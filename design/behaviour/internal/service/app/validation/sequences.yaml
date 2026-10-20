@@ -1,0 +1,2079 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AtLeast
+    participants:
+      - id: caller
+        kind: actor
+      - id: AtLeast
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: one
+        kind: internal
+    steps:
+      - bind: message
+        eval: fmt.Sprintf("must be at least %v", lo)
+        to: fmt
+      - return:
+          closure:
+            params: path string, value T
+            results: corevalidation.ReportValue
+            steps:
+              - opt:
+                  do:
+                    - return: nil
+                  when: value >= lo
+              - return: one(path, ruleMin, message, corevalidation.CodeOutOfRange)
+                to: one
+  - of: AtMost
+    participants:
+      - id: caller
+        kind: actor
+      - id: AtMost
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: one
+        kind: internal
+    steps:
+      - bind: message
+        eval: fmt.Sprintf("must be at most %v", hi)
+        to: fmt
+      - return:
+          closure:
+            params: path string, value T
+            results: corevalidation.ReportValue
+            steps:
+              - opt:
+                  do:
+                    - return: nil
+                  when: value <= hi
+              - return: one(path, ruleMax, message, corevalidation.CodeOutOfRange)
+                to: one
+  - of: Between
+    participants:
+      - id: caller
+        kind: actor
+      - id: Between
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectConstraint(ruleBetween, "the minimum is greater than the maximum")
+          when: lo > hi
+      - bind: message
+        eval: fmt.Sprintf("must be between %v and %v", lo, hi)
+        to: fmt
+      - return: |-
+          func(path string, value T) corevalidation.ReportValue {
+          		//: closed interval on both ends.
+          		if value >= lo && value <= hi {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the interval; the message does not say which end, because
+          		//: telling the caller "too large" for a value they must not see back
+          		//: adds nothing they cannot infer from the bounds.
+          		return one(path, ruleBetween, message, corevalidation.CodeOutOfRange)
+          	}, nil
+  - of: compileStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileStruct
+        kind: self
+      - id: typ.Field
+        kind: value
+      - id: field.Tag.Get
+        kind: value
+      - id: compileField
+        kind: internal
+      - id: checkJSONReach
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, rejectRule(typ.String(), diveRule,
+                			"the type dives into itself; a recursive structure has no compile-time depth")
+          when: visiting[typ]
+      - set: visiting[typ]
+        value: "true"
+      - defer: delete(visiting, typ)
+      - bind: steps
+        eval: make([]planStep, 0, typ.NumField())
+      - loop:
+          do:
+            - bind: field
+              eval: typ.Field(index)
+              to: typ.Field
+            - bind: raw
+              eval: field.Tag.Get(tagName)
+              to: field.Tag.Get
+            - opt:
+                do:
+                  - continue: true
+                when: raw == "" || raw == "-"
+            - bind: fieldSteps, fieldErr
+              eval: compileField(field, index, raw, stopAtFirst, visiting)
+              to: compileField
+            - opt:
+                do:
+                  - return: nil, fieldErr
+                when: fieldErr != nil
+            - set: steps
+              value: append(steps, fieldSteps...)
+          key: index
+          range: typ.NumField()
+      - opt:
+          do:
+            - return: nil, reachErr
+          init:
+            bind: reachErr
+            eval: checkJSONReach(typ)
+            to: checkJSONReach
+          when: reachErr != nil
+      - return: "&structPlan{steps: steps, stopAtFirst: stopAtFirst}, nil"
+  - of: compileField
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileField
+        kind: self
+      - id: pathName
+        kind: internal
+      - id: splitDive
+        kind: internal
+      - id: compileChecks
+        kind: internal
+      - id: compileDive
+        kind: internal
+    steps:
+      - bind: name
+        eval: pathName(field)
+        to: pathName
+      - bind: segment
+        eval: name
+      - opt:
+          do:
+            - set: segment
+              value: "\"\""
+          when: promotedEmbedding(field)
+      - bind: head, tail, hasDive
+        eval: splitDive(parseTag(raw))
+        to: splitDive
+      - bind: checks, checkErr
+        eval: compileChecks(name, field.Type, head)
+        to: compileChecks
+      - opt:
+          do:
+            - return: nil, checkErr
+          when: checkErr != nil
+      - opt:
+          do:
+            - return: nil, rejectRule(name, diveRule, "rules follow dive but no dive is present")
+          when: "!hasDive && len(tail) != 0"
+      - opt:
+          do:
+            - set: steps
+              value: append(steps, fieldStep(index, segment, checks, stopAtFirst))
+          when: len(checks) != 0
+      - opt:
+          do:
+            - return: steps, nil
+          when: "!hasDive"
+      - bind: diveStep, diveErr
+        eval: |-
+          compileDive(field.Type, name, segment, index, diveSpec{
+          		tail: tail, stopAtFirst: stopAtFirst, visiting: visiting,
+          	})
+        to: compileDive
+      - opt:
+          do:
+            - return: nil, diveErr
+          when: diveErr != nil
+      - return: append(steps, diveStep), nil
+  - of: compileChecks
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileChecks
+        kind: self
+      - id: compileRule
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(items) == 0
+      - set: checks
+        value: make([]fieldCheck, 0, len(items))
+      - loop:
+          do:
+            - bind: check, itemErr
+              eval: compileRule(name, typ, item)
+              to: compileRule
+            - opt:
+                do:
+                  - return: nil, itemErr
+                when: itemErr != nil
+            - set: checks
+              value: append(checks, check)
+          key: _
+          range: items
+          value: item
+      - return: checks, nil
+  - of: fieldStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldStep
+        kind: self
+      - id: corevalidation
+        kind: package
+      - id: structValue.Field
+        kind: value
+    steps:
+      - return:
+          closure:
+            params: base string, structValue reflect.Value
+            results: corevalidation.ReportValue
+            steps:
+              - bind: path
+                eval: corevalidation.JoinField(base, segment)
+                to: corevalidation
+              - bind: fieldValue
+                eval: structValue.Field(index)
+                to: structValue.Field
+              - var:
+                  name: report
+                  type: corevalidation.ReportValue
+              - loop:
+                  do:
+                    - bind: found
+                      eval: check(path, fieldValue)
+                    - opt:
+                        do:
+                          - continue: true
+                        when: len(found) == 0
+                    - opt:
+                        do:
+                          - return: found
+                        when: stopAtFirst
+                    - set: report
+                      value: append(report, found...)
+                  key: _
+                  range: checks
+                  value: check
+              - return: report
+  - of: pathName
+    participants:
+      - id: caller
+        kind: actor
+      - id: pathName
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: tag
+        eval: field.Tag.Get(jsonTagName)
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: field.Name
+          when: tag == ""
+      - bind: name, _, _
+        eval: strings.Cut(tag, tagSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: field.Name
+          when: name == "" || name == "-"
+      - return: name
+  - of: promotedEmbedding
+    participants:
+      - id: caller
+        kind: actor
+      - id: promotedEmbedding
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: derefType
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!field.Anonymous"
+      - bind: name, _, _
+        eval: strings.Cut(field.Tag.Get(jsonTagName), tagSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: "false"
+          when: name != ""
+      - bind: target, _
+        eval: derefType(field.Type)
+        to: derefType
+      - return: target.Kind() == reflect.Struct
+  - of: parseTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTag
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.Split(raw, tagSeparator)
+        to: strings
+      - bind: items
+        eval: make([]string, 0, len(parts))
+      - loop:
+          do:
+            - bind: trimmed
+              eval: strings.TrimSpace(part)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: trimmed == ""
+            - set: items
+              value: append(items, trimmed)
+          key: _
+          range: parts
+          value: part
+      - return: items
+  - of: splitPresence
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitPresence
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, items
+          when: "!pointer"
+      - loop:
+          do:
+            - bind: rule, _, _
+              eval: strings.Cut(item, argSeparator)
+              to: strings
+            - opt:
+                do:
+                  - set: presence
+                    value: append(presence, item)
+                  - continue: true
+                when: rule == tagRequired
+            - set: rest
+              value: append(rest, item)
+          key: _
+          range: items
+          value: item
+      - return: presence, rest
+  - of: Field
+    participants:
+      - id: caller
+        kind: actor
+      - id: Field
+        kind: self
+      - id: All
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectConstraint(ruleField, "the member name is empty")
+          when: name == ""
+      - opt:
+          do:
+            - return: nil, rejectConstraint(ruleField, "the accessor is nil")
+          when: get == nil
+      - bind: inner
+        eval: All(constraints...)
+        to: All
+      - return: |-
+          func(path string, value T) corevalidation.ReportValue {
+          		//: the member's path, in the core grammar.
+          		return inner(corevalidation.JoinField(path, name), get(value))
+          	}, nil
+  - of: Each
+    participants:
+      - id: caller
+        kind: actor
+      - id: Each
+        kind: self
+      - id: All
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectConstraint(ruleEach, "the member name is empty")
+          when: name == ""
+      - opt:
+          do:
+            - return: nil, rejectConstraint(ruleEach, "the accessor is nil")
+          when: get == nil
+      - bind: inner
+        eval: All(constraints...)
+        to: All
+      - return: |-
+          func(path string, value T) corevalidation.ReportValue {
+          		//: the slice's own path; each element extends it with its index.
+          		base := corevalidation.JoinField(path, name)
+          		//: nil report — an accepting slice allocates nothing.
+          		var report corevalidation.ReportValue
+          		//: slice order is report order.
+          		for index, element := range get(value) {
+          			//: every element is visited, whatever the earlier ones reported.
+          			report = append(report, inner(corevalidation.JoinIndex(base, index), element)...)
+          		}
+          		//: everything that was wrong, in index order.
+          		return report
+          	}, nil
+  - of: Must
+    steps:
+      - opt:
+          do:
+            - panic: err.Error()
+          when: err != nil
+      - return: constraint
+  - of: compileDive
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileDive
+        kind: self
+      - id: derefType
+        kind: internal
+      - id: compileStruct
+        kind: internal
+      - id: structDiveStep
+        kind: internal
+      - id: compileElements
+        kind: internal
+      - id: elementsStep
+        kind: internal
+    steps:
+      - bind: target, deref
+        eval: derefType(typ)
+        to: derefType
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - opt:
+                    do:
+                      - return: |-
+                          nil, rejectRule(name, diveRule,
+                          				"a struct has no elements; put the rule in the nested type's own validate tag")
+                    when: len(spec.tail) != 0
+                - bind: nested, nestedErr
+                  eval: compileStruct(target, spec.stopAtFirst, spec.visiting)
+                  to: compileStruct
+                - opt:
+                    do:
+                      - return: nil, nestedErr
+                    when: nestedErr != nil
+                - return: structDiveStep(index, segment, nested, deref), nil
+                  to: structDiveStep
+            - case: reflect.Slice, reflect.Array
+              do:
+                - bind: plan, planErr
+                  eval: compileElements(target, name, spec)
+                  to: compileElements
+                - opt:
+                    do:
+                      - return: nil, planErr
+                    when: planErr != nil
+                - return: elementsStep(index, segment, plan, deref), nil
+                  to: elementsStep
+            - case: reflect.Map
+              do:
+                - return: |-
+                    nil, rejectRule(name, diveRule,
+                    			"dive into a map is not supported; validate the map in code with a hand-written Constraint")
+            - default: true
+              do:
+                - return: |-
+                    nil, rejectRule(name, diveRule,
+                    			"dive requires a struct, a slice or an array; this field is a "+target.Kind().String())
+          "on": target.Kind()
+  - of: compileElements
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileElements
+        kind: self
+      - id: derefType
+        kind: internal
+      - id: splitPresence
+        kind: internal
+      - id: compileChecks
+        kind: internal
+      - id: compileStruct
+        kind: internal
+    steps:
+      - bind: elemType, elemDeref
+        eval: derefType(typ.Elem())
+        to: derefType
+      - bind: presenceItems, valueItems
+        eval: splitPresence(spec.tail, elemDeref)
+        to: splitPresence
+      - bind: presence, presenceErr
+        eval: compileChecks(name, typ.Elem(), presenceItems)
+        to: compileChecks
+      - opt:
+          do:
+            - return: elementPlan{}, presenceErr
+          when: presenceErr != nil
+      - bind: checks, checkErr
+        eval: compileChecks(name, elemType, valueItems)
+        to: compileChecks
+      - opt:
+          do:
+            - return: elementPlan{}, checkErr
+          when: checkErr != nil
+      - set: plan
+        value: "elementPlan{presence: presence, checks: checks, deref: elemDeref, stopAtFirst: spec.stopAtFirst}"
+      - opt:
+          do:
+            - bind: nested, nestedErr
+              eval: compileStruct(elemType, spec.stopAtFirst, spec.visiting)
+              to: compileStruct
+            - opt:
+                do:
+                  - return: elementPlan{}, nestedErr
+                when: nestedErr != nil
+            - set: plan.nested
+              value: nested
+          when: elemType.Kind() == reflect.Struct
+      - return: plan, nil
+  - of: structDiveStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: structDiveStep
+        kind: self
+      - id: structValue.Field
+        kind: value
+      - id: fieldValue.Elem
+        kind: value
+      - id: nested.run
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: base string, structValue reflect.Value
+            results: corevalidation.ReportValue
+            steps:
+              - bind: fieldValue
+                eval: structValue.Field(index)
+                to: structValue.Field
+              - opt:
+                  do:
+                    - opt:
+                        do:
+                          - return: nil
+                        when: fieldValue.IsNil()
+                    - set: fieldValue
+                      to: fieldValue.Elem
+                      value: fieldValue.Elem()
+                  when: deref
+              - return: nested.run(corevalidation.JoinField(base, segment), fieldValue)
+                to: nested.run
+  - of: elementsStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: elementsStep
+        kind: self
+      - id: structValue.Field
+        kind: value
+      - id: fieldValue.Elem
+        kind: value
+      - id: corevalidation
+        kind: package
+      - id: plan.check
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: base string, structValue reflect.Value
+            results: corevalidation.ReportValue
+            steps:
+              - bind: fieldValue
+                eval: structValue.Field(index)
+                to: structValue.Field
+              - opt:
+                  do:
+                    - opt:
+                        do:
+                          - return: nil
+                        when: fieldValue.IsNil()
+                    - set: fieldValue
+                      to: fieldValue.Elem
+                      value: fieldValue.Elem()
+                  when: deref
+              - bind: sliceBase
+                eval: corevalidation.JoinField(base, segment)
+                to: corevalidation
+              - var:
+                  name: report
+                  type: corevalidation.ReportValue
+              - loop:
+                  do:
+                    - bind: found
+                      eval: plan.check(corevalidation.JoinIndex(sliceBase, position), fieldValue.Index(position))
+                      to: plan.check
+                    - opt:
+                        do:
+                          - continue: true
+                        when: len(found) == 0
+                    - opt:
+                        do:
+                          - return: found
+                        when: plan.stopAtFirst
+                    - set: report
+                      value: append(report, found...)
+                  key: position
+                  range: fieldValue.Len()
+              - return: report
+  - of: derefType
+    participants:
+      - id: caller
+        kind: actor
+      - id: derefType
+        kind: self
+      - id: typ.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: typ.Elem(), true
+              to: typ.Elem
+          when: typ.Kind() == reflect.Pointer
+      - return: typ, false
+  - of: elementPlan.check
+    participants:
+      - id: caller
+        kind: actor
+      - id: elementPlan.check
+        kind: self
+      - id: p.apply
+        kind: internal
+      - id: element.Elem
+        kind: value
+    steps:
+      - bind: report, stopped
+        eval: p.apply(nil, p.presence, path, element)
+        to: p.apply
+      - opt:
+          do:
+            - return: report
+          when: stopped
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: report
+                when: element.IsNil()
+            - set: element
+              to: element.Elem
+              value: element.Elem()
+          when: p.deref
+      - set: report, stopped
+        to: p.apply
+        value: p.apply(report, p.checks, path, element)
+      - opt:
+          do:
+            - return: report
+          when: stopped
+      - opt:
+          do:
+            - set: report
+              value: append(report, p.nested.run(path, element)...)
+          when: p.nested != nil
+      - return: report
+  - of: checkJSONReach
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkJSONReach
+        kind: self
+      - id: jsonCandidates
+        kind: internal
+      - id: jsonDominant
+        kind: internal
+      - id: indexKey
+        kind: internal
+      - id: rejectRule
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: directKeysDistinct(typ)
+      - bind: candidates
+        eval: jsonCandidates(typ)
+        to: jsonCandidates
+      - bind: dominant
+        eval: jsonDominant(candidates)
+        to: jsonDominant
+      - bind: considered
+        eval: make(map[string]bool, len(candidates))
+      - loop:
+          do:
+            - set: considered[indexKey(candidate.index)]
+              value: "true"
+          key: _
+          range: candidates
+          value: candidate
+      - loop:
+          do:
+            - bind: key
+              eval: indexKey(member.index)
+              to: indexKey
+            - opt:
+                do:
+                  - return: |-
+                      rejectRule(member.name, jsonTagName,
+                      				"encoding/json decodes this key into another field or into none — a shallower field "+
+                      					"of the same name hides this one, or one at its depth makes the key ambiguous")
+                    to: rejectRule
+                when: considered[key] && !dominant[key]
+          key: _
+          range: constrainedMembers(typ, nil, map[reflect.Type]bool{})
+          value: member
+      - return: nil
+  - of: directKeysDistinct
+    participants:
+      - id: caller
+        kind: actor
+      - id: directKeysDistinct
+        kind: self
+      - id: jsonKeyOf
+        kind: internal
+    steps:
+      - bind: keys
+        eval: make([]string, 0, typ.NumField())
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: field.Anonymous
+            - bind: name, ignored
+              eval: jsonKeyOf(field)
+              to: jsonKeyOf
+            - opt:
+                do:
+                  - continue: true
+                when: ignored
+            - opt:
+                do:
+                  - set: name
+                    value: field.Name
+                when: name == ""
+            - opt:
+                do:
+                  - return: "false"
+                when: slices.Contains(keys, name)
+            - set: keys
+              value: append(keys, name)
+          key: field
+          range: typ.Fields()
+      - return: "true"
+  - of: constrainedMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: constrainedMembers
+        kind: self
+      - id: typ.Field
+        kind: value
+      - id: field.Tag.Get
+        kind: value
+      - id: derefType
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: visiting[typ]
+      - var:
+          name: members
+          type: "[]reachMember"
+      - set: visiting[typ]
+        value: "true"
+      - defer: delete(visiting, typ)
+      - loop:
+          do:
+            - bind: field
+              eval: typ.Field(index)
+              to: typ.Field
+            - bind: raw
+              eval: field.Tag.Get(tagName)
+              to: field.Tag.Get
+            - opt:
+                do:
+                  - continue: true
+                when: raw == "" || raw == "-"
+            - bind: path
+              eval: append(slices.Clone(prefix), index)
+            - opt:
+                do:
+                  - bind: target, _
+                    eval: derefType(field.Type)
+                    to: derefType
+                  - set: members
+                    value: append(members, constrainedMembers(target, path, visiting)...)
+                  - continue: true
+                when: promotedEmbedding(field) && slices.Contains(parseTag(raw), diveRule)
+            - set: members
+              value: "append(members, reachMember{name: pathName(field), index: path})"
+          key: index
+          range: typ.NumField()
+      - return: members
+  - of: jsonCandidates
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonCandidates
+        kind: self
+      - id: scanJSONLevel
+        kind: internal
+    steps:
+      - var:
+          name: candidates
+          type: "[]jsonCandidate"
+      - var:
+          name: current
+          type: "[]jsonLevel"
+      - bind: next
+        eval: "[]jsonLevel{{typ: typ}}"
+      - bind: count, nextCount
+        eval: map[reflect.Type]int{}, map[reflect.Type]int{}
+      - bind: visited
+        eval: map[reflect.Type]bool{}
+      - loop:
+          cond: len(next) > 0
+          do:
+            - set: current, next
+              value: next, current[:0]
+            - set: count, nextCount
+              value: nextCount, count
+            - eval: clear(nextCount)
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - continue: true
+                      when: visited[level.typ]
+                  - set: visited[level.typ]
+                    value: "true"
+                  - set: candidates, next
+                    to: scanJSONLevel
+                    value: scanJSONLevel(level, count[level.typ] > 1, candidates, next, nextCount)
+                key: _
+                range: current
+                value: level
+      - return: candidates
+  - of: scanJSONLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanJSONLevel
+        kind: self
+      - id: jsonCandidateOf
+        kind: internal
+    steps:
+      - set: grown, queued
+        value: candidates, next
+      - loop:
+          do:
+            - bind: candidate, embedded, keep
+              eval: jsonCandidateOf(level.typ.Field(index), level.index, index)
+              to: jsonCandidateOf
+            - opt:
+                do:
+                  - continue: true
+                when: "!keep"
+            - opt:
+                do:
+                  - op: ++
+                    set: nextCount[embedded]
+                  - opt:
+                      do:
+                        - set: queued
+                          value: "append(queued, jsonLevel{typ: embedded, index: candidate.index})"
+                      when: nextCount[embedded] == 1
+                  - continue: true
+                when: embedded != nil
+            - set: grown
+              value: append(grown, candidate)
+            - opt:
+                do:
+                  - set: grown
+                    value: append(grown, candidate)
+                when: twice
+          key: index
+          range: level.typ.NumField()
+      - return: grown, queued
+  - of: jsonCandidateOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonCandidateOf
+        kind: self
+      - id: jsonKeyOf
+        kind: internal
+      - id: fieldType.Elem
+        kind: value
+    steps:
+      - bind: name, ignored
+        eval: jsonKeyOf(field)
+        to: jsonKeyOf
+      - opt:
+          do:
+            - return: jsonCandidate{}, nil, false
+          when: ignored
+      - bind: path
+        eval: append(slices.Clone(parent), index)
+      - bind: fieldType
+        eval: field.Type
+      - opt:
+          do:
+            - set: fieldType
+              to: fieldType.Elem
+              value: fieldType.Elem()
+          when: fieldType.Name() == "" && fieldType.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: "jsonCandidate{index: path}, fieldType, true"
+          when: name == "" && field.Anonymous && fieldType.Kind() == reflect.Struct
+      - opt:
+          do:
+            - return: "jsonCandidate{name: field.Name, index: path}, nil, true"
+          when: name == ""
+      - return: "jsonCandidate{name: name, index: path, tagged: true}, nil, true"
+  - of: jsonKeyOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonKeyOf
+        kind: self
+      - id: derefType
+        kind: internal
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: target, _
+        eval: derefType(field.Type)
+        to: derefType
+      - bind: tag
+        eval: field.Tag.Get(jsonTagName)
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: "\"\", true"
+          when: "!field.IsExported() && (!field.Anonymous || target.Kind() != reflect.Struct) || tag == \"-\""
+      - set: name, _, _
+        to: strings
+        value: strings.Cut(tag, tagSeparator)
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!validJSONTagName(name)"
+      - return: name, false
+  - of: jsonDominant
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonDominant
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: sorted
+        eval: slices.Clone(candidates)
+        to: slices
+      - eval: slices.SortFunc(sorted, compareJSONCandidates)
+        to: slices
+      - bind: dominant
+        eval: make(map[string]bool, len(sorted))
+      - loop:
+          cond: start < len(sorted)
+          do:
+            - bind: end
+              eval: start + 1
+            - loop:
+                cond: end < len(sorted) && sorted[end].name == sorted[start].name
+                do:
+                  - op: ++
+                    set: end
+            - bind: first
+              eval: sorted[start]
+            - opt:
+                do:
+                  - set: dominant[indexKey(first.index)]
+                    value: "true"
+                when: end-start == 1 || len(sorted[start+1].index) != len(first.index) || sorted[start+1].tagged != first.tagged
+            - set: start
+              value: end
+          init: start := 0
+      - return: dominant
+  - of: compareJSONCandidates
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareJSONCandidates
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: cmp
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: byName
+          init:
+            bind: byName
+            eval: strings.Compare(left.name, right.name)
+            to: strings
+          when: byName != 0
+      - opt:
+          do:
+            - return: byDepth
+          init:
+            bind: byDepth
+            eval: cmp.Compare(len(left.index), len(right.index))
+            to: cmp
+          when: byDepth != 0
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "-1"
+                when: left.tagged
+            - return: "1"
+          when: left.tagged != right.tagged
+      - return: slices.Compare(left.index, right.index)
+        to: slices
+  - of: indexKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexKey
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: make([]string, len(index))
+      - loop:
+          do:
+            - set: parts[position]
+              to: strconv
+              value: strconv.Itoa(value)
+          key: position
+          range: index
+          value: value
+      - return: strings.Join(parts, ".")
+        to: strings
+  - of: Matches
+    participants:
+      - id: caller
+        kind: actor
+      - id: Matches
+        kind: self
+      - id: regexp
+        kind: stdlib
+    steps:
+      - bind: compiled, compileErr
+        eval: regexp.Compile(pattern)
+        to: regexp
+      - opt:
+          do:
+            - return: nil, rejectConstraint(rulePattern, compileErr.Error())
+          when: compileErr != nil
+      - bind: message
+        eval: "\"must match the pattern \" + clip(pattern)"
+      - return: |-
+          func(path, value string) corevalidation.ReportValue {
+          		//: MatchString is unanchored by design; see the doc comment.
+          		if compiled.MatchString(value) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: no match.
+          		return one(path, rulePattern, message, corevalidation.CodePatternMismatch)
+          	}, nil
+  - of: planFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: planFor
+        kind: self
+      - id: planCache.Load
+        kind: value
+      - id: compileStruct
+        kind: internal
+      - id: planCache.LoadOrStore
+        kind: value
+    steps:
+      - bind: key
+        eval: "planKey{typ: typ, stopAtFirst: stopAtFirst}"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: plan, nil
+                init:
+                  bind: plan, ok
+                  eval: cached.(*structPlan)
+                when: ok
+          init:
+            bind: cached, found
+            eval: planCache.Load(key)
+            to: planCache.Load
+          when: found
+      - bind: compiled, compileErr
+        eval: compileStruct(typ, stopAtFirst, map[reflect.Type]bool{})
+        to: compileStruct
+      - opt:
+          do:
+            - return: nil, compileErr
+          when: compileErr != nil
+      - bind: actual, _
+        eval: planCache.LoadOrStore(key, compiled)
+        to: planCache.LoadOrStore
+      - opt:
+          do:
+            - return: plan, nil
+          init:
+            bind: plan, ok
+            eval: actual.(*structPlan)
+          when: ok
+      - return: compiled, nil
+  - of: Required
+    participants:
+      - id: caller
+        kind: actor
+      - id: Required
+        kind: self
+      - id: one
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - return:
+          closure:
+            params: path string, value T
+            results: corevalidation.ReportValue
+            steps:
+              - opt:
+                  do:
+                    - return: nil
+                  when: value != zero
+              - return: one(path, ruleRequired, requiredMessage, corevalidation.CodeRequired)
+                to: one
+  - of: rejectConstraint
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectConstraint
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corevalidation.ConstraintMisconfigured, errs.WrapParams{},
+          		errs.String("rule", rule), errs.String("clause", clause))
+        to: errs
+  - of: rejectRule
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectRule
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corevalidation.InvalidRule, errs.WrapParams{},
+          		errs.String("field", clip(field)), errs.String("rule", clip(rule)),
+          		errs.String("clause", clause))
+        to: errs
+  - of: rejectTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectTarget
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corevalidation.UnsupportedTarget, errs.WrapParams{}, errs.String("kind", kind))
+        to: errs
+  - of: clip
+    steps:
+      - bind: runes
+        eval: "[]rune(text)"
+      - opt:
+          do:
+            - return: text
+          when: len(runes) <= maxEchoRunes
+      - return: string(runes[:maxEchoRunes]) + ellipsis
+  - of: compileRule
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileRule
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: requiredCheck
+        kind: internal
+      - id: buildNumeric
+        kind: internal
+      - id: buildLength
+        kind: internal
+      - id: buildCount
+        kind: internal
+      - id: buildOneOf
+        kind: internal
+    steps:
+      - bind: rule, arg, hasArg
+        eval: strings.Cut(item, argSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, reason)
+          init:
+            bind: reason, refused
+            eval: refusedRules[rule]
+          when: refused
+      - switch:
+          cases:
+            - case: tagRequired
+              do:
+                - opt:
+                    do:
+                      - return: nil, rejectRule(name, rule, "required takes no argument")
+                    when: hasArg
+                - return: requiredCheck(), nil
+                  to: requiredCheck
+            - case: tagMin, tagMax
+              do:
+                - return: buildNumeric(name, typ, rule, arg, hasArg)
+                  to: buildNumeric
+            - case: tagMinLen, tagMaxLen
+              do:
+                - return: buildLength(name, typ, rule, arg, hasArg)
+                  to: buildLength
+            - case: tagMinCount, tagMaxCount
+              do:
+                - return: buildCount(name, typ, rule, arg, hasArg)
+                  to: buildCount
+            - case: tagOneOf
+              do:
+                - return: buildOneOf(name, typ, arg, hasArg)
+                  to: buildOneOf
+            - default: true
+              do:
+                - return: nil, rejectRule(name, rule, "unknown rule; the dialect is required, min, max, minlen, maxlen, mincount, maxcount, oneof, dive")
+          "on": rule
+  - of: requiredCheck
+    participants:
+      - id: caller
+        kind: actor
+      - id: requiredCheck
+        kind: self
+      - id: one
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: path string, fieldValue reflect.Value
+            results: corevalidation.ReportValue
+            steps:
+              - opt:
+                  do:
+                    - return: nil
+                  when: "!fieldValue.IsZero()"
+              - return: one(path, ruleRequired, requiredMessage, corevalidation.CodeRequired)
+                to: one
+  - of: buildNumeric
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildNumeric
+        kind: self
+      - id: boundRule
+        kind: internal
+      - id: signedBound
+        kind: internal
+      - id: unsignedBound
+        kind: internal
+      - id: floatBound
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, "the rule needs a numeric argument, as in "+rule+"=10")
+          when: "!hasArg || arg == \"\""
+      - bind: upper
+        eval: rule == tagMax
+      - bind: message
+        eval: boundVerb(upper) + " " + arg
+      - bind: reported
+        eval: boundRule(upper)
+        to: boundRule
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: "signedBound(name, rule, arg, typ, boundSpec{upper: upper, rule: reported, message: message})"
+                  to: signedBound
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - return: "unsignedBound(name, rule, arg, typ, boundSpec{upper: upper, rule: reported, message: message})"
+                  to: unsignedBound
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: "floatBound(name, rule, arg, typ, boundSpec{upper: upper, rule: reported, message: message})"
+                  to: floatBound
+            - case: reflect.String
+              do:
+                - return: nil, rejectRule(name, rule, "min and max compare numbers; use minlen or maxlen for a string length")
+            - case: reflect.Slice, reflect.Array
+              do:
+                - return: nil, rejectRule(name, rule, "min and max compare numbers; use mincount or maxcount for an element count")
+            - default: true
+              do:
+                - return: nil, rejectRule(name, rule, "min and max require a numeric field; this field is a "+typ.Kind().String())
+          "on": typ.Kind()
+  - of: signedBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: signedBound
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: limit, parseErr
+        eval: strconv.ParseInt(arg, decimalBase, typ.Bits())
+        to: strconv
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, literalClause(parseErr, "the argument", "is not a whole number", typ))
+          when: parseErr != nil
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: inclusive on both sides.
+          		if withinBound(fieldValue.Int() >= limit, fieldValue.Int() <= limit, spec.upper) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the bound.
+          		return one(path, spec.rule, spec.message, corevalidation.CodeOutOfRange)
+          	}, nil
+  - of: unsignedBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsignedBound
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: limit, parseErr
+        eval: strconv.ParseUint(arg, decimalBase, typ.Bits())
+        to: strconv
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, literalClause(parseErr, "the argument", "is not a non-negative whole number", typ))
+          when: parseErr != nil
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: inclusive on both sides.
+          		if withinBound(fieldValue.Uint() >= limit, fieldValue.Uint() <= limit, spec.upper) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the bound.
+          		return one(path, spec.rule, spec.message, corevalidation.CodeOutOfRange)
+          	}, nil
+  - of: floatBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: floatBound
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: limit, parseErr
+        eval: strconv.ParseFloat(arg, typ.Bits())
+        to: strconv
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, literalClause(parseErr, "the argument", "is not a number", typ))
+          when: parseErr != nil
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: inclusive on both sides.
+          		if withinBound(fieldValue.Float() >= limit, fieldValue.Float() <= limit, spec.upper) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the bound.
+          		return one(path, spec.rule, spec.message, corevalidation.CodeOutOfRange)
+          	}, nil
+  - of: literalClause
+    steps:
+      - opt:
+          do:
+            - return: subject + " is out of range for this field's kind (" + typ.Kind().String() + ")"
+          when: errors.Is(parseErr, strconv.ErrRange)
+      - return: subject + " " + malformed
+  - of: withinBound
+    steps:
+      - opt:
+          do:
+            - return: atMost
+          when: upper
+      - return: atLeast
+  - of: boundVerb
+    steps:
+      - opt:
+          do:
+            - return: "\"must be at most\""
+          when: upper
+      - return: "\"must be at least\""
+  - of: countVerb
+    steps:
+      - opt:
+          do:
+            - return: "\"must contain at most\""
+          when: upper
+      - return: "\"must contain at least\""
+  - of: boundRule
+    steps:
+      - opt:
+          do:
+            - return: ruleMax
+          when: upper
+      - return: ruleMin
+  - of: buildLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildLength
+        kind: self
+      - id: parseSize
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, "the rule needs a whole-number argument, as in "+rule+"=3")
+          when: "!hasArg || arg == \"\""
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, "minlen and maxlen measure a string in runes; use mincount or maxcount for an element count")
+          when: typ.Kind() != reflect.String
+      - bind: limit, limitErr
+        eval: parseSize(name, rule, arg)
+        to: parseSize
+      - opt:
+          do:
+            - return: nil, limitErr
+          when: limitErr != nil
+      - bind: upper
+        eval: rule == tagMaxLen
+      - bind: message
+        eval: boundVerb(upper) + " " + arg + " characters long"
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: RuneCountInString walks the bytes once and allocates nothing.
+          		size := utf8.RuneCountInString(fieldValue.String())
+          		//: inclusive on both sides.
+          		if withinBound(size >= limit, size <= limit, upper) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the bound.
+          		return one(path, ruleLength, message, corevalidation.CodeLengthOutOfRange)
+          	}, nil
+  - of: buildCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildCount
+        kind: self
+      - id: parseSize
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, "the rule needs a whole-number argument, as in "+rule+"=1")
+          when: "!hasArg || arg == \"\""
+      - opt:
+          do:
+            - return: nil, rejectRule(name, rule, "mincount and maxcount count elements; use minlen or maxlen for a string length")
+          when: typ.Kind() != reflect.Slice && typ.Kind() != reflect.Array
+      - bind: limit, limitErr
+        eval: parseSize(name, rule, arg)
+        to: parseSize
+      - opt:
+          do:
+            - return: nil, limitErr
+          when: limitErr != nil
+      - bind: upper
+        eval: rule == tagMaxCount
+      - bind: message
+        eval: countVerb(upper) + " " + arg + " items"
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: a nil slice has length 0 — it holds nothing, which is the honest
+          		//: answer to "how many".
+          		size := fieldValue.Len()
+          		//: inclusive on both sides.
+          		if withinBound(size >= limit, size <= limit, upper) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the bound.
+          		return one(path, ruleCount, message, corevalidation.CodeLengthOutOfRange)
+          	}, nil
+  - of: parseSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseSize
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: parsed, parseErr
+        eval: strconv.Atoi(arg)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, rejectRule(name, rule, "the argument is not a whole number")
+          when: parseErr != nil
+      - opt:
+          do:
+            - return: 0, rejectRule(name, rule, "the size is negative")
+          when: parsed < 0
+      - return: parsed, nil
+  - of: buildOneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildOneOf
+        kind: self
+      - id: splitAllowed
+        kind: internal
+      - id: stringOneOf
+        kind: internal
+      - id: signedOneOf
+        kind: internal
+      - id: unsignedOneOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectRule(name, tagOneOf, "the rule needs a '|'-separated list, as in oneof=red|green|blue")
+          when: "!hasArg || arg == \"\""
+      - bind: values
+        eval: splitAllowed(arg)
+        to: splitAllowed
+      - opt:
+          do:
+            - return: nil, rejectRule(name, tagOneOf, "the allowed set is empty")
+          when: len(values) == 0
+      - switch:
+          cases:
+            - case: reflect.String
+              do:
+                - return: stringOneOf(values), nil
+                  to: stringOneOf
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: signedOneOf(name, values, typ)
+                  to: signedOneOf
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - return: unsignedOneOf(name, values, typ)
+                  to: unsignedOneOf
+            - default: true
+              do:
+                - return: |-
+                    nil, rejectRule(name, tagOneOf,
+                    			"oneof requires a string or integer field; this field is a "+typ.Kind().String())
+          "on": typ.Kind()
+  - of: splitAllowed
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitAllowed
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.Split(arg, oneOfSeparator)
+        to: strings
+      - bind: values
+        eval: make([]string, 0, len(parts))
+      - loop:
+          do:
+            - bind: trimmed
+              eval: strings.TrimSpace(part)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: trimmed == ""
+            - set: values
+              value: append(values, trimmed)
+          key: _
+          range: parts
+          value: part
+      - return: values
+  - of: stringOneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: stringOneOf
+        kind: self
+      - id: oneOfMessage
+        kind: internal
+      - id: one
+        kind: internal
+    steps:
+      - bind: set
+        eval: make(map[string]struct{}, len(values))
+      - loop:
+          do:
+            - set: set[value]
+              value: struct{}{}
+          key: _
+          range: values
+          value: value
+      - bind: message
+        eval: oneOfMessage(values)
+        to: oneOfMessage
+      - return:
+          closure:
+            params: path string, fieldValue reflect.Value
+            results: corevalidation.ReportValue
+            steps:
+              - opt:
+                  do:
+                    - return: nil
+                  init:
+                    bind: _, ok
+                    eval: set[fieldValue.String()]
+                  when: ok
+              - return: one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
+                to: one
+  - of: signedOneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: signedOneOf
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: oneOfMessage
+        kind: internal
+    steps:
+      - bind: set
+        eval: make(map[int64]struct{}, len(values))
+      - bind: parsed
+        eval: make([]int64, 0, len(values))
+      - loop:
+          do:
+            - bind: number, parseErr
+              eval: strconv.ParseInt(value, decimalBase, typ.Bits())
+              to: strconv
+            - opt:
+                do:
+                  - return: nil, rejectRule(name, tagOneOf, literalClause(parseErr, "the entry "+clip(value), "is not a whole number", typ))
+                when: parseErr != nil
+            - set: set[number]
+              value: struct{}{}
+            - set: parsed
+              value: append(parsed, number)
+          key: _
+          range: values
+          value: value
+      - bind: message
+        eval: oneOfMessage(parsed)
+        to: oneOfMessage
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: membership.
+          		if _, ok := set[fieldValue.Int()]; ok {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the set.
+          		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
+          	}, nil
+  - of: unsignedOneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsignedOneOf
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: oneOfMessage
+        kind: internal
+    steps:
+      - bind: set
+        eval: make(map[uint64]struct{}, len(values))
+      - bind: parsed
+        eval: make([]uint64, 0, len(values))
+      - loop:
+          do:
+            - bind: number, parseErr
+              eval: strconv.ParseUint(value, decimalBase, typ.Bits())
+              to: strconv
+            - opt:
+                do:
+                  - return: nil, rejectRule(name, tagOneOf, literalClause(parseErr, "the entry "+clip(value), "is not a non-negative whole number", typ))
+                when: parseErr != nil
+            - set: set[number]
+              value: struct{}{}
+            - set: parsed
+              value: append(parsed, number)
+          key: _
+          range: values
+          value: value
+      - bind: message
+        eval: oneOfMessage(parsed)
+        to: oneOfMessage
+      - return: |-
+          func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
+          		//: membership.
+          		if _, ok := set[fieldValue.Uint()]; ok {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the set.
+          		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
+          	}, nil
+  - of: OneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: OneOf
+        kind: self
+      - id: oneOfMessage
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectConstraint(ruleOneOf, "the allowed set is empty")
+          when: len(allowed) == 0
+      - bind: set
+        eval: make(map[T]struct{}, len(allowed))
+      - loop:
+          do:
+            - set: set[value]
+              value: struct{}{}
+          key: _
+          range: allowed
+          value: value
+      - bind: message
+        eval: oneOfMessage(allowed)
+        to: oneOfMessage
+      - return: |-
+          func(path string, value T) corevalidation.ReportValue {
+          		//: membership.
+          		if _, ok := set[value]; ok {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the set.
+          		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
+          	}, nil
+  - of: oneOfMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: oneOfMessage
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: shown
+        eval: min(len(allowed), maxListedValues)
+      - bind: rendered
+        eval: make([]string, 0, shown)
+      - loop:
+          do:
+            - set: rendered
+              value: append(rendered, fmt.Sprintf("%v", value))
+          key: _
+          range: allowed[:shown]
+          value: value
+      - opt:
+          do:
+            - return: "\"must be one of: \" + strings.Join(rendered, listSeparator)"
+          when: shown == len(allowed)
+      - return: |-
+          fmt.Sprintf("must be one of: %s (and %d more)",
+          		strings.Join(rendered, listSeparator), len(allowed)-shown)
+        to: fmt
+  - of: Length
+    participants:
+      - id: caller
+        kind: actor
+      - id: Length
+        kind: self
+      - id: checkSizeBounds
+        kind: internal
+      - id: sizeMessage
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkSizeBounds(ruleLength, minRunes, maxRunes)
+            to: checkSizeBounds
+          when: err != nil
+      - bind: message
+        eval: sizeMessage("must be", "characters long", minRunes, maxRunes)
+        to: sizeMessage
+      - return: |-
+          func(path, value string) corevalidation.ReportValue {
+          		//: RuneCountInString walks the bytes once and allocates nothing.
+          		if withinSize(utf8.RuneCountInString(value), minRunes, maxRunes) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the interval.
+          		return one(path, ruleLength, message, corevalidation.CodeLengthOutOfRange)
+          	}, nil
+  - of: Count
+    participants:
+      - id: caller
+        kind: actor
+      - id: Count
+        kind: self
+      - id: checkSizeBounds
+        kind: internal
+      - id: sizeMessage
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkSizeBounds(ruleCount, minLen, maxLen)
+            to: checkSizeBounds
+          when: err != nil
+      - bind: message
+        eval: sizeMessage("must contain", "items", minLen, maxLen)
+        to: sizeMessage
+      - return: |-
+          func(path string, value []E) corevalidation.ReportValue {
+          		//: a nil slice has length 0, which is the honest answer: it holds
+          		//: nothing. Count(1, …) therefore refuses nil and empty alike.
+          		if withinSize(len(value), minLen, maxLen) {
+          			//: accepted.
+          			return nil
+          		}
+          		//: outside the interval.
+          		return one(path, ruleCount, message, corevalidation.CodeLengthOutOfRange)
+          	}, nil
+  - of: checkSizeBounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkSizeBounds
+        kind: self
+      - id: rejectConstraint
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rejectConstraint(rule, "the minimum size is negative")
+              to: rejectConstraint
+          when: low < 0
+      - opt:
+          do:
+            - return: rejectConstraint(rule, "the maximum size is negative and is not Unbounded")
+              to: rejectConstraint
+          when: high < 0 && high != Unbounded
+      - opt:
+          do:
+            - return: rejectConstraint(rule, "the minimum size is greater than the maximum")
+              to: rejectConstraint
+          when: high != Unbounded && low > high
+      - return: nil
+  - of: withinSize
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: size < low
+      - opt:
+          do:
+            - return: "true"
+          when: high == Unbounded
+      - return: size <= high
+  - of: sizeMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: sizeMessage
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: fmt.Sprintf("%s %d %s %s", verb, low, unboundedSuffix, noun)
+              to: fmt
+          when: high == Unbounded
+      - return: fmt.Sprintf("%s between %d and %d %s", verb, low, high, noun)
+        to: fmt
+  - of: Struct
+    participants:
+      - id: caller
+        kind: actor
+      - id: Struct
+        kind: self
+      - id: planFor
+        kind: internal
+    steps:
+      - bind: typ
+        eval: reflect.TypeFor[T]()
+      - opt:
+          do:
+            - return: nil, rejectTarget(typ.Kind().String())
+          when: typ.Kind() != reflect.Struct
+      - bind: plan, planErr
+        eval: planFor(typ, cfg.StopAtFirst)
+        to: planFor
+      - opt:
+          do:
+            - return: nil, planErr
+          when: planErr != nil
+      - return: |-
+          func(path string, value T) corevalidation.ReportValue {
+          		//: run the plan from the caller's path.
+          		return plan.run(path, reflect.ValueOf(value))
+          	}, nil
+  - of: All
+    participants:
+      - id: caller
+        kind: actor
+      - id: All
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: fixed
+        eval: slices.Clone(constraints)
+        to: slices
+      - return:
+          closure:
+            params: path string, value T
+            results: corevalidation.ReportValue
+            steps:
+              - var:
+                  name: report
+                  type: corevalidation.ReportValue
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - continue: true
+                        when: constraint == nil
+                    - set: report
+                      value: append(report, constraint(path, value)...)
+                  key: _
+                  range: fixed
+                  value: constraint
+              - return: report
+  - of: First
+    participants:
+      - id: caller
+        kind: actor
+      - id: First
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: fixed
+        eval: slices.Clone(constraints)
+        to: slices
+      - return:
+          closure:
+            params: path string, value T
+            results: corevalidation.ReportValue
+            steps:
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - continue: true
+                        when: constraint == nil
+                    - opt:
+                        do:
+                          - return: report
+                        init:
+                          bind: report
+                          eval: constraint(path, value)
+                        when: "!report.OK()"
+                  key: _
+                  range: fixed
+                  value: constraint
+              - return: nil
+  - of: Check
+    participants:
+      - id: caller
+        kind: actor
+      - id: Check
+        kind: self
+      - id: All(constraints...)(corevalidation.RootPath, value).Err
+        kind: value
+    steps:
+      - return: All(constraints...)(corevalidation.RootPath, value).Err()
+        to: All(constraints...)(corevalidation.RootPath, value).Err
+  - of: one
+    steps:
+      - return: |-
+          corevalidation.ReportValue{{
+          		Path:    path,
+          		Rule:    rule,
+          		Message: message,
+          		Code:    code,
+          	}}

@@ -1,0 +1,599 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: SPKI
+    participants:
+      - id: caller
+        kind: actor
+      - id: SPKI
+        kind: self
+      - id: sha256
+        kind: stdlib
+    steps:
+      - return: sha256.Sum256(c.RawSubjectPublicKeyInfo)
+        to: sha256
+  - of: materialInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: materialInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corenet.TLSMaterialInvalid, errs.WrapParams{}, errs.String("field", field), errs.String("why", why))
+        to: errs
+  - of: NewIdentity
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewIdentity
+        kind: self
+      - id: id.roots.Store
+        kind: value
+      - id: id.Certificate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, materialInvalid("certificate", "nil source")
+          when: get == nil
+      - opt:
+          do:
+            - return: nil, materialInvalid("roots", "nil")
+          when: roots == nil
+      - bind: id
+        eval: "&Identity{get: get}"
+      - eval: id.roots.Store(roots)
+        to: id.roots.Store
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: id.Certificate()
+            to: id.Certificate
+          when: err != nil
+      - return: id, nil
+  - of: LoadReloadable
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadReloadable
+        kind: self
+      - id: readPair
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: x509
+        kind: stdlib
+      - id: id.roots.Store
+        kind: value
+      - id: modTime
+        kind: internal
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: f.Every
+              value: time.Second
+          when: f.Every <= 0
+      - bind: id
+        eval: "&Identity{files: &f}"
+      - bind: c, leaf, err
+        eval: readPair(f.CertFile, f.KeyFile)
+        to: readPair
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: pemRoots, err
+        eval: os.ReadFile(f.RootsFile)
+        to: os
+      - opt:
+          do:
+            - return: nil, materialInvalid("roots_file", err.Error())
+          when: err != nil
+      - bind: pool
+        eval: x509.NewCertPool()
+        to: x509
+      - opt:
+          do:
+            - return: nil, materialInvalid("roots_file", "no certificate")
+          when: "!pool.AppendCertsFromPEM(pemRoots)"
+      - eval: id.roots.Store(pool)
+        to: id.roots.Store
+      - set: id.rootsSeen
+        value: "[][]byte{pemRoots}"
+      - set: id.cur, id.spki, id.san
+        value: c, SPKI(leaf), sanOf(leaf)
+      - set: id.stamp
+        to: modTime
+        value: modTime(f.CertFile, f.KeyFile, f.RootsFile)
+      - set: id.checked
+        to: time
+        value: time.Now()
+      - set: id.get
+        value: id.reload
+      - return: id, nil
+  - of: sanOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: sanOf
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - eval: b.WriteString(u.String())
+              to: b.WriteString
+            - eval: b.WriteByte(' ')
+              to: b.WriteByte
+          key: _
+          range: c.URIs
+          value: u
+      - loop:
+          do:
+            - eval: b.WriteString(d)
+              to: b.WriteString
+            - eval: b.WriteByte(' ')
+              to: b.WriteByte
+          key: _
+          range: c.DNSNames
+          value: d
+      - return: b.String()
+        to: b.String
+  - of: modTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: modTime
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: st.ModTime
+        kind: value
+    steps:
+      - var:
+          name: t
+          type: time.Time
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: t
+                    to: st.ModTime
+                    value: st.ModTime()
+                init:
+                  bind: st, err
+                  eval: os.Stat(f)
+                  to: os
+                when: err == nil && st.ModTime().After(t)
+          key: _
+          range: files
+          value: f
+      - return: t
+  - of: readPair
+    participants:
+      - id: caller
+        kind: actor
+      - id: readPair
+        kind: self
+      - id: tls
+        kind: stdlib
+      - id: x509
+        kind: stdlib
+    steps:
+      - bind: c, err
+        eval: tls.LoadX509KeyPair(certFile, keyFile)
+        to: tls
+      - opt:
+          do:
+            - return: nil, nil, materialInvalid("cert_file", err.Error())
+          when: err != nil
+      - bind: leaf, err
+        eval: x509.ParseCertificate(c.Certificate[0])
+        to: x509
+      - opt:
+          do:
+            - return: nil, nil, materialInvalid("cert_file", err.Error())
+          when: err != nil
+      - set: c.Leaf
+        value: leaf
+      - return: "&c, leaf, nil"
+  - of: (*Identity).reload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).reload
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: modTime
+        kind: internal
+      - id: readPair
+        kind: internal
+      - id: id.failures.Add
+        kind: value
+      - id: os
+        kind: stdlib
+      - id: id.roots.Load().Clone
+        kind: value
+      - id: id.roots.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: id.mu
+      - opt:
+          do:
+            - return: id.cur, nil
+          when: time.Since(id.checked) < id.files.Every
+      - set: id.checked
+        to: time
+        value: time.Now()
+      - bind: m
+        eval: modTime(id.files.CertFile, id.files.KeyFile, id.files.RootsFile)
+        to: modTime
+      - opt:
+          do:
+            - return: id.cur, nil
+          when: "!m.After(id.stamp)"
+      - bind: c, leaf, err
+        eval: readPair(id.files.CertFile, id.files.KeyFile)
+        to: readPair
+      - bind: pairOK
+        eval: "false"
+      - switch:
+          cases:
+            - case: err != nil, SPKI(leaf) != id.spki, sanOf(leaf) != id.san
+              do:
+                - opt:
+                    do:
+                      - eval: id.failures.Add(1)
+                        to: id.failures.Add
+                      - set: id.refusedAt
+                        value: m
+                    when: "!m.Equal(id.refusedAt)"
+            - default: true
+              do:
+                - set: id.cur
+                  value: c
+                - set: pairOK
+                  value: "true"
+      - opt:
+          do:
+            - bind: pool
+              eval: id.roots.Load().Clone()
+              to: id.roots.Load().Clone
+            - alt:
+                - do:
+                    - set: id.rootsSeen
+                      value: append(id.rootsSeen, pemRoots)
+                    - eval: id.roots.Store(pool)
+                      to: id.roots.Store
+                  when: pool.AppendCertsFromPEM(pemRoots)
+                - do:
+                    - eval: id.failures.Add(1)
+                      to: id.failures.Add
+                  else: true
+          init:
+            bind: pemRoots, err
+            eval: os.ReadFile(id.files.RootsFile)
+            to: os
+          when: err == nil && !seen(id.rootsSeen, pemRoots)
+      - opt:
+          do:
+            - set: id.stamp
+              value: m
+          when: pairOK
+      - return: id.cur, nil
+  - of: (*Identity).Certificate
+    steps:
+      - bind: c, err
+        eval: id.get()
+      - opt:
+          do:
+            - return: nil, materialInvalid("certificate", err.Error())
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, materialInvalid("certificate", "empty")
+          when: c == nil || len(c.Certificate) == 0
+      - return: c, nil
+  - of: (*Identity).Leaf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).Leaf
+        kind: self
+      - id: id.Certificate
+        kind: internal
+      - id: x509
+        kind: stdlib
+    steps:
+      - bind: c, err
+        eval: id.Certificate()
+        to: id.Certificate
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: c.Leaf, nil
+          when: c.Leaf != nil
+      - bind: leaf, err
+        eval: x509.ParseCertificate(c.Certificate[0])
+        to: x509
+      - opt:
+          do:
+            - return: nil, materialInvalid("certificate", err.Error())
+          when: err != nil
+      - return: leaf, nil
+  - of: (*Identity).Roots
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).Roots
+        kind: self
+      - id: id.roots.Load
+        kind: value
+    steps:
+      - return: id.roots.Load()
+        to: id.roots.Load
+  - of: (*Identity).ReloadFailures
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).ReloadFailures
+        kind: self
+      - id: id.failures.Load
+        kind: value
+    steps:
+      - return: id.failures.Load()
+        to: id.failures.Load
+  - of: (*Identity).verifyPeer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).verifyPeer
+        kind: self
+      - id: errs
+        kind: package
+      - id: x509
+        kind: stdlib
+      - id: inter.AddCert
+        kind: value
+      - id: leaf.Verify
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corenet.TLSHandshakeFailed, errs.WrapParams{}, errs.String("why", "no peer certificate"))
+              to: errs
+          when: len(cs.PeerCertificates) == 0
+      - bind: leaf
+        eval: cs.PeerCertificates[0]
+      - bind: inter
+        eval: x509.NewCertPool()
+        to: x509
+      - loop:
+          do:
+            - eval: inter.AddCert(c)
+              to: inter.AddCert
+          key: _
+          range: cs.PeerCertificates[1:]
+          value: c
+      - bind: chains, err
+        eval: "leaf.Verify(x509.VerifyOptions{Roots: id.Roots(), Intermediates: inter, KeyUsages: []x509.ExtKeyUsage{usage}})"
+        to: leaf.Verify
+      - opt:
+          do:
+            - return: "errs.Wrap(corenet.TLSHandshakeFailed, errs.WrapParams{}, errs.String(\"why\", \"chain: \"+err.Error()))"
+              to: errs
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: check == nil
+      - return: "check(PeerIdentityValue{Leaf: leaf, Chain: chains[0], SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter})"
+  - of: (*Identity).base
+    steps:
+      - return: |-
+          &tls.Config{
+          		MinVersion: tls.VersionTLS13,
+          		// Session tickets are off: a resumed session would skip the
+          		// certificate check, and every handshake must run it (ADR 0174 D1).
+          		SessionTicketsDisabled: true,
+          		GetCertificate:         func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return id.Certificate() },
+          		GetClientCertificate:   func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return id.Certificate() },
+          	}
+  - of: (*Identity).ServerConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).ServerConfig
+        kind: self
+      - id: id.base
+        kind: internal
+      - id: id.verifyPeer
+        kind: internal
+    steps:
+      - bind: c
+        eval: id.base()
+        to: id.base
+      - set: c.ClientAuth
+        value: tls.RequireAnyClientCert
+      - set: c.VerifyConnection
+        value:
+          closure:
+            params: cs tls.ConnectionState
+            results: error
+            steps:
+              - return: id.verifyPeer(cs, x509.ExtKeyUsageClientAuth, check)
+                to: id.verifyPeer
+      - return: c
+  - of: (*Identity).ClientConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).ClientConfig
+        kind: self
+      - id: id.base
+        kind: internal
+      - id: id.verifyPeer
+        kind: internal
+    steps:
+      - bind: c
+        eval: id.base()
+        to: id.base
+      - set: c.InsecureSkipVerify
+        value: "true"
+      - set: c.VerifyConnection
+        value:
+          closure:
+            params: cs tls.ConnectionState
+            results: error
+            steps:
+              - return: id.verifyPeer(cs, x509.ExtKeyUsageServerAuth, check)
+                to: id.verifyPeer
+      - return: c
+  - of: PeerOf
+    steps:
+      - opt:
+          do:
+            - return: PeerIdentityValue{}, false
+          when: "!cs.HandshakeComplete || len(cs.PeerCertificates) == 0"
+      - bind: leaf
+        eval: cs.PeerCertificates[0]
+      - bind: p
+        eval: "PeerIdentityValue{Leaf: leaf, SPKI: SPKI(leaf), URIs: leaf.URIs, NotAfter: leaf.NotAfter}"
+      - opt:
+          do:
+            - set: p.Chain
+              value: cs.VerifiedChains[0]
+          when: len(cs.VerifiedChains) > 0
+      - return: p, true
+  - of: Deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: Deadline
+        kind: self
+      - id: opened.Add
+        kind: value
+    steps:
+      - bind: d
+        eval: opened.Add(maxAge)
+        to: opened.Add
+      - opt:
+          do:
+            - return: peer.NotAfter
+          when: "!peer.NotAfter.IsZero() && peer.NotAfter.Before(d)"
+      - return: d
+  - of: Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: Load
+        kind: self
+      - id: readMaterial
+        kind: internal
+      - id: corenet
+        kind: package
+    steps:
+      - bind: certPEM, err
+        eval: readMaterial(p.CertFile, "cert_file")
+        to: readMaterial
+      - opt:
+          do:
+            - return: corenet.IdentityValue{}, err
+          when: err != nil
+      - bind: keyPEM, err
+        eval: readMaterial(p.KeyFile, "key_file")
+        to: readMaterial
+      - opt:
+          do:
+            - return: corenet.IdentityValue{}, err
+          when: err != nil
+      - bind: rootsPEM, err
+        eval: readMaterial(p.RootsFile, "roots_file")
+        to: readMaterial
+      - opt:
+          do:
+            - return: corenet.IdentityValue{}, err
+          when: err != nil
+      - bind: clientCAPEM, err
+        eval: readMaterial(p.ClientCAFile, "client_ca_file")
+        to: readMaterial
+      - opt:
+          do:
+            - return: corenet.IdentityValue{}, err
+          when: err != nil
+      - return: |-
+          corenet.NewIdentityValue(corenet.IdentityParams{
+          		CertPEM:           certPEM,
+          		KeyPEM:            keyPEM,
+          		RootsPEM:          rootsPEM,
+          		ClientCAPEM:       clientCAPEM,
+          		ServerName:        p.ServerName,
+          		MinVersion:        p.MinVersion,
+          		NextProtos:        p.NextProtos,
+          		RequireClientCert: p.RequireClientCert,
+          	})
+        to: corenet
+  - of: readMaterial
+    participants:
+      - id: caller
+        kind: actor
+      - id: readMaterial
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: path == ""
+      - bind: content, rerr
+        eval: os.ReadFile(path)
+        to: os
+      - opt:
+          do:
+            - return: nil, wrapMaterial(rerr, field, path)
+          when: rerr != nil
+      - opt:
+          do:
+            - return: nil, wrapMaterial(nil, field, path)
+          when: len(content) == 0
+      - return: content, nil
+  - of: wrapMaterial
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapMaterial
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(\"field\", field), errs.String(\"path\", path)}"
+      - opt:
+          do:
+            - return: errs.Wrap(corenet.TLSMaterialInvalid, errs.WrapParams{}, fields...)
+              to: errs
+          when: cause == nil
+      - return: |-
+          errs.Wrap(corenet.TLSMaterialInvalid, errs.WrapParams{},
+          		append(fields, errs.String("cause", cause.Error()))...)
+        to: errs

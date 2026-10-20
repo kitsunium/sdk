@@ -1,0 +1,129 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c == nil
+      - return: "sdkClock{Clock: c}"
+  - of: sdkClock.NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTimer
+        kind: self
+      - id: c.Clock.NewTimer
+        kind: value
+    steps:
+      - return: c.Clock.NewTimer(d)
+        to: c.Clock.NewTimer
+  - of: sdkClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTicker
+        kind: self
+      - id: c.Clock.NewTicker
+        kind: value
+    steps:
+      - return: c.Clock.NewTicker(d)
+        to: c.Clock.NewTicker
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Jobs.Store
+        kind: value
+    steps:
+      - eval: "plug.Jobs.Store(&plug.JobDriverConfig{Every: every, Cron: cron, Open: open})"
+        to: plug.Jobs.Store
+  - of: every
+    participants:
+      - id: caller
+        kind: actor
+      - id: every
+        kind: self
+      - id: scheduler
+        kind: package
+      - id: plug
+        kind: package
+    steps:
+      - bind: s, err
+        eval: scheduler.Every(period)
+        to: scheduler
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: plug.JobScheduleFunc(s), nil
+        to: plug
+  - of: cron
+    participants:
+      - id: caller
+        kind: actor
+      - id: cron
+        kind: self
+      - id: scheduler
+        kind: package
+      - id: plug
+        kind: package
+    steps:
+      - bind: s, err
+        eval: scheduler.Parse(expr)
+        to: scheduler
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: plug.JobScheduleFunc(s), nil
+        to: plug
+  - of: open
+    steps:
+      - bind: sc
+        eval: "scheduler.Config{Clock: clockOf(cfg.Clock)}"
+      - opt:
+          do:
+            - set: sc.OnResult
+              value:
+                closure:
+                  params: r scheduler.Result
+                  steps:
+                    - eval: on(resultOf(&r))
+          init:
+            bind: "on"
+            eval: cfg.OnResult
+          when: on != nil
+      - return: "runner{s: scheduler.New(sc)}"
+  - of: runner.Add
+    participants:
+      - id: caller
+        kind: actor
+      - id: runner.Add
+        kind: self
+      - id: r.s.Add
+        kind: value
+    steps:
+      - return: "r.s.Add(scheduler.Entry{Name: entry.Name, Schedule: scheduler.Schedule(entry.Schedule), Job: entry.Run})"
+        to: r.s.Add
+  - of: runner.Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: runner.Run
+        kind: self
+      - id: r.s.Run
+        kind: value
+    steps:
+      - return: r.s.Run(ctx)
+        to: r.s.Run
+  - of: resultOf
+    steps:
+      - return: |-
+          plug.JobResultValue{
+          		Name: r.Name, Scheduled: r.Scheduled, Started: r.Started, Finished: r.Finished,
+          		Missed: r.Missed, Skipped: r.Skipped, Err: r.Err,
+          	}

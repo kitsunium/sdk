@@ -1,0 +1,32 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: isHex
+    steps:
+      - loop:
+          do:
+            - bind: char
+              eval: field[index]
+            - opt:
+                do:
+                  - return: "false"
+                when: (char < '0' || char > '9') && (char < 'a' || char > 'f')
+          key: index
+          range: len(field)
+      - return: "true"
+  - of: earliest
+    steps:
+      - var:
+          name: first
+          type: int64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: instant
+                when: instant != 0 && (first == 0 || instant < first)
+          key: _
+          range: instants
+          value: instant
+      - return: first

@@ -1,0 +1,2889 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxBSONBytes caps the Unmarshal input for untrusted payloads (CWE-400). The
+      validator never allocates from a declared length it has not checked, so
+      the cap bounds what one call can make the decoder allocate; 10 MiB covers
+      realistic documents and matches the other codecs.
+    items:
+      - name: maxBSONBytes
+        type: int
+        value: 10 << 20
+    name: maxBSONBytes
+  - doc: Decimal128 layout and range.
+    grouped: true
+    items:
+      - doc: decimalExponentBias is added to the exponent to store it unsigned.
+        name: decimalExponentBias
+        type: int
+        value: "6176"
+      - doc: decimalMaxExponent is the largest exponent a coefficient can carry.
+        name: decimalMaxExponent
+        type: int
+        value: "6111"
+      - doc: decimalMinExponent is the smallest exponent a coefficient can carry.
+        name: decimalMinExponent
+        type: int
+        value: "-6176"
+      - doc: decimalMaxDigits is the most significant digits a coefficient holds.
+        name: decimalMaxDigits
+        type: int
+        value: "34"
+      - doc: decimalExponentMask keeps the 14 exponent bits once shifted down.
+        name: decimalExponentMask
+        type: uint64
+        value: 1<<14 - 1
+      - doc: decimalCoefficientHighMask keeps the coefficient's 49 high bits.
+        name: decimalCoefficientHighMask
+        type: uint64
+        value: 1<<49 - 1
+      - doc: |-
+          decimalMaxCoefficientHigh and decimalMaxCoefficientLow are 10^34-1, the
+          largest coefficient. A larger one is non-canonical and reads as zero.
+        name: decimalMaxCoefficientHigh
+        type: uint64
+        value: "0x0001_ED09_BEAD_87C0"
+      - doc: decimalMaxCoefficientLow is the low half of 10^34-1.
+        name: decimalMaxCoefficientLow
+        type: uint64
+        value: "0x378D_8E63_FFFF_FFFF"
+      - doc: decimalSignBit is the sign, the top bit of the high half.
+        name: decimalSignBit
+        type: uint64
+        value: 1 << 63
+      - doc: |-
+          decimalNaNBits and decimalInfBits are the combination-field patterns
+          that mark the two specials, in the high half's top bits after the sign.
+        name: decimalNaNBits
+        type: uint64
+        value: 0x1F << 58
+      - doc: decimalInfBits marks an infinity.
+        name: decimalInfBits
+        type: uint64
+        value: 0x1E << 58
+      - doc: |-
+          decimalChunk is the power of ten the coefficient is printed nine digits
+          at a time by.
+        name: decimalChunk
+        type: uint64
+        value: "1_000_000_000"
+      - doc: decimalChunkDigits is how many digits decimalChunk carries.
+        name: decimalChunkDigits
+        type: int
+        value: "9"
+      - doc: |-
+          decimalScientificFloor is the smallest adjusted exponent printed without
+          an exponent, as the specification fixes it.
+        name: decimalScientificFloor
+        type: int
+        value: "-6"
+      - doc: |-
+          decimalLargeForm is the value of the two bits after the sign that mark
+          the large-coefficient form.
+        name: decimalLargeForm
+        type: uint64
+        value: "3"
+      - doc: decimalRadix is the base the coefficient is written in.
+        name: decimalRadix
+        type: uint64
+        value: "10"
+      - doc: |-
+          decimalExponentSaturation bounds a scanned exponent's magnitude: past it
+          the value is out of range whatever the coefficient, and saturating keeps
+          the arithmetic inside an int on every platform.
+        name: decimalExponentSaturation
+        type: int
+        value: "100_000_000"
+    name: decimalExponentBias
+  - doc: twoTo63 is 2^63, the first double past the int64 range.
+    items:
+      - name: twoTo63
+        type: float64
+        value: 1 << 63
+    name: twoTo63
+  - doc: |-
+      timeStringLayout is the layout a BSON string decodes into a time.Time by,
+      the one the previous library accepted.
+    items:
+      - name: timeStringLayout
+        type: string
+        value: "\"2006-01-02T15:04:05.999Z07:00\""
+    name: timeStringLayout
+  - doc: Encoder sizing.
+    grouped: true
+    items:
+      - doc: |-
+          maxRetainedSegments bounds the segment lists the map encoder pools: a
+          list grown past it by a very wide map is dropped instead of pinned.
+        name: maxRetainedSegments
+        type: int
+        value: "4096"
+      - doc: elementHeadroom is the free space reserve keeps before each element.
+        name: elementHeadroom
+        type: int
+        value: "64"
+    name: maxRetainedSegments
+  - doc: objectIDHexLen is the length of an ObjectID's hexadecimal form.
+    items:
+      - name: objectIDHexLen
+        type: int
+        value: 2 * objectIDSize
+    name: objectIDHexLen
+  - doc: |-
+      The mappings. Exact types are matched before kinds, so a time.Time is a
+      datetime and not a struct, and a []byte is a binary and not an array.
+    grouped: true
+    items:
+      - doc: |-
+          kindUnsupported has no BSON form: channels, functions, complex numbers,
+          uintptr, unsafe.Pointer.
+        name: kindUnsupported
+        type: planKind
+        value: iota
+      - doc: kindBool is a bool.
+        name: kindBool
+      - doc: "kindInt32 is int8, int16 or int32: always an int32."
+        name: kindInt32
+      - doc: "kindInt is int: an int32 when the value fits, an int64 otherwise."
+        name: kindInt
+      - doc: "kindInt64 is int64: an int64, or an int32 under minsize when it fits."
+        name: kindInt64
+      - doc: "kindUint16 is uint8 or uint16: always an int32."
+        name: kindUint16
+      - doc: |-
+          kindUint64 is uint, uint32 or uint64: an int64, an int32 under minsize
+          when it fits; past the int64 range it is refused.
+        name: kindUint64
+      - doc: kindFloat32 is float32, written as a double.
+        name: kindFloat32
+      - doc: kindFloat64 is float64.
+        name: kindFloat64
+      - doc: kindString is a string kind.
+        name: kindString
+      - doc: "kindBytes is exactly []byte: a generic binary, null when nil."
+        name: kindBytes
+      - doc: kindByteSlice is another slice type whose element type is byte.
+        name: kindByteSlice
+      - doc: kindByteArray is an array whose element type is byte.
+        name: kindByteArray
+      - doc: "kindSlice is any other slice: an array, null when nil."
+        name: kindSlice
+      - doc: "kindArray is any other array: an array."
+        name: kindArray
+      - doc: kindD is exactly D.
+        name: kindD
+      - doc: "kindDocSlice is another slice type convertible to D: a document."
+        name: kindDocSlice
+      - doc: "kindDocArray is an array of E: a document."
+        name: kindDocArray
+      - doc: "kindMap is a map: a document, null when nil."
+        name: kindMap
+      - doc: "kindStruct is a struct: a document of its fields."
+        name: kindStruct
+      - doc: "kindPointer is a pointer: its target, null when nil."
+        name: kindPointer
+      - doc: "kindAny is the empty interface: its dynamic value, null when nil."
+        name: kindAny
+      - doc: |-
+          kindInterface is a non-empty interface: its dynamic value on encode;
+          there is nothing to decode into.
+        name: kindInterface
+      - doc: "kindTime is time.Time: a UTC datetime, truncated to the millisecond."
+        name: kindTime
+      - doc: "kindURL is url.URL: its String form."
+        name: kindURL
+      - doc: |-
+          kindJSONNumber is json.Number: an int64 when it parses as one, a double
+          otherwise.
+        name: kindJSONNumber
+      - doc: kindObjectID is ObjectID.
+        name: kindObjectID
+      - doc: kindDateTime is DateTime.
+        name: kindDateTime
+      - doc: kindBinary is Binary.
+        name: kindBinary
+      - doc: kindRegex is Regex.
+        name: kindRegex
+      - doc: kindDBPointer is DBPointer.
+        name: kindDBPointer
+      - doc: kindJavaScript is JavaScript.
+        name: kindJavaScript
+      - doc: kindSymbol is Symbol.
+        name: kindSymbol
+      - doc: kindCodeWithScope is CodeWithScope.
+        name: kindCodeWithScope
+      - doc: kindTimestamp is Timestamp.
+        name: kindTimestamp
+      - doc: kindDecimal128 is Decimal128.
+        name: kindDecimal128
+      - doc: kindMinKey is MinKey.
+        name: kindMinKey
+      - doc: kindMaxKey is MaxKey.
+        name: kindMaxKey
+      - doc: kindUndefined is Undefined.
+        name: kindUndefined
+      - doc: kindNull is Null.
+        name: kindNull
+    name: kindUnsupported
+  - doc: The ways a method is reached.
+    grouped: true
+    items:
+      - doc: "hookNone: the type does not have the method."
+        name: hookNone
+        type: hookMode
+        value: iota
+      - doc: "hookValue: the type itself has it."
+        name: hookValue
+      - doc: |-
+          hookPointer: only its pointer has it, so it is called on an addressable
+          value and the kind mapping is used on any other.
+        name: hookPointer
+    name: hookNone
+  - doc: The key mappings.
+    grouped: true
+    items:
+      - doc: "keyUnsupported: the key type has no element-name form."
+        name: keyUnsupported
+        type: keyMode
+        value: iota
+      - doc: "keyString: a string kind, used as is."
+        name: keyString
+      - doc: "keyText: encoding.TextMarshaler or TextUnmarshaler."
+        name: keyText
+      - doc: "keyInt: a signed integer kind, in decimal."
+        name: keyInt
+      - doc: "keyUint: an unsigned integer kind, in decimal."
+        name: keyUint
+    name: keyUnsupported
+  - doc: The options a bson tag sets, and the one property of a name the plan checks.
+    grouped: true
+    items:
+      - doc: flagOmitEmpty leaves the field out when it is empty.
+        name: flagOmitEmpty
+        type: fieldFlags
+        value: 1 << iota
+      - doc: flagMinSize writes an integer that fits as an int32.
+        name: flagMinSize
+      - doc: flagTruncate lets a decode drop a double's fraction into an integer.
+        name: flagTruncate
+      - doc: |-
+          flagInline flattens a struct's fields, or collects unclaimed elements
+          into a map.
+        name: flagInline
+      - doc: |-
+          flagBadName marks a name holding a NUL or invalid UTF-8, which an
+          element name cannot be; encoding the field fails.
+        name: flagBadName
+    name: flagOmitEmpty
+  - doc: |-
+      Element type bytes, BSON 1.1. The deprecated types (undefined, DBPointer,
+      symbol, code with scope) are still read and written: a document an older
+      tool produced decodes, and re-encodes to the same bytes.
+    grouped: true
+    items:
+      - doc: typeDouble is a 64-bit IEEE 754 binary floating point.
+        name: typeDouble
+        type: byte
+        value: "0x01"
+      - doc: typeString is an int32-length-prefixed, NUL-terminated UTF-8 string.
+        name: typeString
+        type: byte
+        value: "0x02"
+      - doc: typeDocument is an embedded document.
+        name: typeDocument
+        type: byte
+        value: "0x03"
+      - doc: typeArray is a document whose keys are "0", "1", ….
+        name: typeArray
+        type: byte
+        value: "0x04"
+      - doc: typeBinary is an int32 length, a subtype byte and the bytes.
+        name: typeBinary
+        type: byte
+        value: "0x05"
+      - doc: "typeUndefined is the deprecated undefined value: no payload."
+        name: typeUndefined
+        type: byte
+        value: "0x06"
+      - doc: typeObjectID is twelve bytes.
+        name: typeObjectID
+        type: byte
+        value: "0x07"
+      - doc: typeBoolean is one byte, 0x00 or 0x01 and nothing else.
+        name: typeBoolean
+        type: byte
+        value: "0x08"
+      - doc: typeDateTime is milliseconds since the Unix epoch, UTC, as an int64.
+        name: typeDateTime
+        type: byte
+        value: "0x09"
+      - doc: "typeNull is null: no payload."
+        name: typeNull
+        type: byte
+        value: "0x0A"
+      - doc: "typeRegex is two cstrings: the pattern, then the options."
+        name: typeRegex
+        type: byte
+        value: "0x0B"
+      - doc: "typeDBPointer is the deprecated DBPointer: a string and twelve bytes."
+        name: typeDBPointer
+        type: byte
+        value: "0x0C"
+      - doc: typeJavaScript is JavaScript code, laid out as a string.
+        name: typeJavaScript
+        type: byte
+        value: "0x0D"
+      - doc: typeSymbol is the deprecated symbol, laid out as a string.
+        name: typeSymbol
+        type: byte
+        value: "0x0E"
+      - doc: typeCodeWithScope is an int32 total length, a string and a document.
+        name: typeCodeWithScope
+        type: byte
+        value: "0x0F"
+      - doc: typeInt32 is a 32-bit signed integer.
+        name: typeInt32
+        type: byte
+        value: "0x10"
+      - doc: "typeTimestamp is the replication timestamp: increment, then seconds."
+        name: typeTimestamp
+        type: byte
+        value: "0x11"
+      - doc: typeInt64 is a 64-bit signed integer.
+        name: typeInt64
+        type: byte
+        value: "0x12"
+      - doc: typeDecimal128 is an IEEE 754-2008 decimal128 in BID encoding.
+        name: typeDecimal128
+        type: byte
+        value: "0x13"
+      - doc: "typeMinKey compares lower than every other value: no payload."
+        name: typeMinKey
+        type: byte
+        value: "0xFF"
+      - doc: "typeMaxKey compares higher than every other value: no payload."
+        name: typeMaxKey
+        type: byte
+        value: "0x7F"
+    name: typeDouble
+  - doc: |-
+      Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
+      through unchanged; only BinaryGeneric and BinaryOld decode into []byte.
+    grouped: true
+    items:
+      - doc: BinaryGeneric is the default subtype, and the one a []byte is written as.
+        name: BinaryGeneric
+        type: byte
+        value: "0x00"
+      - doc: BinaryFunction marks a function.
+        name: BinaryFunction
+        type: byte
+        value: "0x01"
+      - doc: |-
+          BinaryOld is the deprecated generic subtype: its bytes are themselves an
+          int32 length followed by that many bytes, and the codec writes and checks
+          that inner length.
+        name: BinaryOld
+        type: byte
+        value: "0x02"
+      - doc: BinaryUUIDOld is the deprecated, byte-order-ambiguous UUID subtype.
+        name: BinaryUUIDOld
+        type: byte
+        value: "0x03"
+      - doc: BinaryUUID is an RFC 9562 UUID.
+        name: BinaryUUID
+        type: byte
+        value: "0x04"
+      - doc: BinaryMD5 is an MD5 digest.
+        name: BinaryMD5
+        type: byte
+        value: "0x05"
+      - doc: BinaryEncrypted is a client-side encrypted value.
+        name: BinaryEncrypted
+        type: byte
+        value: "0x06"
+      - doc: BinaryColumn is a compressed time-series column.
+        name: BinaryColumn
+        type: byte
+        value: "0x07"
+      - doc: BinarySensitive marks data a server must not log.
+        name: BinarySensitive
+        type: byte
+        value: "0x08"
+      - doc: BinaryVector is a packed numeric vector.
+        name: BinaryVector
+        type: byte
+        value: "0x09"
+      - doc: BinaryUserDefined is the first of the subtypes reserved for applications.
+        name: BinaryUserDefined
+        type: byte
+        value: "0x80"
+    name: BinaryGeneric
+  - doc: Structural bounds.
+    grouped: true
+    items:
+      - doc: |-
+          maxBSONNestedLevels bounds how deeply documents and arrays nest, the
+          top-level document counting as the first level: the depth MongoDB
+          accepts for a stored document. Both directions enforce it — a decode
+          before it recurses (CWE-674), an encode so that a cyclic value is refused
+          instead of overflowing the stack.
+        name: maxBSONNestedLevels
+        type: int
+        value: "100"
+      - doc: |-
+          maxIndirections bounds how many pointers and interfaces an encode follows
+          in a row without reaching a value: a pointer that points at itself adds no
+          nesting level, so the depth bound alone would never stop it.
+        name: maxIndirections
+        type: int
+        value: "64"
+      - doc: |-
+          minDocumentSize is the smallest document: the int32 length and the
+          terminating NUL.
+        name: minDocumentSize
+        type: int
+        value: "5"
+      - doc: lengthSize is the width of every int32 length prefix.
+        name: lengthSize
+        type: int
+        value: "4"
+      - doc: objectIDSize is the width of an ObjectID.
+        name: objectIDSize
+        type: int
+        value: "12"
+      - doc: decimal128Size is the width of a decimal128.
+        name: decimal128Size
+        type: int
+        value: "16"
+      - doc: binaryHeaderSize is a binary's int32 length plus its subtype byte.
+        name: binaryHeaderSize
+        type: int
+        value: "5"
+      - doc: |-
+          minCodeWithScopeSize is a code-with-scope's total length, its code
+          string's length and NUL, and the smallest scope document.
+        name: minCodeWithScopeSize
+        type: int
+        value: "14"
+      - doc: wordSize is the width of a double, a datetime, a timestamp and an int64.
+        name: wordSize
+        type: int
+        value: "8"
+      - doc: typeByteValues is how many values a type byte can take.
+        name: typeByteValues
+        type: int
+        value: "256"
+    name: maxBSONNestedLevels
+files:
+  - decls:
+      - maxBSONBytes
+      - Codec
+      - bsonCodec
+      - New
+      - (*bsonCodec).Name
+      - (*bsonCodec).MIMETypes
+      - (*bsonCodec).Extensions
+      - (*bsonCodec).Marshal
+      - (*bsonCodec).Unmarshal
+      - (*bsonCodec).Append
+    name: codec.go
+  - decls:
+      - decimalExponentBias
+      - Decimal128
+      - NewDecimal128
+      - Decimal128.GetBytes
+      - Decimal128.IsNaN
+      - Decimal128.IsInf
+      - Decimal128.IsZero
+      - Decimal128.String
+      - Decimal128.finite
+      - coefficientDigits
+      - formatDecimal
+      - appendPlain
+      - ParseDecimal128
+      - cutSign
+      - parseDecimalSpecial
+      - equalFoldASCII
+      - decimalNumber
+      - scanDecimal
+      - scannedCoefficient
+      - scanCoefficient
+      - (*scannedCoefficient).add
+      - scanExponent
+      - clampExponent
+      - decimalNumber.encode
+      - fitExponent
+      - digitsToCoefficient
+      - assembleDecimal
+      - Decimal128.MarshalJSON
+      - (*Decimal128).UnmarshalJSON
+      - decimalJSONText
+    name: decimal.go
+  - decls:
+      - decodeState
+      - element
+      - errCorrupt
+      - decodeInto
+      - rootTarget
+      - describeTarget
+      - rootHook
+      - decodeValue
+      - decodeContainer
+      - decodeHook
+      - hookTarget
+      - cloneOrNil
+      - mismatch
+      - inField
+      - docIter
+      - newDocIter
+      - (*docIter).next
+      - countElements
+      - decodePointer
+      - decodeInterface
+    name: decode.go
+  - decls:
+      - decodeAny
+      - decodeAnyScalar
+      - decodeAnyFixed
+      - decodeAnyMarker
+      - decodeAnyNumber
+      - anyText
+      - anyRegex
+      - anyDBPointer
+      - decodeAnyDocument
+      - decodeDocument
+      - decodeDElement
+      - decodeAnyArray
+      - decodeAnyCodeWithScope
+    name: decode_any.go
+  - decls:
+      - decodeSlice
+      - decodeDocSlice
+      - decodeBytesSlice
+      - decodeArrayIntoSlice
+      - reusableSlice
+      - decodeElements
+      - decodeESlice
+      - setElement
+      - decodeByteSlice
+      - bytesOf
+      - decodeArray
+      - decodeDocArray
+      - decodeBytesArray
+      - decodeArrayIntoArray
+      - decodeByteArray
+      - decodeD
+      - decodeMap
+      - stringAnyMap
+      - fillStringAnyMap
+      - setStringAnyEntry
+      - fillMap
+      - mapKey
+      - intMapKey
+      - uintMapKey
+      - textMapKey
+      - decodeStruct
+      - decodeFields
+      - (*typePlan).fieldFor
+      - decodeField
+      - decodeUnknown
+    name: decode_container.go
+  - decls:
+      - twoTo63
+      - decodeScalar
+      - decodeBool
+      - integerOf
+      - wholeDouble
+      - decodeSigned
+      - decodeUnsigned
+      - floatOf
+      - decodeFloat
+      - decodeString
+      - textOf
+      - decodeBytes
+      - stringPayload
+      - binaryPayload
+      - genericBinary
+    name: decode_scalar.go
+  - decls:
+      - timeStringLayout
+      - valueTypeBytes
+      - decodeSpecial
+      - decodeStdlib
+      - decodeTime
+      - parseTimeString
+      - decodeURL
+      - decodeJSONNumber
+      - readValueType
+      - decodeValueTypeConversion
+      - decodeObjectIDString
+      - readUint32
+      - setTyped
+    name: decode_special.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - encoder
+      - encodeState
+      - encodeState.child
+      - appendDocument
+      - (*encoder).encodeRoot
+      - nilTopLevelMap
+      - (*encoder).encodeValue
+      - (*encoder).marshalHook
+      - validateEmbedded
+      - methodValue
+      - (*encoder).encodeInteger
+      - (*encoder).encodeScalar
+      - (*encoder).encodeComposite
+      - (*encoder).encodeBytes
+      - (*encoder).encodeNilable
+      - (*encoder).encodeIndirect
+      - (*encoder).encodeAnyValue
+      - (*encoder).encodeCommonScalar
+      - (*encoder).encodeCommonContainer
+      - (*encoder).openContainer
+      - (*encoder).encodeCommonMap
+      - (*encoder).encodeCommonD
+      - (*encoder).encodeCommonArray
+      - (*encoder).finishElement
+    name: encode.go
+  - decls:
+      - maxRetainedSegments
+      - segment
+      - segmentPool
+      - (*encoder).encodeContainer
+      - (*encoder).encodeElements
+      - (*encoder).encodeArrayElements
+      - (*encoder).encodeDocElements
+      - (*encoder).encodeStructElements
+      - (*encoder).encodeField
+      - fieldByIndex
+      - isEmptyField
+      - isEmptyValue
+      - (*encoder).encodeMapElements
+      - (*encoder).encodeMapEntry
+      - (*encoder).beginMapKey
+      - mapKeyName
+      - textKey
+      - (*encoder).sortSegments
+      - (*encoder).reserve
+      - (*encoder).beginElement
+      - (*encoder).beginIndex
+      - (*encoder).reserveLength
+      - (*encoder).endDocument
+    name: encode_document.go
+  - decls:
+      - (*encoder).appendBool
+      - (*encoder).appendInt32
+      - (*encoder).appendInt64
+      - (*encoder).appendInt
+      - (*encoder).appendUint
+      - (*encoder).appendDouble
+      - (*encoder).appendString
+      - (*encoder).appendStringBytes
+      - (*encoder).appendBinary
+      - (*encoder).appendByteArray
+      - timeOf
+    name: encode_primitive.go
+  - decls:
+      - markerTypes
+      - bsonTypeName
+      - (*encoder).encodeSpecial
+      - (*encoder).encodeStdlib
+      - (*encoder).encodeValueType
+      - (*encoder).encodeTextType
+      - encodeMarker
+      - (*encoder).appendJSONNumber
+      - (*encoder).appendObjectID
+      - (*encoder).appendRegex
+      - validCString
+      - sortedOptions
+      - (*encoder).appendDBPointer
+      - (*encoder).appendCodeWithScope
+      - (*encoder).appendScope
+    name: encode_special.go
+  - decls:
+      - marshalError
+      - unmarshalError
+      - depthError
+      - valueError
+    name: errors.go
+  - decls:
+      - objectIDHexLen
+      - ObjectID
+      - NilObjectID
+      - ObjectIDFromHex
+      - ObjectID.Hex
+      - ObjectID.String
+      - ObjectID.IsZero
+      - ObjectID.Timestamp
+      - ObjectID.MarshalText
+      - (*ObjectID).UnmarshalText
+      - ObjectID.MarshalJSON
+      - (*ObjectID).UnmarshalJSON
+      - objectIDJSONText
+    name: objectid.go
+  - decls:
+      - planKind
+      - kindUnsupported
+      - hookMode
+      - hookNone
+      - keyMode
+      - keyUnsupported
+      - typePlan
+      - fieldPlan
+      - fieldFlags
+      - flagOmitEmpty
+      - fieldFlags.has
+      - typeOfTime
+      - planFor
+      - publishedPlan
+      - planBuilder
+      - (*planBuilder).plan
+      - (*planBuilder).fill
+      - hookFor
+      - (*planBuilder).fillKind
+      - interfaceKind
+      - (*planBuilder).fillSlice
+      - (*planBuilder).fillArray
+      - (*planBuilder).fillMap
+      - mapSlots
+      - (*typePlan).acquireSlots
+      - (*typePlan).releaseSlots
+      - keyModes
+      - integerKeyMode
+      - (*planBuilder).fillStruct
+      - (*planBuilder).describeStruct
+      - (*planBuilder).newField
+      - inlineMapProblem
+      - (*planBuilder).inlineStruct
+      - dominantFields
+      - fieldTags
+      - parseFieldTags
+      - (*typePlan).lookupField
+      - (*typePlan).foldedField
+      - needsFolding
+    name: plan.go
+  - decls:
+      - D
+      - E
+      - M
+      - A
+      - Binary
+      - Binary.Equal
+      - Binary.IsZero
+      - Undefined
+      - "Null"
+      - MinKey
+      - MaxKey
+      - DateTime
+      - NewDateTimeFromTime
+      - DateTime.Time
+      - DateTime.MarshalJSON
+      - (*DateTime).UnmarshalJSON
+      - Regex
+      - Regex.String
+      - Regex.Equal
+      - Regex.IsZero
+      - DBPointer
+      - DBPointer.String
+      - DBPointer.Equal
+      - DBPointer.IsZero
+      - JavaScript
+      - Symbol
+      - CodeWithScope
+      - CodeWithScope.String
+      - Timestamp
+      - Timestamp.After
+      - Timestamp.Before
+      - Timestamp.Equal
+      - Timestamp.IsZero
+      - Timestamp.Compare
+    name: types.go
+  - decls:
+      - validationError
+      - validateRoot
+      - validator
+      - validator.root
+      - validator.document
+      - validator.element
+      - validator.value
+      - validator.str
+      - validator.nested
+      - validator.binary
+      - validator.regex
+      - validator.dbPointer
+      - validator.codeWithScope
+      - validator.boolean
+    name: validate.go
+  - decls:
+      - typeDouble
+      - BinaryGeneric
+      - maxBSONNestedLevels
+      - emptyDocument
+      - readInt32
+      - readInt64
+      - readDouble
+      - cstringEnd
+      - valueSize
+      - fixedValueSize
+      - variableValueSize
+      - prefixedSize
+      - dbPointerSize
+      - regexSize
+    name: wire.go
+functions:
+  - name: New
+    results: codec.Codec
+  - name: NewDecimal128
+    params: high, low uint64
+    results: Decimal128
+  - doc: |-
+      coefficientDigits writes the decimal digits of the 113-bit coefficient
+      high:low into buf and returns them without leading zeros: "0" for zero.
+    name: coefficientDigits
+    params: buf *[40]byte, high, low uint64
+    results: "[]byte"
+  - doc: formatDecimal places the decimal point or the exponent in digits.
+    name: formatDecimal
+    params: negative bool, digits []byte, exponent int
+    results: "[]byte"
+  - doc: appendPlain writes digits scaled by 10^exponent, exponent at most zero.
+    name: appendPlain
+    params: out, digits []byte, exponent int
+    results: "[]byte"
+  - name: ParseDecimal128
+    params: s string
+    results: Decimal128, error
+  - doc: cutSign splits a leading sign off s.
+    name: cutSign
+    params: s string
+    results: body string, negative bool
+  - doc: parseDecimalSpecial recognises NaN, Inf and Infinity, in any case.
+    name: parseDecimalSpecial
+    params: body string, negative bool
+    results: Decimal128, bool
+  - doc: |-
+      equalFoldASCII reports whether s equals lower, an ASCII lowercase word, in
+      any letter case.
+    name: equalFoldASCII
+    params: s, lower string
+    results: bool
+  - doc: |-
+      scanDecimal reads the grammar digits ['.' digits] [e [sign] digits], where at
+      least one digit precedes the exponent.
+    name: scanDecimal
+    params: body string
+    results: decimalNumber, bool
+  - doc: |-
+      scanCoefficient reads digits with at most one point, up to the first other
+      byte.
+    name: scanCoefficient
+    params: body string
+    results: scannedCoefficient
+  - doc: |-
+      scanExponent reads an optional exponent: e or E, an optional sign, digits,
+      and nothing after them. The magnitude saturates at
+      decimalExponentSaturation.
+    name: scanExponent
+    params: rest string
+    results: int, bool
+  - doc: clampExponent saturates e at decimalExponentSaturation either way.
+    name: clampExponent
+    params: e int
+    results: int
+  - doc: |-
+      fitExponent brings exponent into range by appending zeros (an exponent too
+      large) or dropping trailing ones (too small), refusing when neither is exact.
+    name: fitExponent
+    params: digits []byte, exponent int
+    results: "[]byte, int, bool"
+  - doc: |-
+      digitsToCoefficient converts at most 34 decimal digits to the 113-bit
+      coefficient high:low.
+    name: digitsToCoefficient
+    params: digits []byte
+    results: high, low uint64
+  - doc: assembleDecimal packs a sign, a coefficient and an in-range exponent.
+    name: assembleDecimal
+    params: negative bool, high, low uint64, exponent int
+    results: Decimal128
+  - doc: |-
+      decimalJSONText extracts the string form from a JSON string or an
+      extended-JSON {"$numberDecimal": "…"} object.
+    name: decimalJSONText
+    params: data []byte
+    results: string, error
+  - doc: |-
+      errCorrupt reports bytes that changed shape after validation — input the
+      caller modified while it was being decoded.
+    name: errCorrupt
+    results: error
+  - doc: decodeInto decodes the validated document data into v.
+    name: decodeInto
+    params: data []byte, v any
+    results: error
+  - doc: |-
+      rootTarget follows a pointer to what it points at, or keeps a map, which is
+      filled in place.
+    name: rootTarget
+    params: rv reflect.Value
+    results: reflect.Value, error
+  - doc: describeTarget names a refused target's type, or nil.
+    name: describeTarget
+    params: rv reflect.Value
+    results: string
+  - doc: rootHook calls a target's own UnmarshalBSON with a copy of the document.
+    name: rootHook
+    params: u interface{ UnmarshalBSON(data []byte) error }, rv reflect.Value, data []byte
+    results: error
+  - doc: decodeValue decodes the value of type t, whose bytes are val, into rv.
+    name: decodeValue
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeContainer decodes into the container mappings and the indirections,
+      and reports whether p was one.
+    name: decodeContainer
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: bool, error
+  - doc: |-
+      decodeHook calls UnmarshalBSON with a copy of the value's bytes: on a
+      pointer type it allocates a nil target first and leaves a null value nil;
+      on a type whose pointer has the method, through the address.
+    name: decodeHook
+    params: t byte, val []byte, rv reflect.Value, p *typePlan
+    results: bool, error
+  - doc: |-
+      hookTarget returns what UnmarshalBSON is called on: the address for a
+      pointer receiver (handled is false when there is none); for a pointer type,
+      the pointer, allocated when nil, or the invalid Value after setting it to
+      nil for a value-less BSON type.
+    name: hookTarget
+    params: val []byte, rv reflect.Value, p *typePlan
+    results: reflect.Value, bool
+  - doc: cloneOrNil copies b, or returns nil for an empty b.
+    name: cloneOrNil
+    params: b []byte
+    results: "[]byte"
+  - doc: mismatch reports a BSON type the target cannot hold.
+    name: mismatch
+    params: t byte, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      inField appends the innermost struct field's name to a message, when there
+      is one.
+    name: inField
+    params: message string, st decodeState
+    results: string
+  - doc: newDocIter starts a walk over doc, a whole document.
+    name: newDocIter
+    params: doc []byte
+    results: docIter
+  - doc: countElements counts a validated document's elements.
+    name: countElements
+    params: doc []byte
+    results: int
+  - doc: |-
+      decodePointer decodes into a pointer's target, allocating it when nil; a
+      null or undefined sets the pointer to nil.
+    name: decodePointer
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeInterface decodes into an empty interface: the value its BSON type
+      decodes as on its own.
+    name: decodeInterface
+    params: t byte, val []byte, rv reflect.Value, st decodeState
+    results: error
+  - doc: decodeAny decodes one value as an interface would hold it.
+    name: decodeAny
+    params: t byte, val []byte, st decodeState
+    results: any, error
+  - doc: decodeAnyScalar decodes the BSON types that hold no other value.
+    name: decodeAnyScalar
+    params: t byte, val []byte
+    results: any, error
+  - doc: |-
+      decodeAnyFixed decodes the fixed-width BSON types, whose length the element
+      walk has already checked.
+    name: decodeAnyFixed
+    params: t byte, val []byte
+    results: any, bool
+  - doc: decodeAnyMarker decodes the BSON types that carry no payload.
+    name: decodeAnyMarker
+    params: t byte
+    results: any, bool
+  - doc: decodeAnyNumber decodes the numeric types, booleans and datetimes.
+    name: decodeAnyNumber
+    params: t byte, val []byte
+    results: any, bool
+  - doc: anyText decodes a string, a JavaScript or a symbol into its Go type.
+    name: anyText
+    params: t byte, val []byte
+    results: any, error
+  - doc: "anyRegex decodes a regex: two cstrings."
+    name: anyRegex
+    params: val []byte
+    results: any, error
+  - doc: "anyDBPointer decodes a DBPointer: a string, then twelve bytes."
+    name: anyDBPointer
+    params: val []byte
+    results: any, error
+  - doc: decodeAnyDocument decodes a document as the ancestor type, or as a D.
+    name: decodeAnyDocument
+    params: val []byte, st decodeState
+    results: any, error
+  - doc: decodeDocument decodes a document into a D, appending to dst.
+    name: decodeDocument
+    params: val []byte, dst D, st decodeState
+    results: D, error
+  - doc: decodeDElement decodes one element of a D.
+    name: decodeDElement
+    params: el element, st decodeState
+    results: E, error
+  - doc: |-
+      decodeAnyArray decodes an array into an A, its elements under the same
+      ancestor.
+    name: decodeAnyArray
+    params: val []byte, st decodeState
+    results: any, error
+  - doc: |-
+      decodeAnyCodeWithScope decodes a code-with-scope: its code, and its scope
+      as a D whose own documents follow the current ancestor.
+    name: decodeAnyCodeWithScope
+    params: val []byte, st decodeState
+    results: any, error
+  - doc: |-
+      decodeSlice decodes into a slice: an array element by element, a document
+      into a slice of E, a binary or a string into a slice of bytes.
+    name: decodeSlice
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeDocSlice decodes a document into a slice of E; an array is refused.
+    name: decodeDocSlice
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeBytesSlice decodes an array, a generic binary or a string into a
+      slice of bytes.
+    name: decodeBytesSlice
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeArrayIntoSlice decodes an array into a slice of anything but bytes
+      and E.
+    name: decodeArrayIntoSlice
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      reusableSlice returns rv resliced to n when its backing array holds n
+      elements, a new slice of n otherwise: a nil slice becomes an empty one, as
+      the previous library made it.
+    name: reusableSlice
+    params: rv reflect.Value, n int
+    results: reflect.Value
+  - doc: |-
+      decodeElements decodes an array into a slice, each element into a zeroed
+      slot.
+    name: decodeElements
+    params: val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeESlice decodes a document into a slice of E, in order, each value
+      decoded as an interface would be.
+    name: decodeESlice
+    params: val []byte, rv reflect.Value, st decodeState
+    results: error
+  - doc: setElement decodes el into an E reached through reflection.
+    name: setElement
+    params: target reflect.Value, el element, st decodeState
+    results: error
+  - doc: |-
+      decodeByteSlice decodes a generic binary or a string into a slice of bytes,
+      reusing its backing array.
+    name: decodeByteSlice
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: bytesOf returns the payload of a generic binary or of a string.
+    name: bytesOf
+    params: t byte, val []byte, p *typePlan, st decodeState
+    results: "[]byte, error"
+  - doc: |-
+      decodeArray decodes into an array: an array element by element, a document
+      into an array of E, a generic binary into an array of bytes. A value
+      shorter than the array leaves the rest of it as it was; a longer one is
+      refused.
+    name: decodeArray
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeDocArray decodes a document into an array of E. As the previous
+      library did, it does not make the array's type the ancestor.
+    name: decodeDocArray
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeBytesArray decodes an array or a generic binary into an array of
+      bytes.
+    name: decodeBytesArray
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeArrayIntoArray decodes an array's elements into an array.
+    name: decodeArrayIntoArray
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeByteArray copies a generic binary into an array of bytes.
+    name: decodeByteArray
+    params: val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeD decodes a document into a D, reusing its backing array. A null
+      leaves it nil; an undefined is refused, as the previous library refused it.
+    name: decodeD
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeMap decodes a document into a map, adding to what it already holds.
+    name: decodeMap
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      stringAnyMap returns the map[string]any rv holds, making it if nil, when
+      rv's type is map[string]any or M.
+    name: stringAnyMap
+    params: rv reflect.Value, val []byte
+    results: map[string]any, bool
+  - doc: |-
+      fillStringAnyMap adds a document's elements to m, each decoded as an
+      interface value.
+    name: fillStringAnyMap
+    params: val []byte, m map[string]any, st decodeState
+    results: error
+  - doc: setStringAnyEntry decodes one element into m.
+    name: setStringAnyEntry
+    params: m map[string]any, el element, st decodeState
+    results: error
+  - doc: |-
+      fillMap adds a document's elements to a map through reflection, each value
+      decoded into a fresh slot.
+    name: fillMap
+    params: val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: mapKey turns an element name into a key of the map's key type.
+    name: mapKey
+    params: name []byte, slot reflect.Value, p *typePlan, st decodeState
+    results: reflect.Value, error
+  - doc: intMapKey parses a decimal signed key that fits the key type.
+    name: intMapKey
+    params: text string, slot reflect.Value, p *typePlan, st decodeState
+    results: reflect.Value, error
+  - doc: uintMapKey parses a decimal unsigned key that fits the key type.
+    name: uintMapKey
+    params: text string, slot reflect.Value, p *typePlan, st decodeState
+    results: reflect.Value, error
+  - doc: textMapKey builds a key through its UnmarshalText method.
+    name: textMapKey
+    params: name []byte, p *typePlan, st decodeState
+    results: reflect.Value, error
+  - doc: |-
+      decodeStruct decodes a document into a struct, field by field; an element
+      no field names goes to the ",inline" map, or is skipped.
+    name: decodeStruct
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeFields decodes a document's elements into a struct's fields.
+    name: decodeFields
+    params: val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeField decodes an element into a struct field, allocating the
+      ",inline" pointers on its path and a nil pointer field, as the previous
+      library did; a null then sets that pointer back to nil.
+    name: decodeField
+    params: el element, rv reflect.Value, f *fieldPlan, st decodeState
+    results: error
+  - doc: |-
+      decodeUnknown decodes an element no field names into the struct's
+      ",inline" map, or skips it when there is none.
+    name: decodeUnknown
+    params: el element, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeScalar decodes into the scalar mappings and reports whether p was one.
+    name: decodeScalar
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: bool, error
+  - doc: decodeBool decodes a boolean, a number (true when not zero), or a null.
+    name: decodeBool
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      integerOf reads the integer a numeric, boolean or null value stands for. A
+      double must be whole unless truncation was asked for, and within the int64
+      range in either case.
+    name: integerOf
+    params: t byte, val []byte, p *typePlan, st decodeState
+    results: int64, error
+  - doc: |-
+      wholeDouble converts a double to an integer: exactly, or dropping the
+      fraction under truncate; never past the int64 range, never from NaN.
+    name: wholeDouble
+    params: f float64, p *typePlan, st decodeState
+    results: int64, error
+  - doc: |-
+      decodeSigned decodes into a signed integer kind, refusing a value it
+      cannot hold.
+    name: decodeSigned
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeUnsigned decodes into an unsigned integer kind, refusing a negative
+      value or one it cannot hold.
+    name: decodeUnsigned
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: floatOf reads the number a numeric, boolean or null value stands for.
+    name: floatOf
+    params: t byte, val []byte, p *typePlan, st decodeState
+    results: float64, error
+  - doc: |-
+      decodeFloat decodes into a float kind. A double that a float32 would round
+      is refused unless truncation was asked for; NaN is not refused for it.
+    name: decodeFloat
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeString decodes a string, a symbol, an ObjectID (as its hexadecimal
+      form), a generic binary (as its bytes) or a null into a string kind.
+    name: decodeString
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: textOf returns the bytes of a string, a symbol or a generic binary.
+    name: textOf
+    params: t byte, val []byte, p *typePlan, st decodeState
+    results: "[]byte, error"
+  - doc: |-
+      decodeBytes decodes a generic binary, a string or a symbol into a []byte, a
+      null into nil. The bytes are copied.
+    name: decodeBytes
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      stringPayload returns the text of a string-shaped value, without its length
+      and NUL.
+    name: stringPayload
+    params: val []byte
+    results: "[]byte, bool"
+  - doc: |-
+      binaryPayload returns a binary's subtype and bytes, the inner length of
+      subtype 0x02 removed. The bytes alias val.
+    name: binaryPayload
+    params: val []byte
+    results: byte, []byte, bool
+  - doc: |-
+      genericBinary returns a binary's bytes when its subtype is one a byte
+      target accepts — generic or old generic — and refuses any other.
+    name: genericBinary
+    params: val []byte, p *typePlan, st decodeState
+    results: "[]byte, error"
+  - doc: decodeSpecial decodes into the codec's own value types and the stdlib types.
+    name: decodeSpecial
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: decodeStdlib decodes into time.Time, url.URL and json.Number.
+    name: decodeStdlib
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: bool, error
+  - doc: |-
+      decodeTime decodes a datetime, an int64 of milliseconds, a timestamp's
+      seconds, or a string in timeStringLayout, into a UTC time.Time.
+    name: decodeTime
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: parseTimeString parses a string value in timeStringLayout.
+    name: parseTimeString
+    params: val []byte, st decodeState
+    results: time.Time, error
+  - doc: decodeURL decodes a string into a url.URL.
+    name: decodeURL
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeJSONNumber decodes a number into a json.Number, a double in its
+      shortest decimal form.
+    name: decodeJSONNumber
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: readValueType sets rv, of the value type matching t, from val.
+    name: readValueType
+    params: t byte, val []byte, rv reflect.Value, st decodeState
+    results: error
+  - doc: |-
+      decodeValueTypeConversion takes the cross-type conversions the previous
+      library accepted for its value types: a string into an ObjectID or a
+      Symbol, a generic binary into a Symbol, null and undefined into each other.
+    name: decodeValueTypeConversion
+    params: t byte, val []byte, rv reflect.Value, p *typePlan, st decodeState
+    results: error
+  - doc: |-
+      decodeObjectIDString decodes a string into an ObjectID: its 24-digit
+      hexadecimal form, or exactly twelve bytes taken as they are, as the previous
+      library accepted.
+    name: decodeObjectIDString
+    params: val []byte, rv reflect.Value, st decodeState
+    results: error
+  - doc: readUint32 reads the little-endian uint32 at the start of b.
+    name: readUint32
+    params: b []byte
+    results: uint32
+  - doc: setTyped stores v in rv without boxing it when rv is addressable.
+    name: setTyped
+    params: rv reflect.Value, v T
+    typeParams: T any
+  - doc: |-
+      appendDocument appends the document v encodes as to dst. On failure dst is
+      returned with its original length.
+    name: appendDocument
+    params: dst []byte, v any
+    results: "[]byte, error"
+  - doc: |-
+      nilTopLevelMap reports a top-level nil map, followed through non-nil
+      pointers that have no MarshalBSON of their own.
+    name: nilTopLevelMap
+    params: rv reflect.Value
+    results: bool
+  - doc: |-
+      validateEmbedded checks a document a MarshalBSON method returned, to be
+      written at depth.
+    name: validateEmbedded
+    params: data []byte, depth int
+    results: error
+  - doc: |-
+      methodValue returns rv as an interface whose method set includes rv's: an
+      interface's dynamic value or a pointer as it is, a pointer to any other
+      addressable value (which boxes without allocating), or the value itself.
+    name: methodValue
+    params: rv reflect.Value
+    results: any
+  - doc: |-
+      fieldByIndex walks an index path, reporting false when a pointer on it is
+      nil.
+    name: fieldByIndex
+    params: rv reflect.Value, index []int
+    results: reflect.Value, bool
+  - doc: |-
+      isEmptyField is omitempty's test. An interface field is empty when nil;
+      one whose type is a non-empty interface without MarshalBSON is judged by
+      its dynamic value, as the previous library judged it.
+    name: isEmptyField
+    params: fv reflect.Value, p *typePlan
+    results: bool
+  - doc: |-
+      isEmptyValue asks IsZero when the type has it and the value is not a nil
+      pointer; otherwise a length of zero, false for a struct, and the zero value
+      for everything else.
+    name: isEmptyValue
+    params: v reflect.Value, p *typePlan
+    results: bool
+  - doc: mapKeyName renders a map key as an element name.
+    name: mapKeyName
+    params: key reflect.Value, mode keyMode
+    results: string, error
+  - doc: |-
+      textKey renders a key through its MarshalText method; a nil pointer key is
+      the empty name.
+    name: textKey
+    params: key reflect.Value
+    results: string, error
+  - doc: timeOf reads a time.Time without allocating.
+    name: timeOf
+    params: rv reflect.Value
+    results: time.Time
+  - doc: bsonTypeName names a BSON type for an error message.
+    name: bsonTypeName
+    params: t byte
+    results: string
+  - doc: |-
+      encodeMarker returns the type of a payload-free value, or refuses a kind BSON
+      has no form for.
+    name: encodeMarker
+    params: p *typePlan
+    results: byte, error
+  - doc: validCString reports whether s can be written as a cstring.
+    name: validCString
+    params: s string
+    results: bool
+  - doc: sortedOptions returns options with its characters in ascending order.
+    name: sortedOptions
+    params: options string
+    results: string
+  - doc: |-
+      marshalError builds the encode failure, detail naming what was refused.
+      detail never carries a value: it names Go types, struct fields and BSON
+      types only, so a log line cannot leak the data being encoded.
+    name: marshalError
+    params: cause error, detail string
+    results: error
+  - doc: |-
+      unmarshalError builds the decode failure. detail names offsets, BSON types,
+      Go types and declared field names — never a key or a value read from the
+      input, which is a stranger's text and does not belong in a log line.
+    name: unmarshalError
+    params: cause error, detail string
+    results: error
+  - doc: depthError builds the nesting refusal for op ("Marshal" or "Unmarshal").
+    name: depthError
+    params: op string
+    results: error
+  - doc: valueError builds the refusal of a value type's constructor or parser.
+    name: valueError
+    params: cause error, detail string
+    results: error
+  - name: ObjectIDFromHex
+    params: s string
+    results: ObjectID, error
+  - doc: |-
+      objectIDJSONText extracts the hexadecimal text from a JSON string or an
+      extended-JSON {"$oid": "…"} object.
+    name: objectIDJSONText
+    params: data []byte
+    results: string, error
+  - doc: |-
+      planFor returns the plan of t, building and publishing it — and every plan
+      it reaches — on first use.
+    name: planFor
+    params: t reflect.Type
+    results: "*typePlan"
+  - doc: publishedPlan returns t's published plan, if there is one.
+    name: publishedPlan
+    params: t reflect.Type
+    results: "*typePlan, bool"
+  - doc: hookFor reports how t reaches the methods of iface.
+    name: hookFor
+    params: t, iface reflect.Type
+    results: hookMode
+  - doc: |-
+      interfaceKind maps an interface type: the empty interface decodes, any
+      other has no concrete type for a decode to make.
+    name: interfaceKind
+    params: t reflect.Type
+    results: planKind
+  - doc: |-
+      keyModes decides how a map key type is written and read. A string kind is
+      written as itself even when it has MarshalText, while UnmarshalText, when
+      present, is preferred for reading: the asymmetry is the previous library's,
+      kept so the same map keys round-trip as they did.
+    name: keyModes
+    params: k reflect.Type
+    results: encode, decode keyMode
+  - doc: |-
+      integerKeyMode maps an integer kind to its decimal key mode, and anything
+      else to keyUnsupported.
+    name: integerKeyMode
+    params: k reflect.Kind
+    results: keyMode
+  - doc: inlineMapProblem says why a map cannot be owner's ",inline" map, or "".
+    name: inlineMapProblem
+    params: owner, mapType reflect.Type, existing *fieldPlan
+    results: string
+  - doc: |-
+      dominantFields resolves duplicated element names: the shallowest field wins,
+      two at the same depth are refused. The survivors come back in declaration
+      order, an inlined struct's fields at the position of the field inlining it.
+      It reports why the struct is ambiguous, or "".
+    name: dominantFields
+    params: t reflect.Type, candidates []*fieldPlan
+    results: "[]*fieldPlan, string"
+  - doc: |-
+      parseFieldTags reads the bson tag of sf. The element name defaults to the
+      field name in lower case. A struct tag with no key and no colon at all is
+      read as a bson tag, as the previous library read it. The options are
+      matched in every comma-separated part, the first included: `bson:"inline"`
+      both names the element "inline" and sets the option.
+    name: parseFieldTags
+    params: sf reflect.StructField
+    results: fieldTags, bool
+  - doc: |-
+      needsFolding reports whether lower-casing key could change it: an ASCII
+      upper-case letter, or any non-ASCII byte.
+    name: needsFolding
+    params: key []byte
+    results: bool
+  - name: NewDateTimeFromTime
+    params: t time.Time
+    results: DateTime
+  - doc: validateRoot checks that data is exactly one well-formed document.
+    name: validateRoot
+    params: data []byte
+    results: error
+  - doc: |-
+      readInt32 reads the little-endian int32 at the start of b, which the caller
+      has checked holds at least lengthSize bytes.
+    name: readInt32
+    params: b []byte
+    results: int32
+  - doc: |-
+      readInt64 reads the little-endian int64 at the start of b, which the caller
+      has checked holds at least eight bytes.
+    name: readInt64
+    params: b []byte
+    results: int64
+  - doc: readDouble reads the little-endian IEEE 754 double at the start of b.
+    name: readDouble
+    params: b []byte
+    results: float64
+  - doc: |-
+      cstringEnd returns the index of the NUL that ends the cstring at the start
+      of b, or -1 when b holds no NUL.
+    name: cstringEnd
+    params: b []byte
+    results: int
+  - doc: |-
+      valueSize returns how many bytes the value of an element of type t occupies
+      at the start of b, or -1 when b cannot hold it or t is not a BSON type. It
+      checks bounds only: the validator has already checked the content, and this
+      is how the decoder steps over a value without reading it.
+    name: valueSize
+    params: t byte, b []byte
+    results: int
+  - doc: |-
+      fixedValueSize returns the width of a fixed-width type, and false for a
+      variable-width or unknown one.
+    name: fixedValueSize
+    params: t byte
+    results: size int, fixed bool
+  - doc: |-
+      variableValueSize returns the width of a length-prefixed or cstring value,
+      or -1 when b cannot hold it or t is not a BSON type.
+    name: variableValueSize
+    params: t byte, b []byte
+    results: int
+  - doc: |-
+      prefixedSize returns extra plus the int32 length at the start of b, or -1
+      when b is too short for the prefix or for the value it announces.
+    name: prefixedSize
+    params: b []byte, extra int
+    results: int
+  - doc: "dbPointerSize returns the width of a DBPointer: a string, then an ObjectID."
+    name: dbPointerSize
+    params: b []byte
+    results: int
+  - doc: "regexSize returns the width of a regex: two NUL-terminated cstrings."
+    name: regexSize
+    params: b []byte
+    results: int
+imports:
+  binary: encoding/binary
+  bits: math/bits
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corebson: github.com/kitsunium/sdk/internal/core/data/codec/bson
+  encoding: encoding
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  hex: encoding/hex
+  json: encoding/json
+  math: math
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  url: net/url
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/bson
+  name: bson
+  purpose: "Package bson is the BSON codec: a native implementation of the BSON 1.1 specification (bsonspec.org) behind the universal core/data/codec.Codec dispatch, written with the standard library alone."
+types:
+  - doc: bsonCodec is the concrete Codec implementation for BSON. Stateless.
+    kind: struct
+    methods:
+      - doc: Name returns the canonical Format identifier.
+        name: Name
+        recv: "*bsonCodec"
+        results: string
+      - doc: MIMETypes returns a defensive copy of the MIME alias list.
+        name: MIMETypes
+        recv: "*bsonCodec"
+        results: "[]string"
+      - doc: Extensions returns a defensive copy of the file-extension list.
+        name: Extensions
+        recv: "*bsonCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal encodes v as a BSON document into a slice the caller owns. v must
+          encode as a document at the top level; anything else surfaces
+          BSON_MARSHAL_FAILED, and nesting past 100 levels — a cyclic value included —
+          BSON_DEPTH_EXCEEDED.
+        name: Marshal
+        params: v any
+        recv: "*bsonCodec"
+        results: encoded []byte, err error
+      - doc: |-
+          Unmarshal decodes the BSON document data into v, which must be a non-nil
+          pointer or a non-nil map. The input is checked whole before v is touched.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*bsonCodec"
+        results: error
+      - doc: |-
+          Append encodes v as BSON and appends the document onto dst. Implements the
+          optional codec.Appender: the encoder writes straight into dst, so a
+          destination with room allocates nothing for the document itself. A failure
+          returns dst with its original length.
+        name: Append
+        params: dst []byte, v any
+        recv: "*bsonCodec"
+        results: appended []byte, err error
+    name: bsonCodec
+  - fields:
+      - name: h
+        type: uint64
+      - name: l
+        type: uint64
+    kind: struct
+    methods:
+      - name: GetBytes
+        recv: d Decimal128
+        results: high, low uint64
+      - name: IsNaN
+        recv: d Decimal128
+        results: bool
+      - name: IsInf
+        recv: d Decimal128
+        results: int
+      - name: IsZero
+        recv: d Decimal128
+        results: bool
+      - name: String
+        recv: d Decimal128
+        results: string
+      - doc: |-
+          finite splits a finite d into its coefficient and unbiased exponent. A
+          coefficient over 10^34-1, and every coefficient of the form whose two bits
+          after the sign are both set, is non-canonical and reads as zero.
+        name: finite
+        recv: d Decimal128
+        results: high, low uint64, exponent int
+      - name: MarshalJSON
+        recv: d Decimal128
+        results: "[]byte, error"
+      - name: UnmarshalJSON
+        params: data []byte
+        recv: d *Decimal128
+        results: error
+    name: Decimal128
+  - doc: |-
+      decimalNumber is a scanned decimal: its significant digits, without leading
+      zeros, and the power of ten they are scaled by.
+    fields:
+      - doc: digits are the significant digits, "0" for zero.
+        name: digits
+        type: "[]byte"
+      - doc: |-
+          exponent scales them, already corrected for the fraction digits; it is
+          saturated far outside the range a decimal128 can reach.
+        name: exponent
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          encode packs the number into a decimal128, trading trailing zeros for
+          exponent while that stays exact. It reports false when no exact encoding
+          exists.
+        name: encode
+        params: negative bool
+        recv: n decimalNumber
+        results: Decimal128, bool
+    name: decimalNumber
+  - doc: scannedCoefficient is the coefficient part of a decimal string.
+    fields:
+      - doc: digits are the significant digits, leading zeros dropped.
+        name: digits
+        type: "[]byte"
+      - doc: fraction counts the digits after the point.
+        name: fraction
+        type: int
+      - doc: end is where the coefficient stops.
+        name: end
+        type: int
+      - doc: sawDigit reports at least one digit.
+        name: sawDigit
+        type: bool
+    kind: struct
+    methods:
+      - doc: add records one digit of the coefficient.
+        name: add
+        params: c byte, afterPoint bool
+        recv: s *scannedCoefficient
+    name: scannedCoefficient
+  - doc: |-
+      decodeState is what a value's decoding depends on besides its bytes and its
+      target.
+    fields:
+      - doc: |-
+          ancestor is the type a document decodes as inside an interface: the
+          nearest enclosing map whose values are interface{} or slice of E, as the
+          previous library tracked it; nil means D.
+        name: ancestor
+        type: reflect.Type
+      - doc: truncate lets a double with a fraction decode into an integer.
+        name: truncate
+        type: bool
+      - doc: field is the Go name of the innermost struct field, for messages.
+        name: field
+        type: string
+    kind: struct
+    name: decodeState
+  - doc: |-
+      element is one element of a document: its type byte, its name and the bytes
+      of its value.
+    fields:
+      - doc: typ is the BSON type byte.
+        name: typ
+        type: byte
+      - doc: key is the element name, aliasing the input.
+        name: key
+        type: "[]byte"
+      - doc: value is the value's bytes, aliasing the input.
+        name: value
+        type: "[]byte"
+    kind: struct
+    name: element
+  - doc: docIter walks the elements of a validated document.
+    fields:
+      - doc: body is the element list, without the length prefix and terminator.
+        name: body
+        type: "[]byte"
+      - doc: pos is where the next element starts.
+        name: pos
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          next returns the next element. more is false at the end; err reports bytes
+          that are not the validated document any more.
+        name: next
+        recv: it *docIter
+        results: el element, more bool, err error
+    name: docIter
+  - doc: encoder appends BSON to buf.
+    fields:
+      - doc: buf is the output so far.
+        name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: encodeRoot writes the top-level value, which must encode as a document.
+        name: encodeRoot
+        params: v any
+        recv: e *encoder
+        results: error
+      - doc: |-
+          encodeValue appends the encoding of rv, planned by p, and returns its BSON
+          type for the caller to put in the element's type byte.
+        name: encodeValue
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: |-
+          marshalHook calls MarshalBSON when p's method is reachable from rv: always
+          for a value receiver, on an addressable value for a pointer receiver. A nil
+          pointer or interface writes null without calling it.
+        name: marshalHook
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeInteger writes the integer kinds.
+        name: encodeInteger
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeScalar writes booleans, floats and strings.
+        name: encodeScalar
+        params: rv reflect.Value, p *typePlan
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeComposite writes the containers and follows the indirections.
+        name: encodeComposite
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeBytes writes a byte slice as a generic binary, a nil one as null.
+        name: encodeBytes
+        params: rv reflect.Value
+        recv: e *encoder
+        results: byte
+      - doc: encodeNilable writes a slice or map, or null when it is nil.
+        name: encodeNilable
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: encodeIndirect follows a pointer or an interface to the value it holds.
+        name: encodeIndirect
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: |-
+          encodeAnyValue writes a dynamic value: the common types through a type
+          switch, every other one through its plan. reflected is the value as a
+          reflect.Value when the caller already has one, the zero Value otherwise.
+        name: encodeAnyValue
+        params: v any, reflected reflect.Value, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: |-
+          encodeCommonScalar writes, without reflection, the scalar dynamic types;
+          each rule is the plan's rule for the same type.
+        name: encodeCommonScalar
+        params: v any, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: |-
+          encodeCommonContainer writes, without reflection, the container dynamic
+          types a decode into an interface produces.
+        name: encodeCommonContainer
+        params: v any, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: |-
+          openContainer checks the depth bound for a container st opens and reserves
+          its length; it returns the child state and where the length goes.
+        name: openContainer
+        params: st encodeState
+        recv: e *encoder
+        results: encodeState, int, error
+      - doc: encodeCommonMap writes a map[string]any, or nil as null, its keys sorted.
+        name: encodeCommonMap
+        params: m map[string]any, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeCommonD writes a D in order, or nil as null.
+        name: encodeCommonD
+        params: d D, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeCommonArray writes a []any, or nil as null.
+        name: encodeCommonArray
+        params: a []any, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: |-
+          finishElement writes a dynamic value after an element header begun at
+          begin, and sets the header's type byte.
+        name: finishElement
+        params: begin int, value any, st encodeState
+        recv: e *encoder
+        results: error
+      - doc: encodeContainer opens a document or array, refusing past the depth bound.
+        name: encodeContainer
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: encodeElements writes the elements of a container and returns its type.
+        name: encodeElements
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: |-
+          encodeArrayElements writes a slice's or array's elements under the keys
+          "0", "1", ….
+        name: encodeArrayElements
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: error
+      - doc: |-
+          encodeDocElements writes the E elements of a D, a slice convertible to one,
+          or an array of E, in order.
+        name: encodeDocElements
+        params: rv reflect.Value, st encodeState
+        recv: e *encoder
+        results: error
+      - doc: encodeStructElements writes a struct's fields, then its ",inline" map.
+        name: encodeStructElements
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: error
+      - doc: |-
+          encodeField writes one struct field, honouring omitempty and minsize. A
+          field behind a nil ",inline" pointer is not written.
+        name: encodeField
+        params: rv reflect.Value, f *fieldPlan, st encodeState
+        recv: e *encoder
+        results: error
+      - doc: |-
+          encodeMapElements writes a map's entries in ascending key order. collisions,
+          when not nil, are the field names an ",inline" map must not repeat.
+        name: encodeMapElements
+        params: rv reflect.Value, p *typePlan, st encodeState, collisions map[string]*fieldPlan
+        recv: e *encoder
+        results: error
+      - doc: encodeMapEntry writes one map entry and returns where it lies.
+        name: encodeMapEntry
+        params: key, value reflect.Value, p *typePlan, st encodeState, collisions map[string]*fieldPlan
+        recv: e *encoder
+        results: segment, error
+      - doc: |-
+          beginMapKey writes an element's type placeholder and the map key as its
+          name, and returns the index of the name's NUL.
+        name: beginMapKey
+        params: key reflect.Value, mode keyMode, collisions map[string]*fieldPlan
+        recv: e *encoder
+        results: int, error
+      - doc: |-
+          sortSegments rewrites the map elements just written, between the first
+          segment's start and the buffer's end, in ascending key order.
+        name: sortSegments
+        params: segs []segment
+        recv: e *encoder
+      - doc: |-
+          reserve keeps elementHeadroom bytes free, doubling the buffer when it must
+          grow: past 256 bytes append grows a slice by about a quarter, so a large
+          document would allocate four to five times its size on the way; doubling
+          bounds that at about twice.
+        name: reserve
+        recv: e *encoder
+      - doc: |-
+          beginElement writes a type placeholder and the element name, refusing a
+          name BSON cannot carry, and returns the index of the name's NUL.
+        name: beginElement
+        params: name string
+        recv: e *encoder
+        results: int, error
+      - doc: |-
+          beginIndex writes a type placeholder and the decimal index as the name, and
+          returns where the type byte is.
+        name: beginIndex
+        params: i int
+        recv: e *encoder
+        results: int
+      - doc: |-
+          reserveLength appends a placeholder for a document's length and returns
+          where it is.
+        name: reserveLength
+        recv: e *encoder
+        results: int
+      - doc: |-
+          endDocument writes the terminator and the length of the document started at
+          start, refusing a document whose length an int32 cannot hold.
+        name: endDocument
+        params: start int
+        recv: e *encoder
+        results: error
+      - doc: appendBool writes a boolean.
+        name: appendBool
+        params: b bool
+        recv: e *encoder
+      - doc: appendInt32 writes an int32.
+        name: appendInt32
+        params: i int32
+        recv: e *encoder
+      - doc: appendInt64 writes an int64.
+        name: appendInt64
+        params: i int64
+        recv: e *encoder
+      - doc: |-
+          appendInt writes i as an int32 when narrow allows it and it fits, as an
+          int64 otherwise, and returns which.
+        name: appendInt
+        params: i int64, narrow bool
+        recv: e *encoder
+        results: byte
+      - doc: |-
+          appendUint writes an unsigned integer: an int32 under minsize when it fits,
+          an int64 when it fits there, refused past the int64 range.
+        name: appendUint
+        params: u uint64, minSize bool, p *typePlan
+        recv: e *encoder
+        results: byte, error
+      - doc: appendDouble writes an IEEE 754 double.
+        name: appendDouble
+        params: f float64
+        recv: e *encoder
+      - doc: appendString writes a string value, refusing one that is not UTF-8.
+        name: appendString
+        params: s string
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendStringBytes writes the length, the bytes and the NUL of a string the
+          caller has validated.
+        name: appendStringBytes
+        params: s string
+        recv: e *encoder
+      - doc: appendBinary writes a binary; the old generic subtype nests its length.
+        name: appendBinary
+        params: subtype byte, data []byte
+        recv: e *encoder
+      - doc: appendByteArray writes a byte array as a generic binary.
+        name: appendByteArray
+        params: rv reflect.Value
+        recv: e *encoder
+      - doc: |-
+          encodeSpecial writes the exact types the plan matched, and refuses the
+          kinds BSON has no form for.
+        name: encodeSpecial
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: encodeStdlib writes time.Time, DateTime, url.URL and json.Number.
+        name: encodeStdlib
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: |-
+          encodeValueType writes the codec's value types that carry bytes of their
+          own.
+        name: encodeValueType
+        params: rv reflect.Value, p *typePlan
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: encodeTextType writes the codec's text-shaped value types.
+        name: encodeTextType
+        params: rv reflect.Value, p *typePlan, st encodeState
+        recv: e *encoder
+        results: byte, bool, error
+      - doc: |-
+          appendJSONNumber writes a json.Number as an integer when it parses as an
+          int64, as a double when it parses as a float64, and refuses it otherwise.
+        name: appendJSONNumber
+        params: n json.Number, st encodeState
+        recv: e *encoder
+        results: byte, error
+      - doc: appendObjectID writes the twelve bytes of an ObjectID value.
+        name: appendObjectID
+        params: rv reflect.Value
+        recv: e *encoder
+      - doc: |-
+          appendRegex writes a regex: two cstrings, the options sorted, as the
+          specification stores them.
+        name: appendRegex
+        params: pattern, options string
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendDBPointer writes a DBPointer: its namespace as a string, then its
+          ObjectID.
+        name: appendDBPointer
+        params: rv reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendCodeWithScope writes a code-with-scope: a total length, the code as a
+          string, and the scope, which must encode as a document.
+        name: appendCodeWithScope
+        params: rv reflect.Value, st encodeState
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendScope writes a code-with-scope's scope, which must encode as a
+          document; a nil map is the empty one, as at the top level.
+        name: appendScope
+        params: scope reflect.Value, st encodeState
+        recv: e *encoder
+        results: error
+    name: encoder
+  - doc: encodeState is what a value's encoding depends on besides the value.
+    fields:
+      - doc: |-
+          depth is the nesting level of the document the value is written in; a
+          container the value opens is one deeper.
+        name: depth
+        type: int
+      - doc: |-
+          hops counts the pointers and interfaces followed since the last
+          container, so a pointer cycle that opens none is still refused.
+        name: hops
+        type: int
+      - doc: minSize writes integers that fit as int32.
+        name: minSize
+        type: bool
+      - doc: |-
+          addressable mirrors reflect's addressability along the path the
+          previous library walked, which decides whether a MarshalBSON method
+          with a pointer receiver is called: a map value, an interface's dynamic
+          value and a value passed to Marshal by value are not addressable.
+        name: addressable
+        type: bool
+    kind: struct
+    methods:
+      - doc: child returns the state of a value inside a container this state opens.
+        name: child
+        recv: st encodeState
+        results: encodeState
+    name: encodeState
+  - doc: |-
+      segment is one encoded element of a map, located in the output so the
+      elements can be put in key order once they are all written.
+    fields:
+      - doc: start is the element's type byte.
+        name: start
+        type: int
+      - doc: keyEnd is the NUL ending its name; the name is buf[start+1:keyEnd].
+        name: keyEnd
+        type: int
+      - doc: end is one past its last byte.
+        name: end
+        type: int
+    kind: struct
+    name: segment
+  - kind: named
+    methods:
+      - name: Hex
+        recv: id ObjectID
+        results: string
+      - name: String
+        recv: id ObjectID
+        results: string
+      - name: IsZero
+        recv: id ObjectID
+        results: bool
+      - name: Timestamp
+        recv: id ObjectID
+        results: time.Time
+      - name: MarshalText
+        recv: id ObjectID
+        results: "[]byte, error"
+      - name: UnmarshalText
+        params: text []byte
+        recv: id *ObjectID
+        results: error
+      - name: MarshalJSON
+        recv: id ObjectID
+        results: "[]byte, error"
+      - name: UnmarshalJSON
+        params: data []byte
+        recv: id *ObjectID
+        results: error
+    name: ObjectID
+    underlying: "[objectIDSize]byte"
+  - doc: planKind is the mapping a plan applies.
+    kind: named
+    name: planKind
+    underlying: uint8
+  - doc: hookMode says whether, and how, a type's own method replaces the mapping.
+    kind: named
+    name: hookMode
+    underlying: uint8
+  - doc: keyMode is how a map key becomes an element name, and back.
+    kind: named
+    name: keyMode
+    underlying: uint8
+  - doc: typePlan is everything the codec decided about one Go type.
+    fields:
+      - doc: typ is the type planned.
+        name: typ
+        type: reflect.Type
+      - doc: kind is the mapping.
+        name: kind
+        type: planKind
+      - doc: |-
+          elem plans a pointer's target, a slice's or array's element, a map's
+          value.
+        name: elem
+        type: "*typePlan"
+      - doc: marshaler says how MarshalBSON is reached, if it is.
+        name: marshaler
+        type: hookMode
+      - doc: unmarshaler says how UnmarshalBSON is reached, if it is.
+        name: unmarshaler
+        type: hookMode
+      - doc: zeroer reports that the type has IsZero, which omitempty then calls.
+        name: zeroer
+        type: bool
+      - doc: |-
+          stringAnyMap reports a map whose underlying type is map[string]any,
+          decoded without reflection.
+        name: stringAnyMap
+        type: bool
+      - doc: |-
+          keyEncode and keyDecode map a map's keys; they differ when only one
+          direction has a text method.
+        name: keyEncode
+        type: keyMode
+      - doc: |-
+          keyEncode and keyDecode map a map's keys; they differ when only one
+          direction has a text method.
+        name: keyDecode
+        type: keyMode
+      - doc: |-
+          slots recycles a map's key and value slots: iterating or filling a map
+          through reflection needs two settable values, and allocating them per
+          call would cost two allocations per map, nested maps included.
+        name: slots
+        type: "*recycler.Pool[*mapSlots]"
+      - doc: fields are a struct's fields in encoding order.
+        name: fields
+        type: "[]*fieldPlan"
+      - doc: byName indexes fields by element name.
+        name: byName
+        type: map[string]*fieldPlan
+      - doc: inlineMap is the field holding a struct's ",inline" map, or nil.
+        name: inlineMap
+        type: "*fieldPlan"
+      - doc: |-
+          invalid says why the type cannot be encoded or decoded at all (a
+          duplicated element name, a malformed ",inline"); each direction raises it
+          under its own code when the type is used.
+        name: invalid
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          fieldFor finds the field an element names, trying first the field that
+          follows the last one matched: a document written from this struct lists
+          its fields in order, and the guess then saves the map lookup.
+        name: fieldFor
+        params: key []byte, next int
+        recv: p *typePlan
+        results: "*fieldPlan"
+      - doc: acquireSlots borrows p's slots; release them with releaseSlots.
+        name: acquireSlots
+        recv: p *typePlan
+        results: "*mapSlots"
+      - doc: |-
+          releaseSlots zeroes the slots, so a pooled slot pins nothing the caller's
+          map held, and returns them.
+        name: releaseSlots
+        params: s *mapSlots
+        recv: p *typePlan
+      - doc: |-
+          lookupField finds the field an element names: exactly, then by the name
+          lower-cased, as the previous library matched.
+        name: lookupField
+        params: key []byte
+        recv: p *typePlan
+        results: "*fieldPlan"
+      - doc: foldedField looks up key lower-cased, Unicode folding included.
+        name: foldedField
+        params: key []byte
+        recv: p *typePlan
+        results: "*fieldPlan"
+    name: typePlan
+  - doc: fieldPlan is one struct field, as an element.
+    fields:
+      - doc: name is the element name.
+        name: name
+        type: string
+      - doc: goName is the Go field name, for error messages.
+        name: goName
+        type: string
+      - doc: |-
+          index is the path to the field, longer than one when it comes from an
+          ",inline" struct.
+        name: index
+        type: "[]int"
+      - doc: |-
+          position is the field's place in its struct plan's fields, so a decode
+          can guess that the next element names the next field.
+        name: position
+        type: int
+      - doc: plan is the field type's plan.
+        name: plan
+        type: "*typePlan"
+      - doc: |-
+          nameBytes is name as bytes, for comparing with an element name read
+          from the input without converting either.
+        name: nameBytes
+        type: "[]byte"
+      - doc: flags are the tag's options, and whether the name is writable.
+        name: flags
+        type: fieldFlags
+    kind: struct
+    name: fieldPlan
+  - doc: fieldFlags are a field's options, one bit each.
+    kind: named
+    methods:
+      - doc: has reports whether every bit of flag is set.
+        name: has
+        params: flag fieldFlags
+        recv: f fieldFlags
+        results: bool
+    name: fieldFlags
+    underlying: uint8
+  - doc: planBuilder builds plans for one planFor call, under planMu.
+    fields:
+      - doc: |-
+          pending holds the plans built so far, so a recursive type reaches its
+          own plan instead of recursing forever.
+        name: pending
+        type: map[reflect.Type]*typePlan
+    kind: struct
+    methods:
+      - doc: |-
+          plan returns the plan of t: a published one, one built earlier in this
+          call (perhaps still being filled), or a new one.
+        name: plan
+        params: t reflect.Type
+        recv: b *planBuilder
+        results: "*typePlan"
+      - doc: fill decides the mapping of p.typ.
+        name: fill
+        params: p *typePlan
+        recv: b *planBuilder
+      - doc: fillKind decides the mapping of a type that is not matched exactly.
+        name: fillKind
+        params: p *typePlan
+        recv: b *planBuilder
+      - doc: "fillSlice decides a slice's mapping: bytes, a document of E, or an array."
+        name: fillSlice
+        params: p *typePlan
+        recv: b *planBuilder
+      - doc: fillArray decides an array's mapping, as fillSlice does.
+        name: fillArray
+        params: p *typePlan
+        recv: b *planBuilder
+      - doc: fillMap decides a map's mapping and how its keys become element names.
+        name: fillMap
+        params: p *typePlan
+        recv: b *planBuilder
+      - doc: |-
+          fillStruct describes a struct's fields: names, options, ",inline" fields
+          flattened, a duplicated name refused unless one occurrence is shallower.
+        name: fillStruct
+        params: p *typePlan
+        recv: b *planBuilder
+      - doc: |-
+          describeStruct lists t's encoded fields, ",inline" structs expanded in
+          place, duplicated names resolved, and t's own ",inline" map. chain holds the
+          structs whose ",inline" expansion encloses this one, so a cycle through
+          ",inline" is refused; a field that merely refers back to a type being
+          planned is an ordinary recursive type and is not one. It reports why t is
+          unusable, or "".
+        name: describeStruct
+        params: t reflect.Type, chain map[reflect.Type]bool
+        recv: b *planBuilder
+        results: "[]*fieldPlan, *fieldPlan, string"
+      - doc: newField builds the plan of one field.
+        name: newField
+        params: sf reflect.StructField, tags fieldTags, index []int
+        recv: b *planBuilder
+        results: "*fieldPlan"
+      - doc: |-
+          inlineStruct expands an ",inline" struct, or pointer to one, into its
+          fields, each path prefixed with the inlining field's index. The inlined
+          struct's own ",inline" map is not carried up, as the previous library did
+          not carry it.
+        name: inlineStruct
+        params: owner, ft reflect.Type, i int, chain map[reflect.Type]bool
+        recv: b *planBuilder
+        results: "[]*fieldPlan, string"
+    name: planBuilder
+  - doc: mapSlots are the settable key and value a reflective map walk reuses.
+    fields:
+      - doc: key holds the current entry's key.
+        name: key
+        type: reflect.Value
+      - doc: value holds the current entry's value.
+        name: value
+        type: reflect.Value
+    kind: struct
+    name: mapSlots
+  - doc: fieldTags are the options of a bson struct tag.
+    fields:
+      - doc: name is the element name.
+        name: name
+        type: string
+      - doc: flags are the options set.
+        name: flags
+        type: fieldFlags
+    kind: struct
+    name: fieldTags
+  - kind: named
+    name: D
+    underlying: "[]E"
+  - fields:
+      - doc: Key is the element name. It must not contain a NUL byte.
+        name: Key
+        type: string
+      - doc: Value is any value the codec encodes.
+        name: Value
+        type: any
+    kind: struct
+    name: E
+  - kind: named
+    name: M
+    underlying: map[string]any
+  - kind: named
+    name: A
+    underlying: "[]any"
+  - fields:
+      - doc: Subtype is the BSON binary subtype, BinaryGeneric for opaque bytes.
+        name: Subtype
+        type: byte
+      - doc: Data is the payload.
+        name: Data
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: Equal
+        params: other Binary
+        recv: b Binary
+        results: bool
+      - name: IsZero
+        recv: b Binary
+        results: bool
+    name: Binary
+  - kind: struct
+    name: Undefined
+  - kind: struct
+    name: "Null"
+  - kind: struct
+    name: MinKey
+  - kind: struct
+    name: MaxKey
+  - kind: named
+    methods:
+      - name: Time
+        recv: dt DateTime
+        results: time.Time
+      - name: MarshalJSON
+        recv: dt DateTime
+        results: "[]byte, error"
+      - name: UnmarshalJSON
+        params: data []byte
+        recv: dt *DateTime
+        results: error
+    name: DateTime
+    underlying: int64
+  - fields:
+      - doc: Pattern is the expression.
+        name: Pattern
+        type: string
+      - doc: Options are the single-letter flags, such as "i" or "imx".
+        name: Options
+        type: string
+    kind: struct
+    methods:
+      - name: String
+        recv: r Regex
+        results: string
+      - name: Equal
+        params: other Regex
+        recv: r Regex
+        results: bool
+      - name: IsZero
+        recv: r Regex
+        results: bool
+    name: Regex
+  - fields:
+      - doc: DB is the namespace the pointer names.
+        name: DB
+        type: string
+      - doc: Pointer is the identifier within it.
+        name: Pointer
+        type: ObjectID
+    kind: struct
+    methods:
+      - name: String
+        recv: p DBPointer
+        results: string
+      - name: Equal
+        params: other DBPointer
+        recv: p DBPointer
+        results: bool
+      - name: IsZero
+        recv: p DBPointer
+        results: bool
+    name: DBPointer
+  - kind: named
+    name: JavaScript
+    underlying: string
+  - kind: named
+    name: Symbol
+    underlying: string
+  - fields:
+      - doc: Code is the JavaScript.
+        name: Code
+        type: JavaScript
+      - doc: Scope is the document.
+        name: Scope
+        type: any
+    kind: struct
+    methods:
+      - name: String
+        recv: c CodeWithScope
+        results: string
+    name: CodeWithScope
+  - fields:
+      - doc: T is the seconds since the Unix epoch.
+        name: T
+        type: uint32
+      - doc: I is the increment, ordering operations within the same second.
+        name: I
+        type: uint32
+    kind: struct
+    methods:
+      - name: After
+        params: other Timestamp
+        recv: t Timestamp
+        results: bool
+      - name: Before
+        params: other Timestamp
+        recv: t Timestamp
+        results: bool
+      - name: Equal
+        params: other Timestamp
+        recv: t Timestamp
+        results: bool
+      - name: IsZero
+        recv: t Timestamp
+        results: bool
+      - name: Compare
+        params: other Timestamp
+        recv: t Timestamp
+        results: int
+    name: Timestamp
+  - doc: |-
+      validationError says where, and why, a document is malformed. It is turned
+      into BSON_UNMARSHAL_FAILED or BSON_DEPTH_EXCEEDED by validateRoot; its text
+      names an offset and a rule, never the bytes found there.
+    fields:
+      - doc: offset is where in the input the problem was found.
+        name: offset
+        type: int
+      - doc: rule is what the bytes there break.
+        name: rule
+        type: string
+      - doc: depth reports the nesting bound rather than a malformation.
+        name: depth
+        type: bool
+    kind: struct
+    name: validationError
+  - doc: validator walks one input, tracking the absolute offset for messages.
+    kind: struct
+    methods:
+      - doc: |-
+          root checks the top-level document, whose declared length must be exactly
+          the length of the input: trailing bytes are refused.
+        name: root
+        params: data []byte
+        recv: v validator
+        results: "*validationError"
+      - doc: |-
+          document checks a document or array occupying exactly doc, found at base in
+          the input and nested at depth.
+        name: document
+        params: doc []byte, base, depth int
+        recv: v validator
+        results: "*validationError"
+      - doc: |-
+          element checks the element at body[pos:], body being a document's element
+          list without its terminator, and returns where the next element starts.
+        name: element
+        params: body []byte, pos, base, depth int
+        recv: v validator
+        results: int, *validationError
+      - doc: |-
+          value checks the value of an element of type t at the start of b, found at
+          base in the input, and returns its size.
+        name: value
+        params: t byte, b []byte, base, depth int
+        recv: v validator
+        results: int, *validationError
+      - doc: str checks an int32-length-prefixed, NUL-terminated UTF-8 string.
+        name: str
+        params: b []byte, base int
+        recv: v validator
+        results: int, *validationError
+      - doc: |-
+          nested checks an embedded document or array, which the element types
+          distinguish but whose layout is the same: an array's keys are not checked
+          to be "0", "1", …, as the specification asks readers to accept either.
+        name: nested
+        params: b []byte, base, depth int
+        recv: v validator
+        results: int, *validationError
+      - doc: |-
+          binary checks a binary: a non-negative int32 length, a subtype byte, and the
+          bytes; the deprecated subtype 0x02 must carry its own inner length, equal
+          to the outer one minus four.
+        name: binary
+        params: b []byte, base int
+        recv: v validator
+        results: int, *validationError
+      - doc: "regex checks two NUL-terminated UTF-8 cstrings: pattern, then options."
+        name: regex
+        params: b []byte, base int
+        recv: v validator
+        results: int, *validationError
+      - doc: "dbPointer checks a DBPointer: a string, then twelve bytes."
+        name: dbPointer
+        params: b []byte, base int
+        recv: v validator
+        results: int, *validationError
+      - doc: |-
+          codeWithScope checks a code-with-scope: an int32 total length that the code
+          string and the scope document fill exactly.
+        name: codeWithScope
+        params: b []byte, base, depth int
+        recv: v validator
+        results: int, *validationError
+      - doc: "boolean checks a boolean: one byte, 0x00 or 0x01."
+        name: boolean
+        params: b []byte, base int
+        recv: v validator
+        results: int, *validationError
+    name: validator
+vars:
+  - grouped: true
+    items:
+      - doc: Codec is the registered BSON singleton.
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&bsonCodec{})
+      - doc: mimeTypes hoisted so MIMETypes does not allocate the literal per call.
+        name: mimeTypes
+        value: "[]string{\"application/bson\"}"
+      - doc: extensions hoisted for the same reason.
+        name: extensions
+        value: "[]string{\".bson\"}"
+    name: Codec
+  - doc: valueTypeBytes maps each value type to the BSON type it is read from.
+    items:
+      - name: valueTypeBytes
+        value: |-
+          map[planKind]byte{
+          	kindObjectID:      typeObjectID,
+          	kindDateTime:      typeDateTime,
+          	kindBinary:        typeBinary,
+          	kindRegex:         typeRegex,
+          	kindDBPointer:     typeDBPointer,
+          	kindJavaScript:    typeJavaScript,
+          	kindSymbol:        typeSymbol,
+          	kindCodeWithScope: typeCodeWithScope,
+          	kindTimestamp:     typeTimestamp,
+          	kindDecimal128:    typeDecimal128,
+          	kindMinKey:        typeMinKey,
+          	kindMaxKey:        typeMaxKey,
+          	kindUndefined:     typeUndefined,
+          	kindNull:          typeNull,
+          }
+    name: valueTypeBytes
+  - doc: segmentPool recycles the per-map segment lists.
+    items:
+      - name: segmentPool
+        value: |-
+          recycler.NewCappedPool[*[]segment](
+          	func() *[]segment {
+          		//: room for an ordinary document.
+          		return new(make([]segment, 0, 32))
+          	},
+          	func(s *[]segment) { *s = (*s)[:0] },
+          	func(s *[]segment) int { return cap(*s) },
+          	maxRetainedSegments,
+          )
+    name: segmentPool
+  - doc: The encoder's tables.
+    grouped: true
+    items:
+      - doc: markerTypes maps the payload-free value types to their type byte.
+        name: markerTypes
+        value: |-
+          map[planKind]byte{
+          		kindMinKey:    typeMinKey,
+          		kindMaxKey:    typeMaxKey,
+          		kindUndefined: typeUndefined,
+          		kindNull:      typeNull,
+          	}
+      - doc: bsonTypeNames names each BSON type for an error message.
+        name: bsonTypeNames
+        value: |-
+          [typeByteValues]string{
+          		typeDouble:        "double",
+          		typeString:        "string",
+          		typeDocument:      "embedded document",
+          		typeArray:         "array",
+          		typeBinary:        "binary",
+          		typeUndefined:     "undefined",
+          		typeObjectID:      "ObjectID",
+          		typeBoolean:       "boolean",
+          		typeDateTime:      "datetime",
+          		typeNull:          "null",
+          		typeRegex:         "regex",
+          		typeDBPointer:     "DBPointer",
+          		typeJavaScript:    "JavaScript",
+          		typeSymbol:        "symbol",
+          		typeCodeWithScope: "code with scope",
+          		typeInt32:         "int32",
+          		typeTimestamp:     "timestamp",
+          		typeInt64:         "int64",
+          		typeDecimal128:    "decimal128",
+          		typeMinKey:        "min key",
+          		typeMaxKey:        "max key",
+          	}
+    name: markerTypes
+  - doc: NilObjectID is the zero ObjectID.
+    items:
+      - name: NilObjectID
+        type: ObjectID
+    name: NilObjectID
+  - doc: The types matched exactly, before their kind is looked at.
+    grouped: true
+    items:
+      - doc: typeOfTime is time.Time.
+        name: typeOfTime
+        value: reflect.TypeFor[time.Time]()
+      - doc: typeOfBytes is []byte.
+        name: typeOfBytes
+        value: reflect.TypeFor[[]byte]()
+      - doc: typeOfByte is byte.
+        name: typeOfByte
+        value: reflect.TypeFor[byte]()
+      - doc: typeOfURL is url.URL.
+        name: typeOfURL
+        value: reflect.TypeFor[url.URL]()
+      - doc: typeOfJSONNumber is json.Number.
+        name: typeOfJSONNumber
+        value: reflect.TypeFor[json.Number]()
+      - doc: typeOfD is D.
+        name: typeOfD
+        value: reflect.TypeFor[D]()
+      - doc: typeOfE is E.
+        name: typeOfE
+        value: reflect.TypeFor[E]()
+      - doc: typeOfM is M.
+        name: typeOfM
+        value: reflect.TypeFor[M]()
+      - doc: typeOfString is string.
+        name: typeOfString
+        value: reflect.TypeFor[string]()
+      - doc: typeOfStringAnyMap is map[string]any.
+        name: typeOfStringAnyMap
+        value: reflect.TypeFor[map[string]any]()
+      - doc: typeOfAny is the empty interface.
+        name: typeOfAny
+        value: reflect.TypeFor[any]()
+      - doc: |-
+          exactKinds maps the codec's own value types, and the stdlib types it
+          knows, to their mapping.
+        name: exactKinds
+        value: |-
+          map[reflect.Type]planKind{
+          		typeOfTime:                       kindTime,
+          		typeOfBytes:                      kindBytes,
+          		typeOfURL:                        kindURL,
+          		typeOfJSONNumber:                 kindJSONNumber,
+          		typeOfD:                          kindD,
+          		reflect.TypeFor[ObjectID]():      kindObjectID,
+          		reflect.TypeFor[DateTime]():      kindDateTime,
+          		reflect.TypeFor[Binary]():        kindBinary,
+          		reflect.TypeFor[Regex]():         kindRegex,
+          		reflect.TypeFor[DBPointer]():     kindDBPointer,
+          		reflect.TypeFor[JavaScript]():    kindJavaScript,
+          		reflect.TypeFor[Symbol]():        kindSymbol,
+          		reflect.TypeFor[CodeWithScope](): kindCodeWithScope,
+          		reflect.TypeFor[Timestamp]():     kindTimestamp,
+          		reflect.TypeFor[Decimal128]():    kindDecimal128,
+          		reflect.TypeFor[MinKey]():        kindMinKey,
+          		reflect.TypeFor[MaxKey]():        kindMaxKey,
+          		reflect.TypeFor[Undefined]():     kindUndefined,
+          		reflect.TypeFor[Null]():          kindNull,
+          	}
+      - doc: |-
+          typeOfMarshaler is the method set a type implements to write its own
+          document.
+        name: typeOfMarshaler
+        value: reflect.TypeFor[interface{ MarshalBSON() ([]byte, error) }]()
+      - doc: |-
+          typeOfUnmarshaler is the method set a type implements to read its own
+          value.
+        name: typeOfUnmarshaler
+        value: reflect.TypeFor[interface{ UnmarshalBSON(data []byte) error }]()
+      - doc: typeOfZeroer is the method set omitempty asks.
+        name: typeOfZeroer
+        value: reflect.TypeFor[interface{ IsZero() bool }]()
+      - doc: typeOfTextMarshaler is encoding.TextMarshaler, for map keys.
+        name: typeOfTextMarshaler
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+      - doc: typeOfTextUnmarshaler is encoding.TextUnmarshaler, for map keys.
+        name: typeOfTextUnmarshaler
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - doc: scalarKinds maps the scalar reflect.Kinds to their mapping.
+        name: scalarKinds
+        value: |-
+          map[reflect.Kind]planKind{
+          		reflect.Bool:    kindBool,
+          		reflect.Int8:    kindInt32,
+          		reflect.Int16:   kindInt32,
+          		reflect.Int32:   kindInt32,
+          		reflect.Int:     kindInt,
+          		reflect.Int64:   kindInt64,
+          		reflect.Uint8:   kindUint16,
+          		reflect.Uint16:  kindUint16,
+          		reflect.Uint:    kindUint64,
+          		reflect.Uint32:  kindUint64,
+          		reflect.Uint64:  kindUint64,
+          		reflect.Float32: kindFloat32,
+          		reflect.Float64: kindFloat64,
+          		reflect.String:  kindString,
+          	}
+      - doc: |-
+          integerKeyModes maps the integer reflect.Kinds to their key mode;
+          uintptr is included, as the previous library included it.
+        name: integerKeyModes
+        value: |-
+          map[reflect.Kind]keyMode{
+          		reflect.Int:     keyInt,
+          		reflect.Int8:    keyInt,
+          		reflect.Int16:   keyInt,
+          		reflect.Int32:   keyInt,
+          		reflect.Int64:   keyInt,
+          		reflect.Uint:    keyUint,
+          		reflect.Uint8:   keyUint,
+          		reflect.Uint16:  keyUint,
+          		reflect.Uint32:  keyUint,
+          		reflect.Uint64:  keyUint,
+          		reflect.Uintptr: keyUint,
+          	}
+      - doc: tagOptions maps each option word to its flag.
+        name: tagOptions
+        value: |-
+          map[string]fieldFlags{
+          		"omitempty": flagOmitEmpty,
+          		"minsize":   flagMinSize,
+          		"truncate":  flagTruncate,
+          		"inline":    flagInline,
+          	}
+      - doc: plans maps reflect.Type to its complete *typePlan.
+        name: plans
+        type: sync.Map
+      - doc: planMu serialises construction; reading plans takes no lock.
+        name: planMu
+        type: sync.Mutex
+    name: typeOfTime
+  - doc: Tables shared by the readers and the writer.
+    grouped: true
+    items:
+      - doc: |-
+          emptyDocument is the five bytes of the empty document: its length, then
+          its terminator.
+        name: emptyDocument
+        value: "[minDocumentSize]byte{byte(minDocumentSize), 0, 0, 0, 0}"
+      - doc: |-
+          fixedWidths holds, per type byte, one more than the width of its value
+          when that width is fixed, and zero for a variable-width or unknown type.
+        name: fixedWidths
+        value: |-
+          [typeByteValues]uint8{
+          		typeUndefined:  1,
+          		typeNull:       1,
+          		typeMinKey:     1,
+          		typeMaxKey:     1,
+          		typeBoolean:    2,
+          		typeInt32:      uint8(lengthSize + 1),
+          		typeDouble:     uint8(wordSize + 1),
+          		typeDateTime:   uint8(wordSize + 1),
+          		typeTimestamp:  uint8(wordSize + 1),
+          		typeInt64:      uint8(wordSize + 1),
+          		typeObjectID:   uint8(objectIDSize + 1),
+          		typeDecimal128: uint8(decimal128Size + 1),
+          	}
+    name: emptyDocument

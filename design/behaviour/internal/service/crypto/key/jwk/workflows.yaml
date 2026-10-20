@@ -1,0 +1,40 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: Set.AllByKid
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: kid == ""
+      - var:
+          name: matches
+          type: "[]KeyValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: matches
+                    value: append(matches, key)
+                when: key.kid == kid
+          key: _
+          range: s.keys
+          value: key
+      - return: matches
+  - of: Set.String
+    steps:
+      - bind: private
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: private
+                when: key.IsPrivate()
+          key: _
+          range: s.keys
+          value: key
+      - return: |-
+          "jwk.Set{keys:" + strconv.Itoa(len(s.keys)) +
+          		" private:" + strconv.Itoa(private) + "}"

@@ -1,0 +1,2763 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: newAgenda
+    participants:
+      - id: caller
+        kind: actor
+      - id: newAgenda
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: byDue
+        eval:
+          closure:
+            params: a, b slot
+            results: int
+            steps:
+              - return: cmp.Or(a.due.Compare(b.due), cmp.Compare(a.seq, b.seq))
+                to: cmp
+      - return: "&agenda{heap: heap.New(byDue), plans: make(map[string]*plan), dirty: make(map[string]struct{}), wake: make(chan struct{}, 1)}"
+  - of: (*agenda).signal
+    steps:
+      - select:
+          cases:
+            - comm: a.wake <- struct{}{}
+            - default: true
+  - of: (*agenda).markDirty
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).markDirty
+        kind: self
+      - id: a.mu.Lock
+        kind: value
+      - id: a.mu.Unlock
+        kind: value
+      - id: a.signal
+        kind: internal
+    steps:
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - set: a.dirty[key]
+        value: struct{}{}
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+      - eval: a.signal()
+        to: a.signal
+  - of: (*agenda).pending
+    steps:
+      - lock:
+          mutex: a.mu
+      - return: len(a.dirty) > 0
+  - of: (*agenda).requeue
+    steps:
+      - lock:
+          mutex: a.mu
+      - loop:
+          do:
+            - set: a.dirty[key]
+              value: struct{}{}
+          key: _
+          range: keys
+          value: key
+  - of: (*agenda).schedule
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).schedule
+        kind: self
+      - id: a.scheduleLocked
+        kind: internal
+    steps:
+      - lock:
+          mutex: a.mu
+      - eval: a.scheduleLocked(key, due)
+        to: a.scheduleLocked
+  - of: (*agenda).scheduleLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).scheduleLocked
+        kind: self
+      - id: a.heap.Push
+        kind: value
+      - id: a.compact
+        kind: internal
+    steps:
+      - bind: p
+        eval: a.plans[key]
+      - opt:
+          do:
+            - set: p
+              value: "&plan{}"
+            - set: a.plans[key]
+              value: p
+          when: p == nil
+      - opt:
+          do:
+            - set: due
+              value: p.notBefore
+          when: due.Before(p.notBefore)
+      - opt:
+          do:
+            - op: ++
+              set: a.live
+          when: p.seq == 0
+      - op: ++
+        set: a.seq
+      - set: p.seq
+        value: a.seq
+      - eval: "a.heap.Push(slot{due: due, key: key, seq: p.seq})"
+        to: a.heap.Push
+      - eval: a.compact()
+        to: a.compact
+  - of: (*agenda).unschedule
+    steps:
+      - lock:
+          mutex: a.mu
+      - bind: p
+        eval: a.plans[key]
+      - opt:
+          do:
+            - return: ""
+          when: p == nil
+      - opt:
+          do:
+            - set: p.seq
+              value: "0"
+            - op: "--"
+              set: a.live
+          when: p.seq != 0
+      - opt:
+          do:
+            - eval: delete(a.plans, key)
+          when: p.failures == 0
+  - of: (*agenda).forget
+    steps:
+      - lock:
+          mutex: a.mu
+      - eval: delete(a.dirty, key)
+      - opt:
+          do:
+            - op: "--"
+              set: a.live
+          init:
+            bind: p
+            eval: a.plans[key]
+          when: p != nil && p.seq != 0
+      - eval: delete(a.plans, key)
+  - of: (*agenda).restart
+    steps:
+      - lock:
+          mutex: a.mu
+      - opt:
+          do:
+            - set: p.failures, p.notBefore
+              value: 0, time.Time{}
+          init:
+            bind: p
+            eval: a.plans[key]
+          when: p != nil
+  - of: (*agenda).failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).failed
+        kind: self
+      - id: now.Add
+        kind: value
+      - id: a.scheduleLocked
+        kind: internal
+    steps:
+      - lock:
+          mutex: a.mu
+      - bind: p
+        eval: a.plans[key]
+      - opt:
+          do:
+            - set: p
+              value: "&plan{}"
+            - set: a.plans[key]
+              value: p
+          when: p == nil
+      - op: ++
+        set: p.failures
+      - set: p.notBefore
+        to: now.Add
+        value: now.Add(delay(p.failures))
+      - eval: a.scheduleLocked(key, p.notBefore)
+        to: a.scheduleLocked
+  - of: (*agenda).heldBack
+    steps:
+      - lock:
+          mutex: a.mu
+      - bind: p
+        eval: a.plans[key]
+      - return: p != nil && p.notBefore.After(now)
+  - of: (*agenda).succeeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).succeeded
+        kind: self
+      - id: a.restart
+        kind: internal
+    steps:
+      - eval: a.restart(key)
+        to: a.restart
+  - of: (*agenda).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).take
+        kind: self
+      - id: a.heap.Peek
+        kind: value
+      - id: a.heap.Pop
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: a.mu
+      - var:
+          name: keys
+          type: "[]string"
+      - bind: seen
+        eval: make(map[string]struct{}, len(a.dirty))
+      - loop:
+          do:
+            - bind: top, ok
+              eval: a.heap.Peek()
+              to: a.heap.Peek
+            - opt:
+                do:
+                  - break: true
+                when: "!ok || top.due.After(now) && a.isLive(top)"
+            - eval: a.heap.Pop()
+              to: a.heap.Pop
+            - opt:
+                do:
+                  - continue: true
+                when: "!a.isLive(top)"
+            - set: a.plans[top.key].seq
+              value: "0"
+            - op: "--"
+              set: a.live
+            - set: keys
+              value: append(keys, top.key)
+            - set: seen[top.key]
+              value: struct{}{}
+          forever: true
+      - bind: dirty
+        eval: make([]string, 0, len(a.dirty))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dirty
+                    value: append(dirty, key)
+                init:
+                  bind: _, dup
+                  eval: seen[key]
+                when: "!dup"
+          key: key
+          range: a.dirty
+      - eval: clear(a.dirty)
+      - eval: slices.Sort(dirty)
+        to: slices
+      - return: append(keys, dirty...)
+  - of: (*agenda).next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).next
+        kind: self
+      - id: a.heap.Peek
+        kind: value
+      - id: a.heap.Pop
+        kind: value
+    steps:
+      - lock:
+          mutex: a.mu
+      - opt:
+          do:
+            - return: now
+          when: len(a.dirty) > 0
+      - loop:
+          do:
+            - bind: top, ok
+              eval: a.heap.Peek()
+              to: a.heap.Peek
+            - opt:
+                do:
+                  - return: time.Time{}
+                when: "!ok"
+            - opt:
+                do:
+                  - return: top.due
+                when: a.isLive(top)
+            - eval: a.heap.Pop()
+              to: a.heap.Pop
+          forever: true
+  - of: (*agenda).isLive
+    steps:
+      - bind: p
+        eval: a.plans[s.key]
+      - return: p != nil && p.seq == s.seq
+  - of: (*agenda).compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).compact
+        kind: self
+      - id: a.heap.Pop
+        kind: value
+      - id: a.heap.Push
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: a.heap.Len() <= staleFactor*a.live+compactSlack
+      - bind: kept
+        eval: make([]slot, 0, a.live)
+      - loop:
+          do:
+            - bind: s, ok
+              eval: a.heap.Pop()
+              to: a.heap.Pop
+            - opt:
+                do:
+                  - break: true
+                when: "!ok"
+            - opt:
+                do:
+                  - set: kept
+                    value: append(kept, s)
+                when: a.isLive(s)
+          forever: true
+      - loop:
+          do:
+            - eval: a.heap.Push(s)
+              to: a.heap.Push
+          key: _
+          range: kept
+          value: s
+  - of: freeze
+    participants:
+      - id: caller
+        kind: actor
+      - id: freeze
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: b
+        eval: |-
+          &blueprint[E, S]{
+          		state: d.state, arrows: slices.Clone(d.arrows), order: slices.Clone(d.order), after: slices.Clone(d.after),
+          		enter:  make(map[S][]func(context.Context, *E) error, len(d.enter)),
+          		events: make(map[eventKey[S]]int), auto: make(map[S][]int), content: make(map[S]bool),
+          		creation: arrow[E, S]{event: corestm.CreateEvent, to: d.initial, trigger: corestm.TriggerStart},
+          	}
+      - loop:
+          do:
+            - set: b.enter[state]
+              to: slices
+              value: slices.Clone(hooks)
+          key: state
+          range: d.enter
+          value: hooks
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: "b.events[eventKey[S]{event: x.event, from: x.from}]"
+                    value: i
+                  - continue: true
+                when: x.trigger == corestm.TriggerEvent
+            - set: b.auto[x.from]
+              value: append(b.auto[x.from], i)
+            - opt:
+                do:
+                  - set: b.content[x.from]
+                    value: "true"
+                when: x.trigger != corestm.TriggerDelay
+          key: i
+          range: b.arrows
+          value: x
+      - return: b
+  - of: (*blueprint).automatic
+    steps:
+      - return: len(b.auto[state]) > 0
+  - of: (*blueprint).declared
+    steps:
+      - bind: counts
+        eval: make(map[S]int, len(b.order))
+      - loop:
+          do:
+            - set: counts[st]
+              value: "0"
+          key: _
+          range: b.order
+          value: st
+      - return: counts
+  - of: (*blueprint).eventArrow
+    steps:
+      - bind: i, found
+        eval: "b.events[eventKey[S]{event: event, from: from}]"
+      - opt:
+          do:
+            - return: arrow[E, S]{}, false
+          when: "!found"
+      - return: b.arrows[i], true
+  - of: (*arrow).dueAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*arrow).dueAt
+        kind: self
+      - id: entered.Add
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: corestm.TriggerGuard
+              do:
+                - return: time.Time{}, x.guard(e)
+            - case: corestm.TriggerDeadline
+              do:
+                - return: x.instant(e)
+            - case: corestm.TriggerDelay
+              do:
+                - return: entered.Add(x.delay), true
+                  to: entered.Add
+            - default: true
+              do:
+                - return: time.Time{}, false
+          "on": x.trigger
+  - of: (*blueprint).evaluate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*blueprint).evaluate
+        kind: self
+      - id: x.dueAt
+        kind: internal
+    steps:
+      - bind: asking
+        eval: "\"\""
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: the verdict stands as computed.
+          			return
+          		}
+          		due = verdict[E, S]{}
+          		//: the value travels as a field, never as the wrap origin.
+          		err = errs.Wrap(corestm.FunctionPanicked, errs.WrapParams{}, errs.String("event", asking),
+          			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
+          	}()
+      - loop:
+          do:
+            - bind: x
+              eval: "&b.arrows[i]"
+            - set: asking
+              value: x.event
+            - bind: at, ok
+              eval: x.dueAt(e, entered)
+              to: x.dueAt
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: "verdict[E, S]{fire: x}, nil"
+                when: "!at.After(now)"
+            - opt:
+                do:
+                  - set: due.next
+                    value: at
+                when: due.next.IsZero() || at.Before(due.next)
+          key: _
+          range: b.auto[state]
+          value: i
+      - return: due, nil
+  - of: newBook
+    steps:
+      - bind: declared
+        eval: make(map[S]bool, len(census))
+      - loop:
+          do:
+            - set: declared[state]
+              value: "true"
+          key: state
+          range: census
+      - return: |-
+          &book[S]{
+          		journal: journal, records: make(map[string]*record[S]), census: census, gates: newKeyLocks(),
+          		declared: declared, flights: make(map[string]*flight), limit: limit,
+          	}
+  - of: (*book).adjust
+    steps:
+      - op: +=
+        set: b.census[state]
+        value: delta
+      - opt:
+          do:
+            - eval: delete(b.census, state)
+          when: b.census[state] <= 0 && !b.declared[state]
+  - of: (*book).adopt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).adopt
+        kind: self
+      - id: b.adjust
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: history
+        eval: rec.History
+      - opt:
+          do:
+            - set: history
+              value: history[over:]
+          init:
+            bind: over
+            eval: len(history) - b.limit
+          when: over > 0
+      - set: b.records[rec.Key]
+        value: "&record[S]{state: rec.State, entered: rec.Entered, history: slices.Clone(history)}"
+      - eval: b.adjust(rec.State, 1)
+        to: b.adjust
+  - of: (*book).fly
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).fly
+        kind: self
+      - id: b.open
+        kind: internal
+    steps:
+      - return: b.open(key, transitionFlight)
+        to: b.open
+  - of: (*book).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).read
+        kind: self
+      - id: b.open
+        kind: internal
+    steps:
+      - return: b.open(key, readFlight)
+        to: b.open
+  - of: (*book).open
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: f
+        eval: "&flight{kind: kind}"
+      - set: b.flights[key]
+        value: f
+      - return: f
+  - of: (*book).land
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - return: false, false
+          when: b.flights[key] != f
+      - eval: delete(b.flights, key)
+      - return: f.touched && !f.deleted, f.deleted
+  - of: (*book).touch
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: f
+        eval: b.flights[key]
+      - opt:
+          do:
+            - return: "false"
+          when: f == nil || f.kind != transitionFlight
+      - set: f.touched
+        value: "true"
+      - return: "true"
+  - of: (*book).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).step
+        kind: self
+      - id: b.stepped
+        kind: internal
+      - id: b.save
+        kind: internal
+    steps:
+      - defer: b.lockGate(key)()
+      - bind: rec, recorded
+        eval: b.stepped(key, s, f)
+        to: b.stepped
+      - opt:
+          do:
+            - return: nil
+          when: "!recorded"
+      - return: b.save(ctx, rec)
+        to: b.save
+  - of: (*book).stepped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).stepped
+        kind: self
+      - id: b.adjust
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: rec.value
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - return: corestm.RecordValue[S]{}, false
+          when: f != nil && f.deleted
+      - bind: rec
+        eval: b.records[key]
+      - alt:
+          - do:
+              - set: rec
+                value: "&record[S]{state: s.To}"
+              - set: b.records[key]
+                value: rec
+              - eval: b.adjust(s.To, 1)
+                to: b.adjust
+            when: rec == nil
+          - do:
+              - eval: b.adjust(rec.state, -1)
+                to: b.adjust
+              - eval: b.adjust(s.To, 1)
+                to: b.adjust
+            else: true
+      - set: rec.state, rec.entered
+        value: s.To, s.At
+      - set: rec.history
+        value: append(rec.history, s)
+      - opt:
+          do:
+            - set: rec.history
+              to: slices
+              value: slices.Delete(rec.history, 0, over)
+          init:
+            bind: over
+            eval: len(rec.history) - b.limit
+          when: over > 0
+      - return: rec.value(key), true
+        to: rec.value
+  - of: (*book).reconcile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).reconcile
+        kind: self
+      - id: b.moved
+        kind: internal
+    steps:
+      - defer: b.lockGate(key)()
+      - bind: rec, changed
+        eval: b.moved(key, state, now, f)
+        to: b.moved
+      - opt:
+          do:
+            - return: false, nil
+          when: "!changed"
+      - return: true, b.save(ctx, rec)
+  - of: (*book).moved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).moved
+        kind: self
+      - id: b.adjust
+        kind: internal
+      - id: rec.value
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - return: corestm.RecordValue[S]{}, false
+          when: f != nil && f.deleted
+      - bind: rec
+        eval: b.records[key]
+      - opt:
+          do:
+            - set: rec
+              value: "&record[S]{state: state, entered: now}"
+            - set: b.records[key]
+              value: rec
+            - eval: b.adjust(state, 1)
+              to: b.adjust
+            - return: rec.value(key), true
+              to: rec.value
+          when: rec == nil
+      - opt:
+          do:
+            - return: corestm.RecordValue[S]{}, false
+          when: rec.state == state
+      - eval: b.adjust(rec.state, -1)
+        to: b.adjust
+      - eval: b.adjust(state, 1)
+        to: b.adjust
+      - set: rec.state, rec.entered
+        value: state, now
+      - return: rec.value(key), true
+        to: rec.value
+  - of: (*book).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).forget
+        kind: self
+      - id: b.dropped
+        kind: internal
+      - id: journalFailure
+        kind: internal
+    steps:
+      - defer: b.lockGate(key)()
+      - bind: known
+        eval: b.dropped(key)
+        to: b.dropped
+      - opt:
+          do:
+            - return: nil
+          when: "!known || b.journal == nil"
+      - return: journalFailure(b.journal.Delete(ctx, key), "delete")
+        to: journalFailure
+  - of: (*book).dropped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).dropped
+        kind: self
+      - id: b.adjust
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - set: f.deleted
+              value: "true"
+          init:
+            bind: f
+            eval: b.flights[key]
+          when: f != nil
+      - bind: rec
+        eval: b.records[key]
+      - opt:
+          do:
+            - return: "false"
+          when: rec == nil
+      - eval: b.adjust(rec.state, -1)
+        to: b.adjust
+      - eval: delete(b.records, key)
+      - return: "true"
+  - of: (*book).lockGate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).lockGate
+        kind: self
+      - id: b.gates.acquire
+        kind: internal
+    steps:
+      - bind: release, err
+        eval: b.gates.acquire(context.Background(), key)
+        to: b.gates.acquire
+      - opt:
+          do:
+            - return:
+                closure:
+                  steps: null
+          when: err != nil
+      - return: release
+  - of: (*book).stateOf
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: rec
+        eval: b.records[key]
+      - opt:
+          do:
+            - return: state, false
+          when: rec == nil
+      - return: rec.state, true
+  - of: (*book).entered
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: rec
+        eval: b.records[key]
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: rec == nil
+      - return: rec.entered, true
+  - of: (*book).save
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).save
+        kind: self
+      - id: journalFailure
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: b.journal == nil
+      - return: journalFailure(b.journal.Save(ctx, rec), "save")
+        to: journalFailure
+  - of: (*record).value
+    steps:
+      - return: "corestm.RecordValue[S]{Key: key, State: r.state, Entered: r.entered, History: slices.Clone(r.history)}"
+  - of: (*book).censusCopy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).censusCopy
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: b.mu
+      - return: maps.Clone(b.census)
+        to: maps
+  - of: (*book).lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).lookup
+        kind: self
+      - id: rec.value
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: rec
+        eval: b.records[key]
+      - opt:
+          do:
+            - return: corestm.RecordValue[S]{}, false
+          when: rec == nil
+      - return: rec.value(key), true
+        to: rec.value
+  - of: (*book).all
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*book).all
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - bind: out
+        eval: make([]corestm.RecordValue[S], 0, len(b.records))
+      - loop:
+          do:
+            - set: out
+              value: append(out, rec.value(key))
+          key: key
+          range: b.records
+          value: rec
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - eval: |-
+          slices.SortFunc(out, func(x, y corestm.RecordValue[S]) int {
+          		//: newest first, then a stable order for equal instants.
+          		return cmp.Or(y.Entered.Compare(x.Entered), cmp.Compare(x.Key, y.Key))
+          	})
+        to: slices
+      - return: out
+  - of: journalFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: journalFailure
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code: corestm.CodeJournalFailed, Reason: "JOURNAL_FAILED", Public: corestm.JournalFailed.Public(), Private: corestm.JournalFailed.Private(),
+          	}, errs.String("operation", operation))
+        to: errs
+  - of: resolve
+    steps:
+      - bind: s
+        eval: |-
+          settings[E, S]{
+          		clock: cfg.Clock, actor: cfg.Actor, observe: cfg.Observe, report: cfg.Report, onLoop: cfg.OnLoop,
+          		backoff: cfg.Backoff, minGap: cfg.MinGap, history: cfg.MaxHistory,
+          	}
+      - opt:
+          do:
+            - set: s.clock
+              value: clock.System
+          when: s.clock == nil
+      - opt:
+          do:
+            - set: s.minGap
+              value: DefaultMinGap
+          when: s.minGap <= 0
+      - opt:
+          do:
+            - set: s.backoff
+              value: "kbackoff.Value{BaseDelay: defaultBackoffBase, MaxDelay: defaultBackoffMax}"
+          when: s.backoff.BaseDelay <= 0
+      - opt:
+          do:
+            - set: s.history
+              value: DefaultMaxHistory
+          when: s.history <= 0
+      - return: s
+  - of: (*settings).sign
+    steps:
+      - opt:
+          do:
+            - set: p.actor
+              value: s.actor(ctx)
+          when: s.actor != nil
+  - of: (*settings).bracket
+    steps:
+      - opt:
+          do:
+            - return: ctx, func(error) {}
+          when: s.observe == nil
+      - bind: tctx, done
+        eval: s.observe(ctx, *firing)
+      - opt:
+          do:
+            - set: done
+              value:
+                closure:
+                  params: error
+                  steps: null
+          when: done == nil
+      - opt:
+          do:
+            - set: tctx
+              value: ctx
+          when: tctx == nil
+      - return: tctx, done
+  - of: (*settings).finish
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: nothing to report.
+          			return
+          		}
+          		//: the value travels as a field, never as the wrap origin.
+          		failed = errs.Wrap(corestm.LoopPanicked, errs.WrapParams{}, errs.String("key", key), errs.String("call", "observe-end"),
+          			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
+          	}()
+      - eval: done(err)
+      - return: nil
+  - of: (*settings).reportErr
+    steps:
+      - opt:
+          do:
+            - eval: s.report(ctx, err)
+          when: s.report != nil && err != nil
+  - of: (*settings).emit
+    steps:
+      - opt:
+          do:
+            - eval: s.onLoop(*event)
+          when: s.onLoop != nil
+  - of: NewMachineSpec
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMachineSpec
+        kind: self
+      - id: d.problem
+        kind: internal
+    steps:
+      - bind: d
+        eval: "&MachineSpec[E, S]{state: state, enter: make(map[S][]func(context.Context, *E) error)}"
+      - opt:
+          do:
+            - eval: d.problem(corestm.FunctionMissing, errs.String("function", "state"))
+              to: d.problem
+          when: state == nil
+      - return: d
+  - of: (*MachineSpec).Initial
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).Initial
+        kind: self
+      - id: d.see
+        kind: internal
+    steps:
+      - set: d.initial, d.hasInitial
+        value: state, true
+      - eval: d.see(state)
+        to: d.see
+      - return: d
+  - of: (*MachineSpec).On
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).On
+        kind: self
+      - id: d.add
+        kind: internal
+    steps:
+      - return: "d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerEvent})"
+        to: d.add
+  - of: (*MachineSpec).After
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).After
+        kind: self
+      - id: d.problem
+        kind: internal
+      - id: d.add
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.problem(corestm.DelayInvalid, errs.String("event", event))
+              to: d.problem
+          when: delay <= 0
+      - return: "d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerDelay, delay: delay})"
+        to: d.add
+  - of: (*MachineSpec).At
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).At
+        kind: self
+      - id: d.problem
+        kind: internal
+      - id: d.add
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.problem(corestm.FunctionMissing, errs.String("function", "instant"), errs.String("event", event))
+              to: d.problem
+          when: instant == nil
+      - return: "d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerDeadline, instant: instant})"
+        to: d.add
+  - of: (*MachineSpec).When
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).When
+        kind: self
+      - id: d.problem
+        kind: internal
+      - id: d.add
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.problem(corestm.FunctionMissing, errs.String("function", "guard"), errs.String("event", event))
+              to: d.problem
+          when: guard == nil
+      - return: "d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerGuard, guard: guard})"
+        to: d.add
+  - of: (*MachineSpec).OnEnter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).OnEnter
+        kind: self
+      - id: d.problem
+        kind: internal
+      - id: d.see
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.problem(corestm.FunctionMissing, errs.String("function", "on-enter"), errs.String("state", fmt.Sprint(state)))
+              to: d.problem
+            - return: d
+          when: hook == nil
+      - set: d.enter[state]
+        value: append(d.enter[state], hook)
+      - eval: d.see(state)
+        to: d.see
+      - return: d
+  - of: (*MachineSpec).OnTransition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).OnTransition
+        kind: self
+      - id: d.problem
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.problem(corestm.FunctionMissing, errs.String("function", "on-transition"))
+              to: d.problem
+            - return: d
+          when: hook == nil
+      - set: d.after
+        value: append(d.after, hook)
+      - return: d
+  - of: (*MachineSpec).Problems
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).Problems
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(d.problems)
+        to: slices
+  - of: (*MachineSpec).States
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).States
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(d.order)
+        to: slices
+  - of: (*MachineSpec).Transitions
+    steps:
+      - bind: out
+        eval: make([]TransitionValue[S], 0, len(d.arrows))
+      - loop:
+          do:
+            - set: out
+              value: "append(out, TransitionValue[S]{Event: x.event, From: x.from, To: x.to, Trigger: x.trigger, Delay: x.delay})"
+          key: _
+          range: d.arrows
+          value: x
+      - return: out
+  - of: (*MachineSpec).InitialState
+    steps:
+      - return: d.initial, d.hasInitial
+  - of: (*MachineSpec).Can
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).Can
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: d.state == nil
+      - bind: current
+        eval: "*d.state(&entity)"
+      - return: |-
+          slices.ContainsFunc(d.arrows, func(x arrow[E, S]) bool {
+          		//: the name, the state left, and the kind all have to agree.
+          		return x.event == event && x.from == current && x.trigger == corestm.TriggerEvent
+          	})
+        to: slices
+  - of: (*MachineSpec).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MachineSpec).add
+        kind: self
+      - id: d.problem
+        kind: internal
+      - id: d.see
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.problem(corestm.EventInvalid, errs.String("event", a.event))
+              to: d.problem
+            - return: d
+          when: a.event == "" || a.event == corestm.CreateEvent
+      - opt:
+          do:
+            - eval: d.problem(corestm.TransitionDuplicate, errs.String("event", a.event), errs.String("state", fmt.Sprint(a.from)))
+              to: d.problem
+            - return: d
+          when: slices.ContainsFunc(d.arrows, func(x arrow[E, S]) bool { return x.event == a.event && x.from == a.from })
+      - set: d.arrows
+        value: append(d.arrows, a)
+      - eval: d.see(a.from, a.to)
+        to: d.see
+      - return: d
+  - of: (*MachineSpec).problem
+    steps:
+      - set: d.problems
+        value: append(d.problems, errs.Wrap(sentinel, errs.WrapParams{}, fields...))
+  - of: newKeyLocks
+    steps:
+      - return: "&keyLocks{byKey: make(map[string]*keyLock)}"
+  - of: (*keyLocks).acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keyLocks).acquire
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: l.mu.Lock
+        kind: value
+      - id: l.mu.Unlock
+        kind: value
+      - id: l.drop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, abandoned(err)
+          init:
+            bind: err
+            eval: ctx.Err()
+            to: ctx.Err
+          when: err != nil
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - bind: lock
+        eval: l.byKey[key]
+      - opt:
+          do:
+            - set: lock
+              value: "&keyLock{gate: make(chan struct{}, 1)}"
+            - set: l.byKey[key]
+              value: lock
+          when: lock == nil
+      - op: ++
+        set: lock.refs
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+      - select:
+          cases:
+            - comm: lock.gate <- struct{}{}
+              do:
+                - bind: released
+                  eval: "false"
+                - return: |-
+                    func() {
+                    			//: a second call — the deferred one after an early release.
+                    			if released {
+                    				//: already given back.
+                    				return
+                    			}
+                    			released = true
+                    			<-lock.gate
+                    			l.drop(key, lock)
+                    		}, nil
+            - comm: <-ctx.Done()
+              do:
+                - eval: l.drop(key, lock)
+                  to: l.drop
+                - return: nil, abandoned(ctx.Err())
+  - of: (*keyLocks).drop
+    steps:
+      - lock:
+          mutex: l.mu
+      - op: "--"
+        set: lock.refs
+      - opt:
+          do:
+            - eval: delete(l.byKey, key)
+          when: lock.refs == 0
+  - of: abandoned
+    participants:
+      - id: caller
+        kind: actor
+      - id: abandoned
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: errors.Join(errs.Wrap(corestm.WaitAbandoned, errs.WrapParams{}), cause)
+        to: errors
+  - of: within
+    participants:
+      - id: caller
+        kind: actor
+      - id: within
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: parent, _
+        eval: ctx.Value(hookScopeKey{}).(*hookScope)
+      - return: "context.WithValue(ctx, hookScopeKey{}, &hookScope{locks: locks, parent: parent})"
+        to: context
+  - of: Wake.String
+    steps:
+      - switch:
+          cases:
+            - case: WakeStart
+              do:
+                - return: "\"start\""
+            - case: WakeDue
+              do:
+                - return: "\"due\""
+            - case: WakeChange
+              do:
+                - return: "\"change\""
+          "on": w
+      - return: "\"\""
+  - of: LoopEventKind.String
+    steps:
+      - switch:
+          cases:
+            - case: LoopRunStarted
+              do:
+                - return: "\"run-started\""
+            - case: LoopRunEnded
+              do:
+                - return: "\"run-ended\""
+            - case: LoopWaiting
+              do:
+                - return: "\"waiting\""
+          "on": k
+      - return: "\"\""
+  - of: (*StateMachine).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Run
+        kind: self
+      - id: m.running.Store
+        kind: value
+      - id: ctx.Done
+        kind: value
+      - id: m.run
+        kind: internal
+      - id: m.wait
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestm.LoopRunning
+          when: "!m.running.CompareAndSwap(false, true)"
+      - defer: m.running.Store(false)
+        to: m.running.Store
+      - opt:
+          do:
+            - eval: <-ctx.Done()
+              to: ctx.Done
+            - return: nil
+          when: len(m.plan.auto) == 0
+      - bind: wake
+        eval: WakeStart
+      - loop:
+          do:
+            - bind: at, floor
+              eval: m.run(ctx, wake)
+              to: m.run
+            - opt:
+                do:
+                  - return: nil
+                when: ctx.Err() != nil
+            - var:
+                name: ok
+                type: bool
+            - opt:
+                do:
+                  - return: nil
+                init:
+                  bind: wake, ok
+                  eval: m.wait(ctx, at, floor)
+                  op: =
+                  to: m.wait
+                when: "!ok"
+          forever: true
+  - of: (*StateMachine).Step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Step
+        kind: self
+      - id: m.running.Store
+        kind: value
+      - id: m.step
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}, corestm.LoopRunning
+          when: "!m.running.CompareAndSwap(false, true)"
+      - defer: m.running.Store(false)
+        to: m.running.Store
+      - bind: out
+        eval: m.step(ctx)
+        to: m.step
+      - return: out.next, out.err
+  - of: (*StateMachine).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).run
+        kind: self
+      - id: m.cfg.clock.Now
+        kind: value
+      - id: m.cfg.emit
+        kind: internal
+      - id: m.step
+        kind: internal
+      - id: ended.Add
+        kind: value
+    steps:
+      - bind: started
+        eval: m.cfg.clock.Now()
+        to: m.cfg.clock.Now
+      - eval: "m.cfg.emit(&LoopEvent{Kind: LoopRunStarted, Wake: wake, Started: started})"
+        to: m.cfg.emit
+      - bind: out
+        eval: m.step(ctx)
+        to: m.step
+      - bind: ended
+        eval: m.cfg.clock.Now()
+        to: m.cfg.clock.Now
+      - set: floor
+        to: ended.Add
+        value: ended.Add(m.cfg.minGap)
+      - set: at
+        value: out.next
+      - opt:
+          do:
+            - set: at
+              value: floor
+          when: "!at.IsZero() && at.Before(floor)"
+      - eval: |-
+          m.cfg.emit(&LoopEvent{
+          		Kind: LoopRunEnded, Wake: wake, Started: started, Ended: ended, Next: at,
+          		Fired: out.fired, Failed: out.failed, Err: out.err,
+          	})
+        to: m.cfg.emit
+      - return: at, floor
+  - of: (*StateMachine).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).wait
+        kind: self
+      - id: m.sleep
+        kind: internal
+      - id: m.retarget
+        kind: internal
+    steps:
+      - bind: wake
+        eval: WakeDue
+      - loop:
+          do:
+            - bind: outcome
+              eval: m.sleep(ctx, at)
+              to: m.sleep
+            - opt:
+                do:
+                  - return: 0, false
+                when: outcome == sleptCanceled
+            - opt:
+                do:
+                  - return: wake, true
+                when: outcome == sleptDue
+            - opt:
+                do:
+                  - continue: true
+                when: "!m.agenda.pending()"
+            - opt:
+                do:
+                  - return: WakeChange, true
+                when: "!m.cfg.clock.Now().Before(floor)"
+            - set: at, wake
+              to: m.retarget
+              value: m.retarget(at, floor, wake)
+          forever: true
+  - of: (*StateMachine).retarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).retarget
+        kind: self
+      - id: m.cfg.emit
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: "m.cfg.emit(&LoopEvent{Kind: LoopWaiting, Next: floor})"
+              to: m.cfg.emit
+            - return: floor, WakeChange
+          when: at.IsZero() || floor.Before(at)
+      - return: at, wake
+  - of: (*StateMachine).sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).sleep
+        kind: self
+      - id: m.arm
+        kind: internal
+      - id: stopTimer
+        kind: internal
+    steps:
+      - bind: timer, fire
+        eval: m.arm(at)
+        to: m.arm
+      - defer: stopTimer(timer)
+        to: stopTimer
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: sleptCanceled
+            - comm: <-fire
+              do:
+                - return: sleptDue
+            - comm: <-m.agenda.wake
+              do:
+                - return: sleptWoken
+  - of: (*StateMachine).arm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).arm
+        kind: self
+      - id: m.cfg.clock.NewTimer
+        kind: value
+      - id: m.cfg.clock.Now
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: at.IsZero()
+      - bind: timer
+        eval: m.cfg.clock.NewTimer(at.Sub(m.cfg.clock.Now()))
+        to: m.cfg.clock.NewTimer
+      - opt:
+          do:
+            - eval: timer.Stop()
+              to: timer.Stop
+            - bind: due
+              eval: make(chan time.Time, 1)
+            - send:
+                chan: due
+                value: now
+            - return: nil, due
+          init:
+            bind: now
+            eval: m.cfg.clock.Now()
+            to: m.cfg.clock.Now
+          when: "!now.Before(at)"
+      - return: timer, timer.C()
+  - of: stopTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: stopTimer
+        kind: self
+      - id: timer.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: timer.Stop()
+              to: timer.Stop
+          when: timer != nil
+  - of: (*StateMachine).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).step
+        kind: self
+      - id: m.cfg.clock.Now
+        kind: value
+      - id: m.agenda.take
+        kind: internal
+      - id: m.agenda.requeue
+        kind: internal
+      - id: m.guarded
+        kind: internal
+      - id: m.cfg.reportErr
+        kind: internal
+      - id: errors
+        kind: stdlib
+      - id: m.agenda.next
+        kind: internal
+    steps:
+      - bind: now
+        eval: m.cfg.clock.Now()
+        to: m.cfg.clock.Now
+      - bind: keys
+        eval: m.agenda.take(now)
+        to: m.agenda.take
+      - var:
+          name: out
+          type: stepResult
+      - var:
+          name: failures
+          type: "[]error"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: m.agenda.requeue(keys[i:])
+                    to: m.agenda.requeue
+                  - break: true
+                when: ctx.Err() != nil
+            - bind: looked
+              eval: m.guarded(ctx, key, now)
+              to: m.guarded
+            - eval: m.cfg.reportErr(ctx, looked.failed)
+              to: m.cfg.reportErr
+            - eval: m.cfg.reportErr(ctx, looked.late)
+              to: m.cfg.reportErr
+            - switch:
+                cases:
+                  - case: looked.failed != nil
+                    do:
+                      - op: ++
+                        set: out.failed
+                      - set: failures
+                        value: append(failures, looked.failed)
+                  - case: looked.fired
+                    do:
+                      - op: ++
+                        set: out.fired
+          key: i
+          range: keys
+          value: key
+      - set: out.err
+        to: errors
+        value: errors.Join(failures...)
+      - set: out.next
+        to: m.agenda.next
+        value: m.agenda.next(m.cfg.clock.Now())
+      - return: out
+  - of: (*StateMachine).guarded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).guarded
+        kind: self
+      - id: m.process
+        kind: internal
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: the outcome stands as process returned it.
+          			return
+          		}
+          		//: the value travels as a field, never as the wrap origin.
+          		looked = pass{failed: m.failure(key, now, errs.Wrap(corestm.LoopPanicked, errs.WrapParams{}, errs.String("key", key),
+          			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack()))))}
+          	}()
+      - return: m.process(ctx, key, now)
+        to: m.process
+  - of: (*StateMachine).process
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).process
+        kind: self
+      - id: m.locks.acquire
+        kind: internal
+      - id: m.agenda.requeue
+        kind: internal
+      - id: m.look
+        kind: internal
+      - id: m.fire
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: release, err
+        eval: m.locks.acquire(ctx, key)
+        to: m.locks.acquire
+      - opt:
+          do:
+            - eval: m.agenda.requeue([]string{key})
+              to: m.agenda.requeue
+            - return: pass{}
+          when: err != nil
+      - defer: release()
+      - bind: looked, due, ok
+        eval: m.look(ctx, key, now)
+        to: m.look
+      - opt:
+          do:
+            - return: looked
+          when: "!ok"
+      - bind: fired
+        eval: m.fire(ctx, due, release, now)
+        to: m.fire
+      - set: fired.late
+        to: errors
+        value: errors.Join(looked.late, fired.late)
+      - return: fired
+  - of: (*StateMachine).look
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).look
+        kind: self
+      - id: m.book.read
+        kind: internal
+      - id: m.inspect
+        kind: internal
+    steps:
+      - bind: f
+        eval: m.book.read(key)
+        to: m.book.read
+      - defer: |-
+          func() {
+          		//: deleted while it was read: nothing fires, nothing stays planned.
+          		if _, deleted := m.book.land(key, f); deleted {
+          			m.agenda.forget(key)
+          			looked, ok = pass{late: looked.late}, false
+          		}
+          	}()
+      - return: m.inspect(ctx, key, now, f)
+        to: m.inspect
+  - of: (*StateMachine).inspect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).inspect
+        kind: self
+      - id: m.store.Get
+        kind: value
+      - id: m.book.reconcile
+        kind: internal
+      - id: m.agenda.restart
+        kind: internal
+      - id: m.book.entered
+        kind: internal
+      - id: m.plan.evaluate
+        kind: internal
+      - id: m.reschedule
+        kind: internal
+    steps:
+      - var:
+          name: none
+          type: pending[E, S]
+      - bind: entity, found, err
+        eval: m.store.Get(ctx, key)
+        to: m.store.Get
+      - opt:
+          do:
+            - return: "pass{failed: m.failure(key, now, storeFailure(err, \"get\"))}, none, false"
+          when: err != nil
+      - opt:
+          do:
+            - return: "pass{late: m.Deleted(ctx, key)}, none, false"
+          when: "!found"
+      - bind: state
+        eval: "*m.plan.state(&entity)"
+      - bind: changed, late
+        eval: m.book.reconcile(ctx, key, state, m.cfg.clock.Now(), f)
+        to: m.book.reconcile
+      - opt:
+          do:
+            - eval: m.agenda.restart(key)
+              to: m.agenda.restart
+          when: changed
+      - bind: entered, _
+        eval: m.book.entered(key)
+        to: m.book.entered
+      - bind: v, err
+        eval: m.plan.evaluate(entity, state, entered, now)
+        to: m.plan.evaluate
+      - opt:
+          do:
+            - return: "pass{failed: m.failure(key, now, err), late: late}, none, false"
+          when: err != nil
+      - opt:
+          do:
+            - eval: m.reschedule(key, v)
+              to: m.reschedule
+            - return: "pass{late: late}, none, false"
+          when: v.fire == nil || m.agenda.heldBack(key, now)
+      - return: "pass{late: late}, pending[E, S]{entity: entity, key: key, arrow: *v.fire}, true"
+  - of: (*StateMachine).fire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).fire
+        kind: self
+      - id: m.cfg.bracket
+        kind: internal
+      - id: m.transition
+        kind: internal
+      - id: m.outcome
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: x
+        eval: p.arrow
+      - bind: tctx, done
+        eval: "m.cfg.bracket(ctx, &FiringValue[S]{Key: p.key, Event: x.event, From: x.from, To: x.to, Trigger: x.trigger})"
+        to: m.cfg.bracket
+      - bind: landed, err
+        eval: m.transition(tctx, p, release)
+        to: m.transition
+      - bind: fired
+        eval: m.outcome(ctx, p.key, now, landed.gone, err)
+        to: m.outcome
+      - set: fired.late
+        to: errors
+        value: errors.Join(fired.late, m.cfg.finish(done, p.key, err))
+      - return: fired
+  - of: (*StateMachine).outcome
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).outcome
+        kind: self
+      - id: m.agenda.succeeded
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: err == nil
+              do:
+                - eval: m.agenda.succeeded(key)
+                  to: m.agenda.succeeded
+                - return: "pass{fired: true}"
+            - case: gone
+              do:
+                - return: "pass{late: m.Deleted(ctx, key)}"
+      - return: "pass{failed: m.failure(key, now, err)}"
+  - of: (*StateMachine).failure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).failure
+        kind: self
+      - id: m.agenda.failed
+        kind: internal
+    steps:
+      - eval: m.agenda.failed(key, now, m.cfg.backoff.Delay)
+        to: m.agenda.failed
+      - return: err
+  - of: (*StateMachine).reschedule
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).reschedule
+        kind: self
+      - id: m.agenda.schedule
+        kind: internal
+      - id: m.agenda.unschedule
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: m.agenda.schedule(key, time.Time{})
+              to: m.agenda.schedule
+            - return: ""
+          when: v.fire != nil
+      - opt:
+          do:
+            - eval: m.agenda.unschedule(key)
+              to: m.agenda.unschedule
+            - return: ""
+          when: v.next.IsZero()
+      - eval: m.agenda.schedule(key, v.next)
+        to: m.agenda.schedule
+  - of: NewStateMachine
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewStateMachine
+        kind: self
+      - id: checked
+        kind: internal
+      - id: freeze
+        kind: internal
+      - id: newBook
+        kind: internal
+      - id: m.open
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corestm.FunctionMissing, errs.WrapParams{}, errs.String("function", "definition"))
+          when: def == nil
+      - opt:
+          do:
+            - set: cfg
+              value: "&Config[E, S]{}"
+          when: cfg == nil
+      - opt:
+          do:
+            - return: nil, errors.Join(problems...)
+          init:
+            bind: problems
+            eval: checked(def, cfg)
+            to: checked
+          when: len(problems) > 0
+      - bind: plan
+        eval: freeze(def)
+        to: freeze
+      - bind: m
+        eval: "&StateMachine[E, S]{store: cfg.Store, plan: plan, cfg: resolve(cfg), agenda: newAgenda(), locks: newKeyLocks()}"
+      - set: m.book
+        to: newBook
+        value: newBook(cfg.Journal, plan.declared(), m.cfg.history)
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: m.open(ctx)
+            to: m.open
+          when: err != nil
+      - return: m, nil
+  - of: checked
+    participants:
+      - id: caller
+        kind: actor
+      - id: checked
+        kind: self
+      - id: def.Problems
+        kind: internal
+      - id: def.InitialState
+        kind: internal
+    steps:
+      - bind: problems
+        eval: def.Problems()
+        to: def.Problems
+      - opt:
+          do:
+            - set: problems
+              value: append(problems, corestm.InitialMissing)
+          init:
+            bind: _, set
+            eval: def.InitialState()
+            to: def.InitialState
+          when: "!set"
+      - opt:
+          do:
+            - set: problems
+              value: append(problems, corestm.StoreMissing)
+          when: cfg.Store == nil
+      - return: problems
+  - of: (*StateMachine).open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).open
+        kind: self
+      - id: m.loadJournal
+        kind: internal
+      - id: m.cfg.clock.Now
+        kind: value
+      - id: storeFailure
+        kind: internal
+      - id: m.book.adopt
+        kind: internal
+      - id: m.admit
+        kind: internal
+      - id: m.syncJournal
+        kind: internal
+    steps:
+      - bind: loaded, err
+        eval: m.loadJournal(ctx)
+        to: m.loadJournal
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: now
+        eval: m.cfg.clock.Now()
+        to: m.cfg.clock.Now
+      - var:
+          name: saves
+          type: "[]corestm.RecordValue[S]"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: storeFailure(err, "all")
+                    to: storeFailure
+                when: err != nil
+            - bind: key, state
+              eval: m.store.Key(entity), *m.plan.state(&entity)
+            - bind: rec, keep
+              eval: loaded[key]
+            - eval: delete(loaded, key)
+            - opt:
+                do:
+                  - set: rec
+                    value: "corestm.RecordValue[S]{Key: key, State: state, Entered: now, History: rec.History}"
+                  - set: saves
+                    value: append(saves, rec)
+                when: "!keep || rec.State != state"
+            - eval: m.book.adopt(rec)
+              to: m.book.adopt
+            - eval: m.admit(key, entity, state, rec.Entered, now)
+              to: m.admit
+          key: entity
+          range: m.store.All(ctx)
+          value: err
+      - return: m.syncJournal(ctx, saves, loaded)
+        to: m.syncJournal
+  - of: (*StateMachine).loadJournal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).loadJournal
+        kind: self
+      - id: m.book.journal.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: make(map[string]corestm.RecordValue[S]), nil
+          when: m.book.journal == nil
+      - bind: records, err
+        eval: m.book.journal.Load(ctx)
+        to: m.book.journal.Load
+      - opt:
+          do:
+            - return: nil, journalFailure(err, "load")
+          when: err != nil
+      - bind: out
+        eval: make(map[string]corestm.RecordValue[S], len(records))
+      - loop:
+          do:
+            - set: out[rec.Key]
+              value: rec
+          key: _
+          range: records
+          value: rec
+      - return: out, nil
+  - of: (*StateMachine).syncJournal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).syncJournal
+        kind: self
+      - id: m.book.journal.Save
+        kind: value
+      - id: journalFailure
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: m.book.journal == nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: journalFailure(err, "save")
+                    to: journalFailure
+                init:
+                  bind: err
+                  eval: m.book.journal.Save(ctx, saves...)
+                  to: m.book.journal.Save
+                when: err != nil
+          when: len(saves) > 0
+      - bind: keys
+        eval: slices.Sorted(maps.Keys(orphans))
+        to: slices
+      - opt:
+          do:
+            - return: nil
+          when: len(keys) == 0
+      - return: journalFailure(m.book.journal.Delete(ctx, keys...), "delete")
+        to: journalFailure
+  - of: (*StateMachine).admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).admit
+        kind: self
+      - id: m.plan.evaluate
+        kind: internal
+      - id: m.agenda.markDirty
+        kind: internal
+      - id: m.agenda.schedule
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!m.plan.automatic(state)"
+      - bind: v, err
+        eval: m.plan.evaluate(entity, state, entered, now)
+        to: m.plan.evaluate
+      - opt:
+          do:
+            - eval: m.agenda.markDirty(key)
+              to: m.agenda.markDirty
+            - return: ""
+          when: err != nil
+      - opt:
+          do:
+            - eval: m.agenda.schedule(key, time.Time{})
+              to: m.agenda.schedule
+            - return: ""
+          when: v.fire != nil
+      - opt:
+          do:
+            - eval: m.agenda.schedule(key, v.next)
+              to: m.agenda.schedule
+          when: "!v.next.IsZero()"
+  - of: (*StateMachine).Census
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Census
+        kind: self
+      - id: m.book.censusCopy
+        kind: internal
+    steps:
+      - return: m.book.censusCopy()
+        to: m.book.censusCopy
+  - of: (*StateMachine).Record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Record
+        kind: self
+      - id: m.book.lookup
+        kind: internal
+    steps:
+      - return: m.book.lookup(key)
+        to: m.book.lookup
+  - of: (*StateMachine).Records
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Records
+        kind: self
+      - id: m.book.all
+        kind: internal
+    steps:
+      - return: m.book.all()
+        to: m.book.all
+  - of: storeFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: storeFailure
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code: corestm.CodeStoreFailed, Reason: "STORE_FAILED", Public: corestm.StoreFailed.Public(), Private: corestm.StoreFailed.Private(),
+          	}, errs.String("operation", operation))
+        to: errs
+  - of: (*StateMachine).Changed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Changed
+        kind: self
+      - id: m.locks.acquire
+        kind: internal
+      - id: m.agenda.markDirty
+        kind: internal
+      - id: m.refresh
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: m.book.touch(key)
+      - bind: release, err
+        eval: m.locks.acquire(ctx, key)
+        to: m.locks.acquire
+      - opt:
+          do:
+            - eval: m.agenda.markDirty(key)
+              to: m.agenda.markDirty
+            - return: err
+          when: err != nil
+      - defer: release()
+      - return: m.refresh(ctx, key)
+        to: m.refresh
+  - of: (*StateMachine).Deleted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Deleted
+        kind: self
+      - id: m.agenda.forget
+        kind: internal
+      - id: m.book.forget
+        kind: internal
+    steps:
+      - eval: m.agenda.forget(key)
+        to: m.agenda.forget
+      - return: m.book.forget(ctx, key)
+        to: m.book.forget
+  - of: (*StateMachine).refresh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).refresh
+        kind: self
+      - id: m.book.read
+        kind: internal
+      - id: m.landRead
+        kind: internal
+      - id: m.store.Get
+        kind: value
+      - id: storeFailure
+        kind: internal
+      - id: m.Deleted
+        kind: internal
+      - id: m.book.reconcile
+        kind: internal
+      - id: m.replan
+        kind: internal
+    steps:
+      - bind: f
+        eval: m.book.read(key)
+        to: m.book.read
+      - defer: m.landRead(key, f)
+        to: m.landRead
+      - bind: entity, found, err
+        eval: m.store.Get(ctx, key)
+        to: m.store.Get
+      - opt:
+          do:
+            - return: storeFailure(err, "get")
+              to: storeFailure
+          when: err != nil
+      - opt:
+          do:
+            - return: m.Deleted(ctx, key)
+              to: m.Deleted
+          when: "!found"
+      - bind: changed, err
+        eval: m.book.reconcile(ctx, key, *m.plan.state(&entity), m.cfg.clock.Now(), f)
+        to: m.book.reconcile
+      - eval: m.replan(key, changed)
+        to: m.replan
+      - return: err
+  - of: (*StateMachine).landRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).landRead
+        kind: self
+      - id: m.book.land
+        kind: internal
+      - id: m.agenda.forget
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: m.agenda.forget(key)
+              to: m.agenda.forget
+          init:
+            bind: _, deleted
+            eval: m.book.land(key, f)
+            to: m.book.land
+          when: deleted
+  - of: (*StateMachine).replan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).replan
+        kind: self
+      - id: m.book.stateOf
+        kind: internal
+      - id: m.agenda.unschedule
+        kind: internal
+      - id: m.agenda.restart
+        kind: internal
+      - id: m.agenda.markDirty
+        kind: internal
+    steps:
+      - bind: state, known
+        eval: m.book.stateOf(key)
+        to: m.book.stateOf
+      - opt:
+          do:
+            - eval: m.agenda.unschedule(key)
+              to: m.agenda.unschedule
+            - return: ""
+          when: "!known || !m.plan.automatic(state)"
+      - opt:
+          do:
+            - eval: m.agenda.restart(key)
+              to: m.agenda.restart
+          when: changed
+      - opt:
+          do:
+            - eval: m.agenda.markDirty(key)
+              to: m.agenda.markDirty
+          when: changed || m.plan.content[state]
+  - of: (*StateMachine).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Start
+        kind: self
+      - id: m.store.Key
+        kind: value
+      - id: m.locks.acquire
+        kind: internal
+      - id: m.cfg.sign
+        kind: internal
+      - id: m.transition
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: E
+      - opt:
+          do:
+            - return: zero, corestm.Reentrant
+          when: inside(ctx, m.locks)
+      - bind: key
+        eval: m.store.Key(entity)
+        to: m.store.Key
+      - opt:
+          do:
+            - return: zero, corestm.KeyEmpty
+          when: key == ""
+      - bind: release, err
+        eval: m.locks.acquire(ctx, key)
+        to: m.locks.acquire
+      - opt:
+          do:
+            - return: zero, err
+          when: err != nil
+      - defer: release()
+      - bind: p
+        eval: "pending[E, S]{entity: entity, key: key, arrow: m.plan.creation, create: true}"
+      - eval: m.cfg.sign(ctx, &p)
+        to: m.cfg.sign
+      - bind: landed, err
+        eval: m.transition(ctx, p, release)
+        to: m.transition
+      - opt:
+          do:
+            - return: zero, err
+          when: err != nil
+      - return: landed.change.Entity, nil
+  - of: (*StateMachine).Fire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).Fire
+        kind: self
+      - id: m.locks.acquire
+        kind: internal
+      - id: m.store.Get
+        kind: value
+      - id: m.plan.eventArrow
+        kind: internal
+      - id: m.cfg.sign
+        kind: internal
+      - id: m.transition
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: E
+      - opt:
+          do:
+            - return: zero, corestm.Reentrant
+          when: inside(ctx, m.locks)
+      - bind: release, err
+        eval: m.locks.acquire(ctx, key)
+        to: m.locks.acquire
+      - opt:
+          do:
+            - return: zero, err
+          when: err != nil
+      - defer: release()
+      - bind: entity, found, err
+        eval: m.store.Get(ctx, key)
+        to: m.store.Get
+      - opt:
+          do:
+            - return: zero, missingOr(err, key)
+          when: err != nil || !found
+      - bind: from
+        eval: "*m.plan.state(&entity)"
+      - bind: x, ok
+        eval: m.plan.eventArrow(event, from)
+        to: m.plan.eventArrow
+      - opt:
+          do:
+            - return: |-
+                entity, errs.Wrap(corestm.TransitionRefused, errs.WrapParams{}, errs.String("key", key),
+                			errs.String("event", event), errs.String("state", fmt.Sprint(from)))
+          when: "!ok"
+      - bind: p
+        eval: "pending[E, S]{entity: entity, key: key, arrow: x}"
+      - eval: m.cfg.sign(ctx, &p)
+        to: m.cfg.sign
+      - bind: landed, err
+        eval: m.transition(ctx, p, release)
+        to: m.transition
+      - opt:
+          do:
+            - return: entity, err
+          when: err != nil
+      - return: landed.change.Entity, nil
+  - of: missingOr
+    participants:
+      - id: caller
+        kind: actor
+      - id: missingOr
+        kind: self
+      - id: storeFailure
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: storeFailure(err, "get")
+              to: storeFailure
+          when: err != nil
+      - return: errs.Wrap(corestm.EntityMissing, errs.WrapParams{}, errs.String("key", key))
+        to: errs
+  - of: (*StateMachine).transition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).transition
+        kind: self
+      - id: m.locked
+        kind: internal
+      - id: m.cfg.reportErr
+        kind: internal
+      - id: m.replan
+        kind: internal
+      - id: m.announce
+        kind: internal
+    steps:
+      - bind: landed, err
+        eval: m.locked(ctx, p, release)
+        to: m.locked
+      - eval: m.cfg.reportErr(ctx, landed.late)
+        to: m.cfg.reportErr
+      - set: landed.late
+        value: nil
+      - opt:
+          do:
+            - return: landed, err
+          when: err != nil
+      - eval: m.replan(p.key, true)
+        to: m.replan
+      - eval: m.announce(ctx, landed.change)
+        to: m.announce
+      - return: landed, nil
+  - of: (*StateMachine).locked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).locked
+        kind: self
+      - id: m.book.fly
+        kind: internal
+      - id: m.commit
+        kind: internal
+    steps:
+      - defer: release()
+      - bind: f
+        eval: m.book.fly(p.key)
+        to: m.book.fly
+      - defer: func() { landed.late = errors.Join(landed.late, m.settle(ctx, p.key, f)) }()
+      - return: m.commit(ctx, p, f)
+        to: m.commit
+  - of: (*StateMachine).commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).commit
+        kind: self
+      - id: within
+        kind: internal
+      - id: m.enter
+        kind: internal
+      - id: m.unchanged
+        kind: internal
+      - id: m.write
+        kind: internal
+      - id: m.cfg.clock.Now
+        kind: value
+      - id: m.book.step
+        kind: internal
+    steps:
+      - bind: entity
+        eval: p.entity
+      - set: "*m.plan.state(&entity)"
+        value: p.arrow.to
+      - bind: hctx
+        eval: within(ctx, m.locks)
+        to: within
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: landing[E, S]{}, err
+                init:
+                  bind: err
+                  eval: m.enter(hctx, hook, &entity, p)
+                  to: m.enter
+                when: err != nil
+          key: _
+          range: m.plan.enter[p.arrow.to]
+          value: hook
+      - opt:
+          do:
+            - return: landing[E, S]{}, err
+          init:
+            bind: err
+            eval: m.unchanged(entity, p)
+            to: m.unchanged
+          when: err != nil
+      - opt:
+          do:
+            - return: "landing[E, S]{gone: refused && !p.create}, err"
+          init:
+            bind: refused, err
+            eval: m.write(ctx, entity, p)
+            to: m.write
+          when: err != nil
+      - bind: at
+        eval: m.cfg.clock.Now()
+        to: m.cfg.clock.Now
+      - bind: late
+        eval: |-
+          m.book.step(ctx, p.key, corestm.StepValue[S]{
+          		Event: p.arrow.event, From: p.arrow.from, To: p.arrow.to, Trigger: p.arrow.trigger, Actor: p.actor, At: at,
+          	}, f)
+        to: m.book.step
+      - return: |-
+          landing[E, S]{late: late, change: ChangeValue[E, S]{
+          		Entity: entity, At: at, Key: p.key, Event: p.arrow.event, Actor: p.actor,
+          		From: p.arrow.from, To: p.arrow.to, Trigger: p.arrow.trigger,
+          	}}, nil
+  - of: (*StateMachine).unchanged
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).unchanged
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corestm.HookChangedState, errs.WrapParams{}, errs.String("event", p.arrow.event))
+              to: errs
+          when: "*m.plan.state(&entity) != p.arrow.to"
+      - opt:
+          do:
+            - return: errs.Wrap(corestm.HookChangedKey, errs.WrapParams{}, errs.String("event", p.arrow.event))
+              to: errs
+          when: m.store.Key(entity) != p.key
+      - return: nil
+  - of: (*StateMachine).write
+    steps:
+      - bind: operation, write
+        eval: "\"replace\", m.store.Replace"
+      - opt:
+          do:
+            - set: operation, write
+              value: "\"insert\", m.store.Insert"
+          when: p.create
+      - bind: stored, err
+        eval: write(ctx, entity)
+      - opt:
+          do:
+            - return: false, storeFailure(err, operation)
+          when: err != nil
+      - opt:
+          do:
+            - return: true, refusedWrite(p.create, p.key)
+          when: "!stored"
+      - return: false, nil
+  - of: refusedWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: refusedWrite
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corestm.EntityExists, errs.WrapParams{}, errs.String("key", key))
+              to: errs
+          when: create
+      - return: errs.Wrap(corestm.EntityMissing, errs.WrapParams{}, errs.String("key", key))
+        to: errs
+  - of: (*StateMachine).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).settle
+        kind: self
+      - id: m.book.land
+        kind: internal
+      - id: m.refresh
+        kind: internal
+    steps:
+      - bind: touched, _
+        eval: m.book.land(key, f)
+        to: m.book.land
+      - opt:
+          do:
+            - return: nil
+          when: "!touched"
+      - return: m.refresh(ctx, key)
+        to: m.refresh
+  - of: (*StateMachine).enter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).enter
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: err stays what the hook returned.
+          			return
+          		}
+          		//: the transition fails, and the deferred release frees the entity.
+          		err = hookPanic(hookOnEnter, p.arrow.event, value)
+          	}()
+      - opt:
+          do:
+            - return: |-
+                errors.Join(errs.Wrap(corestm.HookFailed, errs.WrapParams{}, errs.String("hook", hookOnEnter),
+                			errs.String("event", p.arrow.event), errs.String("state", fmt.Sprint(p.arrow.to))), herr)
+              to: errors
+          init:
+            bind: herr
+            eval: hook(ctx, entity)
+          when: herr != nil
+      - return: nil
+  - of: (*StateMachine).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).announce
+        kind: self
+      - id: m.notify
+        kind: internal
+      - id: m.cfg.reportErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: m.cfg.reportErr(ctx, err)
+                    to: m.cfg.reportErr
+                init:
+                  bind: err
+                  eval: m.notify(ctx, hook, change)
+                  to: m.notify
+                when: err != nil
+          key: _
+          range: m.plan.after
+          value: hook
+  - of: (*StateMachine).notify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StateMachine).notify
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: err stays what the hook returned.
+          			return
+          		}
+          		err = hookPanic(hookOnTransition, change.Event, value)
+          	}()
+      - opt:
+          do:
+            - return: |-
+                errors.Join(errs.Wrap(corestm.HookFailed, errs.WrapParams{}, errs.String("hook", hookOnTransition),
+                			errs.String("event", change.Event), errs.String("key", change.Key)), herr)
+              to: errors
+          init:
+            bind: herr
+            eval: hook(ctx, change)
+          when: herr != nil
+      - return: nil
+  - of: hookPanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: hookPanic
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestm.HookPanicked, errs.WrapParams{}, errs.String("hook", kind), errs.String("event", event),
+          		errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
+        to: errs

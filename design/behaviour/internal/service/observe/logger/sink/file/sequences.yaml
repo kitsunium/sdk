@@ -1,0 +1,158 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: logfile
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, corefile.PathEmpty
+          when: path == ""
+      - bind: f, oerr
+        eval: logfile.Open(path, defaultFilePerm, &openRefusals)
+        to: logfile
+      - opt:
+          do:
+            - return: nil, oerr
+          when: oerr != nil
+      - defer: |-
+          func() {
+          		//: skip the close on the success path — sink owns the descriptor.
+          		if err == nil {
+          			//: nothing to do; the constructor returned the sink to the caller.
+          			return
+          		}
+          		//: best-effort close; err already carries the meaningful failure cause.
+          		if cerr := f.Close(); cerr != nil {
+          			//: chain the close error onto err so callers see both via errors.Is.
+          			err = errs.Wrap(cerr, errs.WrapParams{
+          				Code:    corefile.CodeCloseFailed,
+          				Reason:  "CLOSE_FAILED",
+          				Public:  "File close failed",
+          				Private: "service/observe/logger/sink/file.New: deferred close failed after another error",
+          			})
+          		}
+          	}()
+      - return: "&fileSink{f: f}, nil"
+  - of: (*fileSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSink).Write
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.f.Write
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corefile.CodeCtxCancelled,
+                			Reason:  "CTX_CANCELLED",
+                			Public:  "Logging aborted due to cancellation",
+                			Private: "service/observe/logger/sink/file.Write saw a cancelled context",
+                		}, errs.Int("level", int(r.Level)))
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: written, werr
+        eval: s.f.Write(p)
+        to: s.f.Write
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                written, errs.Wrap(werr, errs.WrapParams{
+                			Code:    corefile.CodeWriteFailed,
+                			Reason:  "WRITE_FAILED",
+                			Public:  "File write failed",
+                			Private: "service/observe/logger/sink/file.Write underlying *os.File returned an error",
+                		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
+          when: werr != nil
+      - return: written, nil
+  - of: (*fileSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSink).Flush
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: s.mu.Lock
+        kind: value
+      - id: s.f.Sync
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: serr
+        eval: s.f.Sync()
+        to: s.f.Sync
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(serr, errs.WrapParams{
+                			Code:    corefile.CodeSyncFailed,
+                			Reason:  "SYNC_FAILED",
+                			Public:  "File flush failed",
+                			Private: "service/observe/logger/sink/file.Flush underlying *os.File.Sync returned an error",
+                		})
+              to: errs
+          when: serr != nil
+      - return: nil
+  - of: (*fileSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSink).Close
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.f.Close
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: cerr
+        eval: s.f.Close()
+        to: s.f.Close
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(cerr, errs.WrapParams{
+                			Code:    corefile.CodeCloseFailed,
+                			Reason:  "CLOSE_FAILED",
+                			Public:  "File close failed",
+                			Private: "service/observe/logger/sink/file.Close underlying *os.File.Close returned an error",
+                		})
+              to: errs
+          when: cerr != nil
+      - return: nil

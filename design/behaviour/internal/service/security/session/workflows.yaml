@@ -1,0 +1,21 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: isDigest
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) != digestLen
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                init:
+                  bind: c
+                  eval: s[i]
+                when: (c < '0' || c > '9') && (c < 'a' || c > 'f')
+          key: i
+          range: len(s)
+      - return: "true"

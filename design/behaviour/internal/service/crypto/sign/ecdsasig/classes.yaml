@@ -1,0 +1,71 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: algorithm is the canonical registry key for ECDSA P-256.
+    items:
+      - name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"ecdsa-p256\""
+    name: algorithm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - algorithm
+      - Signer
+      - ecdsaP256
+      - ecdsaP256.Algorithm
+      - ecdsaP256.GenerateKey
+      - ecdsaP256.Sign
+      - ecdsaP256.Verify
+    name: ecdsasig.go
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  ecdsa: crypto/ecdsa
+  elliptic: crypto/elliptic
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  rand: crypto/rand
+  sha256: crypto/sha256
+  x509: crypto/x509
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/sign/ecdsasig
+  name: ecdsasig
+  purpose: Package ecdsasig registers the "ecdsa-p256" signature scheme (ADR 0013).
+types:
+  - doc: ecdsaP256 implements core/crypto.Signer over crypto/ecdsa on the P-256 curve.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: ecdsaP256
+        results: corecrypto.Algorithm
+      - doc: |-
+          GenerateKey draws a fresh P-256 keypair and returns it DER-marshalled (PKIX
+          public, SEC1 private). The only realistic failure is a host entropy fault.
+        name: GenerateKey
+        recv: ecdsaP256
+        results: pub, priv []byte, err error
+      - doc: |-
+          Sign hashes message with SHA-256 and returns an ASN.1/DER ECDSA signature
+          under the SEC1-DER private key priv. A malformed priv returns SigningFailed.
+        name: Sign
+        params: priv, message []byte
+        recv: ecdsaP256
+        results: sig []byte, err error
+      - doc: |-
+          Verify reports whether sig is a valid ASN.1/DER ECDSA signature over message
+          under the PKIX-DER public key pub. A malformed key or signature is false.
+        name: Verify
+        params: pub, message, sig []byte
+        recv: ecdsaP256
+        results: bool
+    name: ecdsaP256
+vars:
+  - doc: |-
+      Signer is the registered ECDSA P-256 scheme singleton (no init();
+      package-level var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: Signer
+        value: corecrypto.RegisterSigner(ecdsaP256{})
+    name: Signer

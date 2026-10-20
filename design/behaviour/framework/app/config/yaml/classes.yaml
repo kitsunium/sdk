@@ -1,0 +1,38 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - _
+      - register
+    name: yaml.go
+functions:
+  - doc: register gives kit the YAML codec for both of its extensions.
+    name: register
+    results: bool
+imports:
+  iapp: github.com/kitsunium/sdk/framework/internal/app
+  yamlcodec: github.com/kitsunium/sdk/pkg/v1/data/codec/yaml
+package:
+  doc: |-
+    Package yaml lets a kit product read YAML configuration files —
+    config/config.yaml, config/<env>.yaml, and .yml — as it reads JSON ones.
+    kit reads JSON itself; importing this package is the whole of what a
+    product does to read YAML, and what links the YAML codec into it:
+
+    	import _ "github.com/kitsunium/sdk/framework/app/config/yaml"
+
+    A product with a YAML file and without this import is refused at the start,
+    naming the import.
+  docFile: yaml.go
+  importPath: github.com/kitsunium/sdk/framework/app/config/yaml
+  name: yaml
+  purpose: Package yaml lets a kit product read YAML configuration files — config/config.yaml, config/<env>.yaml, and .yml — as it reads JSON ones.
+types: []
+vars:
+  - doc: |-
+      Importing the package gives kit the YAML codec: a blank package-level value
+      rather than an init, the SDK's convention.
+    items:
+      - name: _
+        value: register()
+    name: _

@@ -1,0 +1,120 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AttrString
+    steps:
+      - return: "AttrValue{key: key, kind: KindString, text: value}"
+  - of: AttrInt64
+    steps:
+      - return: "AttrValue{key: key, kind: KindInt64, number: value}"
+  - of: AttrBool
+    steps:
+      - return: "AttrValue{key: key, kind: KindBool, flag: value}"
+  - of: AttrStrings
+    steps:
+      - return: "AttrValue{key: key, kind: KindStrings, list: slices.Clone(values)}"
+  - of: AttrValue.Key
+    steps:
+      - return: a.key
+  - of: AttrValue.Kind
+    steps:
+      - return: a.kind
+  - of: AttrValue.StringValue
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: a.kind != KindString
+      - return: a.text, true
+  - of: AttrValue.Int64Value
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: a.kind != KindInt64
+      - return: a.number, true
+  - of: AttrValue.BoolValue
+    steps:
+      - opt:
+          do:
+            - return: false, false
+          when: a.kind != KindBool
+      - return: a.flag, true
+  - of: AttrValue.StringsValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttrValue.StringsValue
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: a.kind != KindStrings
+      - return: slices.Clone(a.list), true
+        to: slices
+  - of: AttrValue.Contains
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttrValue.Contains
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: false, false
+          when: a.kind != KindStrings
+      - return: slices.Contains(a.list, want), true
+        to: slices
+  - of: Decision.Granted
+    steps:
+      - return: d == Allow
+  - of: Decision.Valid
+    steps:
+      - switch:
+          cases:
+            - case: Abstain, Allow, Deny
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": d
+  - of: Decision.String
+    steps:
+      - switch:
+          cases:
+            - case: Abstain
+              do:
+                - return: "\"abstain\""
+            - case: Allow
+              do:
+                - return: "\"allow\""
+            - case: Deny
+              do:
+                - return: "\"deny\""
+            - default: true
+              do:
+                - return: "\"invalid\""
+          "on": d
+  - of: RequestValue.Subject
+    steps:
+      - return: r.subject
+  - of: RequestValue.Action
+    steps:
+      - return: r.action
+  - of: RequestValue.Resource
+    steps:
+      - return: r.resource
+  - of: RequestValue.Attr
+    steps:
+      - set: attr, ok
+        value: r.attrs[key]
+      - return: attr, ok
+  - of: RequestValue.AttrCount
+    steps:
+      - return: len(r.attrs)

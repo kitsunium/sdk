@@ -1,0 +1,753 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      cronFieldCount is the number of fields in the accepted dialect: minute,
+      hour, day-of-month, month, day-of-week. Five, and only five — see
+      rejectFieldCount for why six is refused rather than read as "with seconds".
+    items:
+      - name: cronFieldCount
+        type: int
+        value: "5"
+    name: cronFieldCount
+  - doc: |-
+      horizonYears bounds the forward search for a matching instant. It is 9
+      because the widest gap a REACHABLE expression can have is Feb 29 across a
+      non-leap century year (2096 → 2104, just under eight years); anything that
+      finds nothing in nine years matches nothing at all.
+    items:
+      - name: horizonYears
+        type: int
+        value: "9"
+    name: horizonYears
+  - doc: |-
+      probeYear anchors the reachability probe. It is a FIXED year, not "now", so
+      that parsing the same expression twice always gives the same answer — a
+      parser whose verdict depends on the day it runs is a parser that passes CI
+      and fails in production. 2000 is a leap year, so a Feb 29 schedule proves
+      itself on the first pass.
+    items:
+      - name: probeYear
+        type: int
+        value: "2000"
+    name: probeYear
+  - doc: |-
+      The two field counts that identify a neighbouring cron dialect rather than a
+      typo: six fields is the seconds dialect, seven adds a year.
+    grouped: true
+    items:
+      - name: secondsDialectFields
+        type: int
+        value: cronFieldCount + 1
+      - name: yearDialectFields
+        type: int
+        value: cronFieldCount + 2
+    name: secondsDialectFields
+  - doc: |-
+      quartzOperators are the Quartz day-of-month / day-of-week operators this
+      parser refuses by name. They are checked only against a token that is
+      neither a number nor a known name, so JUL (an L) and WED (a W) are never
+      mistaken for them.
+    items:
+      - name: quartzOperators
+        type: string
+        value: "\"LW#?\""
+    name: quartzOperators
+  - doc: |-
+      The inclusive bounds of each cron field. Month and weekday are derived from
+      package time's own constants rather than written out, so the two numberings
+      cannot drift from the ones cursor.weekday and cursor.month report.
+    grouped: true
+    items:
+      - name: minMinute
+        type: int
+        value: "0"
+      - name: maxMinute
+        type: int
+        value: "59"
+      - name: minHour
+        type: int
+        value: "0"
+      - name: maxHour
+        type: int
+        value: "23"
+      - name: minDayOfMonth
+        type: int
+        value: "1"
+      - name: maxDayOfMonth
+        type: int
+        value: "31"
+      - name: minMonth
+        type: int
+        value: int(time.January)
+      - name: maxMonth
+        type: int
+        value: int(time.December)
+      - name: minWeekday
+        type: int
+        value: int(time.Sunday)
+      - name: maxWeekday
+        type: int
+        value: int(time.Saturday)
+    name: minMinute
+  - doc: The position of each field in a five-field expression.
+    grouped: true
+    items:
+      - name: minuteField
+        type: int
+        value: iota
+      - name: hourField
+      - name: domField
+      - name: monthField
+      - name: dowField
+    name: minuteField
+  - doc: |-
+      maxEchoRunes caps how much of the caller's own text a refusal echoes into a
+      field. The expression is the caller's configuration, not untrusted input, so
+      echoing it is what makes the error actionable — but an unbounded echo turns
+      one bad config line into a log entry nobody can read.
+    items:
+      - name: maxEchoRunes
+        type: int
+        value: "64"
+    name: maxEchoRunes
+files:
+  - decls:
+      - Config
+    name: config.go
+  - decls:
+      - cronFieldCount
+      - horizonYears
+      - probeYear
+      - secondsDialectFields
+      - cronSchedule
+      - Parse
+      - ParseInLocation
+      - splitExpression
+      - expandMacro
+      - refuseMacro
+      - rejectFieldCount
+      - buildSchedule
+      - (*cronSchedule).next
+      - (*cronSchedule).matchesDay
+    name: cron.go
+  - decls:
+      - cursor
+      - newCursor
+      - cursor.year
+      - cursor.month
+      - cursor.day
+      - cursor.hour
+      - cursor.minute
+      - cursor.weekday
+      - cursor.nextMinute
+      - cursor.nextHour
+      - cursor.nextDay
+      - cursor.nextMonth
+      - cursor.materialise
+      - cursor.readsAs
+      - cursor.earliest
+    name: cursor.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - entry
+      - newEntry
+      - (*entry).arm
+      - (*entry).due
+    name: entry.go
+  - decls:
+      - Every
+    name: every.go
+  - decls:
+      - quartzOperators
+      - minMinute
+      - minuteField
+      - fieldSpec
+      - monthNames
+      - (*fieldSpec).parse
+      - (*fieldSpec).bounds
+      - (*fieldSpec).span
+      - (*fieldSpec).value
+      - (*fieldSpec).rejectToken
+      - (*fieldSpec).hintSuffix
+      - (*fieldSpec).step
+    name: field_spec.go
+  - decls:
+      - maxEchoRunes
+      - rejectExpression
+      - rejectSyntax
+      - rejectUnreachable
+      - rejectLocation
+      - rejectInterval
+      - clip
+      - rangeText
+    name: reject.go
+  - decls:
+      - (*scheduler).Run
+      - (*scheduler).loop
+      - (*scheduler).idle
+      - earliest
+      - (*scheduler).fire
+      - (*scheduler).run
+      - invoke
+    name: run.go
+  - decls:
+      - scheduler
+      - New
+      - (*scheduler).Add
+      - validateEntry
+      - (*scheduler).begin
+      - (*scheduler).finish
+      - (*scheduler).emit
+    name: scheduler.go
+functions:
+  - name: Parse
+    params: expr string
+    results: schedule coresched.Schedule, err error
+  - name: ParseInLocation
+    params: expr string, loc *time.Location
+    results: parsed coresched.Schedule, err error
+  - doc: splitExpression trims, expands a macro, and checks the field count.
+    name: splitExpression
+    params: expr string
+    results: fields []string, err error
+  - doc: |-
+      expandMacro resolves an @-shorthand, refusing the ones outside the subset.
+      The accepted set is written out as a switch rather than a table because the
+      two refusals below belong beside the acceptances: they are the same decision.
+    name: expandMacro
+    params: text string
+    results: expanded string, err error
+  - doc: refuseMacro names the refusal for an @-shorthand outside the subset.
+    name: refuseMacro
+    params: name, text string
+    results: error
+  - doc: |-
+      rejectFieldCount refuses a field count that is not five, distinguishing the
+      dialect mismatch from a plain typo.
+    name: rejectFieldCount
+    params: text string, got int
+    results: error
+  - doc: buildSchedule parses the five fields into membership sets.
+    name: buildSchedule
+    params: fields []string, loc *time.Location
+    results: schedule *cronSchedule, err error
+  - doc: |-
+      newCursor builds a cursor from a reading already expressed in the target
+      location, keeping the fields and dropping the offset.
+    name: newCursor
+    params: t time.Time
+    results: cursor
+  - doc: newEntry builds the engine state for a validated registration.
+    name: newEntry
+    params: value coresched.EntryValue
+    results: "*entry"
+  - name: Every
+    params: period time.Duration
+    results: schedule coresched.Schedule, err error
+  - doc: rejectExpression refuses a malformed or out-of-range cron field.
+    name: rejectExpression
+    params: detail, item, extra string
+    results: error
+  - doc: rejectSyntax refuses a construct from another cron dialect, by name.
+    name: rejectSyntax
+    params: detail, item string
+    results: error
+  - doc: rejectUnreachable refuses a valid expression that matches no instant.
+    name: rejectUnreachable
+    params: expr string
+    results: error
+  - doc: rejectLocation refuses a nil *time.Location.
+    name: rejectLocation
+    results: error
+  - doc: rejectInterval refuses a non-positive Every period.
+    name: rejectInterval
+    params: period time.Duration
+    results: error
+  - doc: |-
+      clip shortens text to maxEchoRunes runes, marking the truncation. It counts
+      RUNES, not bytes, so a multi-byte expression is never cut mid-character.
+    name: clip
+    params: text string
+    results: string
+  - doc: rangeText renders an inclusive bound pair as "min-max" for an error field.
+    name: rangeText
+    params: minValue, maxValue int
+    results: string
+  - doc: earliest returns the soonest armed deadline across entries.
+    name: earliest
+    params: entries []*entry
+    results: due time.Time, found bool
+  - doc: |-
+      invoke runs the job, converting a panic into a typed error.
+
+      The stack is captured inside the deferred recover, while the job's frames
+      are still on it, and travels as a field. Without it the report names only
+      the recover site — this engine, which did nothing wrong — and the frame
+      that actually panicked is gone for good; service/app/events, service/data/queue and
+      service/app/cli capture it on the same path for the same reason.
+    name: invoke
+    params: ctx context.Context, e *entry
+    results: err error
+  - name: New
+    params: cfg Config
+    results: coresched.Scheduler
+  - doc: validateEntry refuses an entry that could never run, naming the missing part.
+    name: validateEntry
+    params: value coresched.EntryValue
+    results: error
+imports:
+  atomic: sync/atomic
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  coresched: github.com/kitsunium/sdk/internal/core/app/scheduler
+  debug: runtime/debug
+  fmt: fmt
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/scheduler
+  name: scheduler
+  purpose: Package scheduler — hosts Config, the engine's construction parameters.
+types:
+  - fields:
+      - doc: |-
+          Clock is the time source the engine reads AND waits on. A nil Clock
+          falls back to clock.System.
+
+          It is clock.Timed rather than clock.Clock because this engine does both
+          halves: it stamps results and it waits for deadlines. Depending on
+          package time directly instead would make every cadence assertion in the
+          test suite a sleep, which is the claim ADR 0039 exists to make true.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          OnResult observes every decision the scheduler takes — each run, with
+          the job's own error, and each fire skipped for overlap.
+
+          Calls are SERIALISED: the hook need not be safe for concurrent use, and
+          in exchange a hook that blocks blocks the scheduler. Keep it short; hand
+          off to a logger or a channel rather than doing work in it.
+
+          A nil hook is a working configuration, not a refusal: a caller whose
+          jobs log their own failures has nothing to observe here. It does mean
+          the job's error goes NOWHERE — the SDK will not write it to stderr on
+          the caller's behalf (ADR 0030) — so a caller who wants to know their
+          jobs are failing must wire this.
+        name: OnResult
+        type: func(coresched.ResultValue)
+    kind: struct
+    name: Config
+  - doc: |-
+      cronSchedule is a parsed cron expression: five membership sets, the two
+      restriction flags the POSIX day rule needs, and the location its wall-clock
+      fields are read in.
+    fields:
+      - doc: minutes … weekdays are membership sets indexed by field value.
+        name: minutes
+        type: "[]bool"
+      - name: hours
+        type: "[]bool"
+      - name: days
+        type: "[]bool"
+      - name: months
+        type: "[]bool"
+      - name: weekdays
+        type: "[]bool"
+      - doc: |-
+          domRestricted / dowRestricted record whether each day field was written
+          as something other than "*". POSIX makes the two fields an OR when BOTH
+          are restricted, and an AND otherwise — see matchesDay.
+        name: domRestricted
+        type: bool
+      - name: dowRestricted
+        type: bool
+      - doc: loc is the location the expression's wall-clock fields are read in.
+        name: loc
+        type: "*time.Location"
+    kind: struct
+    methods:
+      - doc: |-
+          next reports the first instant strictly after `after` at which this
+          expression is due. It satisfies core/app/scheduler.Schedule as a method value.
+
+          The walk advances a calendar [cursor] — wall-clock fields normalised through
+          UTC — and only resolves a candidate into a real instant once every field
+          matches. Skipping a coarse field jumps the cursor to the start of the next
+          one, so an expression like "0 0 29 2 *" costs a few hundred steps per match,
+          not four years of minutes.
+        name: next
+        params: after time.Time
+        recv: c *cronSchedule
+        results: fireAt time.Time, ok bool
+      - doc: |-
+          matchesDay applies the POSIX day rule: when BOTH day fields are restricted a
+          day matches if it matches EITHER, and otherwise it must match both.
+
+          This is the rule people get wrong. crontab(5) is explicit: "If both fields
+          are restricted (i.e., are not *), the command will be run when either field
+          matches the current time." Implementing it as an AND makes "0 0 13 * FRI"
+          mean Friday the 13th, which is not what POSIX cron does.
+        name: matchesDay
+        params: cur cursor
+        recv: c *cronSchedule
+        results: bool
+    name: cronSchedule
+  - doc: |-
+      cursor is a WALL-CLOCK position — year/month/day/hour/minute — not an
+      instant. It is carried as a time.Time in UTC purely because UTC has no
+      transitions, which makes time.Date there a pure calendar normaliser: it
+      turns "February 30" into "March 1" and "hour 24" into "next day 00:00"
+      without ever consulting a DST rule.
+
+      That separation is the whole reason the cron walk survives DST. Advancing
+      the cursor is calendar arithmetic on fields; deciding whether the resulting
+      wall-clock reading EXISTS in the schedule's real location is a separate step
+      ([cursor.materialise]). Doing both with one time.Time in the target location
+      is how cron implementations end up shifting a job by an hour twice a year.
+    fields:
+      - doc: |-
+          t holds the wall-clock fields, in UTC, with seconds and nanoseconds
+          zeroed — cron's finest field is the minute.
+        name: t
+        type: time.Time
+    kind: struct
+    methods:
+      - doc: year returns the cursor's year.
+        name: year
+        recv: c cursor
+        results: int
+      - doc: month returns the cursor's month as 1-12.
+        name: month
+        recv: c cursor
+        results: int
+      - doc: day returns the cursor's day of month as 1-31.
+        name: day
+        recv: c cursor
+        results: int
+      - doc: hour returns the cursor's hour as 0-23.
+        name: hour
+        recv: c cursor
+        results: int
+      - doc: minute returns the cursor's minute as 0-59.
+        name: minute
+        recv: c cursor
+        results: int
+      - doc: |-
+          weekday returns the cursor's day of week as 0-6, Sunday = 0. The weekday of
+          a calendar date does not depend on the location, so reading it off the UTC
+          carrier is exact.
+        name: weekday
+        recv: c cursor
+        results: int
+      - doc: |-
+          nextMinute advances one minute. UTC has no transitions, so adding a duration
+          here is exact calendar arithmetic — which it would NOT be in a zone with DST.
+        name: nextMinute
+        recv: c cursor
+        results: cursor
+      - doc: nextHour advances to the next hour at minute 00.
+        name: nextHour
+        recv: c cursor
+        results: cursor
+      - doc: nextDay advances to the next day at 00:00.
+        name: nextDay
+        recv: c cursor
+        results: cursor
+      - doc: nextMonth advances to the 1st of the next month at 00:00.
+        name: nextMonth
+        recv: c cursor
+        results: cursor
+      - doc: |-
+          materialise resolves the cursor's wall-clock fields into a real instant in
+          loc, reporting false when that reading does not exist there.
+
+          The false case is the spring-forward gap: time.Date is documented to
+          normalise a non-existent local time into the neighbouring offset, so asking
+          for 02:30 on a day where 02:00-03:00 is skipped yields 03:30. Comparing the
+          fields back is what turns that silent shift into an honest "this minute does
+          not exist", which the walk then skips.
+
+          The ambiguous case — a wall-clock reading that happens twice on a
+          fall-back day — resolves to the EARLIER occurrence, and it has to be asked
+          for. time.Date documents that it guarantees neither, and its lookup (the
+          zone in force at the reading taken as a UTC instant) returns the LATER one
+          in every zone east of UTC: 02:30 on 2026-10-25 in Europe/Berlin comes back
+          as 01:30Z, not 00:30Z. Only zones west of UTC, New York among them, happen
+          to come back first. See [cursor.earliest]. The walk's strictly-increasing
+          contract then means the second occurrence is never revisited: the job runs
+          once, at the first.
+        name: materialise
+        params: loc *time.Location
+        recv: c cursor
+        results: time.Time, bool
+      - doc: |-
+          readsAs reports whether t, read in its own location, shows exactly the
+          cursor's wall-clock fields. Date and Clock each resolve the zone once, where
+          the five single-field accessors would resolve it five times.
+        name: readsAs
+        params: t time.Time
+        recv: c cursor
+        results: bool
+      - doc: |-
+          earliest returns the first occurrence of got's wall-clock reading: got
+          itself, unless the zone in force at got began by moving the clock BACK and
+          got lies in the stretch that transition repeated — in which case the same
+          reading also occurred under the previous, larger offset, that many seconds
+          earlier. The shift is read from the zone table rather than assumed to be an
+          hour, because it is not always one: Australia/Lord_Howe moves by thirty
+          minutes. Nothing here allocates; the walk calls it once per full match.
+        name: earliest
+        params: got time.Time
+        recv: c cursor
+        results: time.Time
+    name: cursor
+  - doc: |-
+      entry is one registered pairing plus the state the run loop keeps for it.
+
+      next and armed are touched ONLY by the loop goroutine, which is why they
+      need no lock; busy is the one field a job goroutine writes back, so it is an
+      atomic. Keeping that split explicit is what lets the loop decide overlap
+      without taking a mutex on its hot path.
+    fields:
+      - doc: |-
+          name, schedule, job and allowOverlap are the registration, frozen once
+          Add returns.
+        name: name
+        type: string
+      - name: schedule
+        type: coresched.Schedule
+      - name: job
+        type: coresched.Job
+      - name: allowOverlap
+        type: bool
+      - doc: next is the entry's next due instant; loop goroutine only.
+        name: next
+        type: time.Time
+      - doc: |-
+          armed reports whether next holds a real due instant; loop goroutine
+          only. A Schedule that reports exhaustion — or that misbehaves by not
+          advancing — disarms its own entry and the scheduler keeps running.
+        name: armed
+        type: bool
+      - doc: |-
+          busy reports that a run of THIS entry has not returned yet. Set by the
+          loop before starting a run, cleared by the job goroutine before it
+          publishes the result, so an observer that has seen the result also sees
+          a free slot.
+        name: busy
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: arm computes the entry's first due instant from now.
+        name: arm
+        params: now time.Time
+        recv: e *entry
+      - doc: |-
+          due reports whether the entry fires at now, which due instant the run stands
+          for, and how many earlier due instants were dropped to get there.
+
+          The scheduler SKIPS missed deadlines rather than replaying them, so when
+          several due instants have passed the run is attributed to the LATEST one and
+          the earlier ones are counted, not run. Replaying them would turn a machine
+          that slept for a day into a burst of stale work at the worst possible
+          moment; dropping them silently would make a scheduler that is hours behind
+          look exactly like one that is on time.
+        name: due
+        params: now time.Time
+        recv: e *entry
+        results: scheduled time.Time, missed int, fire bool
+    name: entry
+  - doc: |-
+      fieldSpec describes one cron field: its human label, its inclusive bounds,
+      the names it accepts instead of numbers, and a hint appended to an
+      out-of-range refusal where a neighbouring dialect would have accepted the
+      value.
+    fields:
+      - doc: label names the field in every refusal ("minute", "day-of-week", …).
+        name: label
+        type: string
+      - doc: minValue and maxValue are the inclusive bounds of the field.
+        name: minValue
+        type: int
+      - name: maxValue
+        type: int
+      - doc: |-
+          names are the upper-case aliases this field accepts, in value order:
+          the index of a name PLUS minValue is its numeric value, so the table
+          cannot disagree with the bounds beside it.
+        name: names
+        type: "[]string"
+      - doc: |-
+          hint is appended to an out-of-range refusal. It exists for the one case
+          where the refusal would otherwise look arbitrary: Vixie cron accepts 7
+          for Sunday, this subset does not, and the caller deserves to be told
+          which value to write instead.
+        name: hint
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          parse turns one field's text into a membership set indexed by value, of
+          length maxValue+1 so a lookup is a direct index with no offset arithmetic.
+
+          field is never empty: it comes from strings.Fields, which does not produce
+          empty tokens. The invariant is stated rather than guarded, because a guard
+          here would be a branch no test can reach and no reader can trust — the
+          stance internal/kernel/clock takes on the same shape of impossible input.
+          An empty item WITHIN a field ("0,,5") is a different case and is refused
+          below, by value.
+        name: parse
+        params: field string
+        recv: fs *fieldSpec
+        results: set []bool, err error
+      - doc: |-
+          bounds resolves one comma-separated item into an inclusive [lo, hi] range
+          and a step: "*", "a", "a-b", "*/n" or "a-b/n".
+        name: bounds
+        params: item string
+        recv: fs *fieldSpec
+        results: lo, hi, step int, err error
+      - doc: "span resolves the non-\"*\" half of an item: \"a\" or \"a-b\"."
+        name: span
+        params: spec, item string, step int
+        recv: fs *fieldSpec
+        results: lo, hi, resolvedStep int, err error
+      - doc: value resolves one token — a name or a number — inside its field's bounds.
+        name: value
+        params: token, item string
+        recv: fs *fieldSpec
+        results: value int, err error
+      - doc: |-
+          rejectToken picks between the "unsupported dialect" and the "malformed"
+          refusal for a token that is neither a name nor a number.
+        name: rejectToken
+        params: token, item string
+        recv: fs *fieldSpec
+        results: error
+      - doc: hintSuffix renders the field's hint as a trailing clause, or nothing.
+        name: hintSuffix
+        recv: fs *fieldSpec
+        results: string
+      - doc: step parses the "/n" half of an item.
+        name: step
+        params: text, item string
+        recv: fs *fieldSpec
+        results: stride int, err error
+    name: fieldSpec
+  - doc: |-
+      scheduler is the concrete core/app/scheduler.Scheduler. It is unexported: there
+      is one canonical engine, so a registry would be over-abstraction (the proc
+      and resilience precedents, ADR 0016 / ADR 0026).
+    fields:
+      - doc: clk is the injected time source; never package time.
+        name: clk
+        type: clock.Timed
+      - doc: onResult is the caller's observation hook, or nil.
+        name: onResult
+        type: func(coresched.ResultValue)
+      - doc: hookMu serialises onResult so the hook need not be concurrency-safe.
+        name: hookMu
+        type: sync.Mutex
+      - doc: mu guards the registration set and the running flag.
+        name: mu
+        type: sync.Mutex
+      - doc: running reports that a Run is in progress; it freezes the entry set.
+        name: running
+        type: bool
+      - doc: |-
+          entries holds the registrations, in Add order — which is also the order
+          same-instant fires are started in, so a caller can reason about it.
+        name: entries
+        type: "[]*entry"
+      - doc: names is the duplicate-name index.
+        name: names
+        type: map[string]bool
+    kind: struct
+    methods:
+      - doc: |-
+          Run drives the registered entries until ctx is cancelled.
+
+          It waits for every in-flight job before returning — a job still running
+          after Run has returned would leave the caller believing the scheduler
+          stopped while work continued. A job that ignores ctx therefore delays
+          shutdown by its own duration; that is the documented cost of not abandoning
+          it.
+        name: Run
+        params: ctx context.Context
+        recv: s *scheduler
+        results: error
+      - doc: loop waits for the earliest deadline, fires what is due, and re-arms.
+        name: loop
+        params: ctx context.Context, entries []*entry, wg *sync.WaitGroup
+        recv: s *scheduler
+        results: error
+      - doc: idle waits for cancellation with nothing left to fire.
+        name: idle
+        params: ctx context.Context
+        recv: s *scheduler
+        results: error
+      - doc: |-
+          fire starts every entry that is due at now, or reports it skipped.
+
+          Lifecycle: one goroutine per fired entry, registered on wg before it starts
+          and released when the job returns. Run's deferred wg.Wait is the single join
+          point, so nothing started here outlives Run — a job that ignores ctx delays
+          the return rather than escaping it.
+        name: fire
+        params: ctx context.Context, entries []*entry, wg *sync.WaitGroup, now time.Time
+        recv: s *scheduler
+      - doc: run executes one job and publishes its result.
+        name: run
+        params: ctx context.Context, wg *sync.WaitGroup, e *entry, scheduled time.Time, missed int
+        recv: s *scheduler
+      - doc: Add registers an entry, refusing anything that could not run.
+        name: Add
+        params: value coresched.EntryValue
+        recv: s *scheduler
+        results: error
+      - doc: begin claims the running flag and takes a snapshot of the entry set.
+        name: begin
+        recv: s *scheduler
+        results: snapshot []*entry, err error
+      - doc: finish releases the running flag so the Scheduler can be reused.
+        name: finish
+        recv: s *scheduler
+      - doc: emit publishes one decision through the caller's hook.
+        name: emit
+        params: result coresched.ResultValue
+        recv: s *scheduler
+    name: scheduler
+vars:
+  - grouped: true
+    items:
+      - doc: monthNames runs JAN..DEC, so index 0 + minMonth is January.
+        name: monthNames
+        value: |-
+          []string{
+          		"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+          		"JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+          	}
+      - doc: weekdayNames runs SUN..SAT, so index 0 + minWeekday is Sunday.
+        name: weekdayNames
+        value: "[]string{\"SUN\", \"MON\", \"TUE\", \"WED\", \"THU\", \"FRI\", \"SAT\"}"
+      - doc: fieldSpecs describes the five POSIX fields, in expression order.
+        name: fieldSpecs
+        value: |-
+          [cronFieldCount]fieldSpec{
+          		minuteField: {label: "minute", minValue: minMinute, maxValue: maxMinute},
+          		hourField:   {label: "hour", minValue: minHour, maxValue: maxHour},
+          		domField:    {label: "day-of-month", minValue: minDayOfMonth, maxValue: maxDayOfMonth},
+          		monthField:  {label: "month", minValue: minMonth, maxValue: maxMonth, names: monthNames},
+          		dowField: {
+          			label: "day-of-week", minValue: minWeekday, maxValue: maxWeekday, names: weekdayNames,
+          			hint: "Sunday is 0 or SUN; 7 is a Vixie extension this subset does not accept",
+          		},
+          	}
+    name: monthNames

@@ -1,0 +1,601 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewExporter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewExporter
+        kind: self
+      - id: ringSize
+        kind: internal
+      - id: nodeRefs
+        kind: internal
+      - id: rand
+        kind: stdlib
+      - id: e.ring[i].seq.Store
+        kind: value
+    steps:
+      - bind: size, err
+        eval: ringSize(cfg)
+        to: ringSize
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: refs, err
+        eval: nodeRefs(cfg.Hello.Nodes)
+        to: nodeRefs
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - var:
+          name: id
+          type: "[8]byte"
+      - set: _, _
+        to: rand
+        value: rand.Read(id[:])
+      - bind: e
+        eval: |-
+          &Exporter{
+          		cfg: *cfg, refs: refs, instance: hex.EncodeToString(id[:]),
+          		ring: make(ring, size), mask: uint64(size - 1), wake: make(chan struct{}, 1),
+          		buf: make([]byte, 0, batchRecords*RecordSize),
+          	}
+      - loop:
+          do:
+            - eval: e.ring[i].seq.Store(uint64(i))
+              to: e.ring[i].seq.Store
+          key: i
+          range: e.ring
+      - return: e, nil
+  - of: ringSize
+    steps:
+      - switch:
+          cases:
+            - case: cfg.Path == ""
+              do:
+                - return: 0, errs.Wrap(Misconfigured, errs.WrapParams{}, errs.String("rule", "no socket path"))
+            - case: cfg.Buffer != 0 && (cfg.Buffer < MinBuffer || cfg.Buffer > MaxBuffer)
+              do:
+                - return: 0, errs.Wrap(Misconfigured, errs.WrapParams{}, errs.String("rule", "buffer out of bounds"), errs.Int("buffer", cfg.Buffer))
+            - case: cfg.Buffer == 0
+              do:
+                - return: DefaultBuffer, nil
+      - return: 1 << bits.Len(uint(cfg.Buffer-1)), nil
+  - of: nodeRefs
+    participants:
+      - id: caller
+        kind: actor
+      - id: nodeRefs
+        kind: self
+      - id: model
+        kind: package
+    steps:
+      - bind: refs
+        eval: make(map[string]NodeRef, len(nodes))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, errs.Wrap(Misconfigured, errs.WrapParams{}, errs.String("rule", "a node ID outside the grammar"), errs.Int("index", i))
+                init:
+                  bind: _, err
+                  eval: model.ParseID(id)
+                  to: model
+                when: err != nil
+            - set: refs[id]
+              value: NodeRef(i + 1)
+          key: i
+          range: nodes
+          value: id
+      - return: refs, nil
+  - of: (*Exporter).Ref
+    steps:
+      - return: e.refs[id]
+  - of: (*Exporter).Instance
+    steps:
+      - return: e.instance
+  - of: (*Exporter).Dropped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).Dropped
+        kind: self
+      - id: e.dropped.Load
+        kind: value
+    steps:
+      - return: e.dropped.Load()
+        to: e.dropped.Load
+  - of: (*Exporter).Sent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).Sent
+        kind: self
+      - id: e.sent.Load
+        kind: value
+    steps:
+      - return: e.sent.Load()
+        to: e.sent.Load
+  - of: (*Exporter).Emit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).Emit
+        kind: self
+      - id: e.tail.Load
+        kind: value
+      - id: s.seq.Load
+        kind: value
+      - id: s.seq.Store
+        kind: value
+      - id: e.dropped.Add
+        kind: value
+    steps:
+      - bind: pos
+        eval: e.tail.Load()
+        to: e.tail.Load
+      - loop:
+          do:
+            - bind: s
+              eval: "&e.ring[pos&e.mask]"
+            - bind: seq
+              eval: s.seq.Load()
+              to: s.seq.Load
+            - switch:
+                cases:
+                  - case: diff == 0
+                    do:
+                      - opt:
+                          do:
+                            - set: s.ev
+                              value: "*ev"
+                            - eval: s.seq.Store(pos + 1)
+                              to: s.seq.Store
+                            - select:
+                                cases:
+                                  - comm: e.wake <- struct{}{}
+                                  - default: true
+                            - return: ""
+                          when: e.tail.CompareAndSwap(pos, pos+1)
+                      - set: pos
+                        to: e.tail.Load
+                        value: e.tail.Load()
+                  - case: diff < 0
+                    do:
+                      - eval: e.dropped.Add(1)
+                        to: e.dropped.Add
+                      - return: ""
+                  - default: true
+                    do:
+                      - set: pos
+                        to: e.tail.Load
+                        value: e.tail.Load()
+                init:
+                  bind: diff
+                  eval: int64(seq) - int64(pos)
+          forever: true
+  - of: (*Exporter).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).take
+        kind: self
+      - id: s.seq.Store
+        kind: value
+    steps:
+      - bind: s
+        eval: "&e.ring[e.head&e.mask]"
+      - opt:
+          do:
+            - return: "false"
+          when: s.seq.Load() != e.head+1
+      - set: "*ev"
+        value: s.ev
+      - eval: s.seq.Store(e.head + e.mask + 1)
+        to: s.seq.Store
+      - op: ++
+        set: e.head
+      - return: "true"
+  - of: (*Exporter).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).Start
+        kind: self
+      - id: errs
+        kind: package
+      - id: ipc
+        kind: package
+      - id: context
+        kind: stdlib
+      - id: e.done.Add
+        kind: value
+    steps:
+      - lock:
+          mutex: e.mu
+      - opt:
+          do:
+            - return: errs.Wrap(Running, errs.WrapParams{})
+              to: errs
+          when: e.ln != nil
+      - bind: ln, err
+        eval: "ipc.Listen(ipc.Config{Path: e.cfg.Path, AllowUIDs: e.cfg.AllowUIDs, AllowGIDs: e.cfg.AllowGIDs})"
+        to: ipc
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: ctx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - set: e.ln, e.cancel
+        value: ln, cancel
+      - eval: e.done.Add(2)
+        to: e.done.Add
+      - go: |-
+          func() {
+          		defer e.done.Done()
+          		e.accept(ln)
+          	}()
+      - go: |-
+          func() {
+          		defer e.done.Done()
+          		e.drain(ctx)
+          	}()
+      - return: nil
+  - of: (*Exporter).accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).accept
+        kind: self
+      - id: ln.Accept
+        kind: internal
+      - id: e.mu.Lock
+        kind: value
+      - id: e.greet
+        kind: internal
+      - id: closeBestEffort
+        kind: internal
+      - id: e.mu.Unlock
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: c, err
+              eval: ln.Accept()
+              to: ln.Accept
+            - opt:
+                do:
+                  - return: ""
+                when: err != nil
+            - eval: e.mu.Lock()
+              to: e.mu.Lock
+            - alt:
+                - do:
+                    - eval: closeBestEffort(c)
+                      to: closeBestEffort
+                  init:
+                    bind: err
+                    eval: e.greet(c)
+                    to: e.greet
+                  when: err != nil
+                - do:
+                    - set: e.clients
+                      value: append(e.clients, c)
+                  else: true
+            - eval: e.mu.Unlock()
+              to: e.mu.Unlock
+          forever: true
+  - of: (*Exporter).greet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).greet
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: c.SetWriteDeadline
+        kind: internal
+      - id: c.Write
+        kind: internal
+    steps:
+      - bind: h
+        eval: |-
+          handshake{
+          		Protocol: Protocol, Product: e.cfg.Hello.Product, Binary: e.cfg.Hello.Binary, Role: e.cfg.Hello.Role,
+          		Instance: e.instance, Revision: e.cfg.Hello.Revision, ModelVersion: model.Version, Digest: e.cfg.Hello.Digest,
+          		RecordSize: RecordSize, Seq: e.seq + 1, Ops: OpNames[:], Nodes: e.cfg.Hello.Nodes,
+          	}
+      - bind: line, err
+        eval: json.Marshal(h)
+        to: json
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: c.SetWriteDeadline(time.Now().Add(writeTimeout))
+            to: c.SetWriteDeadline
+          when: err != nil
+      - set: _, err
+        to: c.Write
+        value: c.Write(append(line, '\n'))
+      - return: err
+  - of: (*Exporter).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).drain
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: t.Stop
+        kind: value
+    steps:
+      - bind: t
+        eval: time.NewTicker(drainTick)
+        to: time
+      - defer: t.Stop()
+        to: t.Stop
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: e.flush()
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ""
+                  - comm: _, open := <-e.wake
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!open"
+                  - comm: <-t.C
+          forever: true
+  - of: (*Exporter).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).flush
+        kind: self
+      - id: encode
+        kind: internal
+      - id: e.send
+        kind: internal
+    steps:
+      - var:
+          name: ev
+          type: Event
+      - lock:
+          mutex: e.mu
+      - set: e.buf
+        value: e.buf[:0]
+      - loop:
+          cond: len(e.buf) < cap(e.buf) && e.take(&ev)
+          do:
+            - op: ++
+              set: e.seq
+            - bind: "n"
+              eval: len(e.buf)
+            - set: e.buf
+              value: e.buf[:n+RecordSize]
+            - eval: encode(e.buf[n:], e.seq, &ev)
+              to: encode
+      - opt:
+          do:
+            - eval: e.send()
+              to: e.send
+          when: len(e.buf) > 0 && len(e.clients) > 0
+      - return: len(e.buf) == cap(e.buf)
+  - of: (*Exporter).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).send
+        kind: self
+      - id: e.write
+        kind: internal
+      - id: closeBestEffort
+        kind: internal
+      - id: e.sent.Add
+        kind: value
+    steps:
+      - bind: kept
+        eval: e.clients[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: closeBestEffort(c)
+                    to: closeBestEffort
+                  - continue: true
+                init:
+                  bind: err
+                  eval: e.write(c)
+                  to: e.write
+                when: err != nil
+            - set: kept
+              value: append(kept, c)
+          key: _
+          range: e.clients
+          value: c
+      - set: e.clients
+        value: kept
+      - opt:
+          do:
+            - eval: e.sent.Add(uint64(len(e.buf) / RecordSize))
+              to: e.sent.Add
+          when: len(kept) > 0
+  - of: (*Exporter).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).write
+        kind: self
+      - id: c.SetWriteDeadline
+        kind: internal
+      - id: c.Write
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: c.SetWriteDeadline(time.Now().Add(writeTimeout))
+            to: c.SetWriteDeadline
+          when: err != nil
+      - bind: _, err
+        eval: c.Write(e.buf)
+        to: c.Write
+      - return: err
+  - of: (*Exporter).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Exporter).Stop
+        kind: self
+      - id: e.mu.Lock
+        kind: value
+      - id: e.mu.Unlock
+        kind: value
+      - id: ln.Close
+        kind: value
+      - id: closeBestEffort
+        kind: internal
+    steps:
+      - eval: e.mu.Lock()
+        to: e.mu.Lock
+      - bind: ln, cancel
+        eval: e.ln, e.cancel
+      - set: e.ln
+        value: nil
+      - eval: e.mu.Unlock()
+        to: e.mu.Unlock
+      - opt:
+          do:
+            - return: nil
+          when: ln == nil
+      - eval: cancel()
+      - bind: err
+        eval: ln.Close()
+        to: ln.Close
+      - bind: done
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		e.done.Wait()
+          		close(done)
+          	}()
+      - select:
+          cases:
+            - comm: <-done
+            - comm: <-ctx.Done()
+      - eval: e.mu.Lock()
+        to: e.mu.Lock
+      - loop:
+          do:
+            - eval: closeBestEffort(c)
+              to: closeBestEffort
+          key: _
+          range: e.clients
+          value: c
+      - set: e.clients
+        value: nil
+      - eval: e.mu.Unlock()
+        to: e.mu.Unlock
+      - return: err
+  - of: closeBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeBestEffort
+        kind: self
+      - id: c.Close
+        kind: value
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: "log.Printf(\"telemetry: closing a client: %v\", err)"
+              to: log
+          init:
+            bind: err
+            eval: c.Close()
+            to: c.Close
+          when: err != nil
+  - of: nop.Emit
+  - of: encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: encode
+        kind: self
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+      - id: binary.LittleEndian.PutUint64
+        kind: value
+    steps:
+      - set: b[0], b[1], b[2], b[3]
+        value: recordVersion, byte(e.Kind), byte(e.Op), byte(e.Outcome)
+      - eval: binary.LittleEndian.PutUint32(b[4:], uint32(e.Node))
+        to: binary.LittleEndian.PutUint32
+      - eval: binary.LittleEndian.PutUint32(b[8:], uint32(e.From))
+        to: binary.LittleEndian.PutUint32
+      - eval: binary.LittleEndian.PutUint32(b[12:], e.Code)
+        to: binary.LittleEndian.PutUint32
+      - eval: binary.LittleEndian.PutUint64(b[16:], seq)
+        to: binary.LittleEndian.PutUint64
+      - eval: binary.LittleEndian.PutUint64(b[24:], uint64(e.Start))
+        to: binary.LittleEndian.PutUint64
+      - eval: binary.LittleEndian.PutUint64(b[32:], uint64(e.Duration))
+        to: binary.LittleEndian.PutUint64
+      - eval: copy(b[40:56], e.TraceID[:])
+      - eval: copy(b[56:64], e.SpanID[:])
+  - of: Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: Decode
+        kind: self
+      - id: binary.LittleEndian.Uint32
+        kind: value
+      - id: binary.LittleEndian.Uint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: Event{}, 0, false
+          when: len(b) != RecordSize || b[0] != recordVersion
+      - set: e.Kind, e.Op, e.Outcome
+        value: Kind(b[1]), Op(b[2]), Outcome(b[3])
+      - set: e.Node
+        value: NodeRef(binary.LittleEndian.Uint32(b[4:]))
+      - set: e.From
+        value: NodeRef(binary.LittleEndian.Uint32(b[8:]))
+      - set: e.Code
+        to: binary.LittleEndian.Uint32
+        value: binary.LittleEndian.Uint32(b[12:])
+      - set: seq
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(b[16:])
+      - set: e.Start
+        value: int64(binary.LittleEndian.Uint64(b[24:]))
+      - set: e.Duration
+        value: int64(binary.LittleEndian.Uint64(b[32:]))
+      - eval: copy(e.TraceID[:], b[40:56])
+      - eval: copy(e.SpanID[:], b[56:64])
+      - return: e, seq, true

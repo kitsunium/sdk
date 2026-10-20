@@ -1,0 +1,16 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*memFS).hasChildrenLocked
+    steps:
+      - bind: prefix
+        eval: dir + "/"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: strings.HasPrefix(candidate, prefix)
+          key: candidate
+          range: maps.Keys(m.nodes)
+      - return: "false"

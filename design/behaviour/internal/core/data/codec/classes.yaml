@@ -1,0 +1,130 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - conflictText
+    name: errors.go
+  - decls:
+      - Format
+      - Format.Known
+      - Format.String
+    name: format.go
+  - decls:
+      - registry
+      - Register
+      - publishCodec
+      - indexAliases
+      - normalizeMIME
+      - publishAlias
+      - Lookup
+      - LookupMIME
+      - LookupExt
+      - Available
+    name: registry.go
+functions:
+  - doc: |-
+      conflictText renders a registry conflict for the boot panic that reports it:
+      the typed error's header and Public, then each field it carries, quoted.
+      Error() never renders a field (rule 4), and the panic is the only place an
+      operator learns WHICH key collided and which codec already held it.
+    name: conflictText
+    params: err error
+    results: string
+  - name: Register
+    params: c Codec
+    results: Codec
+  - doc: |-
+      publishCodec claims name for c. Returns a non-nil error when name is already
+      registered — to ANY codec, the same one included: a Format registers once,
+      whereas the alias indexes and the other core registries accept the identical
+      value again as a no-op. The caller turns the error into a panic so the
+      boot-time failure is loud and grep-friendly. The check and the insert are one
+      atomic step.
+    name: publishCodec
+    params: name Format, c Codec
+    results: error
+  - doc: |-
+      indexAliases stores every alias (MIME or extension) in dst, panicking
+      when a distinct codec already claims the same key. normalize reduces each
+      raw alias to its index key — strings.ToLower for extensions, normalizeMIME
+      for MIME types so registration and LookupMIME agree on the key (issue #36).
+    name: indexAliases
+    params: dst *plugin.Registry[string, Format], aliases []string, name Format, kind string, normalize func(string) string
+  - doc: |-
+      normalizeMIME reduces a raw MIME string to the canonical index key shared by
+      registration and LookupMIME: the media type alone (parameters stripped),
+      lowercased and trimmed. Sharing this between the two paths is what guarantees
+      a registered MIME is reachable — the asymmetry it removes was issue #36.
+    name: normalizeMIME
+    params: raw string
+    results: string
+  - doc: |-
+      publishAlias inserts (key → name) into an alias index. Returns a non-nil
+      error when key is already claimed by a different Format; idempotent
+      re-registration by the same Format is accepted. The check, the insert and
+      the owner the error names are one atomic step.
+    name: publishAlias
+    params: dst *plugin.Registry[string, Format], key string, name Format, kind, alias string
+    results: error
+  - name: Lookup
+    params: f Format
+    results: c Codec, ok bool
+  - name: LookupMIME
+    params: raw string
+    results: c Codec, ok bool
+  - name: LookupExt
+    params: ext string
+    results: c Codec, ok bool
+  - name: Available
+    results: "[]Format"
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  mime: mime
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec
+  name: codec
+  purpose: Package codec — declares the optional Appender extension that hot-path encoders (NDJSON, JSON, text) implement so callers can write into a caller-supplied buffer without paying for an intermediate allocation.
+types:
+  - kind: named
+    methods:
+      - name: Known
+        recv: f Format
+        results: bool
+      - name: String
+        recv: f Format
+        results: string
+    name: Format
+    underlying: string
+vars:
+  - doc: |-
+      Package-level indexes.
+
+      Each is the kernel's read-mostly, copy-on-write table (kernel/plugin.Registry,
+      ADR 0159): codec packages register themselves exactly ONCE at package import
+      time (their package-level var initializer calls Register), and every other
+      access is a read (Lookup / LookupMIME / LookupExt) — one atomic pointer load
+      and a map read, no lock. A frozen-after-init map read that way is ~30% faster
+      than sync.Map.Load + the interface-to-Codec type assertion (microbench: 9.1 ns
+      vs 12.8 ns) and avoids the dirty-map fallback machinery sync.Map carries for
+      the write-mostly workloads we never trigger.
+
+      The MIME and extension indexes are the codec's own, kept BESIDE the Format
+      table rather than inside it (the kernel table has no second index); what is
+      shared is the mechanism, and what stays here is the domain: the strict rule on
+      a Format name, the alias normalisation, and the conflict's code and fields.
+    grouped: true
+    items:
+      - name: registry
+        type: plugin.Registry[Format, Codec]
+      - name: mimeIndex
+        type: plugin.Registry[string, Format]
+      - name: extIndex
+        type: plugin.Registry[string, Format]
+    name: registry

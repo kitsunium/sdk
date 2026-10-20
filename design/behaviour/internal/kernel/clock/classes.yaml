@@ -1,0 +1,533 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxDuration is the largest time.Duration, the bound rearmWait's single
+      multiplication must stay under.
+    items:
+      - name: maxDuration
+        type: time.Duration
+        value: math.MaxInt64
+    name: maxDuration
+files:
+  - decls:
+      - _
+    name: clock_compliance.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Clock
+      - Timed
+      - ManualClock
+      - (*ManualClock).NewTimer
+      - (*ManualClock).Sleep
+      - Ticker
+      - Timer
+      - Waiter
+      - NewManualClock
+      - _#2
+    name: gen_decls.go
+  - decls:
+      - newManualClock
+      - (*ManualClock).Now
+      - (*ManualClock).Since
+      - (*ManualClock).After
+      - (*ManualClock).newTimer
+      - (*ManualClock).NewTicker
+      - (*ManualClock).sleep
+      - (*ManualClock).Advance
+      - (*ManualClock).Set
+      - (*ManualClock).Pending
+      - (*ManualClock).BlockUntil
+      - (*ManualClock).register
+      - (*ManualClock).advanceTo
+      - (*ManualClock).nextDue
+      - (*ManualClock).link
+      - (*ManualClock).retire
+      - (*ManualClock).stopWait
+      - (*ManualClock).resetWait
+    name: manual.go
+  - decls:
+      - manualTicker
+      - (*manualTicker).C
+      - (*manualTicker).Stop
+      - (*manualTicker).Reset
+    name: manual_ticker.go
+  - decls:
+      - manualTimer
+      - (*manualTimer).C
+      - (*manualTimer).Stop
+      - (*manualTimer).Reset
+    name: manual_timer.go
+  - decls:
+      - maxDuration
+      - manualWait
+      - rearmWait
+      - fireWait
+      - drainWait
+    name: manual_wait.go
+  - decls:
+      - System
+      - systemClock
+      - systemClock.Now
+      - systemClock.Since
+      - systemClock.After
+      - systemClock.NewTimer
+      - systemClock.NewTicker
+      - systemClock.Sleep
+      - systemTicker
+      - systemTicker.C
+      - systemTicker.Stop
+      - systemTicker.Reset
+      - systemTimer
+      - systemTimer.C
+      - systemTimer.Stop
+      - systemTimer.Reset
+    name: system.go
+  - decls:
+      - requirePositivePeriod
+    name: waiter.go
+functions:
+  - name: NewManualClock
+    params: start time.Time
+    results: "*ManualClock"
+  - doc: |-
+      newManualClock is NewManualClock's body: gen_decls.go writes NewManualClock, from the
+      design, as one call of it.
+    name: newManualClock
+    params: start time.Time
+    results: "*ManualClock"
+  - doc: |-
+      rearmWait moves a ticker's deadline to the first period strictly after
+      target, in one step. Caller holds the owning clock's mu.
+
+      A ticker left behind by close to the whole Duration range is the exception:
+      its deadline becomes target plus one period, which is still strictly after
+      target and within one period of it, but no longer on the ticker's phase.
+      time.Time.Sub saturates at ~292 years, so past that distance the phase
+      cannot even be computed in a Duration — and the multiplication below would
+      wrap NEGATIVE, move the deadline backwards, and leave advanceTo firing the
+      same due wait forever while it holds the lock.
+    name: rearmWait
+    params: w *manualWait, target time.Time
+  - doc: |-
+      fireWait delivers at on w's channel without blocking. Caller holds the
+      owning clock's mu.
+    name: fireWait
+    params: w *manualWait, at time.Time
+  - doc: |-
+      drainWait removes an undelivered value from w's channel. Caller holds the
+      owning clock's mu.
+    name: drainWait
+    params: w *manualWait
+  - doc: |-
+      requirePositivePeriod panics unless d is a usable ticker period. Both
+      implementations funnel through it so the refusal is identical whichever
+      clock is installed — a test that pins the message pins it for production.
+    name: requirePositivePeriod
+    params: op string, d time.Duration
+imports:
+  math: math
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/clock
+  name: clock
+  purpose: Package clock abstracts the passage of time so higher layers can inject a deterministic time source in tests instead of coupling to the wall clock.
+types:
+  - kind: named
+    name: Clock
+    underlying: |-
+      interface {
+      	// Now returns the current instant.
+      	Now() time.Time
+      	// Since returns the elapsed duration between the given instant and Now.
+      	Since(t time.Time) time.Duration
+      }
+  - kind: named
+    name: Timed
+    underlying: |-
+      interface {
+      	Clock
+      	Waiter
+      }
+  - fields:
+      - doc: |-
+          mu guards every field below and is the lock cond is built on. It is an
+          RWMutex so the read-only accessors do not serialise a test's readers
+          against each other while a driving goroutine is between advances.
+        name: mu
+        type: sync.RWMutex
+      - doc: cond is broadcast whenever the wait set changes, so BlockUntil wakes.
+        name: cond
+        type: "*sync.Cond"
+      - doc: now is the clock's current instant.
+        name: now
+        type: time.Time
+      - doc: waits holds every armed wait, in registration order.
+        name: waits
+        type: "[]*manualWait"
+      - doc: |-
+          seq numbers registrations so waits due at the same instant fire in a
+          deterministic order (earliest registration first).
+        name: seq
+        type: uint64
+    kind: struct
+    methods:
+      - name: NewTimer
+        params: d time.Duration
+        recv: m *ManualClock
+        results: Timer
+      - name: Sleep
+        params: d time.Duration
+        recv: m *ManualClock
+      - name: Now
+        recv: m *ManualClock
+        results: time.Time
+      - name: Since
+        params: t time.Time
+        recv: m *ManualClock
+        results: time.Duration
+      - name: After
+        params: d time.Duration
+        recv: m *ManualClock
+        results: <-chan time.Time
+      - doc: |-
+          newTimer is NewTimer's body: gen_decls.go writes ManualClock.NewTimer, from the
+          design, as one call of it.
+        name: newTimer
+        params: d time.Duration
+        recv: m *ManualClock
+        results: Timer
+      - name: NewTicker
+        params: d time.Duration
+        recv: m *ManualClock
+        results: Ticker
+      - doc: |-
+          sleep is Sleep's body: gen_decls.go writes ManualClock.Sleep, from the
+          design, as one call of it.
+        name: sleep
+        params: d time.Duration
+        recv: m *ManualClock
+      - name: Advance
+        params: d time.Duration
+        recv: m *ManualClock
+      - name: Set
+        params: t time.Time
+        recv: m *ManualClock
+      - name: Pending
+        recv: m *ManualClock
+        results: int
+      - name: BlockUntil
+        params: n int
+        recv: m *ManualClock
+      - doc: |-
+          register arms a new wait due d from now with the given ticker period, firing
+          it at once when it is already due.
+        name: register
+        params: d, period time.Duration
+        recv: m *ManualClock
+        results: "*manualWait"
+      - doc: |-
+          advanceTo moves now to target, firing due waits in (deadline, seq) order.
+          Caller holds mu for writing.
+        name: advanceTo
+        params: target time.Time
+        recv: m *ManualClock
+      - doc: |-
+          nextDue returns the earliest wait due at or before target, breaking ties by
+          registration order, or nil when none is due. Caller holds mu.
+        name: nextDue
+        params: target time.Time
+        recv: m *ManualClock
+        results: "*manualWait"
+      - doc: |-
+          link arms w. Caller holds mu for writing, and MUST pass a disarmed wait:
+          register builds a fresh one and resetWait retires first, so linking twice —
+          which would duplicate the entry in the due scan — cannot happen. The
+          invariant is stated rather than guarded, because a guard here would be a
+          branch no test can reach and no reader can trust.
+        name: link
+        params: w *manualWait
+        recv: m *ManualClock
+      - doc: |-
+          retire disarms w, removing it from the armed set. Caller holds mu for
+          writing.
+        name: retire
+        params: w *manualWait
+        recv: m *ManualClock
+      - doc: |-
+          stopWait disarms w, drains any pending delivery, and reports whether it was
+          armed.
+        name: stopWait
+        params: w *manualWait
+        recv: m *ManualClock
+        results: bool
+      - doc: |-
+          resetWait re-arms w for d from now, draining any pending delivery, and
+          reports whether it was armed. A ticker's period is replaced by d; a timer's
+          stays zero.
+        name: resetWait
+        params: w *manualWait, d time.Duration
+        recv: m *ManualClock
+        results: bool
+    name: ManualClock
+  - kind: named
+    name: Ticker
+    underlying: |-
+      interface {
+      	// C returns the channel on which each tick instant is delivered. The same
+      	// channel is returned by every call; it is never closed.
+      	C() <-chan time.Time
+      	// Stop halts the Ticker. It does NOT close the channel, so a concurrent
+      	// receiver never sees a spurious zero value, and after Stop returns no
+      	// tick from before the call is received — the guarantee time.Ticker.Stop
+      	// makes since Go 1.23, whose channel is synchronous.
+      	Stop()
+      	// Reset halts the Ticker and restarts it with period d: no tick from
+      	// before the call is received after it, and the next arrives once d has
+      	// elapsed. It PANICS on a non-positive d; see the package comment.
+      	Reset(d time.Duration)
+      }
+  - kind: named
+    name: Timer
+    underlying: |-
+      interface {
+      	// C returns the channel on which the fire instant is delivered. The same
+      	// channel is returned by every call; it is never closed.
+      	C() <-chan time.Time
+      	// Stop prevents a not-yet-fired Timer from firing and reports whether the
+      	// Timer was still armed. After Stop returns, no value from a previous
+      	// arming is left pending on C.
+      	Stop() bool
+      	// Reset re-arms the Timer to fire d from the clock's current instant and
+      	// reports whether it was still armed. After Reset returns, no value from a
+      	// previous arming is left pending on C. A non-positive d fires at once.
+      	Reset(d time.Duration) bool
+      }
+  - kind: named
+    name: Waiter
+    underlying: |-
+      interface {
+      	// After returns a channel that delivers the fire instant once d has
+      	// elapsed. A non-positive d delivers at once.
+      	After(d time.Duration) <-chan time.Time
+      	// NewTimer returns a one-shot [Timer] due d from now. A non-positive d
+      	// fires at once.
+      	NewTimer(d time.Duration) Timer
+      	// NewTicker returns a repeating [Ticker] of period d. It PANICS on a
+      	// non-positive d; see the package comment.
+      	NewTicker(d time.Duration) Ticker
+      	// Sleep blocks the calling goroutine until d has elapsed on this clock.
+      	// A non-positive d returns at once.
+      	Sleep(d time.Duration)
+      }
+  - doc: manualTicker is the [Ticker] facade over one manualWait.
+    fields:
+      - doc: clk owns the lock and the armed set.
+        name: clk
+        type: "*ManualClock"
+      - doc: w is this ticker's wait; its channel is fixed at registration.
+        name: w
+        type: "*manualWait"
+    kind: struct
+    methods:
+      - doc: C returns the ticker's delivery channel.
+        name: C
+        recv: t *manualTicker
+        results: <-chan time.Time
+      - doc: Stop halts the ticker and discards a tick delivered but not yet received.
+        name: Stop
+        recv: t *manualTicker
+      - doc: Reset restarts the ticker with period d, panicking on a non-positive d.
+        name: Reset
+        params: d time.Duration
+        recv: t *manualTicker
+    name: manualTicker
+  - doc: manualTimer is the [Timer] facade over one manualWait.
+    fields:
+      - doc: clk owns the lock and the armed set; the wait alone is not self-contained.
+        name: clk
+        type: "*ManualClock"
+      - doc: w is this timer's wait; its channel is fixed at registration.
+        name: w
+        type: "*manualWait"
+    kind: struct
+    methods:
+      - doc: C returns the timer's delivery channel.
+        name: C
+        recv: t *manualTimer
+        results: <-chan time.Time
+      - doc: Stop disarms the timer, reporting whether it was still armed.
+        name: Stop
+        recv: t *manualTimer
+        results: bool
+      - doc: Reset re-arms the timer for d, reporting whether it was still armed.
+        name: Reset
+        params: d time.Duration
+        recv: t *manualTimer
+        results: bool
+    name: manualTimer
+  - doc: |-
+      manualWait is one armed wait on a ManualClock: a timer (period == 0) or a
+      ticker (period > 0). Every field is guarded by the owning clock's mutex
+      except ch, which is created once at registration and never reassigned — that
+      exception is what lets a caller select on the channel while holding nothing.
+    fields:
+      - doc: |-
+          ch delivers the fire instant. Buffered with capacity 1 and written with
+          a non-blocking send, because Advance MUST NOT block on a receiver that
+          may never come — see the ManualClock doc comment.
+        name: ch
+        type: chan time.Time
+      - doc: deadline is the absolute instant at which this wait is due.
+        name: deadline
+        type: time.Time
+      - doc: period is the ticker cadence; zero marks a one-shot timer.
+        name: period
+        type: time.Duration
+      - doc: linked reports whether this wait is currently in ManualClock.waits.
+        name: linked
+        type: bool
+      - doc: seq is the registration order, used to break deadline ties.
+        name: seq
+        type: uint64
+    kind: struct
+    name: manualWait
+  - doc: systemClock is the default Timed backed by the package time wall clock.
+    kind: struct
+    methods:
+      - doc: Now returns the current wall-clock instant from package time.
+        name: Now
+        recv: systemClock
+        results: time.Time
+      - doc: Since returns the elapsed duration between t and the current wall-clock time.
+        name: Since
+        params: t time.Time
+        recv: systemClock
+        results: time.Duration
+      - doc: After returns a channel delivering the instant d from now.
+        name: After
+        params: d time.Duration
+        recv: systemClock
+        results: <-chan time.Time
+      - doc: NewTimer returns a one-shot Timer due d from now.
+        name: NewTimer
+        params: d time.Duration
+        recv: systemClock
+        results: Timer
+      - doc: |-
+          NewTicker returns a repeating Ticker of period d, panicking on a
+          non-positive d.
+        name: NewTicker
+        params: d time.Duration
+        recv: systemClock
+        results: Ticker
+      - doc: Sleep blocks the calling goroutine for d.
+        name: Sleep
+        params: d time.Duration
+        recv: systemClock
+    name: systemClock
+  - doc: |-
+      systemTicker adapts *time.Ticker to the [Ticker] interface. Same one-pointer
+      shape as systemTimer, and the same allocation-free boxing.
+    fields:
+      - doc: tk is the wrapped stdlib ticker; never nil once constructed.
+        name: tk
+        type: "*time.Ticker"
+    kind: struct
+    methods:
+      - doc: C returns the stdlib ticker's delivery channel.
+        name: C
+        recv: t systemTicker
+        results: <-chan time.Time
+      - doc: Stop halts the ticker without closing its channel.
+        name: Stop
+        recv: t systemTicker
+      - doc: Reset restarts the ticker with period d, panicking on a non-positive d.
+        name: Reset
+        params: d time.Duration
+        recv: t systemTicker
+    name: systemTicker
+  - doc: |-
+      systemTimer adapts *time.Timer to the [Timer] interface. It is a value type
+      holding exactly one pointer, so converting it to Timer is allocation-free
+      (the runtime stores a pointer-shaped value directly in the interface word).
+    fields:
+      - doc: tm is the wrapped stdlib timer; never nil once constructed.
+        name: tm
+        type: "*time.Timer"
+    kind: struct
+    methods:
+      - doc: C returns the stdlib timer's delivery channel.
+        name: C
+        recv: t systemTimer
+        results: <-chan time.Time
+      - doc: Stop halts the timer, reporting whether it was still armed.
+        name: Stop
+        recv: t systemTimer
+        results: bool
+      - doc: Reset re-arms the timer for d, reporting whether it was still armed.
+        name: Reset
+        params: d time.Duration
+        recv: t systemTimer
+        results: bool
+    name: systemTimer
+vars:
+  - doc: |-
+      Compile-time assertions that every implementation satisfies the contract it
+      claims — the build fails before any test runs if an interface and one of its
+      implementations drift apart. Each clock is asserted against all three of
+      Clock, Waiter and Timed on purpose: Clock is the frozen, downstream-visible
+      half of the port, and losing it silently would be the one break this package
+      is shaped to avoid. ManualClock's three are its design's (implements:),
+      which kit gen writes in gen_decls.go.
+    grouped: true
+    items:
+      - name: _
+        type: Clock
+        value: (*systemClock)(nil)
+      - name: _
+        type: Waiter
+        value: (*systemClock)(nil)
+      - name: _
+        type: Timed
+        value: (*systemClock)(nil)
+      - name: _
+        type: Timer
+        value: (*systemTimer)(nil)
+      - name: _
+        type: Ticker
+        value: (*systemTicker)(nil)
+      - name: _
+        type: Timer
+        value: (*manualTimer)(nil)
+      - name: _
+        type: Ticker
+        value: (*manualTicker)(nil)
+    name: _
+  - grouped: true
+    items:
+      - doc: "ManualClock implements Clock: the compiler holds it."
+        name: _
+        type: Clock
+        value: (*ManualClock)(nil)
+      - doc: "ManualClock implements Waiter: the compiler holds it."
+        name: _
+        type: Waiter
+        value: (*ManualClock)(nil)
+      - doc: "ManualClock implements Timed: the compiler holds it."
+        name: _
+        type: Timed
+        value: (*ManualClock)(nil)
+    name: _#2
+  - doc: |-
+      System is the default Timed using the package time wall clock. It is typed
+      [Timed] rather than [Clock] so callers that need to wait do not have to
+      type-assert; assigning it to a Clock field still compiles unchanged.
+    items:
+      - name: System
+        type: Timed
+        value: systemClock{}
+    name: System

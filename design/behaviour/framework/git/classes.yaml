@@ -1,0 +1,117 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      CodeRepositoryUnresolved identifies a path that is not inside a readable
+      repository. Match it with errs.HasCode: it is the one refusal a caller can act
+      on by falling back to a non-VCS path.
+    items:
+      - name: CodeRepositoryUnresolved
+        type: errs.Code
+        value: coregit.CodeRepositoryUnresolved
+    name: CodeRepositoryUnresolved
+  - doc: |-
+      CodeCommandFailed identifies a version-control command that exited non-zero —
+      a corrupted object store, a permission error, a missing binary.
+    items:
+      - name: CodeCommandFailed
+        type: errs.Code
+        value: coregit.CodeCommandFailed
+    name: CodeCommandFailed
+  - doc: |-
+      CodePathAbsent identifies a path that does not exist at the requested commit,
+      which is deliberately distinct from a successful read of an empty file. It is
+      what ShowFile returns when the commit resolves and its tree holds no object
+      at the path.
+    items:
+      - name: CodePathAbsent
+        type: errs.Code
+        value: coregit.CodePathAbsent
+    name: CodePathAbsent
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - CodeRepositoryUnresolved
+      - CodeCommandFailed
+      - CodePathAbsent
+      - ChangedSet
+      - LineRange
+      - Resolution
+      - Config
+      - Include
+      - HeadState
+      - Resolve
+      - GitDir
+      - Head
+      - ShowFile
+    name: git.go
+functions:
+  - name: Resolve
+    params: ctx context.Context, cfg Config
+    results: Resolution
+  - name: GitDir
+    params: ctx context.Context, root string
+    results: gitDir string, err error
+  - name: Head
+    params: ctx context.Context, dir string
+    results: head HeadState, err error
+  - name: ShowFile
+    params: ctx context.Context, repoRoot, sha, relPath string
+    results: content string, err error
+imports:
+  context: context
+  coregit: github.com/kitsunium/sdk/framework/internal/core/git
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  svcgit: github.com/kitsunium/sdk/framework/internal/service/git
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/git
+  name: git
+  purpose: Package git answers what a branch changed and what a working tree is at, by shelling out to the git binary.
+types:
+  - alias: true
+    doc: |-
+      ChangedSet is what a branch changed, queryable by line, file or directory. It
+      aliases the core git port.
+    kind: alias
+    name: ChangedSet
+    underlying: coregit.ChangedSet
+  - alias: true
+    doc: |-
+      LineRange is an inclusive, 1-based run of changed lines. It aliases the core
+      git value type.
+    kind: alias
+    name: LineRange
+    underlying: coregit.LineRangeValue
+  - alias: true
+    doc: |-
+      Resolution is the outcome of resolving a changed set, including the degraded
+      outcome where none could be trusted. It aliases the core git value type.
+    kind: alias
+    name: Resolution
+    underlying: coregit.ResolutionValue
+  - alias: true
+    doc: |-
+      Config is where the repository is and which files the caller counts as
+      changed. It aliases the service type: these are one implementation's
+      construction parameters, which is what ADR 0074 says belongs with the engine.
+    kind: alias
+    name: Config
+    underlying: svcgit.Config
+  - alias: true
+    doc: |-
+      Include decides which files belong in the changed set. A nil Include admits
+      every file.
+    kind: alias
+    name: Include
+    underlying: svcgit.IncludeFunc
+  - alias: true
+    doc: |-
+      HeadState is what a working tree is at: the commit HEAD names, its
+      committer date in the offset it was recorded with, and whether a tracked
+      file differs from it. It aliases the service type — the core git port models no
+      commit, so this is one engine's value (ADR 0074).
+    kind: alias
+    name: HeadState
+    underlying: svcgit.HeadValue

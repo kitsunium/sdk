@@ -1,0 +1,118 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - sdkClock
+      - clockOf
+      - sdkClock.NewTimer
+      - sdkClock.NewTicker
+    name: clock.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Enable
+      - every
+      - cron
+      - open
+      - runner
+      - runner.Add
+      - runner.Run
+      - resultOf
+    name: jobengine.go
+  - decls:
+      - _
+    name: jobengine_compliance.go
+functions:
+  - doc: |-
+      clockOf is c as the SDK's scheduler takes it, nil — the scheduler's own,
+      the system's — for none.
+    name: clockOf
+    params: c plug.Clock
+    results: clock.Timed
+  - name: Enable
+  - doc: every is the SDK's schedule of a job that runs every period.
+    name: every
+    params: period time.Duration
+    results: plug.JobScheduleFunc, error
+  - doc: |-
+      cron is the SDK's schedule of a five-field cron expression, in the
+      process's local time zone.
+    name: cron
+    params: expr string
+    results: plug.JobScheduleFunc, error
+  - doc: |-
+      open opens the SDK's scheduler over cfg: the app's clock, and kit's ear on
+      every decision it takes.
+
+      IFACE-PLUGIN: kit reaches the scheduler through plug.JobScheduler; this is
+      its implementation.
+    name: open
+    params: cfg *plug.JobSchedulerConfig
+    results: plug.JobScheduler
+  - doc: resultOf is the SDK's report of a decision, as kit's core reads it.
+    name: resultOf
+    params: r *scheduler.Result
+    results: plug.JobResultValue
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  scheduler: github.com/kitsunium/sdk/pkg/v1/app/scheduler
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/jobengine
+  name: jobengine
+  purpose: "Package jobengine is what framework/app/jobs plugs into kit: the scheduler the framework's jobs run on — the SDK's scheduler, on the app's clock — and the schedules it reads from a job's declaration, a period or a five-field cron expression (ADR 0179 §1, step 7)."
+types:
+  - doc: |-
+      sdkClock is the app's clock, as kit's core hands it (plug.Clock), as the
+      SDK's scheduler stamps and waits on it: the same instants and the same
+      timers, a test's manual clock included.
+    fields:
+      - name: ""
+        role: embedded
+        type: plug.Clock
+    kind: struct
+    methods:
+      - doc: NewTimer is the clock's timer, as the SDK's.
+        name: NewTimer
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Timer
+      - doc: NewTicker is the clock's ticker, as the SDK's.
+        name: NewTicker
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Ticker
+    name: sdkClock
+  - doc: runner is the SDK's scheduler as kit's core uses it.
+    fields:
+      - name: s
+        type: scheduler.Scheduler
+    kind: struct
+    methods:
+      - doc: Add registers entry with the SDK's scheduler.
+        name: Add
+        params: entry plug.JobEntryValue
+        recv: r runner
+        results: error
+      - doc: Run fires the jobs until ctx ends.
+        name: Run
+        params: ctx context.Context
+        recv: r runner
+        results: error
+    name: runner
+vars:
+  - doc: |-
+      : Asserts at compile time that the jobs' scheduler is what plug describes,
+      and that the app's clock is the SDK's.
+    grouped: true
+    items:
+      - name: _
+        type: plug.JobScheduler
+        value: runner{}
+      - name: _
+        type: clock.Timed
+        value: sdkClock{}
+    name: _

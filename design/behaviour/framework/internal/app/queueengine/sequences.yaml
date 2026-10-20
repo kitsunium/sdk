@@ -1,0 +1,634 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*broker).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).Publish
+        kind: self
+      - id: b.q.Publish
+        kind: value
+    steps:
+      - bind: _, err
+        eval: b.q.Publish(ctx, payload)
+        to: b.q.Publish
+      - return: err
+  - of: (*broker).Consume
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).Consume
+        kind: self
+      - id: queue
+        kind: package
+    steps:
+      - bind: handle
+        eval: cfg.Handler
+      - return: |-
+          queue.Consume(ctx, b.q, queue.ConsumerConfig{
+          		Handler: func(ctx context.Context, d queue.Delivery) error {
+          			return handle(ctx, plug.DeliveryValue{Message: pluggedMessage(d.Message), Deliveries: d.Deliveries})
+          		},
+          		Clock:               b.clock,
+          		PollInterval:        cfg.PollInterval,
+          		Parallelism:         cfg.Parallelism,
+          		BatchSize:           cfg.BatchSize,
+          		HandlerIsIdempotent: true,
+          	})
+        to: queue
+  - of: (*broker).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).DeadLetters
+        kind: self
+      - id: r.DeadLetters
+        kind: value
+      - id: pluggedDeadLetter
+        kind: internal
+    steps:
+      - bind: r, ok
+        eval: b.q.(queue.DeadLetterReader)
+      - opt:
+          do:
+            - return: nil, lacks("DeadLetterReader")
+          when: "!ok"
+      - bind: dead, err
+        eval: r.DeadLetters(ctx, maxLetters)
+        to: r.DeadLetters
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]plug.DeadLetterValue, len(dead))
+      - loop:
+          do:
+            - set: out[i]
+              to: pluggedDeadLetter
+              value: pluggedDeadLetter(&dead[i])
+          key: i
+          range: dead
+      - return: out, nil
+  - of: (*broker).Messages
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).Messages
+        kind: self
+      - id: r.Messages
+        kind: value
+    steps:
+      - bind: r, ok
+        eval: b.q.(queue.MessageReader)
+      - opt:
+          do:
+            - return: nil, lacks("MessageReader")
+          when: "!ok"
+      - bind: live, err
+        eval: r.Messages(ctx, after, maxMessages)
+        to: r.Messages
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]plug.LiveMessageValue, len(live))
+      - loop:
+          do:
+            - set: out[i]
+              value: "plug.LiveMessageValue{VisibleAt: m.VisibleAt, Message: pluggedMessage(m.Message), Deliveries: m.Deliveries, Leased: m.Leased}"
+          key: i
+          range: live
+          value: m
+      - return: out, nil
+  - of: (*broker).PutMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).PutMessage
+        kind: self
+      - id: w.PutMessage
+        kind: value
+    steps:
+      - bind: w, ok
+        eval: b.q.(queue.MessageWriter)
+      - opt:
+          do:
+            - return: "\"\", lacks(\"MessageWriter\")"
+          when: "!ok"
+      - return: "w.PutMessage(ctx, queue.LiveMessage{VisibleAt: live.VisibleAt, Message: sdkMessage(live.Message), Deliveries: live.Deliveries, Leased: live.Leased})"
+        to: w.PutMessage
+  - of: (*broker).PutDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).PutDeadLetter
+        kind: self
+      - id: w.PutDeadLetter
+        kind: value
+    steps:
+      - bind: w, ok
+        eval: b.q.(queue.DeadLetterWriter)
+      - opt:
+          do:
+            - return: "\"\", lacks(\"DeadLetterWriter\")"
+          when: "!ok"
+      - return: |-
+          w.PutDeadLetter(ctx, queue.DeadLetter{
+          		FailedAt: dead.FailedAt, Reason: dead.Reason, Cause: dead.Cause, Message: sdkMessage(dead.Message),
+          		Code: dead.Code, Deliveries: dead.Deliveries,
+          	})
+        to: w.PutDeadLetter
+  - of: (*broker).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).Close
+        kind: self
+      - id: c.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: c.Close()
+              to: c.Close
+          init:
+            bind: c, ok
+            eval: b.q.(io.Closer)
+          when: ok
+      - return: nil
+  - of: BrokerOf
+    steps:
+      - bind: opened, ok
+        eval: b.(*broker)
+      - opt:
+          do:
+            - return: nil, false
+          when: "!ok"
+      - return: opened.q, true
+  - of: lacks
+    participants:
+      - id: caller
+        kind: actor
+      - id: lacks
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(queue.QueueMisconfigured, errs.WrapParams{}, errs.String("capability", capability))
+        to: errs
+  - of: pluggedMessage
+    steps:
+      - return: "plug.MessageValue{EnqueuedAt: m.EnqueuedAt, ID: m.ID, Payload: m.Payload}"
+  - of: sdkMessage
+    steps:
+      - return: "queue.Message{EnqueuedAt: m.EnqueuedAt, ID: m.ID, Payload: m.Payload}"
+  - of: pluggedDeadLetter
+    steps:
+      - return: |-
+          plug.DeadLetterValue{
+          		FailedAt: d.FailedAt, Reason: d.Reason, Cause: d.Cause, Message: pluggedMessage(d.Message),
+          		Code: d.Code, Deliveries: d.Deliveries,
+          	}
+  - of: pluggedStep
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s == nil
+      - return:
+          closure:
+            params: ctx context.Context, ex plug.Executor
+            results: error
+            steps:
+              - return: s(ctx, ex)
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c == nil
+      - return: "sdkClock{Clock: c}"
+  - of: sdkClock.NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTimer
+        kind: self
+      - id: c.Clock.NewTimer
+        kind: value
+    steps:
+      - return: c.Clock.NewTimer(d)
+        to: c.Clock.NewTimer
+  - of: sdkClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTicker
+        kind: self
+      - id: c.Clock.NewTicker
+        kind: value
+    steps:
+      - return: c.Clock.NewTicker(d)
+        to: c.Clock.NewTicker
+  - of: (*sealedOutbox).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Publish
+        kind: self
+      - id: o.sealMail
+        kind: internal
+      - id: o.Broker.Publish
+        kind: value
+    steps:
+      - bind: box, err
+        eval: o.sealMail(ctx, payload)
+        to: o.sealMail
+      - opt:
+          do:
+            - return: queue.Message{}, err
+          when: err != nil
+      - return: o.Broker.Publish(ctx, box)
+        to: o.Broker.Publish
+  - of: (*sealedOutbox).Receive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Receive
+        kind: self
+      - id: o.Broker.Receive
+        kind: value
+      - id: o.open
+        kind: internal
+    steps:
+      - bind: deliveries, err
+        eval: o.Broker.Receive(ctx, maxMessages)
+        to: o.Broker.Receive
+      - loop:
+          do:
+            - set: deliveries[i].Message.Payload
+              to: o.open
+              value: o.open(ctx, deliveries[i].Message.Payload)
+          key: i
+          range: deliveries
+      - return: deliveries, err
+  - of: (*sealedOutbox).open
+    steps:
+      - opt:
+          do:
+            - return: payload
+          when: o.unseal == nil
+      - return: o.unseal(ctx, payload)
+  - of: (*sealedOutbox).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Wake
+        kind: self
+      - id: o.waker.Wake
+        kind: value
+    steps:
+      - return: o.waker.Wake()
+        to: o.waker.Wake
+  - of: (*sealedOutbox).Extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Extend
+        kind: self
+      - id: o.renew.Extend
+        kind: value
+    steps:
+      - return: o.renew.Extend(ctx, receipt, by)
+        to: o.renew.Extend
+  - of: (*sealedOutbox).Reject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Reject
+        kind: self
+      - id: o.reject.Reject
+        kind: value
+    steps:
+      - return: o.reject.Reject(ctx, receipt, cause)
+        to: o.reject.Reject
+  - of: (*sealedOutbox).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).DeadLetters
+        kind: self
+      - id: o.dead.DeadLetters
+        kind: value
+      - id: o.open
+        kind: internal
+    steps:
+      - bind: dead, err
+        eval: o.dead.DeadLetters(ctx, maxLetters)
+        to: o.dead.DeadLetters
+      - loop:
+          do:
+            - set: dead[i].Message.Payload
+              to: o.open
+              value: o.open(ctx, dead[i].Message.Payload)
+          key: i
+          range: dead
+      - return: dead, err
+  - of: (*sealedOutbox).Messages
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Messages
+        kind: self
+      - id: reader.Messages
+        kind: value
+      - id: o.open
+        kind: internal
+    steps:
+      - bind: reader, ok
+        eval: o.Broker.(queue.MessageReader)
+      - opt:
+          do:
+            - return: nil, o.lacks("MessageReader")
+          when: "!ok"
+      - bind: live, err
+        eval: reader.Messages(ctx, after, maxMessages)
+        to: reader.Messages
+      - loop:
+          do:
+            - set: live[i].Message.Payload
+              to: o.open
+              value: o.open(ctx, live[i].Message.Payload)
+          key: i
+          range: live
+      - return: live, err
+  - of: (*sealedOutbox).PutMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).PutMessage
+        kind: self
+      - id: o.sealMail
+        kind: internal
+      - id: writer.PutMessage
+        kind: value
+    steps:
+      - bind: writer, ok
+        eval: o.Broker.(queue.MessageWriter)
+      - opt:
+          do:
+            - return: "\"\", o.lacks(\"MessageWriter\")"
+          when: "!ok"
+      - bind: box, err
+        eval: o.sealMail(ctx, live.Message.Payload)
+        to: o.sealMail
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - set: live.Message.Payload
+        value: box
+      - return: writer.PutMessage(ctx, live)
+        to: writer.PutMessage
+  - of: (*sealedOutbox).PutDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).PutDeadLetter
+        kind: self
+      - id: o.sealMail
+        kind: internal
+      - id: writer.PutDeadLetter
+        kind: value
+    steps:
+      - bind: writer, ok
+        eval: o.Broker.(queue.DeadLetterWriter)
+      - opt:
+          do:
+            - return: "\"\", o.lacks(\"DeadLetterWriter\")"
+          when: "!ok"
+      - bind: box, err
+        eval: o.sealMail(ctx, dead.Message.Payload)
+        to: o.sealMail
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - set: dead.Message.Payload
+        value: box
+      - return: writer.PutDeadLetter(ctx, dead)
+        to: writer.PutDeadLetter
+  - of: (*sealedOutbox).sealMail
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(queue.MessageTooLarge, errs.WrapParams{},
+                			errs.String("mailer", o.node), errs.Int("bytes", len(payload)), errs.Int("max", o.max))
+          when: o.max > 0 && len(payload) > o.max
+      - return: o.seal(ctx, payload)
+  - of: (*sealedOutbox).lacks
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).lacks
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(queue.QueueMisconfigured, errs.WrapParams{},
+          		errs.String("mailer", o.node), errs.String("capability", capability))
+        to: errs
+  - of: (*sealedOutbox).ReplayDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).ReplayDeadLetter
+        kind: self
+      - id: o.manager.ReplayDeadLetter
+        kind: value
+    steps:
+      - return: o.manager.ReplayDeadLetter(ctx, id)
+        to: o.manager.ReplayDeadLetter
+  - of: (*sealedOutbox).DeleteDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).DeleteDeadLetter
+        kind: self
+      - id: o.manager.DeleteDeadLetter
+        kind: value
+    steps:
+      - return: o.manager.DeleteDeadLetter(ctx, id)
+        to: o.manager.DeleteDeadLetter
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Queues.Store
+        kind: value
+    steps:
+      - eval: |-
+          plug.Queues.Store(&plug.QueueDriverConfig{
+          		Open: open, TableMigration: tableMigration,
+          		DoNotRetry: queue.DoNotRetry, NotRetryable: notRetryable,
+          	})
+        to: plug.Queues.Store
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: policyOf
+        kind: internal
+      - id: clockOf
+        kind: internal
+      - id: openSQL
+        kind: internal
+      - id: queue
+        kind: package
+      - id: newSealedOutbox
+        kind: internal
+    steps:
+      - bind: policy
+        eval: policyOf(cfg.Policy)
+        to: policyOf
+      - bind: clk
+        eval: clockOf(cfg.Clock)
+        to: clockOf
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		b   queue.Broker
+          		err error
+          	)
+      - switch:
+          cases:
+            - case: cfg.Database != nil
+              do:
+                - set: b, err
+                  to: openSQL
+                  value: openSQL(&cfg, policy, clk)
+            - case: cfg.Dir != ""
+              do:
+                - set: b, err
+                  to: queue
+                  value: "queue.NewFile(queue.FileConfig{Clock: clk, Dir: cfg.Dir, Policy: policy})"
+            - default: true
+              do:
+                - set: b, err
+                  to: queue
+                  value: "queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})"
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: b, err
+                  eval: newSealedOutbox(b, &cfg)
+                  op: =
+                  to: newSealedOutbox
+                when: err != nil
+          when: cfg.Seal != nil
+      - opt:
+          do:
+            - set: b
+              value: wrap(b)
+          init:
+            bind: wrap, ok
+            eval: cfg.Wrap.(func(queue.Broker) queue.Broker)
+          when: ok && wrap != nil
+      - return: "&broker{q: b, clock: clk}, nil"
+  - of: openSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: openSQL
+        kind: self
+      - id: storeengine
+        kind: package
+      - id: queue
+        kind: package
+    steps:
+      - bind: tm, dialect, ok
+        eval: storeengine.SQLOf(cfg.Database)
+        to: storeengine
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(queue.SQLQueueMisconfigured, errs.WrapParams{},
+                			errs.String("queue", cfg.Name), errs.String("problem", "the queue's database was not opened by the store subsystem"))
+          when: "!ok"
+      - return: "queue.NewSQL(queue.SQLConfig{Table: cfg.Table, Policy: policy, Clock: clk, Transactor: tm, Dialect: dialect})"
+        to: queue
+  - of: policyOf
+    steps:
+      - return: |-
+          queue.Policy{
+          		VisibilityTimeout: p.VisibilityTimeout, RetryDelay: p.RetryDelay, MaxRetryDelay: p.MaxRetryDelay,
+          		MaxDeliveries: p.MaxDeliveries, MaxMessageBytes: p.MaxMessageBytes,
+          	}
+  - of: notRetryable
+    participants:
+      - id: caller
+        kind: actor
+      - id: notRetryable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.HasCode(err, queue.CodeNotRetryable)
+        to: errs
+  - of: tableMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: tableMigration
+        kind: self
+      - id: dialectOf
+        kind: internal
+      - id: queue
+        kind: package
+    steps:
+      - bind: d, err
+        eval: dialectOf(dialect)
+        to: dialectOf
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - bind: m, err
+        eval: queue.SQLMigration(d, table, version)
+        to: queue
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - return: "plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}, nil"
+  - of: dialectOf
+    steps:
+      - switch:
+          cases:
+            - case: model.EnginePostgres
+              do:
+                - return: sql.DialectPostgres, nil
+            - case: model.EngineMySQL
+              do:
+                - return: sql.DialectMySQL, nil
+            - case: model.EngineSQLite
+              do:
+                - return: sql.DialectSQLite, nil
+          "on": name
+      - return: 0, errs.Wrap(sql.UnknownDialect, errs.WrapParams{}, errs.String("dialect", name))

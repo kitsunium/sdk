@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
+  name: strictjson
+  purpose: Package strictjson declares the error codes and the sentinels of the strict JSON decoder (not a codec), internal/service/data/codec/strictjson — range 0.3.72.* (ADR 0102 service/data/codec/strictjson block).
+types: []

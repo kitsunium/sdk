@@ -1,0 +1,14 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Compose
+    participants:
+      - id: caller
+        kind: actor
+      - id: Compose
+        kind: self
+      - id: svcmail.NewComposer(ComposerConfig{}).Compose
+        kind: value
+    steps:
+      - return: svcmail.NewComposer(ComposerConfig{}).Compose(msg)
+        to: svcmail.NewComposer(ComposerConfig{}).Compose

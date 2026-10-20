@@ -1,0 +1,148 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Unusable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Unusable
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: rv.Type
+        kind: value
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: "\"nil\""
+          when: "!rv.IsValid()"
+      - bind: t
+        eval: rv.Type()
+        to: rv.Type
+      - switch:
+          cases:
+            - case: reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer, reflect.Interface
+              do:
+                - opt:
+                    do:
+                      - return: "\"nil \" + t.String()"
+                    when: rv.IsNil()
+            - default: true
+          "on": rv.Kind()
+      - opt:
+          do:
+            - return: t.String() + " is not comparable"
+          when: "!t.Comparable()"
+      - return: "\"\""
+  - of: (*Registry).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Registry).Publish
+        kind: self
+      - id: r.Claim
+        kind: internal
+    steps:
+      - bind: holder, taken
+        eval: r.Claim(name, value)
+        to: r.Claim
+      - return: taken && holder != value
+  - of: (*Registry).Claim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Registry).Claim
+        kind: self
+      - id: r.table.Update
+        kind: value
+    steps:
+      - eval: |-
+          r.table.Update(func(current *map[K]V) *map[K]V {
+          		//: an existing entry is reported, never replaced.
+          		if current != nil {
+          			//: the name is taken: report what holds it, allocating nothing.
+          			if existing, found := (*current)[name]; found {
+          				//: read by the caller once Update returns.
+          				holder, taken = existing, true
+          				//: the snapshot stays as it is.
+          				return current
+          			}
+          		}
+          		//: copy forward and insert, then publish the copy atomically.
+          		return new(cloneWith(current, name, value))
+          	})
+        to: r.table.Update
+      - return: holder, taken
+  - of: (*Registry).Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Registry).Lookup
+        kind: self
+      - id: r.table.Load
+        kind: value
+    steps:
+      - bind: current
+        eval: r.table.Load()
+        to: r.table.Load
+      - opt:
+          do:
+            - return: value, false
+          when: current == nil
+      - set: value, found
+        value: (*current)[name]
+      - return: value, found
+  - of: (*Registry).Names
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Registry).Names
+        kind: self
+      - id: r.table.Load
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: current
+        eval: r.table.Load()
+        to: r.table.Load
+      - opt:
+          do:
+            - return: nil
+          when: current == nil
+      - bind: names
+        eval: slices.AppendSeq(make([]K, 0, len(*current)), maps.Keys(*current))
+        to: slices
+      - eval: slices.Sort(names)
+        to: slices
+      - return: names
+  - of: cloneWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneWith
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - var:
+          name: size
+          type: int
+      - opt:
+          do:
+            - set: size
+              value: len(*src)
+          when: src != nil
+      - bind: next
+        eval: make(map[K]V, size+1)
+      - opt:
+          do:
+            - eval: maps.Copy(next, *src)
+              to: maps
+          when: src != nil
+      - set: next[name]
+        value: value
+      - return: next

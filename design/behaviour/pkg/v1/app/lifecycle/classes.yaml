@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/lifecycle
+  name: lifecycle
+  purpose: "Package lifecycle is the public facade for the SDK's ordered start/stop domain: components come up in the order you declare them, and go down in the exact reverse."
+types: []

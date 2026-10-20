@@ -1,0 +1,70 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: algorithm is the canonical registry key for HMAC-SHA256.
+    items:
+      - name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"hmac-sha256\""
+    name: algorithm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - algorithm
+      - MAC
+      - hmacSHA256
+      - hmacSHA256.Algorithm
+      - hmacSHA256.Tag
+      - hmacSHA256.Verify
+      - hmacSHA256.New
+    name: hmacsha2.go
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  hash: hash
+  hmac: crypto/hmac
+  sha256: crypto/sha256
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2
+  name: hmacsha2
+  purpose: Package hmacsha2 registers the "hmac-sha256" MAC scheme (ADR 0014).
+types:
+  - doc: hmacSHA256 implements core/crypto.MAC over crypto/hmac with SHA-256.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: hmacSHA256
+        results: corecrypto.Algorithm
+      - doc: |-
+          Tag returns the HMAC-SHA256 authentication tag over message under key. The
+          redacting Key pins the length so this cannot fail; key.Bytes() goes straight
+          to the MAC and is never logged.
+        name: Tag
+        params: key corecrypto.Key, message []byte
+        recv: hmacSHA256
+        results: "[]byte"
+      - doc: |-
+          Verify reports whether tag authenticates message under key, comparing with
+          hmac.Equal so the check is constant-time and never a timing oracle.
+        name: Verify
+        params: key corecrypto.Key, message, tag []byte
+        recv: h hmacSHA256
+        results: bool
+      - doc: |-
+          New returns a fresh streaming hash.Hash keyed by key for incremental tagging
+          over large inputs, paralleling Hasher.New.
+        name: New
+        params: key corecrypto.Key
+        recv: hmacSHA256
+        results: hash.Hash
+    name: hmacSHA256
+vars:
+  - doc: |-
+      MAC is the registered HMAC-SHA256 scheme singleton (no init(); package-level
+      var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: MAC
+        value: corecrypto.RegisterMAC(hmacSHA256{})
+    name: MAC

@@ -1,0 +1,132 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: yieldKeys
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!yield(key, nil)"
+          key: _
+          range: keys
+          value: key
+      - opt:
+          do:
+            - return: "true"
+          when: failure == nil
+      - return: yield("", failure) && failure == nil
+  - of: fileableKeys
+    steps:
+      - bind: out
+        eval: make([]string, 0, len(raw))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, k)
+                when: k != "" && !slices.Contains(out, k)
+          key: _
+          range: raw
+          value: k
+      - return: out
+  - of: (*index).drop
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(holders, owner)
+                  - opt:
+                      do:
+                        - eval: delete(ix.entries, k)
+                      when: len(holders) == 0
+                init:
+                  bind: holders
+                  eval: ix.entries[k]
+                when: holders != nil
+          key: _
+          range: ix.owned[owner]
+          value: k
+      - eval: delete(ix.owned, owner)
+  - of: (*Store).uniqueTaken
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: ix.name, true
+                when: ix.taken(owner, keys[i])
+          key: i
+          range: s.indexes
+          value: ix
+      - return: "\"\", false"
+  - of: isEntryName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(name) != entryNameLen || !strings.HasSuffix(name, entrySuffix)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: (c < '0' || c > '9') && (c < 'a' || c > 'f')
+          key: _
+          range: name[:len(name)-len(entrySuffix)]
+          value: c
+      - return: "true"
+  - of: isTableName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: name == ""
+      - loop:
+          do:
+            - bind: c
+              eval: name[i]
+            - opt:
+                do:
+                  - return: "false"
+                when: (c < 'a' || c > 'z') && c != '_' && (i == 0 || c < '0' || c > '9')
+          key: i
+          range: len(name)
+      - return: "true"
+  - of: rowArgs
+    steps:
+      - bind: args
+        eval: make([]any, 0, indexRowArgs*len(batch))
+      - loop:
+          do:
+            - var:
+                name: uniq
+                type: any
+            - opt:
+                do:
+                  - set: uniq
+                    value: int64(1)
+                when: row.unique
+            - set: args
+              value: append(args, []byte(row.name), row.key, key, uniq)
+          key: _
+          range: batch
+          value: row
+      - return: args
+  - of: pickVersion
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: v, nil
+                when: v.Number == number
+          key: _
+          range: all
+          value: v
+      - return: |-
+          coredocstore.VersionValue{}, kerrs.Wrap(coredocstore.VersionNotFound, kerrs.WrapParams{},
+          		kerrs.String("store", store), kerrs.String("number", strconv.FormatUint(number, 10)))

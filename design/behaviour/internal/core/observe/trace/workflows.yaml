@@ -1,0 +1,50 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: StateValue.Insert
+    steps:
+      - opt:
+          do:
+            - return: StateValue{}, InvalidTraceState
+          when: "!isValidTraceStateKey(key) || !isValidMemberValue(value)"
+      - bind: next
+        eval: make([]traceStateEntry, 0, len(s.entries)+1)
+      - set: next
+        value: "append(next, traceStateEntry{key: key, value: value})"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: next
+                    value: append(next, entry)
+                when: entry.key != key
+          key: _
+          range: s.entries
+          value: entry
+      - return: "StateValue{entries: next[:min(len(next), MaxTraceStateMembers)]}, nil"
+  - of: allTraceStateKeyChars
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isTraceStateKeyChar(tail[i])"
+          key: i
+          range: len(tail)
+      - return: "true"
+  - of: isValidMemberValue
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(value) == 0 || len(value) > MaxTraceStateValueLen || value[len(value)-1] == ' '
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isMemberValueChar(value[i])"
+          key: i
+          range: len(value)
+      - return: "true"

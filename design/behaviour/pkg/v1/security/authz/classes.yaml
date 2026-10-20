@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/security/authz
+  name: authz
+  purpose: "Package authz is the public facade for the SDK's authorization domain: it answers \"may this subject do this to that\", and nothing else."
+types: []

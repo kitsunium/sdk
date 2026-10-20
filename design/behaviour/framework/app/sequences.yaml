@@ -1,0 +1,253 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - forward: iapp.NewApp
+    of: NewApp
+  - forward: iapp.Analyzer
+    of: Analyzer
+  - forward: iapp.Profile
+    of: Profile
+  - forward: iapp.IdleStop
+    of: IdleStop
+  - forward: iapp.Singleton
+    of: Singleton
+  - forward: iapp.SingletonPer
+    of: SingletonPer
+  - forward: iapp.Stop
+    of: Stop
+  - forward: iapp.Auth
+    of: Auth
+  - forward: iapp.AuthOptional
+    of: AuthOptional
+  - forward: iapp.UserID
+    of: UserID
+  - of: AuthData
+    steps:
+      - return: iapp.AuthData[D](ctx)
+  - of: WithUser
+    steps:
+      - return: iapp.WithUser[D](ctx, uid, data)
+  - forward: iapp.Catalog
+    of: Catalog
+  - forward: iapp.NewID
+    of: NewID
+  - forward: iapp.DefaultCommand
+    of: DefaultCommand
+  - forward: iapp.FailSafe
+    of: FailSafe
+  - forward: iapp.Queued
+    of: Queued
+  - forward: iapp.NoTransaction
+    of: NoTransaction
+  - forward: iapp.Env
+    of: Env
+  - forward: iapp.Listen
+    of: Listen
+  - forward: iapp.DataDir
+    of: DataDir
+  - forward: iapp.Studio
+    of: Studio
+  - forward: iapp.Analyze
+    of: Analyze
+  - forward: iapp.Logs
+    of: Logs
+  - forward: iapp.Clock
+    of: Clock
+  - forward: iapp.InMemory
+    of: InMemory
+  - forward: iapp.Keeps
+    of: Keeps
+  - forward: iapp.Migrations
+    of: Migrations
+  - forward: iapp.Statements
+    of: Statements
+  - forward: iapp.Irreversible
+    of: Irreversible
+  - forward: iapp.Database
+    of: Database
+  - forward: iapp.Name
+    of: Name
+  - forward: iapp.MaxBody
+    of: MaxBody
+  - forward: iapp.RateLimit
+    of: RateLimit
+  - forward: iapp.Timeout
+    of: Timeout
+  - forward: iapp.Bulkhead
+    of: Bulkhead
+  - forward: iapp.Invalid
+    of: Invalid
+  - forward: iapp.NotFound
+    of: NotFound
+  - forward: iapp.Conflict
+    of: Conflict
+  - forward: iapp.Unauthenticated
+    of: Unauthenticated
+  - forward: iapp.Forbidden
+    of: Forbidden
+  - forward: iapp.Unavailable
+    of: Unavailable
+  - forward: iapp.Anyone
+    of: Anyone
+  - forward: iapp.AnyUser
+    of: AnyUser
+  - forward: iapp.HoldSubject
+    of: HoldSubject
+  - of: Unique
+    steps:
+      - return: iapp.Unique[T](name, key)
+  - of: Index
+    steps:
+      - return: iapp.Index[T](name, keys)
+  - forward: iapp.SocketPath
+    of: SocketPath
+  - forward: iapp.SocketPer
+    of: SocketPer
+  - forward: iapp.AllowPeers
+    of: AllowPeers
+  - forward: iapp.SocketPathFor
+    of: SocketPathFor
+  - forward: iapp.WakeEvery
+    of: WakeEvery
+  - forward: iapp.WakeAt
+    of: WakeAt
+  - of: WakeOn
+    steps:
+      - return: iapp.WakeOn[T](topic)
+  - forward: iapp.From
+    of: From
+  - forward: iapp.MailAttempts
+    of: MailAttempts
+  - forward: iapp.NewModule
+    of: NewModule
+  - forward: iapp.Requires
+    of: Requires
+  - forward: iapp.Mount
+    of: Mount
+  - forward: iapp.Prefix
+    of: Prefix
+  - forward: iapp.Only
+    of: Only
+  - forward: iapp.MinLength
+    of: MinLength
+  - forward: iapp.NotReused
+    of: NotReused
+  - forward: iapp.NotCommon
+    of: NotCommon
+  - of: Fallback
+    steps:
+      - return: iapp.Fallback[Req, Resp](op)
+  - of: Bind
+    steps:
+      - return: iapp.Bind[Req, Resp](port, op)
+  - forward: iapp.Erase
+    of: Erase
+  - forward: iapp.Export
+    of: Export
+  - forward: iapp.RateLimitPerClient
+    of: RateLimitPerClient
+  - forward: iapp.RecordsOf
+    of: RecordsOf
+  - of: Replace
+    steps:
+      - return: iapp.Replace[Req, Resp](op, fn)
+  - of: SetCookie
+    participants:
+      - id: caller
+        kind: actor
+      - id: SetCookie
+        kind: self
+      - id: iapp
+        kind: package
+    steps:
+      - eval: iapp.SetCookie(ctx, c)
+        to: iapp
+  - of: ClearCookie
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClearCookie
+        kind: self
+      - id: iapp
+        kind: package
+    steps:
+      - eval: iapp.ClearCookie(ctx, name)
+        to: iapp
+  - forward: iapp.ClientIP
+    of: ClientIP
+  - forward: iapp.UserAgent
+    of: UserAgent
+  - forward: iapp.Now
+    of: Now
+  - forward: iapp.NewTicker
+    of: NewTicker
+  - forward: iapp.After
+    of: After
+  - forward: iapp.Log
+    of: Log
+  - of: EraseAfter
+    steps:
+      - return: iapp.EraseAfter[T, D](delay, since)
+  - of: EraseAt
+    steps:
+      - return: iapp.EraseAt[T](at)
+  - of: DeleteAfter
+    steps:
+      - return: iapp.DeleteAfter[T, D](delay, since)
+  - of: DeleteAt
+    steps:
+      - return: iapp.DeleteAt[T](at)
+  - of: Anonymise
+    steps:
+      - return: iapp.Anonymise[T](fn)
+  - of: HeldUntil
+    steps:
+      - return: iapp.HeldUntil[T](until, reason)
+  - forward: iapp.Purpose
+    of: Purpose
+  - forward: iapp.DeleteOnErasure
+    of: DeleteOnErasure
+  - forward: iapp.RetentionByProduct
+    of: RetentionByProduct
+  - forward: iapp.Revisions
+    of: Revisions
+  - forward: iapp.NewBinary
+    of: NewBinary
+  - forward: iapp.PerEnv
+    of: PerEnv
+  - forward: iapp.ScopeKey
+    of: ScopeKey
+  - forward: iapp.Generated
+    of: Generated
+  - forward: iapp.RotateEvery
+    of: RotateEvery
+  - forward: iapp.KeepVersions
+    of: KeepVersions
+  - forward: iapp.Optional
+    of: Optional
+  - forward: iapp.SecretStore
+    of: SecretStore
+  - forward: iapp.NewService
+    of: NewService
+  - forward: iapp.Required
+    of: Required
+  - forward: iapp.Set
+    of: Set
+  - forward: iapp.ConfigFiles
+    of: ConfigFiles
+  - forward: iapp.Root
+    of: Root
+  - forward: iapp.ReadModel
+    of: ReadModel
+  - forward: iapp.Telemetry
+    of: Telemetry
+  - forward: iapp.DesignDigest
+    of: DesignDigest
+  - forward: iapp.MaxDeliveries
+    of: MaxDeliveries
+  - forward: iapp.Parallelism
+    of: Parallelism
+  - forward: iapp.OwnStores
+    of: OwnStores
+  - forward: iapp.Transact
+    of: Transact

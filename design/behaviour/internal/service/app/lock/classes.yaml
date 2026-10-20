@@ -1,0 +1,1210 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      platformNative reports that this GOOS has both halves the file locker rests
+      on: the kernel's file lock and an open that refuses an indirection planted
+      at the lock path. NewFileLocker reads it and refuses at CONSTRUCTION where it
+      is false, so the refusal arrives where the program is wired rather than at
+      the first contended section — and no locker is ever built that would report
+      success while excluding nothing.
+    items:
+      - name: platformNative
+        type: bool
+        value: flock.Native && hardenedOpen
+    name: platformNative
+  - doc: |-
+      kindIndirection names what was found at a parent component.
+
+      It is deliberately NOT the platform spelling [openLockFile] uses. A parent
+      component is judged through fs.FileMode, which maps a Unix symbolic link, a
+      Windows symbolic link and a Windows directory junction onto the same bit —
+      so naming one of the three would be a guess, and the `target` field says
+      where it actually goes, which is the thing an operator needs.
+    items:
+      - name: kindIndirection
+        type: string
+        value: "\"indirection\""
+    name: kindIndirection
+  - doc: |-
+      worldWritable is the permission bit that makes a directory's entries
+      replaceable by any account.
+    items:
+      - name: worldWritable
+        type: fs.FileMode
+        value: "0o002"
+    name: worldWritable
+  - doc: |-
+      fenceBase is the radix the ledger is written in. Decimal is chosen over a
+      fixed-width binary encoding so the file is readable with cat during an
+      incident, which is when someone actually looks at it.
+    items:
+      - name: fenceBase
+        type: int
+        value: "10"
+    name: fenceBase
+  - doc: fenceBits is the width strconv parses and formats the counter at.
+    items:
+      - name: fenceBits
+        type: int
+        value: "64"
+    name: fenceBits
+  - doc: |-
+      maxFenceBytes caps how much of the lock file is read before deciding it is
+      not a counter. A decimal uint64 is at most 20 digits; anything an order of
+      magnitude past that is not a ledger and is refused without being read whole.
+    items:
+      - name: maxFenceBytes
+        type: int
+        value: "64"
+    name: maxFenceBytes
+  - doc: |-
+      exhaustedFence is the one parseable value the ledger cannot be advanced from.
+      The mint is previous+1 on a uint64, so on this value it wraps to zero and the
+      counter starts again from the bottom — reissuing, in order, every token the
+      protected resource has already accepted. That is the same failure
+      [corelock.LockFenceCorrupt] refuses a wrecked file for, reached by arithmetic instead
+      of by bad bytes, so it carries the same verdict.
+    items:
+      - name: exhaustedFence
+        type: uint64
+        value: math.MaxUint64
+    name: exhaustedFence
+  - doc: |-
+      lockSuffix names a lock file. The stem is the SHA-256 of the lock name, so
+      any name a caller can write maps to exactly one usable filename: no path
+      separator escapes the directory, no length limit is hit, and no two distinct
+      names collide by way of a filesystem's case folding or Unicode
+      normalisation — all three of which turn "two locks" into "one lock" or
+      "one lock" into "two", silently.
+    items:
+      - name: lockSuffix
+        type: string
+        value: "\".lock\""
+    name: lockSuffix
+  - doc: |-
+      defaultPoll is the interval between flock(2) attempts while another PROCESS
+      holds the lock.
+
+      It is a clamp, not a refusal, and the difference from MemoryConfig.TTL is
+      the point of ADR 0031: a poll interval has one obviously-right order of
+      magnitude — short enough that a handover is not noticeable, long enough that
+      a contended lock does not spin a core — and no caller's correctness depends
+      on the exact value. A lease lifetime has neither property.
+    items:
+      - name: defaultPoll
+        type: time.Duration
+        value: 25 * time.Millisecond
+    name: defaultPoll
+  - doc: |-
+      lockDirMode is the mode a lock directory is CREATED with when it does not
+      exist. An existing directory is checked, never changed — see [checkDir].
+    items:
+      - name: lockDirMode
+        type: fs.FileMode
+        value: "0o700"
+    name: lockDirMode
+  - doc: lockFileMode is the mode a lock file is created with.
+    items:
+      - name: lockFileMode
+        type: fs.FileMode
+        value: "0o600"
+    name: lockFileMode
+  - doc: |-
+      observedUnlinked is the `observed` field's value when the lock file's name
+      has no entry at all — the attack's own shape, and the only one that can be
+      distinguished from a replacement with certainty.
+    items:
+      - name: observedUnlinked
+        type: string
+        value: "\"unlinked\""
+    name: observedUnlinked
+  - doc: |-
+      observedReplaced is the `observed` field's value when the name exists and
+      resolves to a different file from the one this descriptor holds.
+    items:
+      - name: observedReplaced
+        type: string
+        value: "\"replaced\""
+    name: observedReplaced
+  - doc: |-
+      initialNames is the capacity hint for both per-name maps. A process
+      typically guards a handful of named resources, not thousands; the hint costs
+      one small allocation and saves the first few rehashes.
+    items:
+      - name: initialNames
+        type: int
+        value: "8"
+    name: initialNames
+  - doc: kindSymlink names this platform's indirection in the refusal's fields.
+    items:
+      - name: kindSymlink
+        type: string
+        value: "\"symlink\""
+    name: kindSymlink
+  - doc: |-
+      hardenedOpen reports that this GOOS's [openLockFile] refuses an indirection
+      planted at the lock path — O_NOFOLLOW, here. It is true exactly where
+      internal/kernel/fs/flock.Native is: a platform gains the lock and its
+      hardening together, or neither (backend.go).
+    items:
+      - name: hardenedOpen
+        type: bool
+        value: "true"
+    name: hardenedOpen
+files:
+  - decls:
+      - platformNative
+    name: backend.go
+  - decls:
+      - kindIndirection
+      - checkChain
+      - noteUninspected
+      - parentRedirected
+    name: chain.go
+  - decls:
+      - MemoryConfig
+      - MemoryConfig.validate
+      - MemoryConfig.clockOrSystem
+    name: config.go
+  - decls:
+      - worldWritable
+      - checkDir
+      - plantable
+    name: dirsafety_posix.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - fenceBase
+      - fenceBits
+      - maxFenceBytes
+      - exhaustedFence
+      - fenceFile
+      - readFence
+      - writeFence
+      - backendFailed
+    name: fence.go
+  - decls:
+      - lockSuffix
+      - fileLocker
+      - NewFileLocker
+      - (*fileLocker).Acquire
+      - (*fileLocker).TryAcquire
+      - (*fileLocker).takeFlock
+      - (*fileLocker).contend
+      - (*fileLocker).sleep
+      - (*fileLocker).mintLease
+      - (*fileLocker).pathFor
+      - (*fileLocker).release
+      - foldAbandon
+      - releaseIfLocked
+      - abandonDetail
+      - firstNonNil
+    name: file.go
+  - decls:
+      - defaultPoll
+      - lockDirMode
+      - lockFileMode
+      - FileConfig
+      - FileConfig.validate
+      - FileConfig.pollOrDefault
+      - FileConfig.clockOrSystem
+      - prepareDir
+      - checkCreated
+    name: file_config.go
+  - decls:
+      - fileLease
+      - newFileLease
+      - (*fileLease).Fence
+      - (*fileLease).Extend
+      - (*fileLease).Release
+    name: file_lease.go
+  - decls:
+      - nameGate
+      - newNameGate
+      - (*nameGate).tryEnter
+      - (*nameGate).enter
+      - (*nameGate).leave
+    name: gate.go
+  - decls:
+      - holding
+      - (*holding).end
+    name: holding.go
+  - decls:
+      - observedUnlinked
+      - observedReplaced
+      - statter
+      - sameEntry
+      - fileReplaced
+    name: identity.go
+  - decls:
+      - KeepaliveConfig
+      - KeepaliveConfig.validate
+      - KeepaliveConfig.clockOrSystem
+      - Keepalive
+      - renewUntilLost
+      - keepaliveLost
+    name: keepalive.go
+  - decls:
+      - _
+    name: lock_compliance.go
+  - decls:
+      - initialNames
+      - memoryLocker
+      - NewMemory
+      - (*memoryLocker).Acquire
+      - (*memoryLocker).TryAcquire
+      - (*memoryLocker).attempt
+      - (*memoryLocker).await
+      - (*memoryLocker).release
+      - (*memoryLocker).extend
+      - notHeld
+      - checkName
+    name: memory.go
+  - decls:
+      - memoryLease
+      - newMemoryLease
+      - (*memoryLease).Fence
+      - (*memoryLease).Deadline
+      - (*memoryLease).Extend
+      - (*memoryLease).Release
+    name: memory_lease.go
+  - decls:
+      - pathRedirected
+    name: nofollow.go
+  - decls:
+      - kindSymlink
+      - hardenedOpen
+      - openLockFile
+      - classifyOpenFailure
+    name: nofollow_unix.go
+functions:
+  - doc: |-
+      checkChain refuses the lock directory when any component of its path is an
+      indirection that anybody could have planted.
+
+      It runs at CONSTRUCTION, once, and it is an audit of the caller's own
+      configuration rather than a guard on a hot path — which is also the limit
+      worth stating: a component replaced after this returns is not seen by it.
+      The component this package derives, the lock file's own name, is guarded at
+      every open instead, by [openLockFile], because that is the one an attacker
+      can predict without being told anything.
+    name: checkChain
+    params: dir string
+    results: error
+  - doc: |-
+      noteUninspected records that a component's container was accepted without
+      having been inspected.
+
+      [plantable] answers "not plantable" for a container it judged safe AND for
+      one it could not judge at all, because there is no third verdict to return
+      and refusing on a platform API failure would cost a caller a locker on a
+      directory that is perfectly safe. The two are still different facts, and
+      only one of them means the protection ran.
+
+      observed is EMPTY whenever a verdict was reached, so nothing here fires on
+      the ordinary path — and on Unix it never fires at all, since reading a mode
+      cannot fail once the component has been described.
+    name: noteUninspected
+    params: container, observed string
+  - doc: |-
+      parentRedirected builds the [corelock.LockPathRedirected] refusal for a component
+      ABOVE the lock file.
+
+      It names both paths on purpose. The configured directory is what the
+      operator typed and will search for; the component is where the redirection
+      actually is, and it is usually neither the first nor the last thing they
+      would have looked at.
+    name: parentRedirected
+    params: dir string, step pathchain.StepValue, observed string
+    results: error
+  - doc: |-
+      checkDir refuses a directory whose entries any account can replace.
+
+      Group-writable is ACCEPTED: a lock shared between two service accounts
+      through a common group is a deliberate arrangement, and refusing it would
+      push callers to a world-writable directory instead. World-writable WITH the
+      sticky bit is accepted for the same reason — that is exactly what /tmp is,
+      and the sticky bit is precisely the rule that only an entry's owner may
+      unlink it. World-writable WITHOUT it is refused: unlinking the lock file and
+      creating a new one gives the next process a different inode to lock, so two
+      processes hold "the same" lock and neither can observe the other.
+
+      The whole table is pinned by TestTheDirectoryRuleIsOtherWriteAndNotSticky,
+      including the four ACCEPTING rows — which is the half a build-tag split
+      loses without noticing, since a guard on 0777 alone still passes while the
+      deliberate arrangements stop working.
+    name: checkDir
+    params: dir string, info fs.FileInfo
+    results: error
+  - doc: |-
+      plantable reports whether any account could create an entry in the directory
+      a component was found in, and renders what it read.
+
+      The path is unused here and is the whole of the answer on Windows, where
+      there are no mode bits to read — see dirsafety_windows.go.
+
+      The sticky bit is deliberately NOT consulted, and that is the whole
+      difference from [checkDir]. Sticky says only an entry's owner may UNLINK it;
+      it says nothing about creating one at a name nobody has taken. [checkDir]
+      asks who can replace the lock file, which is an unlink, so sticky exempts a
+      directory there. [checkChain] asks who could have planted a component of the
+      path, which is a creation, so sticky exempts nothing here — and 0777|sticky,
+      which is exactly what /tmp is, is plantable.
+    name: plantable
+    params: container fs.FileMode, _ string
+    results: yes bool, observed string
+  - doc: |-
+      readFence returns the highest fencing token recorded in file, and guarantees
+      its caller that the value returned has a successor.
+
+      An EMPTY file is 0, and that is the only lenient case: a lock file is
+      created empty by the first acquisition, so 0 is the honest reading of "no
+      acquisition has happened yet". Any other unparseable content is REFUSED,
+      never reset — see [corelock.LockFenceCorrupt] for why a restarted counter is worse
+      than no counter.
+
+      [exhaustedFence] is refused for that same reason even though it parses
+      cleanly: it is the one value from which the next token is not larger but
+      zero. Judging it HERE rather than at the increment is what lets [mintLease]
+      stay a plain previous+1 — the ledger's validity is decided in one place, and
+      "can this be read as a counter" and "can this counter be advanced" are the
+      same question asked of the same bytes.
+    name: readFence
+    params: file fenceFile, path string
+    results: fence uint64, err error
+  - doc: |-
+      writeFence records fence in file and forces it to the medium.
+
+      The Sync is not optional. A fencing token that is issued to a caller and
+      then lost to a crash is reissued to the next caller, which is precisely the
+      duplicate the token exists to make impossible. The cost — one fsync per
+      acquisition — is paid on a path that already blocks on a lock.
+    name: writeFence
+    params: file fenceFile, path string, fence uint64
+    results: error
+  - doc: backendFailed builds the LOCK_BACKEND_FAILED outcome for a medium error.
+    name: backendFailed
+    params: op, path string, cause error
+    results: error
+  - name: NewFileLocker
+    params: cfg FileConfig
+    results: locker corelock.Locker, err error
+  - doc: |-
+      foldAbandon folds a failure to give an unusable descriptor back into cause,
+      which is the error the caller actually needs.
+
+      Nothing is discarded here. A failed unlock or close cannot change whether
+      the lock was taken — that question is already answered by cause — but a
+      filesystem refusing either is a fault worth carrying, so it travels as a
+      FIELD on the returned error rather than replacing it. When cause is nil (the
+      TryAcquire "another process holds it" answer) a clean abandon reports nil,
+      keeping that outcome an answer rather than an error.
+    name: foldAbandon
+    params: cause error, path string, unlockErr, closeErr error
+    results: error
+  - doc: releaseIfLocked unlocks file only when this caller actually holds the lock.
+    name: releaseIfLocked
+    params: file *os.File, locked bool
+    results: error
+  - doc: abandonDetail renders the unlock and close failures as one field value.
+    name: abandonDetail
+    params: unlockErr, closeErr error
+    results: string
+  - doc: firstNonNil returns the first non-nil of two errors.
+    name: firstNonNil
+    params: first, second error
+    results: error
+  - doc: |-
+      prepareDir audits the path, then creates dir if it is absent and checks it
+      if it is not.
+
+      The chain audit runs FIRST, before anything is created. os.MkdirAll follows
+      an indirection at a parent component, so auditing afterwards would mean
+      refusing the directory only after having created it inside whatever tree the
+      indirection pointed at.
+    name: prepareDir
+    params: dir string
+    results: error
+  - doc: |-
+      checkCreated applies the safety rule to a directory this process has just
+      created.
+
+      It is not a formality on every platform. A directory created on Windows
+      INHERITS its parent's access control list, and lockDirMode has no meaning
+      there at all, so "we made it, therefore it is safe" holds on Unix and is
+      false on Windows.
+    name: checkCreated
+    params: dir string
+    results: error
+  - doc: newFileLease binds a lease to a held flock.
+    name: newFileLease
+    params: locker *fileLocker, file *os.File, path, name string, fence uint64
+    results: "*fileLease"
+  - doc: newNameGate builds an empty gate.
+    name: newNameGate
+    results: "*nameGate"
+  - doc: |-
+      sameEntry reports whether path still names the file behind file.
+
+      It answers NO only when that can be positively established: the name is
+      gone, or the name resolves to a different file. Every inconclusive
+      answer — a stat this process is not allowed to take, a medium that did not
+      respond — is reported as YES, because a lock that starts refusing renewals
+      on a stat hiccup fails the caller harder than the attack it is watching for,
+      and there is no third verdict to return.
+
+      os.Lstat, never os.Stat: an indirection planted at the name AFTER the open
+      is exactly the replacement being looked for, and following it would compare
+      this descriptor against the planter's chosen target and find them equal.
+
+      os.SameFile is the comparison because it is the portable spelling of the
+      question. On Unix it is (dev, ino) off the two stat structures. On Windows
+      it is the volume serial and the file index, which the standard library loads
+      by opening the path with a desired access of ZERO — a request Windows does
+      not subject to the sharing check, which is why this works on a file the
+      caller holds open without FILE_SHARE_DELETE.
+    name: sameEntry
+    params: file statter, path string
+    results: same bool, observed string
+  - doc: |-
+      fileReplaced builds the [corelock.LockFileReplaced] refusal.
+
+      fence is the token the lease was still handing out, because that is the
+      number the protected resource has been accepting and the one an operator has
+      to grep their own logs for to find out how far the split reached. It is ZERO
+      from Acquire, where no token had been issued yet — which is itself the
+      difference between the two sites, so it is a value rather than an omission.
+    name: fileReplaced
+    params: op, path, name string, fence uint64, observed string
+    results: error
+  - name: Keepalive
+    params: ctx context.Context, lease corelock.Lease, cfg KeepaliveConfig
+    results: guarded context.Context, stop context.CancelFunc, err error
+  - doc: |-
+      renewUntilLost extends lease on every tick until the derived context ends or
+      a renewal fails.
+
+      Goroutine lifecycle: this IS the keepalive's single goroutine. It returns on
+      ctx.Done (stop, parent cancellation, or its own cancel below) and on the
+      first failed renewal, and it stops the ticker on the way out — so it can
+      neither outlive the context it was given nor leave a timer armed.
+    name: renewUntilLost
+    params: ctx context.Context, cancel context.CancelCauseFunc, ticker clock.Ticker, lease corelock.Lease
+  - doc: keepaliveLost builds the cancellation cause for a failed renewal.
+    name: keepaliveLost
+    params: cause error, fence uint64
+    results: error
+  - name: NewMemory
+    params: cfg MemoryConfig
+    results: locker corelock.Locker, err error
+  - doc: notHeld builds the LOCK_NOT_HELD outcome with the operation that produced it.
+    name: notHeld
+    params: op, name string, token uint64
+    results: error
+  - doc: checkName refuses a name no locker can use.
+    name: checkName
+    params: name string
+    results: error
+  - doc: newMemoryLease binds a lease to a fresh holding.
+    name: newMemoryLease
+    params: locker *memoryLocker, name string, held *holding
+    results: "*memoryLease"
+  - doc: |-
+      pathRedirected builds the [corelock.LockPathRedirected] refusal.
+
+      kind says which indirection was found — "symlink" on Unix, "reparse_point"
+      on Windows, the latter covering a symbolic link and a junction alike since
+      both are reparse points and both redirect the open. Each spelling is a
+      constant in the platform file that raises it, because a constant belongs
+      where it is used and neither platform compiles the other's.
+
+      observed carries what the kernel actually reported — the errno on Unix, the
+      attribute word on Windows. The errno is a FIELD rather than the decision,
+      because it is not the same errno on the six Unix kernels this backend runs
+      on: measured ELOOP on linux/amd64, and documented EMLINK on FreeBSD and
+      DragonFly, EFTYPE on NetBSD, ELOOP on OpenBSD and Darwin. A three-value
+      table across six kernels is exactly the shape of thing that is wrong on the
+      seventh, so nothing here branches on it.
+    name: pathRedirected
+    params: path, kind, observed string
+    results: error
+  - doc: |-
+      openLockFile opens the lock file, refusing to traverse a symbolic link
+      planted at the final component of path.
+
+      O_NOFOLLOW is POSIX and present on every GOOS this file is built for. With
+      O_CREAT it does NOT create the link's target: a dangling link is refused
+      exactly as a live one is, which was measured alongside the live case because
+      the dangling one is the shape the attack actually takes — the attacker plants
+      a link to a path that does not exist yet and lets the victim create it.
+
+      What it does NOT cover is the rest of the path. O_NOFOLLOW governs the FINAL
+      component only; a symlink at a PARENT component is still traversed, measured
+      on linux/amd64 in the same probe. That is a different exposure and a much
+      weaker one — the parent components are [FileConfig.Dir], which the caller
+      chose, while the final component is a name this package derives and an
+      attacker can predict. It is named in ADR 0082 §Deferred rather than silently
+      implied to be covered.
+
+      The errno is not consulted. See [pathRedirected] for the three different
+      errnos the six kernels here produce for the same condition; os.Lstat answers
+      the question those errnos were only evidence for, identically everywhere.
+    name: openLockFile
+    params: path string
+    results: file *os.File, err error
+  - doc: |-
+      classifyOpenFailure decides whether a failed open met an indirection or the
+      medium.
+
+      os.Lstat does not traverse the final component, so it answers for the link
+      the open would not follow. It is DIAGNOSIS, never the security decision: the
+      refusal was already taken by the kernel, so a planter who removes the link
+      between the two calls changes which sentinel is reported and cannot change
+      whether the open was refused. That is the difference from an Lstat-then-open
+      check, which is a genuine TOCTOU — and it is why the order here is the
+      reverse of internal/service/observe/logger/writer/rotfile's, which checks first.
+    name: classifyOpenFailure
+    params: path string, openErr error
+    results: error
+imports:
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
+  context: context
+  corelock: github.com/kitsunium/sdk/internal/core/app/lock
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errors: errors
+  filepath: path/filepath
+  flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
+  fs: io/fs
+  hex: encoding/hex
+  io: io
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  log: log
+  math: math
+  os: os
+  pathchain: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
+  sha256: crypto/sha256
+  strconv: strconv
+  sync: sync
+  syscall: syscall
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/lock
+  name: lock
+  purpose: Package lock — the kernel lock the file locker stands on, and what each kernel's version of it means for THIS domain.
+types:
+  - fields:
+      - doc: |-
+          TTL is how long a lease is held before it can be taken by another
+          caller. It MUST be positive; zero and negative are refused at
+          construction, never reinterpreted.
+        name: TTL
+        type: time.Duration
+      - doc: |-
+          Clock is the time source, injectable so expiry and waiting are testable
+          without sleeping. nil means clock.System.
+
+          The whole port is needed, not just the reading half: this locker WAITS
+          for a holder's deadline rather than polling for it, so it needs
+          clock.Waiter as well as clock.Clock — which is what clock.Timed is
+          (ADR 0039).
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: |-
+          validate applies ADR 0031: refuse what the SDK cannot choose on the caller's
+          behalf, and reinterpret nothing.
+        name: validate
+        recv: c MemoryConfig
+        results: error
+      - doc: clockOrSystem resolves the configured time source.
+        name: clockOrSystem
+        recv: c MemoryConfig
+        results: clock.Timed
+    name: MemoryConfig
+  - doc: |-
+      fenceFile is the narrow view of the lock file the ledger needs: read it,
+      shorten it, overwrite it, force it to the medium.
+
+      It is deliberately not *os.File. The ledger's whole job is four positional
+      operations, and naming them here is what makes it obvious that this code
+      never seeks, never appends and never reads the descriptor's offset — which
+      matters because the SAME descriptor carries the flock.
+    kind: named
+    name: fenceFile
+    underlying: |-
+      interface {
+      	io.ReaderAt
+      	io.WriterAt
+      	// Truncate shortens the file, so a smaller number never leaves the tail of
+      	// a larger one behind.
+      	Truncate(size int64) error
+      	// Sync forces the ledger to the medium before a lease is handed out.
+      	Sync() error
+      }
+  - doc: |-
+      fileLocker excludes PROCESSES through flock(2) and GOROUTINES through
+      [nameGate].
+
+      # Its leases do not expire, and that is the decision
+
+      A file lease has no TTL. It is held exactly as long as its descriptor is
+      open, and it ends in exactly two ways: the holder releases it, or the
+      holder's process dies and the kernel releases it. There is no timer and no
+      takeover.
+
+      That is the opposite choice from [memoryLocker], and it comes from a real
+      difference rather than a preference. A dead process is noticed BY THE
+      KERNEL, immediately and reliably, so the failure a TTL exists to recover
+      from is already handled here. What a TTL would add is the ability to take
+      the lock from a process that is still alive — which is the one thing this
+      domain's package comment spends its length warning about, and which no
+      amount of fencing makes safe for a resource that cannot check a fence.
+
+      The price is stated rather than hidden: a holder that HANGS without dying
+      blocks its waiters indefinitely. That is a liveness failure, it is visible
+      (every waiter is blocked in Acquire, on a context they chose the deadline
+      for), and it is strictly preferable to the alternative — a safety failure in
+      which two processes are inside one section and neither is blocked, neither
+      logs anything, and the evidence is corrupted data much later.
+
+      Consequently a fileLease does NOT implement [corelock.Deadliner]. That
+      absence is the API telling a caller which world it is in.
+    fields:
+      - doc: dir holds one lock file per name.
+        name: dir
+        type: string
+      - doc: |-
+          gate is the in-process half. It is taken BEFORE the flock and released
+          AFTER it, so the two never disagree about who holds what.
+        name: gate
+        type: "*nameGate"
+      - doc: clk drives the retry wait while another process holds the lock.
+        name: clk
+        type: clock.Timed
+      - doc: poll is the validated interval between attempts.
+        name: poll
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: Acquire blocks until name is held by this caller or ctx ends.
+        name: Acquire
+        params: ctx context.Context, name string
+        recv: l *fileLocker
+        results: lease corelock.Lease, err error
+      - doc: TryAcquire attempts the acquisition once and never waits.
+        name: TryAcquire
+        params: ctx context.Context, name string
+        recv: l *fileLocker
+        results: lease corelock.Lease, held bool, err error
+      - doc: |-
+          takeFlock opens the lock file, takes the flock — waiting only when wait is
+          true — and records the acquisition's fencing token.
+
+          It returns (nil, nil) ONLY when wait is false and another process holds the
+          lock. The caller holds the gate on entry and owns releasing it on failure.
+        name: takeFlock
+        params: ctx context.Context, name string, wait bool
+        recv: l *fileLocker
+        results: lease corelock.Lease, err error
+      - doc: contend takes the flock, retrying on this locker's clock while wait is true.
+        name: contend
+        params: ctx context.Context, file *os.File, wait bool
+        recv: l *fileLocker
+        results: held bool, err error
+      - doc: sleep waits one poll interval or until ctx ends.
+        name: sleep
+        params: ctx context.Context
+        recv: l *fileLocker
+        results: error
+      - doc: mintLease advances the on-disk fencing counter and builds the lease.
+        name: mintLease
+        params: file *os.File, path, name string
+        recv: l *fileLocker
+        results: lease corelock.Lease, err error
+      - doc: pathFor maps a lock name to its file.
+        name: pathFor
+        params: name string
+        recv: l *fileLocker
+        results: string
+      - doc: release gives the flock and the gate back, in that order.
+        name: release
+        params: file *os.File, name string
+        recv: l *fileLocker
+        results: error
+    name: fileLocker
+  - fields:
+      - doc: |-
+          Dir holds one lock file per name. It is created 0700 if absent, and
+          CHECKED if it already exists: a world-writable directory without the
+          sticky bit is refused, because anyone able to unlink a lock file can
+          replace its inode and split one lock into two.
+
+          It MUST be set. There is no default: a temporary directory would make
+          the lock's SCOPE — which processes it excludes — depend on a value
+          nobody chose.
+        name: Dir
+        type: string
+      - doc: |-
+          Poll is the interval between attempts while another process holds the
+          lock. Zero means [defaultPoll]; negative is refused.
+        name: Poll
+        type: time.Duration
+      - doc: |-
+          Clock is the time source the poll waits on, injectable so contention is
+          testable without sleeping. nil means clock.System.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: |-
+          validate applies ADR 0031: clamp the poll interval, refuse everything the
+          SDK cannot choose on the caller's behalf.
+        name: validate
+        recv: c FileConfig
+        results: error
+      - doc: pollOrDefault resolves the configured poll interval.
+        name: pollOrDefault
+        recv: c FileConfig
+        results: time.Duration
+      - doc: clockOrSystem resolves the configured time source.
+        name: clockOrSystem
+        recv: c FileConfig
+        results: clock.Timed
+    name: FileConfig
+  - doc: |-
+      fileLease is one held flock, plus the gate entry that guards it from the
+      goroutines of this process.
+
+      It does NOT implement [github.com/kitsunium/sdk/internal/core/app/lock.Deadliner],
+      and the absence is load-bearing: a caller that type-asserts for Deadliner
+      and finds nothing has been told, by the API rather than by documentation,
+      that this lock cannot be taken from it while it lives.
+    fields:
+      - doc: locker is where the descriptor and the gate entry are given back.
+        name: locker
+        type: "*fileLocker"
+      - doc: |-
+          file is the open description the flock is held on. Its identity IS the
+          lock: closing it releases, and nothing else can.
+        name: file
+        type: "*os.File"
+      - doc: name is the lock this lease was taken on, needed to release the gate.
+        name: name
+        type: string
+      - doc: |-
+          path is the file the flock is held on. It is kept rather than recomputed
+          from name because Extend consults it on a keepalive's cadence, and
+          because it is the ONE string that has to keep meaning the same thing for
+          the identity check to mean anything.
+        name: path
+        type: string
+      - doc: |-
+          fence is the acquisition's fencing token, read from and written to the
+          lock file under this very flock.
+        name: fence
+        type: uint64
+      - doc: |-
+          mu guards released. It is an RWMutex because Extend only reads it —
+          a keepalive calls Extend on a cadence, and a read lock keeps that off
+          the path Release contends for.
+        name: mu
+        type: sync.RWMutex
+      - doc: |-
+          released records that this holder already gave the lock back, so a
+          second Release is a no-op rather than a double close of a descriptor
+          another lease may by then have reopened.
+        name: released
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Fence returns this acquisition's fencing token.
+
+          Unlike the in-process locker's, this counter is PERSISTENT: it lives in the
+          lock file and survives every process that ever held the lock, so a token
+          issued after a reboot is still greater than every token issued before it.
+        name: Fence
+        recv: l *fileLease
+        results: uint64
+      - doc: |-
+          Extend re-asserts ownership.
+
+          Nothing can take a held flock away — not a timer, not another process, not
+          another goroutine (the gate) — so for as long as the lock file this lease
+          holds is still the file its NAME leads to, Extend reports success and that
+          is the truth rather than a silent no-op.
+
+          The clause is the change. A lock file can be unlinked out from under a
+          holder, by an account the directory's own permissions allow to do it, and
+          the holder's descriptor keeps working afterwards because a descriptor
+          outlives its name. The next acquisition then creates a different file, locks
+          that, and both processes are inside the section. Extend is the only call a
+          holder makes DURING the section, so it is where that is noticed:
+          [corelock.LockFileReplaced], which a Keepalive publishes as the protected context's
+          cause. See identity.go for what this detects and what it does not prevent.
+
+          It still returns [corelock.LockNotHeld] after Release, because at that point
+          the lease genuinely holds nothing.
+        name: Extend
+        params: ctx context.Context
+        recv: l *fileLease
+        results: error
+      - doc: |-
+          Release gives the lock back.
+
+          Like the in-process lease it deliberately IGNORES ctx: the common call site
+          is `defer lease.Release(ctx)` with the context whose cancellation ended the
+          work, and honouring it would mean a cancelled operation never closes its
+          descriptor. Here the consequence is worse than a leaked lease — the flock
+          would be held until the process exits, blocking every other process too.
+        name: Release
+        params: ctx context.Context
+        recv: l *fileLease
+        results: error
+    name: fileLease
+  - doc: |-
+      nameGate is a per-name, context-aware, non-expiring mutual exclusion between
+      goroutines of one process.
+
+      # Why it exists, measured rather than assumed
+
+      flock(2) is per OPEN FILE DESCRIPTION, not per process and not per thread.
+      Two consequences follow, and they pull in opposite directions:
+
+        - Two separate open(2) calls on the same path, in the SAME process, DO
+          exclude each other. Measured on linux/amd64 (kernel 6.12): the second
+          LOCK_EX|LOCK_NB returns EWOULDBLOCK and a blocking LOCK_EX waits.
+        - The same descriptor re-locked is a NO-OP. flock(LOCK_EX) on a
+          description that already holds LOCK_EX is a lock CONVERSION: it returns
+          success immediately. Measured on the same host with eight goroutines
+          sharing one descriptor around a counted critical section: all eight were
+          inside simultaneously. Not "occasionally" — the maximum observed
+          occupancy was 8 of 8, every run.
+
+      The second measurement is the one that matters, because holding one
+      descriptor for the store's lifetime is the natural, efficient design — it is
+      what internal/service/security/session's file store does — and it makes flock a
+      complete no-op between goroutines while continuing to work perfectly between
+      processes. The bug is therefore invisible to any test that spawns processes
+      and only appears under goroutine concurrency, which is the opposite of where
+      anyone looks for a file-locking defect.
+
+      The gate removes the question. The file locker takes the gate first and the
+      flock second, so goroutine exclusion is guaranteed by Go and process
+      exclusion is guaranteed by the kernel, and neither is inferred from the
+      other's behaviour on one platform.
+
+      # Why it does not expire
+
+      The gate's lifetime must match the flock's exactly. A gate that expired
+      while its holder still owned the flock would let a second goroutine of the
+      same process pass the gate and then block on the flock its own process
+      holds — a lock the first goroutine can only release by finishing, which it
+      may be waiting on the second to do. So the gate has no TTL, matching the
+      file locker's own decision that its leases do not expire.
+    fields:
+      - doc: |-
+          entries maps a held name to a channel closed when it is released. The
+          channel is the wake-up: a waiter selects on it and on its own context.
+        name: entries
+        type: map[string]chan struct{}
+      - doc: |-
+          mu guards entries. It is held only for map operations, never across a
+          wait.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: tryEnter takes name if it is free. It never waits.
+        name: tryEnter
+        params: name string
+        recv: g *nameGate
+        results: bool
+      - doc: enter blocks until name is taken by this goroutine or ctx ends.
+        name: enter
+        params: ctx context.Context, name string
+        recv: g *nameGate
+        results: error
+      - doc: leave releases name and wakes every waiter.
+        name: leave
+        params: name string
+        recv: g *nameGate
+    name: nameGate
+  - doc: holding is one live acquisition of one name.
+    fields:
+      - doc: |-
+          token identifies the acquisition, not the name. Two acquisitions of the
+          same name never share one, which is what lets Release refuse to unlock a
+          section that now belongs to someone else.
+        name: token
+        type: uint64
+      - doc: |-
+          fence is the acquisition's fencing token — the value handed to the
+          caller and, if the caller plumbs it through, to the protected resource.
+        name: fence
+        type: uint64
+      - doc: deadline is when this holding stops being held unless it is renewed.
+        name: deadline
+        type: time.Time
+      - doc: |-
+          free is closed when this holding ends, by release or by takeover. It
+          wakes every waiter at once so they re-contend; a waiter is never handed
+          the lock directly, because a hand-off would have to decide fairness and
+          any order chosen here would be invisible to the caller.
+        name: free
+        type: chan struct{}
+      - doc: |-
+          ended guards the close of free.
+
+          Every caller of [holding.end] already holds the locker's mutex and the
+          map invariants make a second close unreachable — but "unreachable given
+          an invariant elsewhere" is exactly the reasoning that turns a refactor
+          into a panic in production. The Once costs one atomic on a path that
+          already took a mutex.
+        name: ended
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: end closes free exactly once, waking every waiter on this acquisition.
+        name: end
+        recv: h *holding
+    name: holding
+  - doc: |-
+      statter is the single question sameEntry asks of the descriptor that carries
+      the lock: describe yourself.
+
+      It is an interface rather than *os.File because nothing else about the file
+      is needed, and a parameter that can do less is a parameter that can go wrong
+      in fewer ways — this function must never write, seek or close the descriptor
+      the lease is holding.
+    kind: named
+    name: statter
+    underlying: |-
+      interface {
+      	Stat() (os.FileInfo, error)
+      }
+  - fields:
+      - doc: |-
+          Every is the renewal period. It MUST be positive, and it MUST be
+          comfortably shorter than the lease TTL — a renewal that lands at the
+          deadline has already lost every race it could lose. A third of the TTL
+          leaves room for two consecutive failures.
+
+          It is refused at zero rather than derived from the lease, because a
+          Lease deliberately does not expose its TTL: the port's job is to say
+          whether it can expire at all ([corelock.Deadliner]), not to let a helper
+          reconstruct a schedule the caller never chose.
+        name: Every
+        type: time.Duration
+      - doc: |-
+          Clock is the time source the renewal ticks on. nil means clock.System.
+
+          A caller testing expiry MUST pass the SAME clock the locker was built
+          with, or the renewals and the deadline will run on two different
+          timelines.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: validate applies ADR 0031 to the renewal period.
+        name: validate
+        recv: c KeepaliveConfig
+        results: error
+      - doc: clockOrSystem resolves the configured time source.
+        name: clockOrSystem
+        recv: c KeepaliveConfig
+        results: clock.Timed
+    name: KeepaliveConfig
+  - doc: |-
+      memoryLocker is the in-process [corelock.Locker].
+
+      # Why THIS backend needs a TTL and the file one does not
+
+      A goroutine that stops — panics behind a recover, blocks on a channel
+      nobody will ever send to, leaks — leaves no trace the runtime will act on.
+      Nothing releases its lock. Without expiry, one such goroutine deadlocks
+      every future caller of that name for the life of the process, and the only
+      evidence is a hang. So this locker expires leases, which means it can also
+      TAKE ONE AWAY from a holder that is still running — the hazard the domain's
+      package comment describes at length, and the reason [corelock.Lease.Fence]
+      exists.
+    fields:
+      - doc: mu guards every map and every holding in them.
+        name: mu
+        type: sync.Mutex
+      - doc: ttl is the validated, strictly positive lease lifetime.
+        name: ttl
+        type: time.Duration
+      - doc: |-
+          clk is the time source: it reads Now for expiry and arms a timer to a
+          holder's deadline so a waiter wakes exactly then instead of polling.
+        name: clk
+        type: clock.Timed
+      - doc: held maps a name to its live acquisition, if any.
+        name: held
+        type: map[string]*holding
+      - doc: |-
+          fences maps a name to the highest fencing token ever issued for it.
+
+          It is NEVER pruned, and that is deliberate: forgetting a name's counter
+          resets it, and a reset fencing token reissues numbers the protected
+          resource has already accepted. The cost is one map entry per distinct
+          name for the process's lifetime, which is stated in this package's
+          CLAUDE.md as a bound on the names a caller should mint.
+        name: fences
+        type: map[string]uint64
+      - doc: nextToken is the source of holder identities, monotone per locker.
+        name: nextToken
+        type: uint64
+    kind: struct
+    methods:
+      - doc: Acquire blocks until name is held by this caller or ctx ends.
+        name: Acquire
+        params: ctx context.Context, name string
+        recv: l *memoryLocker
+        results: lease corelock.Lease, err error
+      - doc: TryAcquire attempts the acquisition once and never waits.
+        name: TryAcquire
+        params: ctx context.Context, name string
+        recv: l *memoryLocker
+        results: lease corelock.Lease, held bool, err error
+      - doc: |-
+          attempt takes name if it is free or expired. On failure it returns the
+          current holding's free channel and deadline so the caller can wait on the
+          two events that could change the answer.
+        name: attempt
+        params: name string
+        recv: l *memoryLocker
+        results: lease corelock.Lease, free chan struct{}, until time.Time
+      - doc: |-
+          await blocks until the current holding ends, its deadline passes, or ctx
+          does. It returns a non-nil error only for ctx.
+        name: await
+        params: ctx context.Context, free chan struct{}, until time.Time
+        recv: l *memoryLocker
+        results: error
+      - doc: release ends the holding identified by token, if it is still the live one.
+        name: release
+        params: name string, token uint64
+        recv: l *memoryLocker
+        results: error
+      - doc: extend renews the holding identified by token.
+        name: extend
+        params: name string, token uint64
+        recv: l *memoryLocker
+        results: deadline time.Time, err error
+    name: memoryLocker
+  - doc: |-
+      memoryLease is one acquisition, held by the caller that took it.
+
+      It carries the holder token rather than a pointer to the holding: the
+      holding it refers to may already have been taken over, and the whole point
+      of Release is to notice that instead of unlocking whatever is there now.
+    fields:
+      - doc: locker is where the token is checked. A lease is useless without it.
+        name: locker
+        type: "*memoryLocker"
+      - doc: name is the lock this lease was taken on.
+        name: name
+        type: string
+      - doc: token identifies THIS acquisition. It never changes.
+        name: token
+        type: uint64
+      - doc: |-
+          fence is the fencing token for this acquisition. It never changes:
+          renewing a lease does not reorder it against other holders, so a
+          renewal that moved the fence would invalidate the caller's own earlier
+          writes at the resource.
+        name: fence
+        type: uint64
+      - doc: |-
+          mu guards the two fields below, which move. It is an RWMutex because
+          Deadline reads without writing, and a lease's deadline is polled by
+          anything scheduling its own renewal.
+        name: mu
+        type: sync.RWMutex
+      - doc: deadline is the last deadline this lease knows about. Extend moves it.
+        name: deadline
+        type: time.Time
+      - doc: |-
+          released records that this holder already gave the lock back, so a
+          second Release reports success rather than an alarming LOCK_NOT_HELD
+          that only means "you did this twice".
+        name: released
+        type: bool
+    kind: struct
+    methods:
+      - doc: Fence returns this acquisition's fencing token.
+        name: Fence
+        recv: l *memoryLease
+        results: uint64
+      - doc: |-
+          Deadline returns the instant this lease stops being held unless renewed.
+
+          Its presence is the signal: a lease that implements the domain's Deadliner
+          sibling can be taken from a live holder, and a caller that type-asserts for
+          it is asking exactly the question that changes how it must be written.
+        name: Deadline
+        recv: l *memoryLease
+        results: time.Time
+      - doc: |-
+          Extend renews the lease for another full lifetime.
+
+          A cancelled ctx is reported before the attempt, because renewing a lease for
+          work that has already been abandoned would hold the lock for a lifetime
+          nobody is using.
+        name: Extend
+        params: ctx context.Context
+        recv: l *memoryLease
+        results: error
+      - doc: |-
+          Release gives the lock back.
+
+          It deliberately IGNORES ctx. The overwhelmingly common call site is
+          `defer lease.Release(ctx)` with the very context whose cancellation ended
+          the work, so honouring it would mean a cancelled operation never releases
+          its lock — every timeout would leak a lease for a full TTL, and the leak
+          would look like contention rather than like a bug.
+        name: Release
+        params: ctx context.Context
+        recv: l *memoryLease
+        results: error
+    name: memoryLease
+vars:
+  - doc: |-
+      Compile-time assertions that both lockers and both leases still answer every
+      contract they claim — and, in one case, that one of them still does NOT.
+
+      The negative matters as much as the positives. corelock.Deadliner is how a
+      caller asks "can this lock be taken from me while I am running", and the
+      answer differs between the two backends: memoryLease has a deadline,
+      fileLease does not. If fileLease ever grew a Deadline method by accident,
+      nothing would fail to compile and nothing would fail at run time — a caller
+      would simply start taking the "this can expire" branch for a lock that
+      cannot, and would begin renewing and fencing a lease that needs neither.
+      The negative assertion lives in the external test as
+      TestFileLeaseIsNotADeadliner, because a `var _ !Deadliner` cannot be
+      written; this block names the positives so the pair is greppable together.
+    grouped: true
+    items:
+      - name: _
+        type: corelock.Locker
+        value: (*memoryLocker)(nil)
+      - name: _
+        type: corelock.Lease
+        value: (*memoryLease)(nil)
+      - name: _
+        type: corelock.Deadliner
+        value: (*memoryLease)(nil)
+      - name: _
+        type: corelock.Locker
+        value: (*fileLocker)(nil)
+      - name: _
+        type: corelock.Lease
+        value: (*fileLease)(nil)
+    name: _

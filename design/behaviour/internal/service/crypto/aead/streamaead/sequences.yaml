@@ -1,0 +1,498 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: newReader
+    steps:
+      - return: "&streamReader{key: key, src: src, aad: aad}"
+  - of: (*streamReader).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).Read
+        kind: self
+      - id: r.readHeader
+        kind: internal
+      - id: r.nextChunk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: 0, herr
+                init:
+                  bind: herr
+                  eval: r.readHeader()
+                  to: r.readHeader
+                when: herr != nil
+          when: r.state&stateStarted == 0
+      - loop:
+          cond: len(r.plain) == 0
+          do:
+            - opt:
+                do:
+                  - return: 0, io.EOF
+                when: r.state&stateDone != 0
+            - opt:
+                do:
+                  - return: 0, derr
+                init:
+                  bind: derr
+                  eval: r.nextChunk()
+                  to: r.nextChunk
+                when: derr != nil
+      - set: "n"
+        value: copy(p, r.plain)
+      - set: r.plain
+        value: r.plain[n:]
+      - return: n, nil
+  - of: (*streamReader).readHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).readHeader
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: newGCM
+        kind: internal
+    steps:
+      - var:
+          name: header
+          type: "[headerLen]byte"
+      - opt:
+          do:
+            - return: corecrypto.StreamTruncated
+          init:
+            bind: _, err
+            eval: io.ReadFull(r.src, header[:])
+            to: io
+          when: err != nil
+      - opt:
+          do:
+            - return: corecrypto.DecryptionFailed
+          when: header[0] != streamVersion || header[1] != algID
+      - bind: gcm, gerr
+        eval: newGCM(r.key.Bytes(), header[versionFieldLen:headerLen])
+        to: newGCM
+      - opt:
+          do:
+            - return: gerr
+          when: gerr != nil
+      - set: r.gcm
+        value: gcm
+      - op: "|="
+        set: r.state
+        value: stateStarted
+      - return: nil
+  - of: (*streamReader).nextChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).nextChunk
+        kind: self
+      - id: r.readWire
+        kind: internal
+      - id: r.openChunk
+        kind: internal
+    steps:
+      - bind: n, atEOF, rerr
+        eval: r.readWire()
+        to: r.readWire
+      - opt:
+          do:
+            - return: rerr
+          when: rerr != nil
+      - opt:
+          do:
+            - return: corecrypto.StreamTruncated
+          when: n < gcmTagLen
+      - bind: flag
+        eval: flagMore
+      - opt:
+          do:
+            - set: flag
+              value: flagFinal
+          when: atEOF
+      - return: r.openChunk(r.wire[:n], flag, atEOF)
+        to: r.openChunk
+  - of: (*streamReader).openChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).openChunk
+        kind: self
+      - id: chunkNonce
+        kind: internal
+      - id: r.gcm.Open
+        kind: internal
+    steps:
+      - bind: nonce
+        eval: chunkNonce(r.counter, flag)
+        to: chunkNonce
+      - bind: pt, oerr
+        eval: r.gcm.Open(nil, nonce[:], wire, r.aad)
+        to: r.gcm.Open
+      - opt:
+          do:
+            - return: corecrypto.DecryptionFailed
+          when: oerr != nil
+      - opt:
+          do:
+            - op: "|="
+              set: r.state
+              value: stateDone
+          when: atEOF
+      - set: r.plain
+        value: pt
+      - op: ++
+        set: r.counter
+      - return: nil
+  - of: (*streamReader).readWire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).readWire
+        kind: self
+      - id: r.fillWire
+        kind: internal
+    steps:
+      - bind: "off"
+        eval: "0"
+      - opt:
+          do:
+            - set: r.wire[0]
+              value: r.peek[0]
+            - op: "&^="
+              set: r.state
+              value: statePeeked
+            - set: "off"
+              value: "1"
+          when: r.state&statePeeked != 0
+      - return: r.fillWire(off)
+        to: r.fillWire
+  - of: (*streamReader).fillWire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).fillWire
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: r.peekNext
+        kind: internal
+    steps:
+      - bind: got, rerr
+        eval: io.ReadFull(r.src, r.wire[off:])
+        to: io
+      - bind: total
+        eval: off + got
+      - opt:
+          do:
+            - return: total, true, nil
+          when: rerr == io.EOF || rerr == io.ErrUnexpectedEOF
+      - opt:
+          do:
+            - return: 0, false, corecrypto.StreamTruncated
+          when: rerr != nil
+      - return: r.peekNext(total)
+        to: r.peekNext
+  - of: (*streamReader).peekNext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamReader).peekNext
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: got, perr
+        eval: io.ReadFull(r.src, r.peek[:])
+        to: io
+      - opt:
+          do:
+            - op: "|="
+              set: r.state
+              value: statePeeked
+            - return: n, false, nil
+          when: got == 1
+      - opt:
+          do:
+            - return: n, true, nil
+          when: perr == io.EOF || perr == io.ErrUnexpectedEOF
+      - return: 0, false, corecrypto.StreamTruncated
+  - of: streamAEAD.Algorithm
+    steps:
+      - return: algorithm
+  - of: streamAEAD.Writer
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamAEAD.Writer
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: newWriterWithSalt
+        kind: internal
+    steps:
+      - var:
+          name: salt
+          type: "[saltLen]byte"
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(rerr, errs.WrapParams{
+                			Code:    corecrypto.CodeEntropyFailed,
+                			Reason:  "ENTROPY_FAILED",
+                			Public:  "Could not gather entropy for encryption",
+                			Private: "service/crypto/aead/streamaead.Writer: crypto/rand.Read failed while generating a salt",
+                		})
+          init:
+            bind: _, rerr
+            eval: rand.Read(salt[:])
+            to: rand
+          when: rerr != nil
+      - return: newWriterWithSalt(key, dst, aad, salt)
+        to: newWriterWithSalt
+  - of: streamAEAD.Reader
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamAEAD.Reader
+        kind: self
+      - id: newReader
+        kind: internal
+    steps:
+      - return: newReader(key, src, aad), nil
+        to: newReader
+  - of: newGCM
+    participants:
+      - id: caller
+        kind: actor
+      - id: newGCM
+        kind: self
+      - id: hkdf
+        kind: stdlib
+      - id: aes
+        kind: stdlib
+      - id: cipher
+        kind: stdlib
+    steps:
+      - bind: streamKey, kerr
+        eval: hkdf.Key(sha256.New, keyBytes, salt, hkdfInfo, corecrypto.KeyLen)
+        to: hkdf
+      - opt:
+          do:
+            - return: nil, corecrypto.DecryptionFailed
+          when: kerr != nil
+      - bind: block, berr
+        eval: aes.NewCipher(streamKey)
+        to: aes
+      - opt:
+          do:
+            - return: nil, corecrypto.DecryptionFailed
+          when: berr != nil
+      - bind: gcm, gerr
+        eval: cipher.NewGCM(block)
+        to: cipher
+      - opt:
+          do:
+            - return: nil, corecrypto.DecryptionFailed
+          when: gerr != nil
+      - return: gcm, nil
+  - of: chunkNonce
+    participants:
+      - id: caller
+        kind: actor
+      - id: chunkNonce
+        kind: self
+      - id: binary.BigEndian.PutUint64
+        kind: value
+    steps:
+      - var:
+          name: nonce
+          type: "[nonceLen]byte"
+      - eval: binary.BigEndian.PutUint64(nonce[counterBE64Offset:counterLen], counter)
+        to: binary.BigEndian.PutUint64
+      - set: nonce[nonceLen-1]
+        value: flag
+      - return: nonce
+  - of: newWriterWithSalt
+    participants:
+      - id: caller
+        kind: actor
+      - id: newWriterWithSalt
+        kind: self
+      - id: newGCM
+        kind: internal
+    steps:
+      - bind: gcm, gerr
+        eval: newGCM(key.Bytes(), salt[:])
+        to: newGCM
+      - opt:
+          do:
+            - return: nil, gerr
+          when: gerr != nil
+      - return: "&streamWriter{dst: dst, gcm: gcm, aad: aad, buf: make([]byte, 0, chunkSize), salt: salt}, nil"
+  - of: (*streamWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamWriter).Write
+        kind: self
+      - id: w.ensureHeader
+        kind: internal
+      - id: w.sealChunk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, io.ErrClosedPipe
+          when: w.state&writerClosed != 0
+      - opt:
+          do:
+            - return: 0, herr
+          init:
+            bind: herr
+            eval: w.ensureHeader()
+            to: w.ensureHeader
+          when: herr != nil
+      - loop:
+          cond: len(p) > 0
+          do:
+            - bind: take
+              eval: min(chunkSize-len(w.buf), len(p))
+            - set: w.buf
+              value: append(w.buf, p[:take]...)
+            - op: +=
+              set: "n"
+              value: take
+            - set: p
+              value: p[take:]
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: n, serr
+                      init:
+                        bind: serr
+                        eval: w.sealChunk(flagMore)
+                        to: w.sealChunk
+                      when: serr != nil
+                when: len(w.buf) == chunkSize
+      - return: n, nil
+  - of: (*streamWriter).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamWriter).Close
+        kind: self
+      - id: w.ensureHeader
+        kind: internal
+      - id: w.sealChunk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: w.state&writerClosed != 0
+      - opt:
+          do:
+            - op: "|="
+              set: w.state
+              value: writerClosed
+            - return: herr
+          init:
+            bind: herr
+            eval: w.ensureHeader()
+            to: w.ensureHeader
+          when: herr != nil
+      - op: "|="
+        set: w.state
+        value: writerClosed
+      - return: w.sealChunk(flagFinal)
+        to: w.sealChunk
+  - of: writeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeAll
+        kind: self
+      - id: dst.Write
+        kind: value
+    steps:
+      - bind: n, err
+        eval: dst.Write(b)
+        to: dst.Write
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: io.ErrShortWrite
+          when: n != len(b)
+      - return: nil
+  - of: (*streamWriter).ensureHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamWriter).ensureHeader
+        kind: self
+      - id: writeAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: w.state&writerHeaderDone != 0
+      - bind: header
+        eval: make([]byte, 0, headerLen)
+      - set: header
+        value: append(header, streamVersion, algID)
+      - set: header
+        value: append(header, w.salt[:]...)
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: writeAll(w.dst, header)
+            to: writeAll
+          when: err != nil
+      - op: "|="
+        set: w.state
+        value: writerHeaderDone
+      - return: nil
+  - of: (*streamWriter).sealChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamWriter).sealChunk
+        kind: self
+      - id: chunkNonce
+        kind: internal
+      - id: w.gcm.Seal
+        kind: internal
+      - id: writeAll
+        kind: internal
+    steps:
+      - bind: nonce
+        eval: chunkNonce(w.counter, flag)
+        to: chunkNonce
+      - bind: wire
+        eval: w.gcm.Seal(nil, nonce[:], w.buf, w.aad)
+        to: w.gcm.Seal
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: writeAll(w.dst, wire)
+            to: writeAll
+          when: err != nil
+      - op: ++
+        set: w.counter
+      - set: w.buf
+        value: w.buf[:0]
+      - return: nil

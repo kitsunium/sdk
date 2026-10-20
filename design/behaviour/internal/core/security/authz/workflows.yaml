@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: NewRequestValue
+    steps:
+      - var:
+          name: indexed
+          type: map[string]AttrValue
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: attr.key == "" || attr.kind == KindInvalid
+            - opt:
+                do:
+                  - set: indexed
+                    value: make(map[string]AttrValue, len(attrs))
+                when: indexed == nil
+            - set: indexed[attr.key]
+              value: attr
+          key: _
+          range: attrs
+          value: attr
+      - return: "RequestValue{subject: subject, action: action, resource: resource, attrs: indexed}"

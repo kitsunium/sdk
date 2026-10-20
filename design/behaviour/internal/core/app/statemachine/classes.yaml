@@ -1,0 +1,119 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      CreateEvent is the event name of the step that brings a new entity into its
+      initial state. No declared transition may take it, so a history can always
+      tell a creation from an event.
+    items:
+      - name: CreateEvent
+        type: string
+        value: "\"create\""
+    name: CreateEvent
+  - grouped: true
+    items:
+      - doc: |-
+          TriggerStart is the creation of an entity: the step into its initial
+          state.
+        name: TriggerStart
+        type: Trigger
+        value: iota + 1
+      - doc: TriggerEvent is an event transition, fired by a caller.
+        name: TriggerEvent
+      - doc: |-
+          TriggerDelay is a timer transition due once an entity has spent a
+          declared duration in its state.
+        name: TriggerDelay
+      - doc: |-
+          TriggerDeadline is a timer transition due at an instant the entity
+          itself carries — a due date, an expiry.
+        name: TriggerDeadline
+      - doc: |-
+          TriggerGuard is a transition due as soon as a condition on the entity
+          holds.
+        name: TriggerGuard
+    name: TriggerStart
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - CreateEvent
+      - RecordValue
+      - StepValue
+    name: record.go
+  - decls:
+      - Trigger
+      - TriggerStart
+      - triggerNames
+      - Trigger.String
+      - ParseTrigger
+    name: trigger.go
+functions:
+  - name: ParseTrigger
+    params: name string
+    results: Trigger, error
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/statemachine
+  name: statemachine
+  purpose: Package statemachine — ranges 0.2.56.* (ADR 0120 core/app/statemachine block) and 0.3.88.* (ADR 0120 service/app/statemachine block, declared here since ADR 0160).
+types:
+  - fields:
+      - doc: Key is the entity's key in the store.
+        name: Key
+        type: string
+      - doc: State is the state the entity is in.
+        name: State
+        type: S
+      - doc: Entered is when the entity entered State.
+        name: Entered
+        type: time.Time
+      - doc: History holds the latest transitions, oldest first.
+        name: History
+        type: "[]StepValue[S]"
+    kind: struct
+    name: RecordValue
+    typeParams: S comparable
+  - fields:
+      - doc: Event is the transition's name; [CreateEvent] for a creation.
+        name: Event
+        type: string
+      - doc: "From is the state left: the zero S for a creation."
+        name: From
+        type: S
+      - doc: To is the state entered.
+        name: To
+        type: S
+      - doc: Trigger says what fired the transition.
+        name: Trigger
+        type: Trigger
+      - doc: |-
+          Actor says who fired it when a caller did, as the machine's
+          configuration reads it from the caller's context; empty when the
+          machine's own loop fired it or nobody said.
+        name: Actor
+        type: string
+      - doc: At is when the transition was stored.
+        name: At
+        type: time.Time
+    kind: struct
+    name: StepValue
+    typeParams: S comparable
+  - kind: named
+    methods:
+      - name: String
+        recv: t Trigger
+        results: string
+    name: Trigger
+    underlying: uint8
+vars:
+  - doc: |-
+      triggerNames spells each trigger, indexed by its value; index 0 is the zero
+      value's, which has no name.
+    items:
+      - name: triggerNames
+        value: "[...]string{\"\", \"start\", \"event\", \"delay\", \"deadline\", \"guard\"}"
+    name: triggerNames

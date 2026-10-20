@@ -1,0 +1,157 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewEncWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewEncWriter
+        kind: self
+      - id: deriveSubkey
+        kind: internal
+    steps:
+      - bind: info
+        eval: cfg.Info
+      - opt:
+          do:
+            - set: info
+              value: defaultInfo
+          when: info == ""
+      - bind: subkey, derr
+        eval: deriveSubkey(cfg.Key, info)
+        to: deriveSubkey
+      - opt:
+          do:
+            - return: nil, derr
+          when: derr != nil
+      - return: "&EncWriter{downstream: cfg.Sink, key: cfg.Key, subkey: subkey}, nil"
+  - of: deriveSubkey
+    participants:
+      - id: caller
+        kind: actor
+      - id: deriveSubkey
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: secret
+        eval: keyBytes(master)
+      - defer: clear(secret)
+      - bind: raw, derr
+        eval: corecrypto.Subkey(kdfAlgorithm, secret, nil, info, corecrypto.KeyLen)
+        to: corecrypto
+      - opt:
+          do:
+            - return: |-
+                corecrypto.Key{}, errs.Wrap(derr, errs.WrapParams{
+                			Code:    coreencwrite.CodeEncWriteSealFailed,
+                			Reason:  "ENC_WRITE_SEAL_FAILED",
+                			Public:  "Encrypting middleware could not seal the record",
+                			Private: "service/observe/logger/middleware/encwrite: Subkey derivation failed at construction",
+                		})
+          when: derr != nil
+      - defer: clear(raw)
+      - bind: key, kerr
+        eval: corecrypto.NewKey(raw)
+        to: corecrypto
+      - opt:
+          do:
+            - return: |-
+                corecrypto.Key{}, errs.Wrap(kerr, errs.WrapParams{
+                			Code:    coreencwrite.CodeEncWriteSealFailed,
+                			Reason:  "ENC_WRITE_SEAL_FAILED",
+                			Public:  "Encrypting middleware could not seal the record",
+                			Private: "service/observe/logger/middleware/encwrite: derived subkey was not KeyLen bytes",
+                		})
+          when: kerr != nil
+      - return: key, nil
+  - of: (*EncWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*EncWriter).Write
+        kind: self
+      - id: corecrypto
+        kind: package
+      - id: frame
+        kind: internal
+      - id: s.downstream.Write
+        kind: value
+    steps:
+      - lock:
+          mutex: s.mu
+      - bind: box, serr
+        eval: corecrypto.Seal(aeadAlgorithm, s.subkey, p, nil)
+        to: corecrypto
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(serr, errs.WrapParams{
+                			Code:    coreencwrite.CodeEncWriteSealFailed,
+                			Reason:  "ENC_WRITE_SEAL_FAILED",
+                			Public:  "Encrypting middleware could not seal the record",
+                			Private: "service/observe/logger/middleware/encwrite: Seal returned an error",
+                		})
+          when: serr != nil
+      - bind: framed, ferr
+        eval: frame(box)
+        to: frame
+      - opt:
+          do:
+            - return: 0, ferr
+          when: ferr != nil
+      - return: s.downstream.Write(ctx, r, framed)
+        to: s.downstream.Write
+  - of: (*EncWriter).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*EncWriter).Flush
+        kind: self
+      - id: s.downstream.Flush
+        kind: value
+    steps:
+      - lock:
+          mutex: s.mu
+      - return: s.downstream.Flush(ctx)
+        to: s.downstream.Flush
+  - of: (*EncWriter).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*EncWriter).Close
+        kind: self
+      - id: s.key.Zeroize
+        kind: value
+      - id: s.subkey.Zeroize
+        kind: value
+      - id: s.downstream.Close
+        kind: value
+    steps:
+      - lock:
+          mutex: s.mu
+      - eval: s.key.Zeroize()
+        to: s.key.Zeroize
+      - eval: s.subkey.Zeroize()
+        to: s.subkey.Zeroize
+      - return: s.downstream.Close()
+        to: s.downstream.Close
+  - of: frame
+    participants:
+      - id: caller
+        kind: actor
+      - id: frame
+        kind: self
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, coreencwrite.FramingFailed
+          when: uint64(len(box)) > math.MaxUint32
+      - set: framed
+        value: make([]byte, lenPrefixBytes+len(box))
+      - eval: binary.BigEndian.PutUint32(framed[:lenPrefixBytes], uint32(len(box)))
+        to: binary.BigEndian.PutUint32
+      - eval: copy(framed[lenPrefixBytes:], box)
+      - return: framed, nil

@@ -1,0 +1,225 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultMaxBytes is the ceiling [Config.MaxBytes] clamps to when it is not
+      positive: 8 MiB.
+
+      A rendered HTML document larger than this is a defect or an attack. The value
+      is generous by an order of magnitude for a page a browser is meant to parse,
+      and it is a CLAMP rather than a refusal because — unlike a lock's TTL, whose
+      two readings are opposites (ADR 0031, ADR 0052) — there is a defensible
+      universal answer here, and refusing view.Config{FS: templates} would make the
+      obvious spelling unusable for no safety gain.
+    items:
+      - name: DefaultMaxBytes
+        type: int
+        value: 8 << 20
+    name: DefaultMaxBytes
+  - doc: |-
+      MaxPooledBytes is the largest scratch buffer the engine keeps for reuse.
+
+      A single 8 MiB render must not leave 8 MiB pinned in a pool for the life of
+      the process; anything above this is returned to the collector instead.
+    items:
+      - name: MaxPooledBytes
+        type: int
+        value: 1 << 20
+    name: MaxPooledBytes
+  - doc: |-
+      HTML is the [Engine] name of the stdlib html/template implementation in
+      internal/service/app/view. It is the only engine the SDK ships.
+    items:
+      - name: HTML
+        type: Engine
+        value: "\"html\""
+    name: HTML
+  - doc: |-
+      ContentTypeHTML is the value an HTML [Renderer] reports from ContentType.
+
+      The charset is not decoration. A response whose Content-Type carries no
+      charset is sniffed by the browser, and a document sniffed as UTF-7 or as a
+      legacy multi-byte encoding can smuggle markup past an escaper that judged
+      the bytes as UTF-8.
+    items:
+      - name: ContentTypeHTML
+        type: string
+        value: "\"text/html; charset=utf-8\""
+    name: ContentTypeHTML
+files:
+  - decls:
+      - DefaultMaxBytes
+      - MaxPooledBytes
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Engine
+      - HTML
+    name: factory.go
+  - decls:
+      - registry
+      - Register
+      - publish
+      - Lookup
+      - Available
+      - Open
+    name: registry.go
+  - decls:
+      - TrustedHTML
+      - TrustHTML
+    name: trusted.go
+  - decls:
+      - ContentTypeHTML
+    name: view.go
+functions:
+  - name: Register
+    params: f Factory
+    results: Factory
+  - doc: |-
+      publish inserts (name → f) into the registry, returning a non-nil error when
+      name is already taken by a different factory. The check and the insert are
+      one atomic step of the kernel table.
+    name: publish
+    params: name Engine, f Factory
+    results: error
+  - name: Lookup
+    params: name Engine
+    results: factory Factory, found bool
+  - name: Available
+    results: "[]Engine"
+  - name: Open
+    params: name Engine, cfg Config
+    results: renderer Renderer, err error
+  - name: TrustHTML
+    params: s string
+    results: TrustedHTML
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  template: html/template
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/view
+  name: view
+  purpose: Package view — ranges 0.2.27.* (ADR 0058 core/app/view block) and 0.3.57.* (ADR 0058 service/app/view block, declared here since ADR 0160).
+types:
+  - fields:
+      - doc: |-
+          FS is the tree the templates are read from. Required.
+
+          It is an fs.FS rather than a directory path so that embed.FS, os.DirFS
+          and fstest.MapFS are all first-class, and so that the domain never
+          touches the filesystem API. It also removes path traversal from the
+          problem statement: fs.ValidPath rejects "..", so no template name can
+          address a file outside the tree the caller handed over.
+
+          Every regular file under FS is parsed, and each template is named by its
+          SLASH PATH relative to the root — "admin/page.html", not "page.html".
+          See [Factory] for why that is not a cosmetic choice.
+        name: FS
+        type: fs.FS
+      - doc: |-
+          Ext optionally restricts which files are parsed, by extension including
+          the dot (".html", ".gohtml").
+
+          Empty means every regular file in FS, which is the honest default: the
+          caller already chose the tree, and second-guessing its contents is the
+          SDK inventing a naming convention. Set it when templates share a
+          directory with assets.
+        name: Ext
+        type: "[]string"
+      - doc: |-
+          MaxBytes caps a single render's output. Not positive clamps to
+          [DefaultMaxBytes]; there is deliberately no spelling for "unlimited".
+
+          The cap is the only bound that exists. text/template's Execute takes no
+          context, so a render cannot be cancelled, and the stdlib's own guard is a
+          recursion DEPTH limit (100000 frames) that says nothing about output
+          size: a {{range}} over an attacker-influenced collection has no depth at
+          all and will write until the machine stops. The same "no unbounded
+          setting" reasoning applies here as to the WebSocket ceilings in ADR 0047.
+        name: MaxBytes
+        type: int
+    kind: struct
+    name: Config
+  - kind: named
+    name: Engine
+    underlying: string
+  - alias: true
+    doc: |-
+      TrustedHTML is an HTML fragment that the engine writes WITHOUT escaping.
+
+      It is deliberately an ALIAS of html/template.HTML rather than a defined type
+      of its own. That is not a convenience: html/template recognises its trust
+      types by an exact type switch, so a `type TrustedHTML string` would be
+      escaped like any other string — measured, it renders <b>hi</b> as
+      &lt;b&gt;hi&lt;/b&gt; — and a trust type that does not actually confer trust
+      is worse than none, because callers stop looking for the reason their markup
+      disappeared.
+
+      The alias has a consequence that is stated rather than hidden: because
+      TrustedHTML and html/template.HTML are the same type, the engine cannot tell
+      a fragment marked through [TrustHTML] from one a caller converted directly.
+      What the SDK buys is therefore precise, and it is worth naming exactly:
+
+        - Six of html/template's seven trust types — CSS, HTMLAttr, JS, JSStr,
+          URL and Srcset — are REFUSED outright when they appear in render data,
+          with the path that carries them named in the error. Those six have no
+          SDK spelling at all.
+        - The seventh has one canonical, greppable spelling, [TrustHTML], so
+          "where does this codebase decide to trust markup?" is one grep with one
+          answer rather than a hunt through an import list.
+
+      A build-time ban on the raw conversion in CONSUMER code belongs in
+      tools/sdkguard (ADR 0033), which already reads consumer source for exactly
+      this class of rule. It is not shipped here.
+    kind: alias
+    name: TrustedHTML
+    underlying: template.HTML
+vars:
+  - doc: |-
+      registry maps each [Engine] to its [Factory] — the kernel's read-mostly,
+      copy-on-write table (kernel/plugin.Registry, ADR 0159), for the same reason
+      core/observe/logger/writer gives: an engine package registers exactly ONCE at
+      import time and every other access is a lock-free Lookup (ADR 0011). What
+      stays here is the domain's refusal: the empty name and the conflict.
+
+      # Why this domain HAS a registry when proc, resilience, net, scheduler,
+      # token, session, lock and lifecycle do not
+
+      Those domains have no registry because their alternatives are not
+      interchangeable: swapping a memory lock for a file lock changes whether a
+      lease can be taken from a live holder, and resolving that from a
+      configuration string would let a typo change it silently (ADR 0052 §D10).
+
+      A template engine is the other case. html/template, pongo2, quicktemplate and
+      jet all answer the same question — a name plus a model becomes a document —
+      and the SDK has an opinion about none of them. A registry is what lets the
+      SDK ship the extension point without shipping the opinion: the engine that
+      lives in third-party/ or in a framework registers itself and is reached
+      through the same [Open] as the built-in one, with no fork of the port.
+
+      It is worth being precise about what it does NOT buy, because the codec and
+      writer registries do buy that and this one does not. Swapping engines is not
+      a deployment decision: template syntax differs between them, so changing the
+      engine invalidates every template file on disk. Nobody flips this in a
+      config map between staging and production, and a reader who assumes otherwise
+      will design a fallback that cannot work.
+
+      # And the hazard a string-keyed registry creates here
+
+      A registry keyed by a name from configuration is exactly how "text/template
+      must not be reachable by accident" becomes reachable by accident: one typo,
+      one merged config map, and the engine that escapes has been replaced by one
+      that does not, with every call still succeeding. That is why the registry's
+      membership rule is not documentary — the contract in [Factory] requires
+      contextual escaping for the content type an engine reports, no non-escaping
+      engine has a name here, and a named AST audit in internal/service/app/view fails
+      the build if text/template is imported anywhere in the domain.
+    items:
+      - name: registry
+        type: plugin.Registry[Engine, Factory]
+    name: registry

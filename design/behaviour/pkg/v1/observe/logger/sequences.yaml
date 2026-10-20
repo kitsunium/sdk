@@ -1,0 +1,636 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewTextEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTextEncoder
+        kind: self
+      - id: encoder
+        kind: package
+    steps:
+      - return: encoder.NewText(clock.System)
+        to: encoder
+  - of: NewJSONEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewJSONEncoder
+        kind: self
+      - id: encoder
+        kind: package
+    steps:
+      - return: encoder.NewJSON(clock.System)
+        to: encoder
+  - of: FromConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromConfig
+        kind: self
+      - id: decodeTopology
+        kind: internal
+      - id: resolveSinks
+        kind: internal
+      - id: NewWithSink
+        kind: internal
+      - id: svclogger
+        kind: package
+    steps:
+      - bind: topo, dErr
+        eval: decodeTopology(format, raw)
+        to: decodeTopology
+      - opt:
+          do:
+            - return: nil, dErr
+          when: dErr != nil
+      - opt:
+          do:
+            - return: nil, errs.Wrap(TopologyInvalid, errs.WrapParams{}, errs.String("reason", "no writers in topology"))
+          when: len(topo.Writers) == 0
+      - bind: sink, rErr
+        eval: resolveSinks(topo.Writers)
+        to: resolveSinks
+      - opt:
+          do:
+            - return: nil, rErr
+          when: rErr != nil
+      - bind: built, bErr
+        eval: |-
+          NewWithSink(SinkConfig{
+          		Sink:     sink,
+          		Encoder:  TextEncoder(),
+          		MinLevel: parseLevel(topo.Level),
+          	})
+        to: NewWithSink
+      - opt:
+          do:
+            - return: nil, bErr
+          when: bErr != nil
+      - return: svclogger.Owning(built, sink), nil
+        to: svclogger
+  - of: decodeTopology
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTopology
+        kind: self
+      - id: corecodec
+        kind: package
+      - id: codec.Unmarshal
+        kind: value
+    steps:
+      - bind: codec, ok
+        eval: corecodec.Lookup(format)
+        to: corecodec
+      - opt:
+          do:
+            - return: |-
+                TopologyConfig{}, errs.Wrap(TopologyInvalid, errs.WrapParams{},
+                			errs.String("format", format.String()), errs.String("reason", "codec not registered"))
+          when: "!ok"
+      - opt:
+          do:
+            - return: TopologyConfig{}, errs.Wrap(TopologyInvalid, errs.WrapParams{}, errs.String("reason", "blob did not decode"))
+          init:
+            bind: uErr
+            eval: codec.Unmarshal(raw, &topo)
+            to: codec.Unmarshal
+          when: uErr != nil
+      - return: topo, nil
+  - of: resolveSinks
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveSinks
+        kind: self
+      - id: openEntry
+        kind: internal
+      - id: Multi
+        kind: internal
+    steps:
+      - bind: branches
+        eval: make([]Sink, 0, len(entries))
+      - loop:
+          do:
+            - bind: built, bErr
+              eval: openEntry(entry)
+              to: openEntry
+            - opt:
+                do:
+                  - return: nil, bErr
+                when: bErr != nil
+            - set: branches
+              value: append(branches, built)
+          key: _
+          range: entries
+          value: entry
+      - opt:
+          do:
+            - return: branches[0], nil
+          when: len(branches) == 1
+      - return: Multi(branches...), nil
+        to: Multi
+  - of: openEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: openEntry
+        kind: self
+      - id: corewriter
+        kind: package
+      - id: decoder.Decode
+        kind: value
+      - id: factory.Open
+        kind: value
+    steps:
+      - bind: factory, ok
+        eval: corewriter.Lookup(corewriter.Name(entry.Name))
+        to: corewriter
+      - opt:
+          do:
+            - return: nil, redactWriterFailure(entry.Name, "unknown writer name")
+          when: "!ok"
+      - bind: cfg, cErr
+        eval: corewriter.Config(entry.Options), error(nil)
+      - opt:
+          do:
+            - set: cfg, cErr
+              to: decoder.Decode
+              value: decoder.Decode(entry.Options)
+          init:
+            bind: decoder, ok
+            eval: factory.(corewriter.Decoder)
+          when: ok
+      - opt:
+          do:
+            - return: nil, redactWriterFailure(entry.Name, "decode config rejected")
+          when: cErr != nil
+      - bind: built, oErr
+        eval: factory.Open(cfg)
+        to: factory.Open
+      - opt:
+          do:
+            - return: nil, redactWriterFailure(entry.Name, "writer rejected its config")
+          when: oErr != nil
+      - return: built, nil
+  - of: redactWriterFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: redactWriterFailure
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(TopologyInvalid, errs.WrapParams{},
+          		errs.String("writer", writer), errs.String("reason", reason))
+        to: errs
+  - of: parseLevel
+    steps:
+      - switch:
+          cases:
+            - case: "\"debug\""
+              do:
+                - return: LevelDebug
+            - case: "\"warn\""
+              do:
+                - return: LevelWarn
+            - case: "\"error\""
+              do:
+                - return: LevelError
+            - default: true
+              do:
+                - return: LevelInfo
+          "on": toLowerASCII(name)
+  - of: NewText
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewText
+        kind: self
+      - id: NewWriterSink
+        kind: internal
+      - id: NewWithSink
+        kind: internal
+      - id: svclogger
+        kind: package
+      - id: base.With
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: branches
+              eval: make([]Sink, 0, len(cfg.Writers))
+            - loop:
+                do:
+                  - bind: sink, sErr
+                    eval: NewWriterSink(w)
+                    to: NewWriterSink
+                  - opt:
+                      do:
+                        - return: nil, sErr
+                      when: sErr != nil
+                  - set: branches
+                    value: append(branches, sink)
+                key: _
+                range: cfg.Writers
+                value: w
+            - return: |-
+                NewWithSink(SinkConfig{
+                			Sink:     Multi(branches...),
+                			Encoder:  TextEncoder(),
+                			MinLevel: cfg.MinLevel,
+                		})
+              to: NewWithSink
+          when: len(cfg.Writers) > 0
+      - opt:
+          do:
+            - return: nil, WriterRequired
+          when: cfg.Writer == nil
+      - bind: handler, hErr
+        eval: svclogger.NewTextHandler(cfg.Writer, cfg.MinLevel)
+        to: svclogger
+      - opt:
+          do:
+            - return: nil, hErr
+          when: hErr != nil
+      - bind: base, lErr
+        eval: svclogger.NewWithTraceContext(handler, TraceContextFromContext)
+        to: svclogger
+      - opt:
+          do:
+            - return: nil, lErr
+          when: lErr != nil
+      - return: "base.With(corelogger.AttrValue{Key: \"framework_version\", Value: corelogger.StringValue(FrameworkVersion())}), nil"
+        to: base.With
+  - of: Default
+    participants:
+      - id: caller
+        kind: actor
+      - id: Default
+        kind: self
+      - id: NewText
+        kind: internal
+    steps:
+      - return: "NewText(Config{Writer: os.Stderr})"
+        to: NewText
+  - of: DefaultMulti
+    participants:
+      - id: caller
+        kind: actor
+      - id: DefaultMulti
+        kind: self
+      - id: NewMulti
+        kind: internal
+    steps:
+      - return: |-
+          NewMulti(
+          		LevelInfo,
+          		WriterSpec{Name: "console", Config: ConsoleConfig{}},
+          		WriterSpec{Name: "file", Config: FileConfig{Path: path}},
+          	)
+        to: NewMulti
+  - of: Debug
+    participants:
+      - id: caller
+        kind: actor
+      - id: Debug
+        kind: self
+      - id: lg.Log
+        kind: value
+    steps:
+      - eval: lg.Log(ctx, LevelDebug, msg, attrs...)
+        to: lg.Log
+  - of: Info
+    participants:
+      - id: caller
+        kind: actor
+      - id: Info
+        kind: self
+      - id: lg.Log
+        kind: value
+    steps:
+      - eval: lg.Log(ctx, LevelInfo, msg, attrs...)
+        to: lg.Log
+  - of: Warn
+    participants:
+      - id: caller
+        kind: actor
+      - id: Warn
+        kind: self
+      - id: lg.Log
+        kind: value
+    steps:
+      - eval: lg.Log(ctx, LevelWarn, msg, attrs...)
+        to: lg.Log
+  - of: Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: Error
+        kind: self
+      - id: lg.Log
+        kind: value
+    steps:
+      - eval: lg.Log(ctx, LevelError, msg, attrs...)
+        to: lg.Log
+  - of: String
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.StringValue(val)}"
+  - of: Int
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.IntValue(val)}"
+  - of: Bool
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.BoolValue(val)}"
+  - of: Float64
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.Float64Value(val)}"
+  - of: Int64
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.Int64Value(val)}"
+  - of: Uint64
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.Uint64Value(val)}"
+  - of: Duration
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.DurationValue(val)}"
+  - of: Time
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.TimeValue(val)}"
+  - of: Any
+    steps:
+      - return: "Attr{Key: key, Value: corelogger.AnyValue(val)}"
+  - of: NewWithSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWithSink
+        kind: self
+      - id: encoder
+        kind: package
+      - id: svclogger
+        kind: package
+      - id: base.With
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, SinkConfigRequired
+          when: cfg.Sink == nil
+      - bind: enc
+        eval: cfg.Encoder
+      - opt:
+          do:
+            - set: enc
+              to: encoder
+              value: encoder.NewText(clock.System)
+          when: enc == nil
+      - bind: handler, hErr
+        eval: svclogger.NewHandler(enc, cfg.Sink, cfg.MinLevel)
+        to: svclogger
+      - opt:
+          do:
+            - return: nil, hErr
+          when: hErr != nil
+      - bind: base, lErr
+        eval: svclogger.NewWithTraceContext(handler, TraceContextFromContext)
+        to: svclogger
+      - opt:
+          do:
+            - return: nil, lErr
+          when: lErr != nil
+      - return: "base.With(corelogger.AttrValue{Key: \"framework_version\", Value: corelogger.StringValue(FrameworkVersion())}), nil"
+        to: base.With
+  - of: NewWriterSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWriterSink
+        kind: self
+      - id: console
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, WriterRequired
+          when: w == nil
+      - bind: built, bErr
+        eval: console.New(w)
+        to: console
+      - opt:
+          do:
+            - return: nil, bErr
+          when: bErr != nil
+      - return: built, nil
+  - of: TextEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: TextEncoder
+        kind: self
+      - id: encoder
+        kind: package
+    steps:
+      - return: encoder.NewText(clock.System)
+        to: encoder
+  - of: TraceContextFromContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: TraceContextFromContext
+        kind: self
+      - id: coretrace
+        kind: package
+    steps:
+      - bind: spanContext
+        eval: coretrace.SpanContextFromContext(ctx)
+        to: coretrace
+      - opt:
+          do:
+            - return: TraceContext{}
+          when: "!spanContext.IsValid()"
+      - return: |-
+          TraceContext{
+          		TraceID: [corelogger.TraceIDLen]byte(spanContext.TraceID),
+          		SpanID:  [corelogger.SpanIDLen]byte(spanContext.SpanID),
+          	}
+  - of: FrameworkVersion
+    steps:
+      - opt:
+          do:
+            - return: devVersion
+          when: Version == ""
+      - return: Version
+  - of: WithError
+    participants:
+      - id: caller
+        kind: actor
+      - id: WithError
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: fallbackAttrs
+        kind: internal
+      - id: appendReason
+        kind: internal
+      - id: appendOptional
+        kind: internal
+      - id: appendTrail
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - bind: code, ok
+        eval: kerrs.CodeOf(err)
+        to: kerrs
+      - opt:
+          do:
+            - return: fallbackAttrs(err)
+              to: fallbackAttrs
+          when: "!ok"
+      - bind: attrs
+        eval: make([]Attr, 0, errorAttrCap)
+      - set: attrs
+        value: append(attrs, String(errorCodeKey, code.String()))
+      - set: attrs
+        to: appendReason
+        value: appendReason(attrs, err)
+      - set: attrs
+        to: appendOptional
+        value: appendOptional(attrs, errorPublicKey, kerrs.PublicOf(err))
+      - set: attrs
+        to: appendTrail
+        value: appendTrail(attrs, kerrs.TrailOf(err))
+      - return: attrs
+  - of: fallbackAttrs
+    steps:
+      - return: "[]Attr{String(errorMessageKey, err.Error())}"
+  - of: appendReason
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendReason
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: appendOptional
+        kind: internal
+    steps:
+      - bind: reason, ok
+        eval: kerrs.ReasonOf(err)
+        to: kerrs
+      - opt:
+          do:
+            - return: attrs
+          when: "!ok"
+      - return: appendOptional(attrs, errorReasonKey, reason)
+        to: appendOptional
+  - of: appendOptional
+    steps:
+      - opt:
+          do:
+            - return: attrs
+          when: value == ""
+      - return: append(attrs, String(key, value))
+  - of: appendTrail
+    steps:
+      - loop:
+          do:
+            - bind: key
+              eval: errorTrailKey + "." + strconv.Itoa(i)
+            - set: attrs
+              value: append(attrs, String(key, c.String()))
+          key: i
+          range: trail
+          value: c
+      - return: attrs
+  - of: NewMulti
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMulti
+        kind: self
+      - id: branch.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+      - id: corewriter
+        kind: package
+      - id: Multi
+        kind: internal
+      - id: NewWithSink
+        kind: internal
+      - id: svclogger
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, WriterSpecInvalid
+          when: len(specs) == 0
+      - bind: branches
+        eval: make([]Sink, 0, len(specs))
+      - bind: rollback
+        eval:
+          closure:
+            params: cause error
+            results: error
+            steps:
+              - bind: closeErrs
+                eval: make([]error, 0, len(branches))
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - set: closeErrs
+                            value: append(closeErrs, cErr)
+                        init:
+                          bind: cErr
+                          eval: branch.Close()
+                          to: branch.Close
+                        when: cErr != nil
+                  key: _
+                  range: slices.Backward(branches)
+                  value: branch
+              - opt:
+                  do:
+                    - return: cause
+                  when: len(closeErrs) == 0
+              - return: errors.Join(append([]error{cause}, closeErrs...)...)
+                to: errors
+      - loop:
+          do:
+            - bind: sink, oErr
+              eval: corewriter.Open(spec.Name, spec.Config)
+              to: corewriter
+            - opt:
+                do:
+                  - return: nil, rollback(oErr)
+                when: oErr != nil
+            - set: branches
+              value: append(branches, sink)
+          key: _
+          range: specs
+          value: spec
+      - bind: fanout
+        eval: Multi(branches...)
+        to: Multi
+      - set: lg, err
+        to: NewWithSink
+        value: |-
+          NewWithSink(SinkConfig{
+          		Sink:     fanout,
+          		Encoder:  TextEncoder(),
+          		MinLevel: min,
+          	})
+      - opt:
+          do:
+            - return: nil, rollback(err)
+          when: err != nil
+      - return: svclogger.Owning(lg, fanout), nil
+        to: svclogger

@@ -1,0 +1,27 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: HasAnyCode
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: HasCode(err, c)
+          key: _
+          range: codes
+          value: c
+      - return: "false"
+  - of: HasAnyReason
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: HasReason(err, r)
+          key: _
+          range: reasons
+          value: r
+      - return: "false"

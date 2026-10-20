@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/observe/metrics
+  name: metrics
+  purpose: Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger, shaped on the OpenTelemetry metrics DATA MODEL.
+types: []

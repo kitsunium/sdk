@@ -1,0 +1,2046 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The spool's refusals the framework tells apart, which it words for the product.
+    grouped: true
+    items:
+      - doc: MailRefusalNone is no refusal the framework words.
+        name: MailRefusalNone
+        type: MailRefusal
+        value: iota
+      - doc: |-
+          MailRefusalClosed is a spool that is closed: its mailer is not
+          running.
+        name: MailRefusalClosed
+      - doc: MailRefusalUnencodable is a mail the outbox cannot encode.
+        name: MailRefusalUnencodable
+      - doc: |-
+          MailRefusalInvalidURL is an SMTP URL that is not one of the form
+          smtp://user:password@host:port; its "problem" field says the clause.
+        name: MailRefusalInvalidURL
+    name: MailRefusalNone
+  - doc: What a spool reports of a mail.
+    grouped: true
+    items:
+      - doc: MailEventOther is an event of the spool the framework shows nothing of.
+        name: MailEventOther
+        type: MailEvent
+        value: iota
+      - doc: MailEventQueued is a mail put in the outbox.
+        name: MailEventQueued
+      - doc: MailEventSent is a mail the transport accepted.
+        name: MailEventSent
+      - doc: MailEventRetrying is a failed attempt that will be retried.
+        name: MailEventRetrying
+      - doc: MailEventDeadLettered is a mail given up on after its last attempt.
+        name: MailEventDeadLettered
+      - doc: MailEventDuplicate is a redelivery of a mail already sent, dropped.
+        name: MailEventDuplicate
+    name: MailEventOther
+  - grouped: true
+    items:
+      - doc: LabelNode is the pprof label naming the node a goroutine works for.
+        name: LabelNode
+        type: string
+        value: "\"app_node\""
+      - doc: LabelLoop is the pprof label naming the loop a goroutine belongs to.
+        name: LabelLoop
+        type: string
+        value: "\"app_loop\""
+    name: LabelNode
+  - doc: The write modes.
+    grouped: true
+    items:
+      - doc: |-
+          WriteUpsert writes whatever the key holds: a creation or a
+          replacement.
+        name: WriteUpsert
+        type: WriteMode
+        value: iota
+      - doc: WriteInsert expects nothing under the key, and is refused otherwise.
+        name: WriteInsert
+      - doc: |-
+          WriteReplace expects a document under the key, and is refused
+          otherwise: never a resurrection.
+        name: WriteReplace
+    name: WriteUpsert
+  - doc: The kinds of refusal.
+    grouped: true
+    items:
+      - doc: RefusalNone is no refusal the framework words.
+        name: RefusalNone
+        type: Refusal
+        value: iota
+      - doc: |-
+          RefusalNotFound is no document under the key, or under the index's
+          key.
+        name: RefusalNotFound
+      - doc: RefusalExists is a document already under the key an insertion names.
+        name: RefusalExists
+      - doc: RefusalUniqueTaken is another document under a unique index's key.
+        name: RefusalUniqueTaken
+      - doc: RefusalKeyEmpty is a document whose key is empty.
+        name: RefusalKeyEmpty
+      - doc: RefusalKeyChanged is an update that changes the document's key.
+        name: RefusalKeyChanged
+      - doc: RefusalIndexUnknown is an index the store does not declare.
+        name: RefusalIndexUnknown
+      - doc: RefusalIndexNotUnique is a lookup on an index that is not unique.
+        name: RefusalIndexNotUnique
+      - doc: RefusalIndexBroken is stored documents that break a unique index.
+        name: RefusalIndexBroken
+      - doc: RefusalUndecodable is a record that does not decode into its type.
+        name: RefusalUndecodable
+      - doc: RefusalUnencodable is an entity that does not encode.
+        name: RefusalUnencodable
+      - doc: RefusalPersist is a write the store could not keep.
+        name: RefusalPersist
+      - doc: |-
+          RefusalLoad is a store that could not be loaded; its "problem" field
+          says why.
+        name: RefusalLoad
+      - doc: RefusalClosed is a call on a closed engine.
+        name: RefusalClosed
+      - doc: |-
+          RefusalUnconfirmed is a write that stands but whose survival across a
+          power loss is in doubt.
+        name: RefusalUnconfirmed
+      - doc: |-
+          RefusalVersionsNotKept is a call on the versions of a store that keeps
+          none.
+        name: RefusalVersionsNotKept
+      - doc: |-
+          RefusalVersionsRewrite is a rewrite of versions that adds or
+          renumbers one.
+        name: RefusalVersionsRewrite
+      - doc: RefusalNotTrashed is no record in the trash under the key.
+        name: RefusalNotTrashed
+      - doc: |-
+          RefusalKeyTooLong is a key longer than a database's key columns hold;
+          its "max" field says how long they hold.
+        name: RefusalKeyTooLong
+      - doc: RefusalStatement is a statement the database did not complete.
+        name: RefusalStatement
+      - doc: |-
+          RefusalTxClosed is a call with the context of a transaction that
+          ended.
+        name: RefusalTxClosed
+      - doc: |-
+          RefusalTxFailed is a transaction or a savepoint the database would
+          not open, commit or roll back.
+        name: RefusalTxFailed
+      - doc: |-
+          RefusalOutOfOrder is a migration older than one already applied; its
+          "applied" field names the newer.
+        name: RefusalOutOfOrder
+      - doc: |-
+          RefusalRenameTarget is a table whose present name is taken while its
+          former one still holds the framework's data (ADR 0180 step 5); its
+          "tables" field names them, and nothing was moved.
+        name: RefusalRenameTarget
+    name: RefusalNone
+  - doc: |-
+      WorkflowCreateEvent is the event of a transition Start fires: an entity
+      entering its workflow.
+    items:
+      - name: WorkflowCreateEvent
+        type: string
+        value: "\"create\""
+    name: WorkflowCreateEvent
+  - doc: The triggers of a transition.
+    grouped: true
+    items:
+      - doc: WorkflowTriggerStart is a creation, which Start fires.
+        name: WorkflowTriggerStart
+        type: WorkflowTrigger
+        value: iota
+      - doc: WorkflowTriggerEvent is an event code fires.
+        name: WorkflowTriggerEvent
+      - doc: "WorkflowTriggerDelay is a timer: a duration spent in a state."
+        name: WorkflowTriggerDelay
+      - doc: WorkflowTriggerDeadline is a timer at an instant the entity carries.
+        name: WorkflowTriggerDeadline
+      - doc: WorkflowTriggerGuard is a condition on the entity that holds.
+        name: WorkflowTriggerGuard
+    name: WorkflowTriggerStart
+  - doc: Why a run of a workflow's loop started.
+    grouped: true
+    items:
+      - doc: WorkflowWakeStart is the loop's first run.
+        name: WorkflowWakeStart
+        type: WorkflowWake
+        value: iota
+      - doc: WorkflowWakeDue is a transition coming due.
+        name: WorkflowWakeDue
+      - doc: WorkflowWakeChange is a write that may have brought one forward.
+        name: WorkflowWakeChange
+    name: WorkflowWakeStart
+  - doc: What a workflow's loop reports.
+    grouped: true
+    items:
+      - doc: WorkflowLoopOther is an event of the loop the framework shows nothing of.
+        name: WorkflowLoopOther
+        type: WorkflowLoopEvent
+        value: iota
+      - doc: "WorkflowLoopRunStarted is a run starting: Wake and Started are set."
+        name: WorkflowLoopRunStarted
+      - doc: |-
+          WorkflowLoopRunEnded is a run ending: Started, Ended, Next and what
+          it could not fire, Err, are set.
+        name: WorkflowLoopRunEnded
+      - doc: |-
+          WorkflowLoopWaiting is the loop asleep until Next, zero for no
+          transition due.
+        name: WorkflowLoopWaiting
+    name: WorkflowLoopOther
+  - doc: The engine's failures the framework tells apart, which it words for the product.
+    grouped: true
+    items:
+      - doc: WorkflowFailureNone is no failure the framework words.
+        name: WorkflowFailureNone
+        type: WorkflowFailure
+        value: iota
+      - doc: |-
+          WorkflowTransitionRefused is an event that leaves no transition from
+          the entity's state.
+        name: WorkflowTransitionRefused
+      - doc: WorkflowEntityMissing is no entity under the key.
+        name: WorkflowEntityMissing
+      - doc: WorkflowEntityExists is an entity already under the key Start names.
+        name: WorkflowEntityExists
+      - doc: WorkflowKeyEmpty is an entity whose key is empty.
+        name: WorkflowKeyEmpty
+      - doc: |-
+          WorkflowHookFailed is a hook that returned an error, joined to it;
+          its "hook" and "event" fields name the hook's kind and the event.
+        name: WorkflowHookFailed
+      - doc: |-
+          WorkflowHookPanicked is a hook that panicked; its "hook", "panic" and
+          "stack" fields say which and how.
+        name: WorkflowHookPanicked
+      - doc: |-
+          WorkflowHookChangedState is an OnEnter hook that changed the state
+          it entered.
+        name: WorkflowHookChangedState
+      - doc: |-
+          WorkflowHookChangedKey is an OnEnter hook that changed its entity's
+          key.
+        name: WorkflowHookChangedKey
+      - doc: WorkflowReentrant is an OnEnter hook that fired its own workflow.
+        name: WorkflowReentrant
+      - doc: WorkflowStoreFailed is the workflow's store that failed.
+        name: WorkflowStoreFailed
+      - doc: WorkflowJournalFailed is the workflow's journal that failed.
+        name: WorkflowJournalFailed
+      - doc: |-
+          WorkflowFunctionPanicked is a guard or an instant function that
+          panicked.
+        name: WorkflowFunctionPanicked
+      - doc: WorkflowLoopPanicked is the loop that panicked.
+        name: WorkflowLoopPanicked
+      - doc: |-
+          WorkflowWaitAbandoned is a caller that stopped waiting for its
+          entity: its context ended.
+        name: WorkflowWaitAbandoned
+    name: WorkflowFailureNone
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Jobs
+      - JobDriverConfig
+      - JobScheduleFunc
+      - JobSchedulerConfig
+      - JobEntryValue
+      - JobResultValue
+    name: jobs.go
+  - decls:
+      - JobScheduler
+    name: jobs_interface.go
+  - decls:
+      - MailRefusalNone
+      - MailEventOther
+      - Mail
+      - MailDriverConfig
+      - MailRefusal
+      - MailEvent
+      - MailSpoolConfig
+      - MailValue
+      - MailRelayValue
+      - MailAttemptValue
+      - MailEventValue
+    name: mail.go
+  - decls:
+      - MailSpool
+      - MailSink
+      - MailCaptureSource
+    name: mail_interface.go
+  - decls:
+      - LabelNode
+      - NewHTTPServer
+      - HTTPConfig
+      - HTTPState
+      - HTTPServer
+    name: plug.go
+  - decls:
+      - Queues
+      - QueueDriverConfig
+      - QueueConfig
+      - QueuePolicyValue
+      - ConsumeConfig
+      - MessageValue
+      - DeliveryValue
+      - LiveMessageValue
+      - DeadLetterValue
+    name: queue.go
+  - decls:
+      - Broker
+      - MessageMover
+      - Clock
+      - Timer
+      - Ticker
+    name: queue_interface.go
+  - decls:
+      - WriteUpsert
+      - Stores
+      - StoreDriverConfig
+      - RenameSpec
+      - RenameValue
+      - DocumentValue
+      - EntryValue
+      - WriteMode
+      - IndexSpec
+      - StoreConfig
+      - StampValue
+      - DatabaseConfig
+      - TableSpec
+      - MigrationValue
+      - Step
+      - VersionValue
+      - VersionWeightValue
+      - TombstoneValue
+    name: store.go
+  - decls:
+      - Database
+      - Checker
+      - MigratorProvider
+      - Migrator
+      - Executor
+      - Transaction
+      - StoreEngine
+      - Folder
+      - Keyser
+      - EntrySource
+      - Reindexer
+      - VersionKeeper
+      - VersionWeighter
+      - Trasher
+      - DocumentSource
+      - Documents
+      - DocumentSink
+    name: store_interface.go
+  - decls:
+      - RefusalNone
+      - Refusal
+      - RefusalError
+      - Refuse
+      - Refused
+      - (*RefusalError).Error
+      - (*RefusalError).Unwrap
+    name: store_refusal.go
+  - decls:
+      - Studio
+      - StudioDriverConfig
+      - StudioEnvValue
+      - StudioStateValue
+    name: studio.go
+  - decls:
+      - StudioHost
+    name: studio_interface.go
+  - decls:
+      - Words
+      - WordsConfig
+    name: words.go
+  - decls:
+      - Translator
+    name: words_interface.go
+  - decls:
+      - WorkflowCreateEvent
+      - WorkflowTriggerStart
+      - WorkflowWakeStart
+      - WorkflowLoopOther
+      - WorkflowFailureNone
+      - Workflows
+      - WorkflowDriverConfig
+      - WorkflowTrigger
+      - WorkflowWake
+      - WorkflowLoopEvent
+      - WorkflowFailure
+      - WorkflowConfig
+      - TransitionSpec
+      - EnterHookSpec
+      - WorkflowEntityValue
+      - WorkflowChangeValue
+      - WorkflowFiringValue
+      - WorkflowRecordValue
+      - WorkflowStepValue
+      - WorkflowLoopEventValue
+    name: workflow.go
+  - decls:
+      - WorkflowEngine
+      - WorkflowStore
+      - WorkflowJournal
+    name: workflow_interface.go
+functions:
+  - name: Refuse
+    params: kind Refusal, err error
+    results: error
+  - name: Refused
+    params: err error, kind Refusal
+    results: bool
+imports:
+  atomic: sync/atomic
+  context: context
+  fs: io/fs
+  http: net/http
+  iter: iter
+  json: encoding/json
+  model: github.com/kitsunium/sdk/framework/model
+  sql: database/sql
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/plug
+  name: plug
+  purpose: "Package plug is where the framework's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/app/server), the Studio — the tool's variables, its routes and the framework's sentences in the languages after English (framework/app/studio) —, the stores and the databases (framework/app/store), the queues (framework/app/queue), the workflows (framework/app/workflow), the mailers (framework/app/mail), the jobs (framework/app/jobs)."
+types:
+  - fields:
+      - doc: |-
+          Every is the schedule of a job that runs every period, first one
+          period after the scheduler starts; a period that is not positive is
+          refused.
+        name: Every
+        type: func(period time.Duration) (JobScheduleFunc, error)
+      - doc: |-
+          Cron is the schedule of a five-field POSIX cron expression, in the
+          process's local time zone; an expression it cannot read is refused.
+        name: Cron
+        type: func(expr string) (JobScheduleFunc, error)
+      - doc: |-
+          Open opens the scheduler the app's jobs run on, as cfg says, with no
+          entry yet.
+        name: Open
+        type: func(cfg *JobSchedulerConfig) JobScheduler
+    kind: struct
+    name: JobDriverConfig
+  - kind: named
+    name: JobScheduleFunc
+    underlying: func(after time.Time) (next time.Time, ok bool)
+  - fields:
+      - doc: Clock is the app's clock, which the scheduler stamps and waits on.
+        name: Clock
+        type: Clock
+      - doc: |-
+          OnResult hears every decision of the scheduler — each run, with the
+          job's own error, and each fire skipped or missed —, one at a time.
+        name: OnResult
+        type: func(res JobResultValue)
+    kind: struct
+    name: JobSchedulerConfig
+  - fields:
+      - doc: Name names the job; the scheduler refuses a name it holds already.
+        name: Name
+        type: string
+      - doc: Schedule says when the job runs next.
+        name: Schedule
+        type: JobScheduleFunc
+      - doc: Run runs the job once; its error is the result's.
+        name: Run
+        type: func(ctx context.Context) error
+    kind: struct
+    name: JobEntryValue
+  - fields:
+      - doc: Name is the job's.
+        name: Name
+        type: string
+      - doc: Scheduled is the instant the fire was due.
+        name: Scheduled
+        type: time.Time
+      - doc: Started and Finished bound the run; zero for a fire that did not run.
+        name: Started
+        type: time.Time
+      - doc: Started and Finished bound the run; zero for a fire that did not run.
+        name: Finished
+        type: time.Time
+      - doc: |-
+          Missed counts the fires that came due while the scheduler could not
+          fire them, skipped rather than caught up.
+        name: Missed
+        type: int
+      - doc: "Skipped says the fire did not run: a run of the same job was going."
+        name: Skipped
+        type: bool
+      - doc: Err is the run's error.
+        name: Err
+        type: error
+    kind: struct
+    name: JobResultValue
+  - kind: named
+    name: JobScheduler
+    underlying: |-
+      interface {
+      	// Add registers a job; it is refused while the scheduler runs, for a
+      	// name it holds already, and for an entry with no name, run or
+      	// schedule.
+      	Add(entry JobEntryValue) error
+      	// Run fires the jobs until ctx ends, then waits for the runs going.
+      	Run(ctx context.Context) error
+      }
+  - fields:
+      - doc: Open opens one mailer's outbox as cfg says, closed until it runs.
+        name: Open
+        type: func(cfg *MailSpoolConfig) (MailSpool, error)
+      - doc: |-
+          Validate is the SDK's verdict on a mail: nil when the outbox takes it,
+          else what is wrong with it, in the SDK's public words.
+        name: Validate
+        type: func(msg MailValue) error
+      - doc: |-
+          Capture is a transport that delivers nothing and keeps the last
+          message it composed (MailCaptureSource).
+        name: Capture
+        type: func() MailSink
+      - doc: |-
+          ParseSMTP reads an SMTP URL — smtp://user:password@host:port?tls=
+          starttls|implicit|none, smtps:// for implicit TLS — as the SDK's
+          SMTP transport would take it.
+        name: ParseSMTP
+        type: func(url string) (MailRelayValue, error)
+      - doc: |-
+          NewSMTP is the SDK's SMTP transport to relay, which dials nothing
+          until a mail is sent.
+        name: NewSMTP
+        type: func(relay *MailRelayValue) (MailSink, error)
+      - doc: |-
+          Refused reports whether err, or an error it wraps, is the spool's or
+          the URL's refusal of kind: the SDK's sentinels stay in the subsystem,
+          and the error keeps the fields the SDK gave it.
+        name: Refused
+        type: func(err error, kind MailRefusal) bool
+    kind: struct
+    name: MailDriverConfig
+  - kind: named
+    name: MailRefusal
+    underlying: uint8
+  - kind: named
+    name: MailEvent
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Transport makes one delivery attempt of msg; the spool retries a
+          failure, or dead-letters the mail after its last attempt.
+        name: Transport
+        type: func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error
+      - doc: Clock is the app's clock, which the spool stamps and waits on.
+        name: Clock
+        type: Clock
+      - doc: Observe is told each event of each mail.
+        name: Observe
+        type: func(e *MailEventValue)
+      - doc: |-
+          Annotate is what the spool keeps of a Send for its deliveries, read
+          from the Send's context.
+        name: Annotate
+        type: func(ctx context.Context) map[string]string
+      - doc: NewID mints a mail's outbox ID.
+        name: NewID
+        type: func() (string, error)
+      - doc: |-
+          Outbox is the queue the spool keeps its mails in on a database —
+          the queue subsystem's, sealed —, nil for a directory or memory.
+        name: Outbox
+        type: Broker
+      - doc: |-
+          Database is the database Outbox is on, whose transaction a mail sent
+          in one joins; nil for none.
+        name: Database
+        type: Database
+      - doc: |-
+          From is the sender of every mail that names none: the SDK's
+          mail.Address, held as any.
+        name: From
+        type: MailValue
+      - doc: |-
+          Dir is the directory the spool keeps its own queue in; with no Outbox
+          and no Dir, the outbox is in memory.
+        name: Dir
+        type: string
+      - doc: |-
+          BackoffBase is the wait after a failed attempt, doubled after each,
+          up to BackoffMax.
+        name: BackoffBase
+        type: time.Duration
+      - doc: BackoffMax bounds the wait after a failed attempt.
+        name: BackoffMax
+        type: time.Duration
+      - doc: SendTimeout bounds one attempt.
+        name: SendTimeout
+        type: time.Duration
+      - doc: PollInterval bounds an idle wait.
+        name: PollInterval
+        type: time.Duration
+      - doc: |-
+          MaxAttempts is how many attempts a mail gets before it is
+          dead-lettered.
+        name: MaxAttempts
+        type: int
+      - doc: |-
+          MaxMessageBytes bounds one mail in the spool's own queue; zero is the
+          spool's own bound.
+        name: MaxMessageBytes
+        type: int
+    kind: struct
+    name: MailSpoolConfig
+  - fields:
+      - doc: Value is the SDK's mail value.
+        name: Value
+        type: any
+    kind: struct
+    name: MailValue
+  - fields:
+      - doc: Config is the SDK's SMTP configuration, held as any.
+        name: Config
+        type: any
+      - doc: Server is where it delivers, host:port.
+        name: Server
+        type: string
+      - doc: "TLS is its TLS mode as the URL spells it: starttls, implicit or none."
+        name: TLS
+        type: string
+    kind: struct
+    name: MailRelayValue
+  - fields:
+      - doc: QueuedAt is when the mail was put in the outbox.
+        name: QueuedAt
+        type: time.Time
+      - doc: Meta is what Annotate kept of the Send.
+        name: Meta
+        type: map[string]string
+      - doc: ID is the mail's outbox ID.
+        name: ID
+        type: string
+      - doc: Attempt numbers the attempt, from 1.
+        name: Attempt
+        type: int
+    kind: struct
+    name: MailAttemptValue
+  - fields:
+      - doc: Err is a failed attempt's failure.
+        name: Err
+        type: error
+      - doc: Meta is what Annotate kept of the Send.
+        name: Meta
+        type: map[string]string
+      - doc: At is when the event happened.
+        name: At
+        type: time.Time
+      - doc: QueuedAt is when the mail was put in the outbox.
+        name: QueuedAt
+        type: time.Time
+      - doc: Message is the mail.
+        name: Message
+        type: MailValue
+      - doc: ID is the mail's outbox ID.
+        name: ID
+        type: string
+      - doc: Attempt numbers the attempt the event is about.
+        name: Attempt
+        type: int
+      - doc: Kind is what happened.
+        name: Kind
+        type: MailEvent
+    kind: struct
+    name: MailEventValue
+  - kind: named
+    name: MailSpool
+    underlying: |-
+      interface {
+      	// Send puts msg in the outbox — in the transaction ctx carries for its
+      	// database, when it lives on one — and returns its outbox ID.
+      	Send(ctx context.Context, msg MailValue) (string, error)
+      	// SendWithID puts msg in the outbox under id, minted by the framework.
+      	SendWithID(ctx context.Context, id string, msg MailValue) error
+      	// DeadLetters counts up to maxLetters of the mails earlier runs gave up
+      	// on.
+      	DeadLetters(ctx context.Context, maxLetters int) (int, error)
+      	// Run hands each mail to the transport until ctx ends.
+      	Run(ctx context.Context) error
+      	// Close releases the outbox.
+      	Close() error
+      }
+  - kind: named
+    name: MailSink
+    underlying: |-
+      interface {
+      	// Send delivers msg.
+      	Send(ctx context.Context, msg MailValue) error
+      }
+  - kind: named
+    name: MailCaptureSource
+    underlying: |-
+      interface {
+      	// Composed is the last message the transport composed, nil for none.
+      	Composed() []byte
+      }
+  - fields:
+      - doc: Addr is where to listen, "host:port".
+        name: Addr
+        type: string
+      - doc: Shards is how many sockets the engine opens on Addr.
+        name: Shards
+        type: int
+      - doc: ReadHeader, Read, Write and Idle bound a request's phases.
+        name: ReadHeader
+        type: time.Duration
+      - doc: ReadHeader, Read, Write and Idle bound a request's phases.
+        name: Read
+        type: time.Duration
+      - doc: ReadHeader, Read, Write and Idle bound a request's phases.
+        name: Write
+        type: time.Duration
+      - doc: ReadHeader, Read, Write and Idle bound a request's phases.
+        name: Idle
+        type: time.Duration
+      - doc: MaxHeaderBytes bounds a request's header.
+        name: MaxHeaderBytes
+        type: int
+      - doc: Handler answers every request.
+        name: Handler
+        type: http.Handler
+    kind: struct
+    name: HTTPConfig
+  - fields:
+      - doc: Addr is the address the engine bound, "" before it did.
+        name: Addr
+        type: string
+      - doc: Listeners is how many sockets it listens on.
+        name: Listeners
+        type: int
+      - doc: |-
+          Active are the connections being served, Total those accepted since
+          the start, Rejected those refused.
+        name: Active
+        type: int64
+      - name: Total
+        type: uint64
+      - name: Rejected
+        type: uint64
+    kind: struct
+    name: HTTPState
+  - kind: named
+    name: HTTPServer
+    underlying: |-
+      interface {
+      	// Start binds the address and serves, returning once bound.
+      	Start(ctx context.Context) error
+      	// State says what the engine binds and serves.
+      	State() HTTPState
+      	// Shutdown drains the engine within ctx.
+      	Shutdown(ctx context.Context) error
+      }
+  - fields:
+      - doc: |-
+          Open opens one queue, as cfg places it: on a database, in a
+          directory, or in memory.
+        name: Open
+        type: func(cfg QueueConfig) (Broker, error)
+      - doc: |-
+          TableMigration is the migration that makes the queue table on a
+          database of the dialect named, at version.
+        name: TableMigration
+        type: func(dialect, table string, version uint64) (MigrationValue, error)
+      - doc: |-
+          DoNotRetry is err as a delivery's handler returns it when no retry
+          can help: its queue dead-letters the message at once.
+        name: DoNotRetry
+        type: func(err error) error
+      - doc: |-
+          NotRetryable reports whether err, a delivery's handler's, says that no
+          retry can help: what DoNotRetry returned, the product's own included.
+        name: NotRetryable
+        type: func(err error) bool
+    kind: struct
+    name: QueueDriverConfig
+  - fields:
+      - doc: |-
+          Name names the queue's node in a refusal: the consumer's or the
+          mailer's node ID.
+        name: Name
+        type: string
+      - doc: |-
+          Dir is the directory a file queue lies in; with no Database and no
+          Dir, the queue is in memory.
+        name: Dir
+        type: string
+      - doc: |-
+          Database keeps the queue, nil when Dir or memory does: a scope the
+          store subsystem's Database opened, whose transaction a publication in
+          it joins.
+        name: Database
+        type: Database
+      - doc: Table is the queue's table on Database.
+        name: Table
+        type: string
+      - doc: Policy is how the queue leases, retries and bounds its messages.
+        name: Policy
+        type: QueuePolicyValue
+      - doc: Clock is the app's clock, which the queue stamps and waits on.
+        name: Clock
+        type: Clock
+      - doc: |-
+          Seal, when set, seals every payload on its way in — a mail's, in a
+          mailer's outbox on a database —, and Unseal opens one on its way out;
+          MaxPayload bounds a payload before it is sealed.
+        name: Seal
+        type: func(ctx context.Context, payload []byte) ([]byte, error)
+      - doc: |-
+          Unseal is the payload a box holds, the box as it lies when it does
+          not open.
+        name: Unseal
+        type: func(ctx context.Context, box []byte) []byte
+      - doc: MaxPayload bounds a payload Seal seals.
+        name: MaxPayload
+        type: int
+      - doc: |-
+          Wrap, when a test sets it, stands in front of the queue the subsystem
+          opens: a func(queue.Broker) queue.Broker of the SDK's queue, which
+          the framework's core does not name. Nil in every app a product builds.
+        name: Wrap
+        type: any
+    kind: struct
+    name: QueueConfig
+  - fields:
+      - doc: VisibilityTimeout is how long a delivery is leased.
+        name: VisibilityTimeout
+        type: time.Duration
+      - doc: |-
+          RetryDelay is the wait after a message's first failure, doubled after
+          each, up to MaxRetryDelay.
+        name: RetryDelay
+        type: time.Duration
+      - doc: MaxRetryDelay bounds the wait before a retry; zero leaves it unbound.
+        name: MaxRetryDelay
+        type: time.Duration
+      - doc: |-
+          MaxDeliveries is how often a message is delivered before it is
+          dead-lettered.
+        name: MaxDeliveries
+        type: int
+      - doc: MaxMessageBytes bounds a message; zero is the queue's own bound.
+        name: MaxMessageBytes
+        type: int
+    kind: struct
+    name: QueuePolicyValue
+  - fields:
+      - doc: |-
+          Handler handles one delivery: nil acknowledges it, an error has it
+          retried or, through DoNotRetry, dead-lettered at once. Every handler
+          the framework runs tolerates a redelivery.
+        name: Handler
+        type: func(ctx context.Context, d DeliveryValue) error
+      - doc: PollInterval bounds an idle wait.
+        name: PollInterval
+        type: time.Duration
+      - doc: Parallelism is how many deliveries are handled at once.
+        name: Parallelism
+        type: int
+      - doc: BatchSize is how many messages the consumer takes at a time.
+        name: BatchSize
+        type: int
+    kind: struct
+    name: ConsumeConfig
+  - fields:
+      - doc: EnqueuedAt is when the message was published.
+        name: EnqueuedAt
+        type: time.Time
+      - doc: ID identifies the message in its queue.
+        name: ID
+        type: string
+      - doc: Payload is the message as the framework encoded it.
+        name: Payload
+        type: "[]byte"
+    kind: struct
+    name: MessageValue
+  - fields:
+      - doc: Message is what is delivered.
+        name: Message
+        type: MessageValue
+      - doc: Deliveries counts the deliveries, this one included.
+        name: Deliveries
+        type: int
+    kind: struct
+    name: DeliveryValue
+  - fields:
+      - doc: VisibleAt is when the message is next delivered.
+        name: VisibleAt
+        type: time.Time
+      - doc: Message is the message.
+        name: Message
+        type: MessageValue
+      - doc: Deliveries counts its deliveries so far.
+        name: Deliveries
+        type: int
+      - doc: Leased reports whether a consumer holds it.
+        name: Leased
+        type: bool
+    kind: struct
+    name: LiveMessageValue
+  - fields:
+      - doc: FailedAt is when its last attempt failed.
+        name: FailedAt
+        type: time.Time
+      - doc: Reason is the failure's identifier.
+        name: Reason
+        type: string
+      - doc: Cause is the failure's public text, "" for none.
+        name: Cause
+        type: string
+      - doc: Message is the message, unmodified.
+        name: Message
+        type: MessageValue
+      - doc: Code is the failure's error code, 0 for none.
+        name: Code
+        type: uint32
+      - doc: Deliveries counts its deliveries.
+        name: Deliveries
+        type: int
+    kind: struct
+    name: DeadLetterValue
+  - kind: named
+    name: Broker
+    underlying: |-
+      interface {
+      	// Publish puts payload in the queue: in the transaction ctx carries for
+      	// its database, when it lives on one.
+      	Publish(ctx context.Context, payload []byte) error
+      	// Consume delivers the queue's messages to cfg's handler until ctx ends
+      	// or the queue's storage fails.
+      	Consume(ctx context.Context, cfg ConsumeConfig) error
+      	// DeadLetters are up to maxLetters of the queue's dead letters, oldest
+      	// first.
+      	DeadLetters(ctx context.Context, maxLetters int) ([]DeadLetterValue, error)
+      }
+  - kind: named
+    name: MessageMover
+    underlying: |-
+      interface {
+      	// Messages are up to maxMessages live messages after the identifier
+      	// after, "" for the first, in their queue's order.
+      	Messages(ctx context.Context, after string, maxMessages int) ([]LiveMessageValue, error)
+      	// PutMessage writes live under an identifier of the queue's own, and
+      	// returns it.
+      	PutMessage(ctx context.Context, live LiveMessageValue) (string, error)
+      	// PutDeadLetter writes dead, with its cause, under an identifier of the
+      	// queue's own, and returns it.
+      	PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
+      }
+  - kind: named
+    name: Clock
+    underlying: |-
+      interface {
+      	// Now is the clock's instant.
+      	Now() time.Time
+      	// Since is how long ago t was, on the clock.
+      	Since(t time.Time) time.Duration
+      	// After is a channel that receives the clock's instant once d passed.
+      	After(d time.Duration) <-chan time.Time
+      	// NewTimer is a timer that fires once d passed.
+      	NewTimer(d time.Duration) Timer
+      	// NewTicker is a ticker that fires every d.
+      	NewTicker(d time.Duration) Ticker
+      	// Sleep waits until d passed.
+      	Sleep(d time.Duration)
+      }
+  - kind: named
+    name: Timer
+    underlying: |-
+      interface {
+      	// C receives the clock's instant when the timer fires.
+      	C() <-chan time.Time
+      	// Stop stops the timer, and reports whether it had not fired.
+      	Stop() bool
+      	// Reset makes the timer fire once d passed, and reports whether it had
+      	// not fired.
+      	Reset(d time.Duration) bool
+      }
+  - kind: named
+    name: Ticker
+    underlying: |-
+      interface {
+      	// C receives the clock's instant at each tick.
+      	C() <-chan time.Time
+      	// Stop stops the ticker.
+      	Stop()
+      	// Reset makes the ticker fire every d.
+      	Reset(d time.Duration)
+      }
+  - fields:
+      - doc: |-
+          Open opens the engine of one store, as cfg places it: loaded from the
+          data directory, empty in memory, or on a database.
+        name: Open
+        type: func(cfg StoreConfig) (StoreEngine, error)
+      - doc: Database opens the framework's scope on one database's pool.
+        name: Database
+        type: func(cfg DatabaseConfig) (Database, error)
+      - doc: |-
+          TableMigration is the migration that makes the table t on a database
+          of the dialect named, at version.
+        name: TableMigration
+        type: func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
+      - doc: |-
+          FormerTables are the tables of plan still under a former name on db —
+          its former version table among them —, read from the database's
+          catalogue, sorted: what RenameTables would move; none once moved.
+        name: FormerTables
+        type: func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)
+      - doc: |-
+          RenameTables moves the tables of plan to their present names on db
+          (ADR 0180 step 5), under the migration lock of plan's former version
+          table and in the transaction that records the move there, and returns
+          the tables it moved; none when nothing was left under a former name.
+          A table whose present name is taken too is a [RefusalRenameTarget],
+          and nothing moves.
+        name: RenameTables
+        type: func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)
+    kind: struct
+    name: StoreDriverConfig
+  - fields:
+      - doc: |-
+          FormerVersions is the version table the framework's set had: the move
+          holds its migration lock, is recorded there, and drops it once the
+          history is the present table's.
+        name: FormerVersions
+        type: string
+      - doc: Versions is the version table the framework's set has now.
+        name: Versions
+        type: string
+      - doc: Name labels the move in FormerVersions, at Version.
+        name: Name
+        type: string
+      - doc: |-
+          Tables are the tables moved, each from its former name to its present
+          one.
+        name: Tables
+        type: "[]RenameValue"
+      - doc: |-
+          Labels are the names of the tables' migrations in the history, each
+          from what the former release recorded to what this one says.
+        name: Labels
+        type: "[]RenameValue"
+      - doc: |-
+          Version is the move's version in FormerVersions: above every version
+          the framework gives.
+        name: Version
+        type: uint64
+    kind: struct
+    name: RenameSpec
+  - fields:
+      - doc: From is the former name.
+        name: From
+        type: string
+      - doc: To is the present one.
+        name: To
+        type: string
+    kind: struct
+    name: RenameValue
+  - fields:
+      - doc: JSON is the record as it rests.
+        name: JSON
+        type: json.RawMessage
+      - doc: |-
+          Value is the entity decoded from JSON, nil until something decoded it;
+          the store's typed facade asserts it to its type.
+        name: Value
+        type: any
+    kind: struct
+    name: DocumentValue
+  - fields:
+      - doc: Key is the record's key.
+        name: Key
+        type: string
+      - doc: JSON is the record as it rests.
+        name: JSON
+        type: json.RawMessage
+    kind: struct
+    name: EntryValue
+  - kind: named
+    name: WriteMode
+    underlying: int
+  - fields:
+      - doc: Name reads the index, and names it in a refusal.
+        name: Name
+        type: string
+      - doc: Unique refuses a write that would file two documents under one key.
+        name: Unique
+        type: bool
+      - doc: Keys are a document's keys in the index; an empty key is not indexed.
+        name: Keys
+        type: func(d DocumentValue) []string
+    kind: struct
+    name: IndexSpec
+  - fields:
+      - doc: Name is the store's, as a log line and a rollback name it.
+        name: Name
+        type: string
+      - doc: |-
+          Key is a document's key: the product's key function on its type,
+          wrapped once at the declaration. It reads the document's Value, which
+          the engine decodes first unless KeyAtRest gives the key.
+        name: Key
+        type: func(d DocumentValue) string
+      - doc: |-
+          KeyAtRest, when set, gives the key of a record as it rests, without
+          decoding it; false when it cannot.
+        name: KeyAtRest
+        type: func(raw json.RawMessage) (string, bool)
+      - doc: |-
+          Decode is the entity a document's JSON holds, which the engine keeps
+          as the document's Value.
+        name: Decode
+        type: func(raw json.RawMessage) (any, error)
+      - doc: Indexes are the store's secondary indexes.
+        name: Indexes
+        type: "[]IndexSpec"
+      - doc: |-
+          Data is the data directory the store rests in — the SDK's writable
+          file system, which the engine asserts — and Path its snapshot there;
+          a nil Data and a nil Database keep the store in memory.
+        name: Data
+        type: fs.FS
+      - doc: Path is the store's snapshot in Data.
+        name: Path
+        type: string
+      - doc: |-
+          Database keeps the store, nil when the data directory or memory does:
+          a scope the store subsystem's Database opened.
+        name: Database
+        type: Database
+      - doc: Table is the store's table on Database.
+        name: Table
+        type: string
+      - doc: |-
+          IndexKey is the key a table's index keys are hashed under, nil for
+          none: an index key reaches the table as its keyed hash.
+        name: IndexKey
+        type: func(index, key string) []byte
+      - doc: |-
+          Call is the context one call of the engine on Database runs with: on
+          the transaction ctx carries for it, else on the pool, within the
+          database's timeout; done ends it.
+        name: Call
+        type: func(ctx context.Context, write bool) (call context.Context, done func(), err error)
+      - doc: |-
+          Versions is how many former versions of each record the engine keeps,
+          none when zero; Clock stamps them.
+        name: Versions
+        type: int
+      - doc: Clock is the app's clock, which stamps a version.
+        name: Clock
+        type: func() time.Time
+      - doc: |-
+          Held reports whether a record's versions are held, and no write may
+          prune them: asked with the write's context, on a database inside its
+          transaction.
+        name: Held
+        type: func(ctx context.Context, key string) bool
+      - doc: Stamp is what a write under ctx says about the version it makes.
+        name: Stamp
+        type: func(ctx context.Context) StampValue
+      - doc: |-
+          Transaction is the framework's transaction, which the engine's writes take part
+          in.
+        name: Transaction
+        type: Transaction
+    kind: struct
+    name: StoreConfig
+  - fields:
+      - doc: Meta is kept with the version the write makes.
+        name: Meta
+        type: map[string]string
+      - doc: InPlace makes the write change the document without making a version.
+        name: InPlace
+        type: bool
+    kind: struct
+    name: StampValue
+  - fields:
+      - doc: Name is the database's, as the product declared it.
+        name: Name
+        type: string
+      - doc: DB is the pool app.Engine opened.
+        name: DB
+        type: "*sql.DB"
+      - doc: |-
+          Dialect is the engine's SQL dialect: "postgres", "mysql" or
+          "sqlite".
+        name: Dialect
+        type: string
+      - doc: Timeout bounds each call the framework makes on the database.
+        name: Timeout
+        type: time.Duration
+      - doc: MaxOpen and MaxIdle bound the pool's connections.
+        name: MaxOpen
+        type: int
+      - doc: MaxOpen and MaxIdle bound the pool's connections.
+        name: MaxIdle
+        type: int
+      - doc: MaxLifetime and MaxIdleTime bound a connection's life.
+        name: MaxLifetime
+        type: time.Duration
+      - doc: MaxLifetime and MaxIdleTime bound a connection's life.
+        name: MaxIdleTime
+        type: time.Duration
+      - doc: CheckTimeout bounds a check of the database.
+        name: CheckTimeout
+        type: time.Duration
+    kind: struct
+    name: DatabaseConfig
+  - fields:
+      - doc: Name is the table's.
+        name: Name
+        type: string
+      - doc: |-
+          VersionsOf is, for a store's versions, the store's table, from which
+          the versions' table is named.
+        name: VersionsOf
+        type: string
+    kind: struct
+    name: TableSpec
+  - fields:
+      - doc: "Version orders the migration in its set: non-zero and unique."
+        name: Version
+        type: uint64
+      - doc: Name labels it in the version table.
+        name: Name
+        type: string
+      - doc: Up applies the change.
+        name: Up
+        type: Step
+      - doc: Down reverses it.
+        name: Down
+        type: Step
+    kind: struct
+    name: MigrationValue
+  - kind: named
+    name: Step
+    underlying: func(ctx context.Context, ex Executor) error
+  - fields:
+      - doc: Number counts a record's versions from 1.
+        name: Number
+        type: uint64
+      - doc: At is when the write that made the version ran, in UTC.
+        name: At
+        type: time.Time
+      - doc: "Meta is what the write said about it: who made it, which command."
+        name: Meta
+        type: map[string]string
+      - doc: JSON is the record as the version holds it.
+        name: JSON
+        type: json.RawMessage
+    kind: struct
+    name: VersionValue
+  - fields:
+      - doc: Former is how many former versions the store keeps.
+        name: Former
+        type: int
+      - doc: Trashed is how many records are in the trash.
+        name: Trashed
+        type: int
+      - doc: Bytes is what the former versions and the trashed records weigh.
+        name: Bytes
+        type: int64
+    kind: struct
+    name: VersionWeightValue
+  - fields:
+      - doc: Key is the trashed record's key.
+        name: Key
+        type: string
+      - doc: At is when the record was trashed, in UTC.
+        name: At
+        type: time.Time
+    kind: struct
+    name: TombstoneValue
+  - kind: named
+    name: Database
+    underlying: |-
+      interface {
+      	// Transact runs fn in a transaction of the database, or in a savepoint
+      	// of the one ctx carries for it: nil commits or releases, an error
+      	// rolls back.
+      	Transact(ctx context.Context, fn func(ctx context.Context) error) error
+      	// InTransaction reports whether ctx carries a transaction of this
+      	// database.
+      	InTransaction(ctx context.Context) bool
+      	// Defer holds fn until the transaction ctx carries for the database
+      	// commits, and reports true; outside one it holds nothing and reports
+      	// false.
+      	Defer(ctx context.Context, fn func()) bool
+      	// OnAbort holds fn until the work of the scope ctx carries for the
+      	// database is undone, and reports true; outside one it holds nothing
+      	// and reports false.
+      	OnAbort(ctx context.Context, fn func(ctx context.Context)) bool
+      }
+  - kind: named
+    name: Checker
+    underlying: |-
+      interface {
+      	// Check asks the database whether it answers, within its check timeout.
+      	Check(ctx context.Context) error
+      }
+  - kind: named
+    name: MigratorProvider
+    underlying: |-
+      interface {
+      	// Migrator is the set ms, under the version table table.
+      	Migrator(table string, ms []MigrationValue) (Migrator, error)
+      }
+  - kind: named
+    name: Migrator
+    underlying: |-
+      interface {
+      	// Plan is the set's pending migrations, oldest first, applying nothing.
+      	Plan(ctx context.Context) ([]MigrationValue, error)
+      	// Up applies every pending migration, in order.
+      	Up(ctx context.Context) error
+      	// Down reverses the applied migrations above version, newest first.
+      	Down(ctx context.Context, version uint64) error
+      }
+  - kind: named
+    name: Executor
+    underlying: |-
+      interface {
+      	// ExecContext runs a statement that returns no rows.
+      	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+      	// QueryContext runs a query that returns rows.
+      	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+      	// QueryRowContext runs a query that returns at most one row.
+      	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+      }
+  - kind: named
+    name: Transaction
+    underlying: |-
+      interface {
+      	// Local reports whether ctx runs in a transaction that holds the data's
+      	// writer turn: a write in the data directory or in memory then records
+      	// what it replaces.
+      	Local(ctx context.Context) bool
+      	// Undo keeps restore, which a rollback of the transaction ctx carries
+      	// runs; nothing outside one. store names the store in a log line.
+      	Undo(ctx context.Context, store string, restore func(ctx context.Context) error)
+      	// AtCommit holds fn until the transaction ctx carries commits, and
+      	// reports whether it did: false outside one, where the caller runs it
+      	// now.
+      	AtCommit(ctx context.Context, fn func()) bool
+      	// Retell keeps fn, which announces a write on a database again when the
+      	// transaction ctx carries rolls it back.
+      	Retell(ctx context.Context, fn func())
+      }
+  - kind: named
+    name: StoreEngine
+    underlying: |-
+      interface {
+      	// Get returns the document under key.
+      	Get(ctx context.Context, key string) (DocumentValue, error)
+      	// List returns every document, in key order.
+      	List(ctx context.Context) ([]DocumentValue, error)
+      	// Filter returns the documents keep accepts, in key order.
+      	Filter(ctx context.Context, keep func(d DocumentValue) bool) ([]DocumentValue, error)
+      	// Lookup returns the document a unique index files under key.
+      	Lookup(ctx context.Context, index, key string) (DocumentValue, error)
+      	// Find returns the documents an index files under key, in key order.
+      	Find(ctx context.Context, index, key string) ([]DocumentValue, error)
+      	// Count says how many documents the store holds.
+      	Count(ctx context.Context) (int, error)
+      	// Entries returns up to limit documents as they rest, in key order.
+      	Entries(ctx context.Context, limit int) ([]json.RawMessage, error)
+      	// Write stores d as mode says. The document and its index keys are kept
+      	// together, or neither.
+      	Write(ctx context.Context, d DocumentValue, mode WriteMode) error
+      	// Update applies fn to the document under key and stores the result,
+      	// atomically with respect to every other write of the store.
+      	Update(ctx context.Context, key string, fn func(d *DocumentValue) error) (DocumentValue, error)
+      	// Delete removes the document under key.
+      	Delete(ctx context.Context, key string) error
+      	// Watch registers the functions told the key of every document written
+      	// and deleted, once the write stands.
+      	Watch(onWrite, onDelete func(key string))
+      	// Close releases the engine.
+      	Close() error
+      }
+  - kind: named
+    name: Folder
+    underlying: |-
+      interface {
+      	// Fold rewrites the store's data with only what it holds now.
+      	Fold(ctx context.Context) error
+      }
+  - kind: named
+    name: Keyser
+    underlying: |-
+      interface {
+      	// Keys yields the keys above after, in order, then its failure if any.
+      	Keys(ctx context.Context, after string) iter.Seq2[string, error]
+      }
+  - kind: named
+    name: EntrySource
+    underlying: |-
+      interface {
+      	// KeyedEntries returns up to limit records as they rest, in key order.
+      	KeyedEntries(ctx context.Context, limit int) ([]EntryValue, error)
+      }
+  - kind: named
+    name: Reindexer
+    underlying: |-
+      interface {
+      	// Reindex files every record's index rows again.
+      	Reindex(ctx context.Context) error
+      }
+  - kind: named
+    name: VersionKeeper
+    underlying: |-
+      interface {
+      	// StoredVersions are the versions of the record under key, newest
+      	// first, the current one first.
+      	StoredVersions(ctx context.Context, key string) ([]VersionValue, error)
+      	// RewriteVersions rewrites the former versions of the record under key
+      	// as fn returns them: fn may drop a version or change what one holds,
+      	// never add or renumber one.
+      	RewriteVersions(ctx context.Context, key string, fn func(vs []VersionValue) ([]VersionValue, error)) error
+      }
+  - kind: named
+    name: VersionWeighter
+    underlying: |-
+      interface {
+      	// VersionWeight is what the store's versions and trash weigh.
+      	VersionWeight(ctx context.Context) (VersionWeightValue, error)
+      }
+  - kind: named
+    name: Trasher
+    underlying: |-
+      interface {
+      	// Trash moves the record under key to the trash: gone from every read,
+      	// its index keys freed, its versions kept.
+      	Trash(ctx context.Context, key string) error
+      	// Untrash brings the record trashed under key back as it was.
+      	Untrash(ctx context.Context, key string) error
+      	// Purge empties the trash of the record trashed under key, its versions
+      	// with it.
+      	Purge(ctx context.Context, key string) error
+      	// Tombstones are every record in the trash, in key order.
+      	Tombstones(ctx context.Context) ([]TombstoneValue, error)
+      }
+  - kind: named
+    name: DocumentSource
+    underlying: |-
+      interface {
+      	// Documents is the document store the engine runs on, and whether there
+      	// is one.
+      	Documents() (Documents, bool)
+      }
+  - kind: named
+    name: Documents
+    underlying: |-
+      interface {
+      	// KeyList yields every key the store holds, in key order.
+      	KeyList(ctx context.Context) iter.Seq2[string, error]
+      	// TombstoneList is the trash, in key order: none when the store keeps
+      	// no versions.
+      	TombstoneList(ctx context.Context) ([]TombstoneValue, error)
+      	// VersionList is the versions of the document key, newest first.
+      	VersionList(ctx context.Context, key string) ([]VersionValue, error)
+      	// Current is the document key as the store keeps it.
+      	Current(ctx context.Context, key string) (json.RawMessage, error)
+      	// KeepsVersions reports whether the store keeps versions.
+      	KeepsVersions() bool
+      }
+  - kind: named
+    name: DocumentSink
+    underlying: |-
+      interface {
+      	// PutDocument writes the document key with its versions and its trash
+      	// as they are given.
+      	PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
+      	// InsertRaw writes a document of a store that keeps no versions, as it
+      	// rests.
+      	InsertRaw(ctx context.Context, raw json.RawMessage) error
+      }
+  - kind: named
+    name: Refusal
+    underlying: uint8
+  - fields:
+      - doc: Err is what the engine met.
+        name: Err
+        type: error
+      - doc: Kind is how the framework words it.
+        name: Kind
+        type: Refusal
+    kind: struct
+    methods:
+      - name: Error
+        recv: e *RefusalError
+        results: string
+      - name: Unwrap
+        recv: e *RefusalError
+        results: error
+    name: RefusalError
+  - fields:
+      - doc: Env reads what the tool's variables ask of the Studio in this run.
+        name: Env
+        type: func(getenv func(string) string) StudioEnvValue
+      - doc: |-
+          Settings are the tool's variables as the settings of a run show them,
+          in order, each with its value as the run resolved it and where it
+          came from: the product's code, the environment, or the framework's default.
+        name: Settings
+        type: func(getenv func(string) string, state StudioStateValue) []model.Setting
+      - doc: |-
+          Forced are the variables kit dev says it set itself for this launch,
+          as it names them; the framework labels only those it lets kit dev set.
+        name: Forced
+        type: func(getenv func(string) string) []string
+      - doc: |-
+          DevBuild is what kit dev said about the build it launched, nil when
+          the process was not started by kit dev.
+        name: DevBuild
+        type: func(getenv func(string) string) *model.DevBuild
+      - doc: |-
+          Mount registers the Studio's routes on mux, each behind the Studio's
+          guard, reading the running app through host.
+        name: Mount
+        type: func(mux *http.ServeMux, host StudioHost)
+    kind: struct
+    name: StudioDriverConfig
+  - fields:
+      - doc: |-
+          Studio is what the environment says of the Studio: on — which
+          production refuses —, off, or empty when it says neither.
+        name: Studio
+        type: string
+      - doc: "Remote: the Studio answers a client that is not on this machine."
+        name: Remote
+        type: bool
+      - doc: "NoAnalysis: the environment turns the static analysis off."
+        name: NoAnalysis
+        type: bool
+    kind: struct
+    name: StudioEnvValue
+  - fields:
+      - doc: |-
+          StudioOption and AnalyzeOption are the product's code's choice of the
+          Studio and of the static analysis, which wins over the environment;
+          nil when the code chose nothing.
+        name: StudioOption
+        type: "*bool"
+      - doc: |-
+          StudioOption and AnalyzeOption are the product's code's choice of the
+          Studio and of the static analysis, which wins over the environment;
+          nil when the code chose nothing.
+        name: AnalyzeOption
+        type: "*bool"
+      - doc: |-
+          Studio, Remote and Analyze are the Studio's switches, as resolved and
+          as the settings spell them: on or off.
+        name: Studio
+        type: string
+      - doc: |-
+          Studio, Remote and Analyze are the Studio's switches, as resolved and
+          as the settings spell them: on or off.
+        name: Remote
+        type: string
+      - doc: |-
+          Studio, Remote and Analyze are the Studio's switches, as resolved and
+          as the settings spell them: on or off.
+        name: Analyze
+        type: string
+    kind: struct
+    name: StudioStateValue
+  - kind: named
+    name: StudioHost
+    underlying: |-
+      interface {
+      	// Graph is the app's graph, as it is now.
+      	Graph() *model.Graph
+      	// Phase is where the app is in its life, as the graph says it.
+      	Phase() string
+      	// Now is the time on the app's clock.
+      	Now() time.Time
+      	// Subscribe streams the app's live events until cancel is called.
+      	Subscribe() (events <-chan model.Event, cancel func())
+      	// Stopping is closed when the app ends its live streams.
+      	Stopping() <-chan struct{}
+      	// Traces are the latest traces the app keeps, at most limit, those of
+      	// root's trace or through node when either is given.
+      	Traces(limit int, root, node string) []model.Trace
+      	// Trace is one trace, while the app keeps it.
+      	Trace(id string) (model.Trace, bool)
+      	// Logs are the latest records the product logged, those of a trace or
+      	// a node and from a level when given, at most limit — a default when
+      	// it is empty; a level or a limit the app does not take is refused.
+      	Logs(trace, node, level, limit string) ([]model.LogRecord, error)
+      	// Instances are a workflow's entities and where each is; false for no
+      	// such workflow.
+      	Instances(workflow string) ([]model.Instance, bool)
+      	// Items are a store's latest entities, redacted as payloads are; false
+      	// for no such store.
+      	Items(store string) ([]json.RawMessage, bool)
+      	// Source is a file the graph names, of the product's Go module or of
+      	// the one module names: a regular file within the bound, never a link;
+      	// false for any other name.
+      	Source(ctx context.Context, module, file string) ([]byte, bool)
+      	// Locate says where the function fn, at file:line, lies in the
+      	// product's own module; nil anywhere else.
+      	Locate(file string, line int, fn string) *model.Source
+      	// Mails are every mailer's latest mails, at most limit of each.
+      	Mails(limit int) []model.MailSummary
+      	// Mail is one mail, whole when its mailer keeps bodies; false when no
+      	// mailer remembers it.
+      	Mail(id string) (model.MailMessage, bool)
+      	// Stores reports whether the app runs on the store subsystem: the
+      	// Studio's routes on the stores and the databases are mounted only then.
+      	Stores() bool
+      	// Databases are the app's databases, each checked and its migrations
+      	// read again now.
+      	Databases(ctx context.Context) []model.Database
+      	// Former are the former values of the record under key in store, as
+      	// the Studio's data view shows them.
+      	Former(ctx context.Context, store, key string) (model.RecordHistory, error)
+      	// Revisions are the versions of the record under key in store, and
+      	// what changed from version from to version to when both are given.
+      	Revisions(ctx context.Context, store, key, from, to string) (model.RecordVersions, error)
+      	// Trash is a page of store's trash, from offset and at most limit
+      	// records — defaults when they are empty.
+      	Trash(ctx context.Context, store, offset, limit string) (model.StoreTrash, error)
+      	// Privacy is what the Studio's Privacy page shows.
+      	Privacy(ctx context.Context) (model.Privacy, error)
+      	// Remote reports whether the Studio answers a client that is not on
+      	// this machine.
+      	Remote() bool
+      	// AllowedHost reports whether a request's Host, its port, brackets and
+      	// case removed, may reach the Studio.
+      	AllowedHost(host string) bool
+      	// Reply answers r with body, a JSON document, or with err as the framework
+      	// answers an error.
+      	Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)
+      	// Forbid answers that the caller may not reach the Studio, saying
+      	// message.
+      	Forbid(w http.ResponseWriter, message string)
+      	// Fail answers an internal error, saying message and nothing of the
+      	// error.
+      	Fail(w http.ResponseWriter, message string)
+      	// NotFound is the framework's answer to a request for what does not exist,
+      	// saying message.
+      	NotFound(message string) error
+      	// Invalid is the framework's answer to a request the caller must change, saying
+      	// message.
+      	Invalid(message string) error
+      	// ProfileUnreadable is the framework's refusal of a profile the process could
+      	// not read: public says which, cause why, for the logs.
+      	ProfileUnreadable(public string, cause error) error
+      	// Debug logs, at the debug level, a failure nobody is told of.
+      	Debug(ctx context.Context, message string, err error)
+      }
+  - fields:
+      - doc: |-
+          Open reads and compiles the catalogue of every language after
+          English, each falling back to english — the framework's own sentences, by
+          key, as its core holds them; a catalogue that does not decode or
+          does not compile is refused.
+        name: Open
+        type: func(english map[string]string) (Translator, error)
+    kind: struct
+    name: WordsConfig
+  - kind: named
+    name: Translator
+    underlying: |-
+      interface {
+      	// Languages are the languages it speaks after English, in order.
+      	Languages() []string
+      	// Keys are the keys of lang's catalogue, sorted; nil for a language
+      	// it does not speak.
+      	Keys(lang string) []string
+      	// Render is the sentence of key in lang, its placeholders filled from
+      	// args by name; a key the catalogue lacks, or a name the sentence
+      	// takes that args does not give, is an error.
+      	Render(lang, key string, args map[string]string) (string, error)
+      }
+  - fields:
+      - doc: |-
+          Open opens the engine of one workflow, as cfg declares it: it reads
+          the journal and every entity of the store once.
+        name: Open
+        type: func(ctx context.Context, cfg *WorkflowConfig) (WorkflowEngine, error)
+      - doc: |-
+          Failed reports whether err, or an error it wraps, is the engine's
+          failure of kind: the SDK's sentinels stay in the subsystem, and the
+          error keeps the fields the engine gave it.
+        name: Failed
+        type: func(err error, kind WorkflowFailure) bool
+    kind: struct
+    name: WorkflowDriverConfig
+  - kind: named
+    name: WorkflowTrigger
+    underlying: uint8
+  - kind: named
+    name: WorkflowWake
+    underlying: uint8
+  - kind: named
+    name: WorkflowLoopEvent
+    underlying: uint8
+  - kind: named
+    name: WorkflowFailure
+    underlying: uint8
+  - fields:
+      - doc: Store is the workflow's entities, as the engine reads and writes them.
+        name: Store
+        type: WorkflowStore
+      - doc: |-
+          Journal keeps what the engine knows of each entity — its state, since
+          when, its latest transitions —; nil keeps it in memory alone.
+        name: Journal
+        type: WorkflowJournal
+      - doc: Clock is the app's clock, which the engine stamps and waits on.
+        name: Clock
+        type: Clock
+      - doc: |-
+          Actor names, from the context of a transition someone fired, who
+          fired it.
+        name: Actor
+        type: func(ctx context.Context) string
+      - doc: |-
+          Observe brackets each transition the loop fires: the context it runs
+          with, and the function told how it ended.
+        name: Observe
+        type: func(ctx context.Context, f WorkflowFiringValue) (context.Context, func(err error))
+      - doc: |-
+          Report receives what the engine reports and no caller's return value
+          carries: an OnTransition hook that failed, a panic, a journal's write
+          that failed.
+        name: Report
+        type: func(ctx context.Context, err error)
+      - doc: OnLoop is told each run of the loop, and each wait.
+        name: OnLoop
+        type: func(e WorkflowLoopEventValue)
+      - doc: Initial is the state Start enters an entity in.
+        name: Initial
+        type: string
+      - doc: Transitions are the declared transitions, in declaration order.
+        name: Transitions
+        type: "[]TransitionSpec"
+      - doc: |-
+          OnEnter are the hooks run as an entity enters a state, in
+          declaration order.
+        name: OnEnter
+        type: "[]EnterHookSpec"
+      - doc: |-
+          OnTransition are the hooks run after every stored transition, in
+          declaration order.
+        name: OnTransition
+        type: "[]func(ctx context.Context, c WorkflowChangeValue) error"
+      - doc: MinGap is the least a wake for a due transition waits after a run.
+        name: MinGap
+        type: time.Duration
+      - doc: |-
+          BackoffBase is the wait after a run that failed, doubled after each,
+          up to BackoffMax.
+        name: BackoffBase
+        type: time.Duration
+      - doc: BackoffMax bounds the wait after a run that failed.
+        name: BackoffMax
+        type: time.Duration
+      - doc: MaxHistory caps the transitions remembered per entity.
+        name: MaxHistory
+        type: int
+    kind: struct
+    name: WorkflowConfig
+  - fields:
+      - doc: |-
+          Instant is when a deadline's transition comes due, false for no
+          instant for now; set for WorkflowTriggerDeadline.
+        name: Instant
+        type: func(e WorkflowEntityValue) (time.Time, bool)
+      - doc: |-
+          Guard is the condition a guard's transition waits for; set for
+          WorkflowTriggerGuard.
+        name: Guard
+        type: func(e WorkflowEntityValue) bool
+      - doc: Event names the transition.
+        name: Event
+        type: string
+      - doc: From is the state it leaves.
+        name: From
+        type: string
+      - doc: To is the state it enters.
+        name: To
+        type: string
+      - doc: Delay is how long a delay's transition waits in From.
+        name: Delay
+        type: time.Duration
+      - doc: "Trigger is what fires it: an event, a delay, a deadline or a guard."
+        name: Trigger
+        type: WorkflowTrigger
+    kind: struct
+    name: TransitionSpec
+  - fields:
+      - doc: |-
+          Fn runs the hook; it may change the entity, not its state nor its
+          key.
+        name: Fn
+        type: func(ctx context.Context, e *WorkflowEntityValue) error
+      - doc: State is the state whose entering runs it.
+        name: State
+        type: string
+    kind: struct
+    name: EnterHookSpec
+  - fields:
+      - doc: Value is the product's entity.
+        name: Value
+        type: any
+      - doc: State is the entity's state, spelled.
+        name: State
+        type: string
+    kind: struct
+    name: WorkflowEntityValue
+  - fields:
+      - doc: At is when it happened.
+        name: At
+        type: time.Time
+      - doc: Entity is the entity, as stored after the transition.
+        name: Entity
+        type: WorkflowEntityValue
+      - doc: Key is the entity's key.
+        name: Key
+        type: string
+      - doc: Event is the transition's name; WorkflowCreateEvent for Start.
+        name: Event
+        type: string
+      - doc: From is the state left, "" on creation.
+        name: From
+        type: string
+      - doc: To is the state entered.
+        name: To
+        type: string
+      - doc: Actor is who fired it, "" for the loop.
+        name: Actor
+        type: string
+      - doc: Trigger is what fired it.
+        name: Trigger
+        type: WorkflowTrigger
+    kind: struct
+    name: WorkflowChangeValue
+  - fields:
+      - doc: Key is the entity's key.
+        name: Key
+        type: string
+      - doc: Event is the transition's name.
+        name: Event
+        type: string
+      - doc: From is the state it leaves.
+        name: From
+        type: string
+      - doc: To is the state it enters.
+        name: To
+        type: string
+      - doc: Trigger is what fires it.
+        name: Trigger
+        type: WorkflowTrigger
+    kind: struct
+    name: WorkflowFiringValue
+  - fields:
+      - doc: Entered is when the entity entered its state.
+        name: Entered
+        type: time.Time
+      - doc: Key is the entity's key.
+        name: Key
+        type: string
+      - doc: State is the entity's state.
+        name: State
+        type: string
+      - doc: History are its latest transitions, oldest first.
+        name: History
+        type: "[]WorkflowStepValue"
+    kind: struct
+    name: WorkflowRecordValue
+  - fields:
+      - doc: At is when it happened.
+        name: At
+        type: time.Time
+      - doc: Event is the transition's name.
+        name: Event
+        type: string
+      - doc: From is the state left, "" on creation.
+        name: From
+        type: string
+      - doc: To is the state entered.
+        name: To
+        type: string
+      - doc: Actor is who fired it, "" for the loop.
+        name: Actor
+        type: string
+      - doc: Trigger is what fired it.
+        name: Trigger
+        type: WorkflowTrigger
+    kind: struct
+    name: WorkflowStepValue
+  - fields:
+      - doc: Err is what a run could not fire, nil for nothing.
+        name: Err
+        type: error
+      - doc: Started is when the run started.
+        name: Started
+        type: time.Time
+      - doc: Ended is when the run ended.
+        name: Ended
+        type: time.Time
+      - doc: Next is when the loop wakes next, zero for no transition due.
+        name: Next
+        type: time.Time
+      - doc: Kind is what the event reports.
+        name: Kind
+        type: WorkflowLoopEvent
+      - doc: Wake is why the run started.
+        name: Wake
+        type: WorkflowWake
+    kind: struct
+    name: WorkflowLoopEventValue
+  - kind: named
+    name: WorkflowEngine
+    underlying: |-
+      interface {
+      	// Start enters e in the workflow, in the initial state: its OnEnter
+      	// hooks run, then it is inserted in the store.
+      	Start(ctx context.Context, e WorkflowEntityValue) (WorkflowEntityValue, error)
+      	// Fire moves the entity under key along the event's transition leaving
+      	// its state.
+      	Fire(ctx context.Context, key, event string) (WorkflowEntityValue, error)
+      	// Changed tells the engine the entity under key was written.
+      	Changed(ctx context.Context, key string) error
+      	// Deleted tells the engine the entity under key was deleted.
+      	Deleted(ctx context.Context, key string) error
+      	// Census counts the entities per state.
+      	Census() map[string]int
+      	// Records are what the engine knows of each entity.
+      	Records() []WorkflowRecordValue
+      	// Run runs the loop that fires the timers and the guards, until ctx
+      	// ends.
+      	Run(ctx context.Context) error
+      }
+  - kind: named
+    name: WorkflowStore
+    underlying: |-
+      interface {
+      	// Key is e's key.
+      	Key(e WorkflowEntityValue) string
+      	// Get reads the entity under key; false when there is none.
+      	Get(ctx context.Context, key string) (WorkflowEntityValue, bool, error)
+      	// Insert writes e unless its key is taken; false when it was.
+      	Insert(ctx context.Context, e WorkflowEntityValue) (bool, error)
+      	// Replace writes e over the entity of its key; false when there was
+      	// none.
+      	Replace(ctx context.Context, e WorkflowEntityValue) (bool, error)
+      	// All yields every entity of the store.
+      	All(ctx context.Context) iter.Seq2[WorkflowEntityValue, error]
+      }
+  - kind: named
+    name: WorkflowJournal
+    underlying: |-
+      interface {
+      	// Load reads every record the journal kept.
+      	Load(ctx context.Context) ([]WorkflowRecordValue, error)
+      	// Save keeps records, in the transaction ctx carries for a database.
+      	Save(ctx context.Context, records ...WorkflowRecordValue) error
+      	// Delete forgets the records of keys; one already gone is no error.
+      	Delete(ctx context.Context, keys ...string) error
+      }
+vars:
+  - doc: |-
+      Jobs is the jobs subsystem: the schedules of the framework's jobs and the scheduler
+      that fires them; nil until framework/app/jobs is imported. A product that
+      declares a job without it is refused at the start (ADR 0179 §6).
+    items:
+      - name: Jobs
+        type: atomic.Pointer[JobDriverConfig]
+    name: Jobs
+  - doc: |-
+      Mail is the mail subsystem: the outbox the framework's mailers keep and the
+      transports that empty it; nil until framework/app/mail is imported. A
+      product that declares a mailer without it is refused at the start (ADR
+      0179 §6).
+    items:
+      - name: Mail
+        type: atomic.Pointer[MailDriverConfig]
+    name: Mail
+  - grouped: true
+    items:
+      - doc: |-
+          NewHTTPServer builds the HTTP engine an app in the server profile
+          serves on; nil until framework/app/server is imported.
+        name: NewHTTPServer
+        type: atomic.Pointer[func(cfg HTTPConfig) HTTPServer]
+      - doc: |-
+          NewStaticFiles builds the file server of a frontend's tree; nil until
+          framework/app/server is imported.
+        name: NewStaticFiles
+        type: atomic.Pointer[func(fsys fs.FS, csp string) (http.Handler, error)]
+      - doc: |-
+          SampleProcess samples the running process — its heap, goroutines,
+          collections and CPU time — for the runtime graph a serving app answers;
+          nil until framework/app/server is imported, and the graph then carries
+          no process (ADR 0172).
+        name: SampleProcess
+        type: atomic.Pointer[func() *model.Process]
+    name: NewHTTPServer
+  - doc: |-
+      Queues is the queue subsystem: the brokers the framework's consumers' queues run on
+      and the migration of a queue's table on a database; nil until
+      framework/app/queue is imported. A product that declares a topic, a
+      subscription, a watch, a queued command or a mailer whose outbox is on a
+      database without it is refused at the start (ADR 0179 §6).
+    items:
+      - name: Queues
+        type: atomic.Pointer[QueueDriverConfig]
+    name: Queues
+  - doc: |-
+      Stores is the store subsystem: the engines the framework's stores run on, the framework's
+      scope on a database and the migrations of the framework's tables; nil until
+      framework/app/store is imported. A product that declares a store or a
+      database without it is refused at the start (ADR 0179 §6).
+    items:
+      - name: Stores
+        type: atomic.Pointer[StoreDriverConfig]
+    name: Stores
+  - doc: |-
+      Studio is the Studio subsystem: the tool's variables and the Studio's
+      routes; nil until framework/app/studio is imported, and the framework then reads
+      none of the tool's variables and serves no route of the Studio.
+    items:
+      - name: Studio
+        type: atomic.Pointer[StudioDriverConfig]
+    name: Studio
+  - doc: |-
+      Words is the framework's sentences in the languages after English, the catalogues
+      the Studio shows its reader's language from; nil until
+      framework/app/studio is imported, and the framework then speaks English alone.
+      The terminal, the logs and an error read English whatever a program
+      imports (ADR 0179 Q6).
+    items:
+      - name: Words
+        type: atomic.Pointer[WordsConfig]
+    name: Words
+  - doc: |-
+      Workflows is the workflow subsystem: the engine the framework's workflows run on;
+      nil until framework/app/workflow is imported. A product that declares a
+      workflow without it is refused at the start (ADR 0179 §6).
+    items:
+      - name: Workflows
+        type: atomic.Pointer[WorkflowDriverConfig]
+    name: Workflows

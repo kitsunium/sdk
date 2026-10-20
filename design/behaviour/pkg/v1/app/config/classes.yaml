@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - FileSource
+      - FSSource
+    name: config.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: FileSource
+    params: format, path string
+    results: Source
+  - name: FSSource
+    params: fsys fs.FS, format, path string
+    results: Source
+imports:
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  fs: io/fs
+  svcconfig: github.com/kitsunium/sdk/internal/service/app/config
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/config
+  name: config
+  purpose: "Package config is the public facade for the SDK's configuration domain: layer configuration from env + files, [Load] into a typed struct (later sources override earlier), self-[Validator] the result, and [PollWatcher] for cross-OS hot-reload."
+types: []

@@ -1,0 +1,49 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*entry).due
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}, 0, false
+          when: "!e.armed || e.next.After(now)"
+      - set: scheduled
+        value: e.next
+      - loop:
+          do:
+            - bind: next, ok
+              eval: e.schedule(scheduled)
+            - opt:
+                do:
+                  - set: e.armed
+                    value: "false"
+                  - return: scheduled, missed, true
+                when: "!ok || !next.After(scheduled)"
+            - opt:
+                do:
+                  - set: e.next
+                    value: next
+                  - return: scheduled, missed, true
+                when: next.After(now)
+            - set: scheduled
+              value: next
+            - op: ++
+              set: missed
+          forever: true
+  - of: earliest
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!e.armed"
+            - opt:
+                do:
+                  - set: due, found
+                    value: e.next, true
+                when: "!found || e.next.Before(due)"
+          key: _
+          range: entries
+          value: e
+      - return: due, found

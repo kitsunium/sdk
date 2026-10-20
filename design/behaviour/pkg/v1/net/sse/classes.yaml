@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/net/sse
+  name: sse
+  purpose: "Package sse is the server side of Server-Sent Events: a unidirectional server→client stream over an ordinary HTTP response."
+types: []

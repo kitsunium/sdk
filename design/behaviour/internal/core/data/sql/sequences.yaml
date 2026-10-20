@@ -1,0 +1,133 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Dialect.String
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: dialectNames[d]
+          when: ok
+      - return: dialectNames[DialectUnknown]
+  - of: Dialect.Valid
+    steps:
+      - return: d == DialectPostgres || d == DialectMySQL || d == DialectSQLite
+  - of: Dialect.SupportsAdvisoryLock
+    steps:
+      - return: d == DialectPostgres || d == DialectMySQL
+  - of: Dialect.Placeholder
+    steps:
+      - opt:
+          do:
+            - return: "\"$\" + strconv.Itoa(n)"
+          when: d == DialectPostgres
+      - opt:
+          do:
+            - return: "\"?\""
+          when: d == DialectMySQL || d == DialectSQLite
+      - return: "\"\""
+  - of: Dialect.QuoteIdent
+    steps:
+      - opt:
+          do:
+            - return: "\"`\" + strings.ReplaceAll(name, \"`\", \"``\") + \"`\""
+          when: d == DialectMySQL
+      - opt:
+          do:
+            - return: "`\"` + strings.ReplaceAll(name, `\"`, `\"\"`) + `\"`"
+          when: d == DialectPostgres || d == DialectSQLite
+      - return: "\"\""
+  - of: Dialect.ForUpdate
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: d == DialectSQLite
+      - return: "\" FOR UPDATE\""
+  - of: Dialect.ForUpdateSkipLocked
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: d == DialectSQLite
+      - return: "\" FOR UPDATE SKIP LOCKED\""
+  - of: ParseDialect
+    steps:
+      - opt:
+          do:
+            - return: dialect, nil
+          init:
+            bind: dialect, ok
+            eval: dialectByName[name]
+          when: ok
+      - opt:
+          do:
+            - return: |-
+                DialectUnknown, errs.Wrap(DialectRefused, errs.WrapParams{},
+                			errs.String("dialect", name), errs.String("reason", reason))
+          init:
+            bind: reason, ok
+            eval: refusedDialects[name]
+          when: ok
+      - return: |-
+          DialectUnknown, errs.Wrap(UnknownDialect, errs.WrapParams{},
+          		errs.String("dialect", name))
+  - of: Irreversible
+    steps:
+      - set: _, _
+        value: ctx, ex
+      - return: MigrationIrreversible
+  - of: MigrationValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: MigrationValue.Validate
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(InvalidMigration, errs.WrapParams{},
+                			errs.String("missing", "version"))
+              to: errs
+          when: m.Version == 0
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(InvalidMigration, errs.WrapParams{},
+                			errs.String("version", strconv.FormatUint(m.Version, decimalBase)),
+                			errs.String("missing", "version-fits-int64"))
+              to: errs
+          when: m.Version > math.MaxInt64
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(InvalidMigration, errs.WrapParams{},
+                			errs.String("version", strconv.FormatUint(m.Version, decimalBase)), errs.String("missing", "name"))
+              to: errs
+          when: m.Name == ""
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(InvalidMigration, errs.WrapParams{},
+                			errs.String("version", strconv.FormatUint(m.Version, decimalBase)), errs.String("missing", "up"))
+              to: errs
+          when: m.Up == nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(InvalidMigration, errs.WrapParams{},
+                			errs.String("version", strconv.FormatUint(m.Version, decimalBase)), errs.String("missing", "down"))
+              to: errs
+          when: m.Down == nil
+      - return: nil
+  - of: TxOptionsValue.IsZero
+    steps:
+      - return: o.Isolation == stdsql.LevelDefault && !o.ReadOnly
+  - of: TxOptionsValue.StdOptions
+    steps:
+      - return: "&stdsql.TxOptions{Isolation: o.Isolation, ReadOnly: o.ReadOnly}"

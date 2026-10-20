@@ -1,0 +1,195 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*flatbuffersCodec).Name
+    steps:
+      - return: "\"flatbuffers\""
+  - of: (*flatbuffersCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flatbuffersCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*flatbuffersCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flatbuffersCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*flatbuffersCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flatbuffersCodec).Marshal
+        kind: self
+      - id: resolveSourceBytes
+        kind: internal
+      - id: validateBuffer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, nil
+          init:
+            bind: b, ok
+            eval: v.([]byte)
+          when: |-
+            ok && len(b) >= flatBuffersHeaderBytes &&
+            		binary.LittleEndian.Uint32(b) == PromotionMagic &&
+            		len(b) <= maxFlatBuffersBytes
+      - bind: src, rerr
+        eval: resolveSourceBytes(v)
+        to: resolveSourceBytes
+      - opt:
+          do:
+            - return: nil, rerr
+          when: rerr != nil
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: validateBuffer(src)
+            to: validateBuffer
+          when: verr != nil
+      - return: src, nil
+  - of: (*flatbuffersCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flatbuffersCodec).Unmarshal
+        kind: self
+      - id: validateBuffer
+        kind: internal
+      - id: acc.SetBytes
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: verr
+          init:
+            bind: verr
+            eval: validateBuffer(data)
+            to: validateBuffer
+          when: verr != nil
+      - opt:
+          do:
+            - set: "*dst"
+              value: data
+            - return: nil
+          init:
+            bind: dst, ok
+            eval: v.(*[]byte)
+          when: ok && dst != nil
+      - opt:
+          do:
+            - eval: acc.SetBytes(data)
+              to: acc.SetBytes
+            - return: nil
+          init:
+            bind: acc, ok
+            eval: v.(BytesAcceptor)
+          when: ok
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coreflatbuffers.CodeFlatbuffersBadTarget,
+          		Reason:  "FLATBUFFERS_BAD_TARGET",
+          		Public:  "FlatBuffers codec requires a *[]byte or BytesAcceptor target",
+          		Private: "service/data/codec/flatbuffers.Unmarshal: target is not *[]byte and does not implement BytesAcceptor",
+          	})
+        to: errs
+  - of: (*flatbuffersCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flatbuffersCodec).Append
+        kind: self
+      - id: c.Marshal
+        kind: internal
+    steps:
+      - bind: src, merr
+        eval: c.Marshal(v)
+        to: c.Marshal
+      - opt:
+          do:
+            - return: dst, merr
+          when: merr != nil
+      - return: append(dst, src...), nil
+  - of: resolveSourceBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveSourceBytes
+        kind: self
+      - id: prov.Bytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, nil
+          init:
+            bind: b, ok
+            eval: v.([]byte)
+          when: ok
+      - opt:
+          do:
+            - return: prov.Bytes(), nil
+              to: prov.Bytes
+          init:
+            bind: prov, ok
+            eval: v.(BytesProvider)
+          when: ok
+      - return: |-
+          nil, errs.Wrap(nil, errs.WrapParams{
+          		Code:    coreflatbuffers.CodeFlatbuffersBadType,
+          		Reason:  "FLATBUFFERS_BAD_TYPE",
+          		Public:  "FlatBuffers codec requires []byte or a BytesProvider value",
+          		Private: "service/data/codec/flatbuffers.Marshal: argument is not []byte and does not implement BytesProvider",
+          	})
+  - of: validateBuffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateBuffer
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coreflatbuffers.CodeFlatbuffersTruncated,
+                			Reason:  "FLATBUFFERS_TRUNCATED",
+                			Public:  "FlatBuffers buffer is truncated",
+                			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) < flatBuffersHeaderBytes",
+                		}, errs.Int("len", len(data)), errs.Int("min", flatBuffersHeaderBytes))
+              to: errs
+          when: len(data) < flatBuffersHeaderBytes
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coreflatbuffers.CodeFlatbuffersTruncated,
+                			Reason:  "FLATBUFFERS_TRUNCATED",
+                			Public:  "FlatBuffers buffer exceeds size limit",
+                			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) > maxFlatBuffersBytes",
+                		}, errs.Int("len", len(data)), errs.Int("max", maxFlatBuffersBytes))
+              to: errs
+          when: len(data) > maxFlatBuffersBytes
+      - return: nil

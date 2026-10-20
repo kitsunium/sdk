@@ -1,0 +1,28 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: Chain
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: h
+                    value: middleware(h)
+                when: middleware != nil
+          key: _
+          range: slices.Backward(middlewares)
+          value: middleware
+      - return: h
+  - of: StateValue.Degraded
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: listener.Degraded
+          key: _
+          range: s.Listeners
+          value: listener
+      - return: "false"

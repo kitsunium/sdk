@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: writesOwnJSON
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: t.Implements(marshaler) || reflect.PointerTo(t).Implements(marshaler)
+          key: _
+          range: "[]reflect.Type{jsonMarshalerType, textMarshalerType}"
+          value: marshaler
+      - return: "false"
+  - of: (*Redactor).declared
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: strings.TrimSpace(option) == secretOption
+          key: option
+          range: strings.SplitSeq(field.Tag.Get(r.tag), ",")
+      - return: r.field != nil && r.field(field)

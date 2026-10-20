@@ -1,0 +1,95 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Writer
+      - consoleFactory
+      - (*consoleFactory).Name
+      - (*consoleFactory).Open
+      - (*consoleFactory).Decode
+      - decodeStream
+      - decodeMinLevel
+      - configInvalid
+      - pickStream
+    name: console.go
+  - decls: []
+    name: doc.go
+functions:
+  - doc: |-
+      decodeStream maps the optional "target" option onto dst. An absent key keeps
+      the zero value (stderr); "stderr"/"" select stderr, "stdout" selects stdout.
+      An empty string is treated as unspecified, so it lands on the same safe
+      default as an absent key rather than on stdout (ADR 0030). A non-string value
+      or an unrecognised name yields the redacted WriterConfigInvalid sentinel —
+      the value is never echoed (secret gate).
+    name: decodeStream
+    params: raw map[string]any, dst *writer.ConsoleStream
+    results: error
+  - doc: |-
+      decodeMinLevel maps the optional "min_level" option onto dst. An absent key
+      inherits the handler-global floor (zero Level). A non-string value or an
+      unparsable name yields the redacted WriterConfigInvalid sentinel; ParseLevel
+      is redaction-safe and never echoes its input.
+    name: decodeMinLevel
+    params: raw map[string]any, dst *level.Level
+    results: error
+  - doc: |-
+      configInvalid returns the shared WriterConfigInvalid sentinel tagged with the
+      writer name only. It never carries a decoded option value, honouring the
+      Decoder secret-gate contract; origin-wins keeps errors.Is matching the
+      sentinel.
+    name: configInvalid
+    results: error
+  - doc: pickStream maps the config stream selector onto the concrete console sink.
+    name: pickStream
+    params: s writer.ConsoleStream
+    results: corelogger.Sink
+imports:
+  consolesink: github.com/kitsunium/sdk/internal/service/observe/logger/sink/console
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/console
+  name: console
+  purpose: Package console registers the "console" writer factory.
+types:
+  - doc: consoleFactory builds a console Sink from a writer.ConsoleConfig.
+    kind: struct
+    methods:
+      - doc: Name reports the canonical key "console".
+        name: Name
+        recv: "*consoleFactory"
+        results: writer.Name
+      - doc: |-
+          Open builds the console sink for cfg, wrapping it in the per-writer level
+          gate. A Config of the wrong concrete type yields the shared
+          WriterConfigInvalid sentinel.
+        name: Open
+        params: cfg writer.Config
+        recv: "*consoleFactory"
+        results: sink corelogger.Sink, err error
+      - doc: |-
+          Decode translates a raw topology option map into a ConsoleConfig. It is the
+          YAML/JSON/TOML entry point used by FromConfig: it recognises "target" and
+          "min_level" and ignores absent keys (the zero ConsoleConfig is valid, and
+          targets stderr — ADR 0030). A key present with the wrong scalar type, an
+          unknown target, or an unknown level name returns the shared
+          WriterConfigInvalid sentinel — the offending value is never echoed
+          (secret-gate contract), only the writer name is attached.
+        name: Decode
+        params: raw map[string]any
+        recv: "*consoleFactory"
+        results: cfg writer.Config, err error
+    name: consoleFactory
+vars:
+  - doc: |-
+      Writer is the registered console factory singleton. The blank assignment runs
+      writer.Register at package load (no init()), mirroring the codec convention.
+    items:
+      - name: Writer
+        value: writer.Register(&consoleFactory{})
+    name: Writer

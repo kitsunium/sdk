@@ -1,0 +1,9 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*ResolutionValue).Degraded
+    steps:
+      - return: r.FullFallback
+  - of: LineRangeValue.Contains
+    steps:
+      - return: line >= r.Start && line <= r.End

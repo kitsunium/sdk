@@ -1,0 +1,112 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: HasReason
+    steps:
+      - bind: cursor
+        eval: err
+      - loop:
+          cond: cursor != nil
+          do:
+            - bind: layer, ok
+              eval: errors.AsType[*Error](cursor)
+            - opt:
+                do:
+                  - return: "false"
+                when: "!ok"
+            - opt:
+                do:
+                  - return: "true"
+                when: layer.reason == reason
+            - set: cursor
+              value: layer.source
+      - return: "false"
+  - of: deepestError
+    steps:
+      - var:
+          name: deepest
+          type: "*Error"
+      - bind: cursor
+        eval: err
+      - loop:
+          cond: cursor != nil
+          do:
+            - bind: layer, ok
+              eval: errors.AsType[*Error](cursor)
+            - opt:
+                do:
+                  - break: true
+                when: "!ok"
+            - set: deepest
+              value: layer
+            - set: cursor
+              value: layer.source
+      - return: deepest
+  - of: hasCodeInMultiUnwrap
+    steps:
+      - bind: multiUnwrapper, ok
+        eval: err.(interface{ Unwrap() []error })
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: HasCode(child, c)
+          key: _
+          range: multiUnwrapper.Unwrap()
+          value: child
+      - return: "false"
+  - of: digitsToOctet
+    steps:
+      - var:
+          name: "n"
+          type: int
+      - loop:
+          do:
+            - bind: ch
+              eval: seg[i]
+            - opt:
+                do:
+                  - return: 0, false
+                when: ch < '0' || ch > '9'
+            - set: "n"
+              value: n*decimalBase + int(ch-'0')
+          key: i
+          range: len(seg)
+      - opt:
+          do:
+            - return: 0, false
+          when: n > octetMax
+      - return: uint8(n), true
+  - of: containsNewline
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: r == '\n' || r == '\r'
+          key: _
+          range: s
+          value: r
+      - return: "false"
+  - of: isScreamingSnake
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isValidReasonRune(i, r)"
+          key: i
+          range: s
+          value: r
+      - return: "true"

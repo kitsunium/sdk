@@ -1,0 +1,67 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Scheme
+      - Scheme.String
+      - Scheme.Known
+      - New
+    name: id.go
+  - decls:
+      - registry
+      - Register
+      - publishGenerator
+      - Lookup
+      - Available
+    name: registry.go
+functions:
+  - name: New
+    params: scheme Scheme
+    results: newID string, err error
+  - name: Register
+    params: g Generator
+    results: Generator
+  - doc: |-
+      publishGenerator inserts (name -> g) into the registry. Returns a non-nil
+      error when name is the reserved empty Scheme or is already registered to a
+      different generator; re-registering the same generator is an idempotent
+      no-op. The check and the insert are one atomic step of the kernel table.
+    name: publishGenerator
+    params: name Scheme, g Generator
+    results: error
+  - name: Lookup
+    params: name Scheme
+    results: g Generator, ok bool
+  - name: Available
+    results: "[]Scheme"
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/id
+  name: id
+  purpose: Package id — ranges 0.2.7.* (ADR 0024 core/app/id block) and 0.3.39.* (ADR 0024 service/app/id block, declared here since ADR 0160).
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: s Scheme
+        results: string
+      - name: Known
+        recv: s Scheme
+        results: bool
+    name: Scheme
+    underlying: string
+vars:
+  - doc: |-
+      registry maps each Scheme to its Generator — the kernel's read-mostly,
+      copy-on-write table (kernel/plugin.Registry, ADR 0159): schemes register
+      once at import, every other access is a lock-free Lookup. What stays here is
+      the domain's refusal: the reserved empty Scheme and the conflict's code.
+    items:
+      - name: registry
+        type: plugin.Registry[Scheme, Generator]
+    name: registry

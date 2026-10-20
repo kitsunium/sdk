@@ -1,0 +1,1356 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: FromECDSAPublic
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromECDSAPublic
+        kind: self
+      - id: x509
+        kind: stdlib
+      - id: fromECDSAPublicKey
+        kind: internal
+    steps:
+      - bind: parsed, perr
+        eval: x509.ParsePKIXPublicKey(der)
+        to: x509
+      - opt:
+          do:
+            - return: |-
+                KeyValue{}, errs.Wrap(perr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKMalformed,
+                			Reason:  "MALFORMED",
+                			Public:  "JWK document is malformed",
+                			Private: "service/crypto/key/jwk.FromECDSAPublic: x509.ParsePKIXPublicKey rejected the DER blob",
+                		})
+          when: perr != nil
+      - bind: pub, ok
+        eval: parsed.(*ecdsa.PublicKey)
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.TypeMismatch
+          when: "!ok"
+      - return: fromECDSAPublicKey(pub)
+        to: fromECDSAPublicKey
+  - of: FromECDSAPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromECDSAPrivate
+        kind: self
+      - id: x509
+        kind: stdlib
+      - id: fromECDSAPublicKey
+        kind: internal
+      - id: attachScalar
+        kind: internal
+    steps:
+      - bind: priv, perr
+        eval: x509.ParseECPrivateKey(der)
+        to: x509
+      - opt:
+          do:
+            - return: |-
+                KeyValue{}, errs.Wrap(perr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKMalformed,
+                			Reason:  "MALFORMED",
+                			Public:  "JWK document is malformed",
+                			Private: "service/crypto/key/jwk.FromECDSAPrivate: x509.ParseECPrivateKey rejected the DER blob",
+                		})
+          when: perr != nil
+      - bind: base, kerr
+        eval: fromECDSAPublicKey(&priv.PublicKey)
+        to: fromECDSAPublicKey
+      - opt:
+          do:
+            - return: KeyValue{}, kerr
+          when: kerr != nil
+      - return: attachScalar(base, priv.D)
+        to: attachScalar
+  - of: attachScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: attachScalar
+        kind: self
+      - id: coordLen
+        kind: internal
+      - id: scalar.FillBytes
+        kind: value
+      - id: checkECScalar
+        kind: internal
+    steps:
+      - bind: size
+        eval: coordLen(base.crv)
+        to: coordLen
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.KeyMismatch
+          when: scalar == nil || scalar.BitLen() > size*bitsPerOctet
+      - bind: fixed
+        eval: scalar.FillBytes(make([]byte, size))
+        to: scalar.FillBytes
+      - opt:
+          do:
+            - return: KeyValue{}, serr
+          init:
+            bind: serr
+            eval: checkECScalar(base.crv, fixed, base.x, base.y)
+            to: checkECScalar
+          when: serr != nil
+      - set: base.priv
+        value: fixed
+      - return: base, nil
+  - of: fromECDSAPublicKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: fromECDSAPublicKey
+        kind: self
+      - id: curveFromElliptic
+        kind: internal
+      - id: coordLen
+        kind: internal
+      - id: pub.X.FillBytes
+        kind: value
+      - id: pub.Y.FillBytes
+        kind: value
+      - id: checkECPoint
+        kind: internal
+    steps:
+      - bind: crv, ok
+        eval: curveFromElliptic(pub.Curve)
+        to: curveFromElliptic
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.UnsupportedCurve
+          when: "!ok"
+      - bind: size
+        eval: coordLen(crv)
+        to: coordLen
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.KeyMismatch
+          when: |-
+            pub.X == nil || pub.Y == nil ||
+            		pub.X.BitLen() > size*bitsPerOctet || pub.Y.BitLen() > size*bitsPerOctet
+      - bind: xcoord
+        eval: pub.X.FillBytes(make([]byte, size))
+        to: pub.X.FillBytes
+      - bind: ycoord
+        eval: pub.Y.FillBytes(make([]byte, size))
+        to: pub.Y.FillBytes
+      - opt:
+          do:
+            - return: KeyValue{}, perr
+          init:
+            bind: perr
+            eval: checkECPoint(crv, xcoord, ycoord)
+            to: checkECPoint
+          when: perr != nil
+      - return: "KeyValue{kty: TypeEC, crv: crv, x: xcoord, y: ycoord}, nil"
+  - of: KeyValue.ECDSAPublic
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.ECDSAPublic
+        kind: self
+      - id: k.ecdsaPublicKey
+        kind: internal
+      - id: x509
+        kind: stdlib
+    steps:
+      - bind: pub, kerr
+        eval: k.ecdsaPublicKey()
+        to: k.ecdsaPublicKey
+      - opt:
+          do:
+            - return: nil, kerr
+          when: kerr != nil
+      - bind: out, merr
+        eval: x509.MarshalPKIXPublicKey(pub)
+        to: x509
+      - opt:
+          do:
+            - return: nil, corejwk.KeyMismatch
+          when: merr != nil
+      - return: out, nil
+  - of: KeyValue.ECDSAPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.ECDSAPrivate
+        kind: self
+      - id: k.ecdsaPublicKey
+        kind: internal
+      - id: x509
+        kind: stdlib
+    steps:
+      - bind: pub, kerr
+        eval: k.ecdsaPublicKey()
+        to: k.ecdsaPublicKey
+      - opt:
+          do:
+            - return: nil, kerr
+          when: kerr != nil
+      - opt:
+          do:
+            - return: nil, corejwk.NoPrivateMaterial
+          when: "!k.IsPrivate()"
+      - bind: priv
+        eval: "&ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(k.priv)}"
+      - bind: out, merr
+        eval: x509.MarshalECPrivateKey(priv)
+        to: x509
+      - opt:
+          do:
+            - return: nil, corejwk.KeyMismatch
+          when: merr != nil
+      - return: out, nil
+  - of: KeyValue.ecdsaPublicKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.ecdsaPublicKey
+        kind: self
+      - id: ellipticCurve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.TypeMismatch
+          when: k.kty != TypeEC
+      - bind: curve, ok
+        eval: ellipticCurve(k.crv)
+        to: ellipticCurve
+      - opt:
+          do:
+            - return: nil, corejwk.UnsupportedCurve
+          when: "!ok"
+      - return: |-
+          &ecdsa.PublicKey{
+          		Curve: curve,
+          		X:     new(big.Int).SetBytes(k.x),
+          		Y:     new(big.Int).SetBytes(k.y),
+          	}, nil
+  - of: FromEd25519Public
+    steps:
+      - opt:
+          do:
+            - return: |-
+                KeyValue{}, errs.Wrap(corejwk.InvalidEncoding, errs.WrapParams{},
+                			errs.Int("want", ed25519.PublicKeySize), errs.Int("got", len(pub)))
+          when: len(pub) != ed25519.PublicKeySize
+      - return: "KeyValue{kty: TypeOKP, crv: CurveEd25519, x: bytes.Clone(pub)}, nil"
+  - of: FromEd25519Private
+    steps:
+      - opt:
+          do:
+            - return: |-
+                KeyValue{}, errs.Wrap(corejwk.InvalidEncoding, errs.WrapParams{},
+                			errs.Int("want", ed25519.PrivateKeySize), errs.Int("got", len(priv)))
+          when: len(priv) != ed25519.PrivateKeySize
+      - bind: seed
+        eval: priv[:ed25519KeyLen]
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.KeyMismatch
+          when: "!bytes.Equal(ed25519.NewKeyFromSeed(seed)[ed25519KeyLen:], priv[ed25519KeyLen:])"
+      - return: |-
+          KeyValue{
+          		kty: TypeOKP, crv: CurveEd25519,
+          		x: bytes.Clone(priv[ed25519KeyLen:]), priv: bytes.Clone(seed),
+          	}, nil
+  - of: KeyValue.Ed25519Public
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.Ed25519Public
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.TypeMismatch
+          when: k.kty != TypeOKP
+      - return: bytes.Clone(k.x), nil
+        to: bytes
+  - of: KeyValue.Ed25519Private
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.Ed25519Private
+        kind: self
+      - id: ed25519
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.TypeMismatch
+          when: k.kty != TypeOKP
+      - opt:
+          do:
+            - return: nil, corejwk.NoPrivateMaterial
+          when: "!k.IsPrivate()"
+      - return: ed25519.NewKeyFromSeed(k.priv), nil
+        to: ed25519
+  - of: FromSecret
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromSecret
+        kind: self
+      - id: secret.Bytes
+        kind: value
+    steps:
+      - bind: raw
+        eval: secret.Bytes()
+        to: secret.Bytes
+      - opt:
+          do:
+            - return: KeyValue{}, corecrypto.InvalidKey
+          when: len(raw) != corecrypto.KeyLen
+      - return: "KeyValue{kty: TypeOct, priv: raw}, nil"
+  - of: KeyValue.Secret
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.Secret
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: corecrypto.Key{}, corejwk.TypeMismatch
+          when: k.kty != TypeOct
+      - opt:
+          do:
+            - return: corecrypto.Key{}, corejwk.NoPrivateMaterial
+          when: "!k.IsPrivate()"
+      - return: corecrypto.NewKey(k.priv)
+        to: corecrypto
+  - of: coordLen
+    steps:
+      - switch:
+          cases:
+            - case: CurveP256
+              do:
+                - return: p256CoordLen
+            - case: CurveP384
+              do:
+                - return: p384CoordLen
+            - case: CurveP521
+              do:
+                - return: p521CoordLen
+            - default: true
+              do:
+                - return: "0"
+          "on": crv
+  - of: ecdhCurve
+    participants:
+      - id: caller
+        kind: actor
+      - id: ecdhCurve
+        kind: self
+      - id: ecdh
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: CurveP256
+              do:
+                - return: ecdh.P256(), true
+                  to: ecdh
+            - case: CurveP384
+              do:
+                - return: ecdh.P384(), true
+                  to: ecdh
+            - case: CurveP521
+              do:
+                - return: ecdh.P521(), true
+                  to: ecdh
+            - default: true
+              do:
+                - return: nil, false
+          "on": crv
+  - of: ellipticCurve
+    participants:
+      - id: caller
+        kind: actor
+      - id: ellipticCurve
+        kind: self
+      - id: elliptic
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: CurveP256
+              do:
+                - return: elliptic.P256(), true
+                  to: elliptic
+            - case: CurveP384
+              do:
+                - return: elliptic.P384(), true
+                  to: elliptic
+            - case: CurveP521
+              do:
+                - return: elliptic.P521(), true
+                  to: elliptic
+            - default: true
+              do:
+                - return: nil, false
+          "on": crv
+  - of: curveFromElliptic
+    steps:
+      - switch:
+          cases:
+            - case: elliptic.P256()
+              do:
+                - return: CurveP256, true
+            - case: elliptic.P384()
+              do:
+                - return: CurveP384, true
+            - case: elliptic.P521()
+              do:
+                - return: CurveP521, true
+            - default: true
+              do:
+                - return: "\"\", false"
+          "on": curve
+  - of: uncompressedPoint
+    steps:
+      - bind: point
+        eval: make([]byte, 0, 1+len(x)+len(y))
+      - set: point
+        value: append(point, uncompressedPointTag)
+      - set: point
+        value: append(point, x...)
+      - set: point
+        value: append(point, y...)
+      - return: point
+  - of: checkECPoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkECPoint
+        kind: self
+      - id: ecdhCurve
+        kind: internal
+      - id: curve.NewPublicKey
+        kind: value
+    steps:
+      - bind: curve, ok
+        eval: ecdhCurve(crv)
+        to: ecdhCurve
+      - opt:
+          do:
+            - return: corejwk.UnsupportedCurve
+          when: "!ok"
+      - opt:
+          do:
+            - return: corejwk.KeyMismatch
+          init:
+            bind: _, err
+            eval: curve.NewPublicKey(uncompressedPoint(x, y))
+            to: curve.NewPublicKey
+          when: err != nil
+      - return: nil
+  - of: checkECScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkECScalar
+        kind: self
+      - id: ecdhCurve
+        kind: internal
+      - id: curve.NewPrivateKey
+        kind: value
+    steps:
+      - bind: curve, ok
+        eval: ecdhCurve(crv)
+        to: ecdhCurve
+      - opt:
+          do:
+            - return: corejwk.UnsupportedCurve
+          when: "!ok"
+      - bind: priv, err
+        eval: curve.NewPrivateKey(d)
+        to: curve.NewPrivateKey
+      - opt:
+          do:
+            - return: corejwk.KeyMismatch
+          when: err != nil || !bytes.Equal(priv.PublicKey().Bytes(), uncompressedPoint(x, y))
+      - return: nil
+  - of: KeyValue.Kty
+    steps:
+      - return: k.kty
+  - of: KeyValue.Crv
+    steps:
+      - return: k.crv
+  - of: KeyValue.Kid
+    steps:
+      - return: k.kid
+  - of: KeyValue.Use
+    steps:
+      - return: k.use
+  - of: KeyValue.Alg
+    steps:
+      - return: k.alg
+  - of: KeyValue.KeyOps
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.KeyOps
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(k.keyOps)
+        to: slices
+  - of: KeyValue.IsZero
+    steps:
+      - return: k.kty == ""
+  - of: KeyValue.IsPrivate
+    steps:
+      - return: len(k.priv) != 0
+  - of: KeyValue.WithKid
+    steps:
+      - set: k.kid
+        value: kid
+      - return: k
+  - of: KeyValue.WithUse
+    steps:
+      - set: k.use
+        value: use
+      - return: k
+  - of: KeyValue.WithAlg
+    steps:
+      - set: k.alg
+        value: alg
+      - return: k
+  - of: KeyValue.WithKeyOps
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.WithKeyOps
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - set: k.keyOps
+        to: slices
+        value: slices.Clone(ops)
+      - return: k
+  - of: KeyValue.Public
+    steps:
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.MissingMember
+          when: k.IsZero()
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.NoPublicForm
+          when: k.kty == TypeOct
+      - set: k.priv
+        value: nil
+      - return: k, nil
+  - of: KeyValue.Equal
+    steps:
+      - return: k.equalMetadata(other) && k.equalMaterial(other)
+  - of: KeyValue.equalMetadata
+    steps:
+      - return: |-
+          k.kty == other.kty && k.crv == other.crv && k.kid == other.kid &&
+          		k.use == other.use && k.alg == other.alg &&
+          		slices.Equal(k.keyOps, other.keyOps)
+  - of: KeyValue.equalMaterial
+    steps:
+      - return: |-
+          bytes.Equal(k.x, other.x) && bytes.Equal(k.y, other.y) &&
+          		bytes.Equal(k.priv, other.priv)
+  - of: KeyValue.String
+    steps:
+      - return: |-
+          "jwk.KeyValue{kty:" + string(k.kty) +
+          		" crv:" + string(k.crv) +
+          		" kid:" + strconv.Quote(k.kid) +
+          		" private:" + strconv.FormatBool(k.IsPrivate()) + "}"
+  - of: KeyValue.GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.GoString
+        kind: self
+      - id: k.String
+        kind: internal
+    steps:
+      - return: k.String()
+        to: k.String
+  - of: KeyValue.MarshalPublic
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.MarshalPublic
+        kind: self
+      - id: k.publicWire
+        kind: internal
+      - id: encodeWire
+        kind: internal
+    steps:
+      - bind: raw, werr
+        eval: k.publicWire()
+        to: k.publicWire
+      - opt:
+          do:
+            - return: nil, werr
+          when: werr != nil
+      - return: encodeWire(raw)
+        to: encodeWire
+  - of: KeyValue.MarshalPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.MarshalPrivate
+        kind: self
+      - id: k.privateWire
+        kind: internal
+      - id: encodeWire
+        kind: internal
+    steps:
+      - bind: raw, werr
+        eval: k.privateWire()
+        to: k.privateWire
+      - opt:
+          do:
+            - return: nil, werr
+          when: werr != nil
+      - return: encodeWire(raw)
+        to: encodeWire
+  - of: KeyValue.MarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.MarshalJSON
+        kind: self
+      - id: k.MarshalPublic
+        kind: internal
+    steps:
+      - return: k.MarshalPublic()
+        to: k.MarshalPublic
+  - of: KeyValue.publicWire
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.publicWire
+        kind: self
+      - id: b64Encode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: keyJSON{}, corejwk.MissingMember
+          when: k.IsZero()
+      - opt:
+          do:
+            - return: keyJSON{}, corejwk.NoPublicForm
+          when: k.kty == TypeOct
+      - opt:
+          do:
+            - return: keyJSON{}, corejwk.MissingMember
+          when: len(k.x) == 0
+      - set: raw
+        value: |-
+          keyJSON{
+          		Kty: string(k.kty), Crv: string(k.crv), Kid: k.kid,
+          		Use: k.use, Alg: k.alg, KeyOps: k.keyOps,
+          		X: b64Encode(k.x),
+          	}
+      - opt:
+          do:
+            - set: raw.Y
+              to: b64Encode
+              value: b64Encode(k.y)
+          when: k.kty == TypeEC
+      - return: raw, nil
+  - of: KeyValue.privateWire
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.privateWire
+        kind: self
+      - id: k.publicWire
+        kind: internal
+      - id: b64Encode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: keyJSON{}, corejwk.MissingMember
+          when: k.IsZero()
+      - opt:
+          do:
+            - return: keyJSON{}, corejwk.NoPrivateMaterial
+          when: "!k.IsPrivate()"
+      - opt:
+          do:
+            - return: |-
+                keyJSON{
+                			Kty: string(k.kty), Kid: k.kid, Use: k.use,
+                			Alg: k.alg, KeyOps: k.keyOps, K: b64Encode(k.priv),
+                		}, nil
+          when: k.kty == TypeOct
+      - bind: raw, werr
+        eval: k.publicWire()
+        to: k.publicWire
+      - opt:
+          do:
+            - return: keyJSON{}, werr
+          when: werr != nil
+      - set: raw.D
+        to: b64Encode
+        value: b64Encode(k.priv)
+      - return: raw, nil
+  - of: encodeWire
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeWire
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: out, merr
+        eval: json.Marshal(raw)
+        to: json
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(merr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKMalformed,
+                			Reason:  "MALFORMED",
+                			Public:  "JWK document is malformed",
+                			Private: "service/crypto/key/jwk: json.Marshal failed on the JWK wire struct",
+                		})
+          when: merr != nil
+      - return: out, nil
+  - of: KeyValue.Thumbprint
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.Thumbprint
+        kind: self
+      - id: k.thumbprintInput
+        kind: internal
+      - id: sha256
+        kind: stdlib
+      - id: b64Encode
+        kind: internal
+    steps:
+      - bind: canonical, cerr
+        eval: k.thumbprintInput()
+        to: k.thumbprintInput
+      - opt:
+          do:
+            - return: "\"\", cerr"
+          when: cerr != nil
+      - bind: sum
+        eval: sha256.Sum256(canonical)
+        to: sha256
+      - return: b64Encode(sum[:]), nil
+        to: b64Encode
+  - of: KeyValue.WithThumbprintKid
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.WithThumbprintKid
+        kind: self
+      - id: k.Thumbprint
+        kind: internal
+      - id: k.WithKid
+        kind: internal
+    steps:
+      - bind: thumb, terr
+        eval: k.Thumbprint()
+        to: k.Thumbprint
+      - opt:
+          do:
+            - return: KeyValue{}, terr
+          when: terr != nil
+      - return: k.WithKid(thumb), nil
+        to: k.WithKid
+  - of: KeyValue.thumbprintInput
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.thumbprintInput
+        kind: self
+      - id: k.thumbprintEC
+        kind: internal
+      - id: k.thumbprintOKP
+        kind: internal
+      - id: k.thumbprintOct
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.MissingMember
+          when: k.IsZero()
+      - switch:
+          cases:
+            - case: TypeEC
+              do:
+                - return: k.thumbprintEC()
+                  to: k.thumbprintEC
+            - case: TypeOKP
+              do:
+                - return: k.thumbprintOKP()
+                  to: k.thumbprintOKP
+            - case: TypeOct
+              do:
+                - return: k.thumbprintOct()
+                  to: k.thumbprintOct
+            - default: true
+              do:
+                - return: nil, corejwk.UnsupportedKeyType
+          "on": k.kty
+  - of: KeyValue.thumbprintEC
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.MissingMember
+          when: len(k.x) == 0 || len(k.y) == 0
+      - return: |-
+          []byte(`{"crv":"` + string(k.crv) + `","kty":"EC","x":"` +
+          		b64Encode(k.x) + `","y":"` + b64Encode(k.y) + `"}`), nil
+  - of: KeyValue.thumbprintOKP
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.MissingMember
+          when: len(k.x) == 0
+      - return: |-
+          []byte(`{"crv":"` + string(k.crv) + `","kty":"OKP","x":"` +
+          		b64Encode(k.x) + `"}`), nil
+  - of: KeyValue.thumbprintOct
+    steps:
+      - opt:
+          do:
+            - return: nil, corejwk.NoPrivateMaterial
+          when: "!k.IsPrivate()"
+      - return: "[]byte(`{\"k\":\"` + b64Encode(k.priv) + `\",\"kty\":\"oct\"}`), nil"
+  - of: Parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: Parse
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: fromWire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                KeyValue{}, errs.Wrap(corejwk.Malformed, errs.WrapParams{},
+                			errs.String("why", "the document is JSON null, not a JWK object"))
+          when: isJSONNull(document)
+      - var:
+          name: raw
+          type: keyJSON
+      - opt:
+          do:
+            - return: |-
+                KeyValue{}, errs.Wrap(uerr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKMalformed,
+                			Reason:  "MALFORMED",
+                			Public:  "JWK document is malformed",
+                			Private: "service/crypto/key/jwk.Parse: json.Unmarshal rejected the document",
+                		})
+          init:
+            bind: uerr
+            eval: json.Unmarshal(document, &raw)
+            to: json
+          when: uerr != nil
+      - return: fromWire(raw)
+        to: fromWire
+  - of: isJSONNull
+    participants:
+      - id: caller
+        kind: actor
+      - id: isJSONNull
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - return: bytes.Equal(bytes.TrimSpace(document), []byte("null"))
+        to: bytes
+  - of: fromWire
+    participants:
+      - id: caller
+        kind: actor
+      - id: fromWire
+        kind: self
+      - id: parseEC
+        kind: internal
+      - id: parseOKP
+        kind: internal
+      - id: parseOct
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.MissingMember
+          when: raw.Kty == ""
+      - bind: base
+        eval: |-
+          KeyValue{
+          		kty:    Type(raw.Kty),
+          		crv:    Curve(raw.Crv),
+          		kid:    raw.Kid,
+          		use:    raw.Use,
+          		alg:    raw.Alg,
+          		keyOps: slices.Clone(raw.KeyOps),
+          	}
+      - switch:
+          cases:
+            - case: TypeEC
+              do:
+                - return: parseEC(base, raw)
+                  to: parseEC
+            - case: TypeOKP
+              do:
+                - return: parseOKP(base, raw)
+                  to: parseOKP
+            - case: TypeOct
+              do:
+                - return: parseOct(base, raw)
+                  to: parseOct
+            - default: true
+              do:
+                - return: KeyValue{}, corejwk.UnsupportedKeyType
+          "on": base.kty
+  - of: parseEC
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseEC
+        kind: self
+      - id: coordLen
+        kind: internal
+      - id: b64DecodeFixed
+        kind: internal
+      - id: checkECPoint
+        kind: internal
+      - id: attachECPrivate
+        kind: internal
+    steps:
+      - bind: size
+        eval: coordLen(base.crv)
+        to: coordLen
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.UnsupportedCurve
+          when: size == 0
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.MissingMember
+          when: raw.X == "" || raw.Y == ""
+      - bind: xcoord, xerr
+        eval: b64DecodeFixed(raw.X, size)
+        to: b64DecodeFixed
+      - opt:
+          do:
+            - return: KeyValue{}, xerr
+          when: xerr != nil
+      - bind: ycoord, yerr
+        eval: b64DecodeFixed(raw.Y, size)
+        to: b64DecodeFixed
+      - opt:
+          do:
+            - return: KeyValue{}, yerr
+          when: yerr != nil
+      - opt:
+          do:
+            - return: KeyValue{}, perr
+          init:
+            bind: perr
+            eval: checkECPoint(base.crv, xcoord, ycoord)
+            to: checkECPoint
+          when: perr != nil
+      - set: base.x, base.y
+        value: xcoord, ycoord
+      - return: attachECPrivate(base, raw.D, size)
+        to: attachECPrivate
+  - of: attachECPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: attachECPrivate
+        kind: self
+      - id: b64DecodeFixed
+        kind: internal
+      - id: checkECScalar
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: base, nil
+          when: member == ""
+      - bind: scalar, derr
+        eval: b64DecodeFixed(member, size)
+        to: b64DecodeFixed
+      - opt:
+          do:
+            - return: KeyValue{}, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: KeyValue{}, serr
+          init:
+            bind: serr
+            eval: checkECScalar(base.crv, scalar, base.x, base.y)
+            to: checkECScalar
+          when: serr != nil
+      - set: base.priv
+        value: scalar
+      - return: base, nil
+  - of: parseOKP
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseOKP
+        kind: self
+      - id: b64DecodeFixed
+        kind: internal
+      - id: attachOKPPrivate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.UnsupportedCurve
+          when: base.crv != CurveEd25519
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.MissingMember
+          when: raw.X == ""
+      - bind: pub, xerr
+        eval: b64DecodeFixed(raw.X, ed25519KeyLen)
+        to: b64DecodeFixed
+      - opt:
+          do:
+            - return: KeyValue{}, xerr
+          when: xerr != nil
+      - set: base.x
+        value: pub
+      - return: attachOKPPrivate(base, raw.D)
+        to: attachOKPPrivate
+  - of: attachOKPPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: attachOKPPrivate
+        kind: self
+      - id: b64DecodeFixed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: base, nil
+          when: member == ""
+      - bind: seed, derr
+        eval: b64DecodeFixed(member, ed25519KeyLen)
+        to: b64DecodeFixed
+      - opt:
+          do:
+            - return: KeyValue{}, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.KeyMismatch
+          when: "!bytes.Equal(ed25519.NewKeyFromSeed(seed)[ed25519KeyLen:], base.x)"
+      - set: base.priv
+        value: seed
+      - return: base, nil
+  - of: parseOct
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseOct
+        kind: self
+      - id: b64Decode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.UnsupportedCurve
+          when: base.crv != ""
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.MissingMember
+          when: raw.K == ""
+      - bind: secret, kerr
+        eval: b64Decode(raw.K)
+        to: b64Decode
+      - opt:
+          do:
+            - return: KeyValue{}, kerr
+          when: kerr != nil
+      - set: base.priv
+        value: secret
+      - return: base, nil
+  - of: NewSet
+    steps:
+      - return: "Set{keys: slices.Clone(keys)}"
+  - of: ParseSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseSet
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: parseMembers
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                Set{}, errs.Wrap(corejwk.Malformed, errs.WrapParams{},
+                			errs.String("why", "the document is JSON null, not a JWK Set object"))
+          when: isJSONNull(document)
+      - var:
+          name: raw
+          type: setJSON
+      - opt:
+          do:
+            - return: |-
+                Set{}, errs.Wrap(uerr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKMalformed,
+                			Reason:  "MALFORMED",
+                			Public:  "JWK document is malformed",
+                			Private: "service/crypto/key/jwk.ParseSet: json.Unmarshal rejected the JWK Set envelope",
+                		})
+          init:
+            bind: uerr
+            eval: json.Unmarshal(document, &raw)
+            to: json
+          when: uerr != nil
+      - opt:
+          do:
+            - return: Set{}, corejwk.MissingMember
+          when: raw.Keys == nil
+      - return: parseMembers(raw.Keys)
+        to: parseMembers
+  - of: parseMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseMembers
+        kind: self
+      - id: Parse
+        kind: internal
+    steps:
+      - bind: keys
+        eval: make([]KeyValue, 0, len(members))
+      - loop:
+          do:
+            - bind: key, perr
+              eval: Parse(member)
+              to: Parse
+            - opt:
+                do:
+                  - return: Set{}, errs.Wrap(perr, errs.WrapParams{}, errs.Int("index", index))
+                when: perr != nil
+            - set: keys
+              value: append(keys, key)
+          key: index
+          range: members
+          value: member
+      - return: "Set{keys: keys}, nil"
+  - of: Set.Len
+    steps:
+      - return: len(s.keys)
+  - of: Set.Keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.Keys
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(s.keys)
+        to: slices
+  - of: Set.ByKid
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.ByKid
+        kind: self
+      - id: s.AllByKid
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: KeyValue{}, corejwk.KeyNotFound
+          when: kid == ""
+      - bind: matches
+        eval: s.AllByKid(kid)
+        to: s.AllByKid
+      - switch:
+          cases:
+            - case: "0"
+              do:
+                - return: KeyValue{}, corejwk.KeyNotFound
+            - case: "1"
+              do:
+                - return: matches[0], nil
+            - default: true
+              do:
+                - return: |-
+                    KeyValue{}, errs.Wrap(corejwk.AmbiguousKid, errs.WrapParams{},
+                    			errs.Int("candidates", len(matches)))
+          "on": len(matches)
+  - of: Set.MarshalPublic
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.MarshalPublic
+        kind: self
+      - id: s.marshalWith
+        kind: internal
+    steps:
+      - return: s.marshalWith(KeyValue.MarshalPublic)
+        to: s.marshalWith
+  - of: Set.MarshalPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.MarshalPrivate
+        kind: self
+      - id: s.marshalWith
+        kind: internal
+    steps:
+      - return: s.marshalWith(KeyValue.MarshalPrivate)
+        to: s.marshalWith
+  - of: Set.MarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.MarshalJSON
+        kind: self
+      - id: s.MarshalPublic
+        kind: internal
+    steps:
+      - return: s.MarshalPublic()
+        to: s.MarshalPublic
+  - of: Set.marshalWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.marshalWith
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: "setJSON{Keys: make([]json.RawMessage, 0, len(s.keys))}"
+      - loop:
+          do:
+            - bind: member, merr
+              eval: render(key)
+            - opt:
+                do:
+                  - return: nil, errs.Wrap(merr, errs.WrapParams{}, errs.Int("index", index))
+                when: merr != nil
+            - set: raw.Keys
+              value: append(raw.Keys, member)
+          key: index
+          range: s.keys
+          value: key
+      - bind: out, jerr
+        eval: json.Marshal(raw)
+        to: json
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(jerr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKMalformed,
+                			Reason:  "MALFORMED",
+                			Public:  "JWK document is malformed",
+                			Private: "service/crypto/key/jwk: json.Marshal failed on the JWK Set envelope",
+                		})
+          when: jerr != nil
+      - return: out, nil
+  - of: Set.GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.GoString
+        kind: self
+      - id: s.String
+        kind: internal
+    steps:
+      - return: s.String()
+        to: s.String
+  - of: b64Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: b64Encode
+        kind: self
+      - id: base64.RawURLEncoding.EncodeToString
+        kind: value
+    steps:
+      - return: base64.RawURLEncoding.EncodeToString(raw)
+        to: base64.RawURLEncoding.EncodeToString
+  - of: b64Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: b64Decode
+        kind: self
+      - id: base64.RawURLEncoding.DecodeString
+        kind: value
+    steps:
+      - bind: decoded, derr
+        eval: base64.RawURLEncoding.DecodeString(member)
+        to: base64.RawURLEncoding.DecodeString
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(derr, errs.WrapParams{
+                			Code:    corejwk.CodeJWKInvalidEncoding,
+                			Reason:  "INVALID_ENCODING",
+                			Public:  "JWK member is not valid unpadded base64url",
+                			Private: "service/crypto/key/jwk: base64.RawURLEncoding rejected a member (padded or wrong alphabet)",
+                		})
+          when: derr != nil
+      - return: decoded, nil
+  - of: b64DecodeFixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: b64DecodeFixed
+        kind: self
+      - id: b64Decode
+        kind: internal
+    steps:
+      - bind: decoded, derr
+        eval: b64Decode(member)
+        to: b64Decode
+      - opt:
+          do:
+            - return: nil, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corejwk.InvalidEncoding, errs.WrapParams{},
+                			errs.Int("want", want), errs.Int("got", len(decoded)))
+          when: len(decoded) != want
+      - return: decoded, nil

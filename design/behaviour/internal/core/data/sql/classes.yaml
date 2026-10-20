@@ -1,0 +1,233 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: DialectUnknown is the unusable zero value.
+        name: DialectUnknown
+        type: Dialect
+        value: iota
+      - doc: |-
+          DialectPostgres is PostgreSQL 9.1+ (and wire-compatible engines that
+          implement pg_advisory_lock, e.g. CockroachDB advertises the function
+          but the caller must verify it is a real lock before claiming this).
+        name: DialectPostgres
+      - doc: DialectMySQL is MySQL 5.7+ / MariaDB 10.x with InnoDB.
+        name: DialectMySQL
+      - doc: DialectSQLite is SQLite 3.6.8+.
+        name: DialectSQLite
+    name: DialectUnknown
+  - doc: |-
+      decimalBase is the radix a version is rendered in when it travels as an
+      error field. Named because 10 appearing four times in one file is exactly
+      the kind of literal that gets "fixed" to 16 by a well-meaning edit.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - TxFunc
+    name: sql.go
+  - decls:
+      - Dialect
+      - DialectUnknown
+      - dialectNames
+      - Dialect.String
+      - Dialect.Valid
+      - Dialect.SupportsAdvisoryLock
+      - Dialect.Placeholder
+      - Dialect.QuoteIdent
+      - Dialect.ForUpdate
+      - Dialect.ForUpdateSkipLocked
+      - ParseDialect
+    name: sql_dialect.go
+  - decls:
+      - decimalBase
+      - Step
+      - MigrationValue
+      - Irreversible
+      - MigrationValue.Validate
+    name: sql_migration.go
+  - decls:
+      - TxOptionsValue
+      - TxOptionsValue.IsZero
+      - TxOptionsValue.StdOptions
+    name: sql_txoptions.go
+functions:
+  - name: ParseDialect
+    params: name string
+    results: dialect Dialect, err error
+  - name: Irreversible
+    params: ctx context.Context, ex Executor
+    results: error
+imports:
+  context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  stdsql: database/sql
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/sql
+  name: sql
+  purpose: Package sql — range 0.2.24.* (ADR 0055 core/data/sql block), and the transaction manager's, health probe's and migration runner's 0.3.54.* (ADR 0055 service/data/sql block, declared here since ADR 0160).
+types:
+  - kind: named
+    name: TxFunc
+    underlying: func(ctx context.Context, ex Executor) error
+  - kind: named
+    methods:
+      - name: String
+        recv: d Dialect
+        results: string
+      - name: Valid
+        recv: d Dialect
+        results: bool
+      - name: SupportsAdvisoryLock
+        recv: d Dialect
+        results: bool
+      - name: Placeholder
+        params: n int
+        recv: d Dialect
+        results: string
+      - name: QuoteIdent
+        params: name string
+        recv: d Dialect
+        results: string
+      - name: ForUpdate
+        recv: d Dialect
+        results: string
+      - name: ForUpdateSkipLocked
+        recv: d Dialect
+        results: string
+    name: Dialect
+    underlying: uint8
+  - kind: named
+    name: Step
+    underlying: func(ctx context.Context, ex Executor) error
+  - fields:
+      - doc: |-
+          Version orders the migration. It must be non-zero and unique within one
+          set: zero is reserved as "before every migration", the value Down takes
+          to reverse everything.
+
+          Any strictly-increasing scheme works; a UTC timestamp (20260910143000)
+          is the conventional one because two branches developed in parallel then
+          merge without colliding.
+        name: Version
+        type: uint64
+      - doc: |-
+          Name is the human label recorded in the version table. It must be
+          non-empty: a schema history whose rows say only "42" is a schema
+          history nobody can read during an incident.
+        name: Name
+        type: string
+      - doc: Up applies the change. Required.
+        name: Up
+        type: Step
+      - doc: |-
+          Down reverses it. Required — and [Irreversible] is how a caller says
+          "this one cannot be reversed" OUT LOUD.
+
+          A nil Down is refused rather than accepted as "irreversible", because
+          "I forgot the reversal" and "there is no reversal" are the same nil and
+          only one of them is a defect. The same rule core/app/lifecycle applies to a
+          nil Stop, for the same reason.
+        name: Down
+        type: Step
+    kind: struct
+    methods:
+      - name: Validate
+        recv: m MigrationValue
+        results: error
+    name: MigrationValue
+  - fields:
+      - doc: |-
+          Isolation is the transaction isolation level. The zero value
+          (sql.LevelDefault) defers to the driver.
+        name: Isolation
+        type: stdsql.IsolationLevel
+      - doc: |-
+          ReadOnly asks the engine to refuse writes. Not every driver enforces
+          it; those that do not report an error at Begin rather than accepting
+          writes silently, which is why this is passed through rather than
+          emulated.
+        name: ReadOnly
+        type: bool
+    kind: struct
+    methods:
+      - name: IsZero
+        recv: o TxOptionsValue
+        results: bool
+      - name: StdOptions
+        recv: o TxOptionsValue
+        results: "*stdsql.TxOptions"
+    name: TxOptionsValue
+vars:
+  - doc: |-
+      The three lookup tables ParseDialect and String are built from. Grouped so a
+      new dialect that forgets one of them is visible in one place rather than
+      rendering as "unknown" at a call site.
+    grouped: true
+    items:
+      - doc: |-
+          dialectNames maps a Dialect to its canonical lowercase name. Kept beside
+          the constants so a new dialect that forgets its name is visible here.
+        name: dialectNames
+        value: |-
+          map[Dialect]string{
+          		DialectUnknown:  "unknown",
+          		DialectPostgres: "postgres",
+          		DialectMySQL:    "mysql",
+          		DialectSQLite:   "sqlite",
+          	}
+      - doc: |-
+          dialectByName is the accepted half of [ParseDialect]. Aliases are
+          included where the ecosystem genuinely uses two spellings for one
+          engine, so a caller reading their driver's own documentation does not
+          get refused for a synonym.
+        name: dialectByName
+        value: |-
+          map[string]Dialect{
+          		"postgres":   DialectPostgres,
+          		"postgresql": DialectPostgres,
+          		"pgx":        DialectPostgres,
+          		"mysql":      DialectMySQL,
+          		"mariadb":    DialectMySQL,
+          		"sqlite":     DialectSQLite,
+          		"sqlite3":    DialectSQLite,
+          	}
+      - doc: |-
+          refusedDialects is the REFUSED-BY-NAME half of [ParseDialect]: engines
+          this SDK recognises and declines, each with the reason it cannot be
+          supported by the same code path as the three above.
+
+          Being on this list is a stronger statement than being absent from
+          dialectByName. "I have never heard of this" and "I know this engine and
+          its savepoint grammar is not the one I implement" are different facts,
+          and a caller debugging a refusal deserves to know which one they hit.
+        name: refusedDialects
+        value: |-
+          map[string]string{
+          		//: T-SQL spells a savepoint `SAVE TRANSACTION n`, has NO release
+          		//: statement at all, and dooms a transaction on many errors so that
+          		//: even `ROLLBACK TRANSACTION n` fails (XACT_STATE() = -1). Nesting
+          		//: there is a different algorithm, not a different string.
+          		"sqlserver": "T-SQL uses SAVE TRANSACTION and has no RELEASE; nesting is a different algorithm",
+          		"mssql":     "T-SQL uses SAVE TRANSACTION and has no RELEASE; nesting is a different algorithm",
+          		//: Oracle has SAVEPOINT and ROLLBACK TO, but no RELEASE SAVEPOINT: a
+          		//: savepoint lives until the transaction ends. This runner releases
+          		//: on success so a long transaction does not accumulate them, which
+          		//: Oracle cannot express.
+          		"oracle": "Oracle has no RELEASE SAVEPOINT, so a released nested scope cannot be expressed",
+          		"godror": "Oracle has no RELEASE SAVEPOINT, so a released nested scope cannot be expressed",
+          		//: Db2 spells it `SAVEPOINT n ON ROLLBACK RETAIN CURSORS` and the
+          		//: cursor retention clause is mandatory and semantically load-bearing.
+          		"db2": "Db2 requires the ON ROLLBACK RETAIN clause, which changes cursor semantics",
+          	}
+    name: dialectNames

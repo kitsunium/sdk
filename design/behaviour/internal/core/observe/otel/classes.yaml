@@ -1,0 +1,216 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The two identity bytes a bool attribute encodes to, plus the strconv
+      parameters the canonical text rendering uses.
+    grouped: true
+    items:
+      - name: boolTrue
+        type: byte
+        value: "1"
+      - name: boolFalse
+        type: byte
+        value: "0"
+      - name: decimalBase
+        type: int
+        value: "10"
+      - name: floatFmt
+        type: byte
+        value: "'g'"
+      - name: floatPrec
+        type: int
+        value: "-1"
+      - name: floatBits
+        type: int
+        value: "64"
+    name: boolTrue
+  - grouped: true
+    items:
+      - doc: |-
+          AttrKindInvalid is the zero value, and it names no type. An AttrValue
+          carrying it was built by a struct literal rather than by a
+          constructor, so its value was never set; every signal refuses it rather
+          than inventing an empty string for it (ADR 0031).
+        name: AttrKindInvalid
+        type: AttrKind
+        value: iota
+      - doc: AttrKindString marks a string-valued attribute.
+        name: AttrKindString
+      - doc: AttrKindBool marks a bool-valued attribute.
+        name: AttrKindBool
+      - doc: AttrKindInt64 marks a signed 64-bit integer attribute.
+        name: AttrKindInt64
+      - doc: AttrKindFloat64 marks an IEEE-754 double attribute.
+        name: AttrKindFloat64
+    name: AttrKindInvalid
+  - doc: |-
+      ServiceNameKey is the attribute key OpenTelemetry's resource semantic
+      conventions reserve for the logical name of the service. It is dotted, like
+      every OTel-conventional key — which is exactly why the Prometheus connector
+      cannot carry it (see internal/service/observe/metrics/CLAUDE.md §What the Prometheus
+      connector loses). It is also the key a backend correlates a trace with a
+      metric on, which is why both signals read it from here.
+    items:
+      - name: ServiceNameKey
+        type: string
+        value: "\"service.name\""
+    name: ServiceNameKey
+  - doc: |-
+      UnknownService is the value the OpenTelemetry specification mandates when a
+      producer supplies no service.name. The spec allows appending the executable
+      name to it; this SDK does not, because a binary path is not a service
+      identity and would silently become one on a dashboard.
+    items:
+      - name: UnknownService
+        type: string
+        value: "\"unknown_service\""
+    name: UnknownService
+files:
+  - decls:
+      - boolTrue
+      - AttrKind
+      - AttrKindInvalid
+      - AttrValue
+      - String
+      - Bool
+      - Int64
+      - Float64
+      - AttrValue.Kind
+      - AttrValue.Str
+      - AttrValue.Bool
+      - AttrValue.Int64
+      - AttrValue.Float64
+      - AttrValue.AppendIdentity
+      - AttrValue.AppendText
+      - CompareAttrKey
+      - CompareAttrValue
+      - ValidateAttrs
+      - SortAttrs
+    name: attr_value.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - ServiceNameKey
+      - UnknownService
+      - ResourceValue
+      - NormalizeResource
+      - isServiceName
+    name: resource_value.go
+  - decls:
+      - ScopeValue
+      - NormalizeScope
+    name: scope_value.go
+functions:
+  - name: String
+    params: key, value string
+    results: AttrValue
+  - name: Bool
+    params: key string, value bool
+    results: AttrValue
+  - name: Int64
+    params: key string, value int64
+    results: AttrValue
+  - name: Float64
+    params: key string, value float64
+    results: AttrValue
+  - name: CompareAttrKey
+    params: a, b AttrValue
+    results: int
+  - name: CompareAttrValue
+    params: a, b AttrValue
+    results: int
+  - name: ValidateAttrs
+    params: sorted []AttrValue, refusal error
+  - name: SortAttrs
+    params: attrs []AttrValue, refusal error
+    results: "[]AttrValue"
+  - name: NormalizeResource
+    params: resource ResourceValue, refusal error
+    results: ResourceValue
+  - doc: isServiceName reports whether a carries the reserved service.name key.
+    name: isServiceName
+    params: a AttrValue
+    results: bool
+  - name: NormalizeScope
+    params: scope ScopeValue, defaultName string
+    results: ScopeValue
+imports:
+  binary: encoding/binary
+  cmp: cmp
+  math: math
+  slices: slices
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/otel
+  name: otel
+  purpose: "Package otel holds the OpenTelemetry types every signal shares: the typed attribute (common/v1 KeyValue and AnyValue), the Resource (resource/v1) and the InstrumentationScope (common/v1)."
+types:
+  - kind: named
+    name: AttrKind
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Key names the dimension. It must be non-empty and appear at most once
+          in an attribute set; ValidateAttrs checks both.
+        name: Key
+        type: string
+      - doc: kind discriminates which of num/str carries the value.
+        name: kind
+        type: AttrKind
+      - doc: num carries a bool, an int64 or the IEEE-754 bits of a float64.
+        name: num
+        type: uint64
+      - doc: str carries a string value, and only a string value.
+        name: str
+        type: string
+    kind: struct
+    methods:
+      - name: Kind
+        recv: a AttrValue
+        results: AttrKind
+      - name: Str
+        recv: a AttrValue
+        results: string
+      - name: Bool
+        recv: a AttrValue
+        results: bool
+      - name: Int64
+        recv: a AttrValue
+        results: int64
+      - name: Float64
+        recv: a AttrValue
+        results: float64
+      - name: AppendIdentity
+        params: dst []byte
+        recv: a AttrValue
+        results: "[]byte"
+      - name: AppendText
+        params: dst []byte
+        recv: a AttrValue
+        results: "[]byte"
+    name: AttrValue
+  - fields:
+      - doc: |-
+          Attrs are the producer's attributes, sorted by Key. A ResourceValue
+          normalised by NormalizeResource always carries ServiceNameKey.
+        name: Attrs
+        type: "[]AttrValue"
+    kind: struct
+    name: ResourceValue
+  - fields:
+      - doc: |-
+          Name is the instrumenting library's name. Empty means unset and
+          resolves to the signal's own default — see NormalizeScope.
+        name: Name
+        type: string
+      - doc: |-
+          Version is the instrumenting library's version. It is optional in the
+          specification and stays empty when the caller has none — inventing one
+          would be a claim about code this package cannot see.
+        name: Version
+        type: string
+    kind: struct
+    name: ScopeValue

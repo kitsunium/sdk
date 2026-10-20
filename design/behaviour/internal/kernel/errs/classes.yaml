@@ -1,0 +1,903 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Shift values are WIRE-STABLE. Changing them breaks every persisted Code.
+      A future layout (e.g. 4/8/8/12) MUST introduce a new Code type, never
+      mutate these constants.
+    grouped: true
+    items:
+      - name: shiftMajor
+        type: uint
+        value: "24"
+      - name: shiftLayer
+        type: uint
+        value: "16"
+      - name: shiftPackage
+        type: uint
+        value: "8"
+    name: shiftMajor
+  - doc: CIDR-style mask constants for prefix matching via NewPrefixMatcher.
+    grouped: true
+    items:
+      - comment: /8 — all codes sharing Major
+        name: MaskByMajor
+        type: Code
+        value: "0xFF_00_00_00"
+      - comment: /16 — all codes sharing Major+Layer
+        name: MaskByLayer
+        type: Code
+        value: "0xFF_FF_00_00"
+      - comment: /24 — all codes sharing Major+Layer+Package
+        name: MaskByPackage
+        type: Code
+        value: "0xFF_FF_FF_00"
+      - comment: /32 — exact match only
+        name: MaskExact
+        type: Code
+        value: "0xFF_FF_FF_FF"
+    name: MaskByMajor
+  - doc: |-
+      padThreshold10 is the cutoff below which itoaPadded3 must emit two
+      leading zeros ("00X"). Named to avoid a bare magic literal.
+    items:
+      - name: padThreshold10
+        type: uint8
+        value: "10"
+    name: padThreshold10
+  - doc: |-
+      padThreshold100 is the cutoff below which itoaPadded3 must emit one
+      leading zero ("0XX"). Named to avoid a bare magic literal.
+    items:
+      - name: padThreshold100
+        type: uint8
+        value: "100"
+    name: padThreshold100
+  - grouped: true
+    items:
+      - comment: "0.0.0.1"
+        doc: |-
+          CodeInvalidCode identifies a Define call whose numeric code is zero,
+          overflows int32-positive range, or violates the Layer=0 reserved rule.
+        name: CodeInvalidCode
+        type: Code
+        value: iota + 0x00_00_00_01
+      - comment: "0.0.0.2"
+        doc: |-
+          CodeInvalidReason identifies a Define call whose Reason is empty or
+          does not match the SCREAMING_SNAKE convention.
+        name: CodeInvalidReason
+      - comment: "0.0.0.3"
+        doc: |-
+          CodeInvalidPublic identifies a Define call whose Public message is
+          empty, exceeds 120 runes, or contains a newline.
+        name: CodeInvalidPublic
+      - comment: "0.0.0.4"
+        doc: |-
+          CodeInvalidPrivate identifies a Define call whose Private message is
+          empty. Introduced by ADR 0005 to close the validate.go bug where
+          CodeInvalidPublic was erroneously cited for Private-field failures.
+        name: CodeInvalidPrivate
+      - comment: "0.0.0.5"
+        doc: |-
+          CodeInvalidCodeString identifies a ParseCode failure (malformed
+          canonical dotted-quad input).
+        name: CodeInvalidCodeString
+      - comment: "0.0.0.6"
+        doc: |-
+          CodeInvalidWrapParams identifies a Wrap-time validation failure on
+          caller-supplied WrapParams. Wrap returns an *Error carrying this
+          code instead of panicking (runtime path, not init-time).
+        name: CodeInvalidWrapParams
+    name: CodeInvalidCode
+  - doc: |-
+      defaultHTTPStatus is the wire status returned when an Error does not
+      override it. 500 is deliberately generic — callers who want layer-aware
+      mapping put the raw Code in a response header.
+    items:
+      - name: defaultHTTPStatus
+        type: int
+        value: "500"
+    name: defaultHTTPStatus
+  - doc: |-
+      defaultExitCode is the POSIX exit status returned when an Error does not
+      override it. 70 matches sysexits EX_SOFTWARE (internal software error).
+    items:
+      - name: defaultExitCode
+        type: int
+        value: "70"
+    name: defaultExitCode
+  - doc: |-
+      errorBuilderInitialCap is the initial allocation Grow hint for the
+      strings.Builder used by (*Error).Error when a trail is present. Matches
+      the average rendered length of "[code REASON] public" for the SDK's
+      existing sentinel surface.
+    items:
+      - name: errorBuilderInitialCap
+        type: int
+        value: "64"
+    name: errorBuilderInitialCap
+  - doc: |-
+      errorBuilderPerTrailEntry is the per-trail-entry allocation hint added
+      on top of errorBuilderInitialCap. Each trail entry adds " <- M.L.P.S"
+      (~12 bytes for a typical dotted-quad code).
+    items:
+      - name: errorBuilderPerTrailEntry
+        type: int
+        value: "12"
+    name: errorBuilderPerTrailEntry
+  - doc: decimalBase is the radix used when rendering integer FieldValue payloads.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: floatPrec is the shortest-round-trip sentinel for strconv.FormatFloat.
+    items:
+      - name: floatPrec
+        type: int
+        value: "-1"
+    name: floatPrec
+  - doc: floatBitSize tells strconv.FormatFloat we are formatting a 64-bit float.
+    items:
+      - name: floatBitSize
+        type: int
+        value: "64"
+    name: floatBitSize
+  - doc: floatFormat selects strconv's general exponent-or-decimal mode.
+    items:
+      - name: floatFormat
+        type: byte
+        value: "'g'"
+    name: floatFormat
+  - doc: |-
+      fieldInvalid is the zero-value tag; it marks a FieldValue that was not
+      built through one of the constructors. StringValue degrades to "" for it.
+    items:
+      - name: fieldInvalid
+        type: fieldKind
+        value: "0"
+    name: fieldInvalid
+  - doc: fieldString tags a FieldValue whose payload lives in the private str member.
+    items:
+      - name: fieldString
+        type: fieldKind
+        value: "1"
+    name: fieldString
+  - doc: fieldInt tags a FieldValue whose payload lives in the private num member.
+    items:
+      - name: fieldInt
+        type: fieldKind
+        value: "2"
+    name: fieldInt
+  - doc: fieldBool tags a FieldValue whose payload lives in the private bl member.
+    items:
+      - name: fieldBool
+        type: fieldKind
+        value: "3"
+    name: fieldBool
+  - doc: fieldFloat tags a FieldValue whose payload lives in the private fl member.
+    items:
+      - name: fieldFloat
+        type: fieldKind
+        value: "4"
+    name: fieldFloat
+  - doc: Canonical-form length and shape limits for ParseCode.
+    grouped: true
+    items:
+      - doc: "codeStringMinLen is the shortest valid canonical form: \"0.0.0.0\"."
+        name: codeStringMinLen
+        type: int
+        value: "7"
+      - doc: "codeStringMaxLen is the longest valid canonical form: \"255.255.255.255\"."
+        name: codeStringMaxLen
+        type: int
+        value: "15"
+      - doc: codeSegmentCount is the exact number of dot-separated segments.
+        name: codeSegmentCount
+        type: int
+        value: "4"
+      - doc: codeSegmentLastIdx is the highest valid segment index (codeSegmentCount-1).
+        name: codeSegmentLastIdx
+        type: int
+        value: "3"
+      - doc: codeSegmentMaxDigits is the upper bound on a single segment's digit count.
+        name: codeSegmentMaxDigits
+        type: int
+        value: "3"
+    name: codeStringMinLen
+  - doc: |-
+      Per-segment numeric upper bound for ParseCode.
+      The radix for digit accumulation is the package-wide decimalBase (field.go).
+    grouped: true
+    items:
+      - doc: octetMax is the maximum value a single segment may represent.
+        name: octetMax
+        type: int
+        value: "255"
+    name: octetMax
+  - doc: Diagnostics envelope sizing — bounds the echoed input in error messages.
+    grouped: true
+    items:
+      - doc: |-
+          inputEchoMax caps the prefix of malformed input we include in private
+          diagnostics, preventing adversarial gigantic payloads from bloating logs.
+        name: inputEchoMax
+        type: int
+        value: "32"
+    name: inputEchoMax
+  - doc: |-
+      Fixed-position indices for the four-octet array — naming them removes the
+      raw 0/1/2/3 literals from the Pack call site.
+    grouped: true
+    items:
+      - doc: octetIdxMajor is the index of the Major octet inside the parsed array.
+        name: octetIdxMajor
+        type: int
+        value: iota
+      - doc: octetIdxLayer is the index of the Layer octet inside the parsed array.
+        name: octetIdxLayer
+      - doc: octetIdxPackage is the index of the Package octet inside the parsed array.
+        name: octetIdxPackage
+      - doc: octetIdxSerial is the index of the Serial octet inside the parsed array.
+        name: octetIdxSerial
+    name: octetIdxMajor
+  - doc: |-
+      registrySentinel is a compile-time marker that the registry audit is
+      expected to run in this package. It has no runtime behaviour beyond
+      existing.
+    items:
+      - name: registrySentinel
+        type: string
+        value: "\"sdk-registry-audit-v1\""
+    name: registrySentinel
+  - doc: |-
+      maxTrailLen caps the trail length so pathological recursive wraps cannot
+      grow the trail unbounded. Observed middleware depth in Go SDKs (go-kit,
+      otel, sqlx, grpc-go) is <= 5; 16 gives 3x headroom. Memory cost per
+      *Error with a full trail: 16 * 4 bytes = 64 bytes, negligible.
+    items:
+      - name: maxTrailLen
+        type: int
+        value: "16"
+    name: maxTrailLen
+  - doc: |-
+      trailReserveTail is subtracted from maxTrailLen to compute how many tail
+      entries to preserve on overflow truncation: preservedTail = maxTrailLen -
+      trailReserveTail. The two reserved slots account for the origin (kept at
+      index 0) and the newest entry being appended, so the final slice
+      origin + preservedTail + newest fits within maxTrailLen.
+    items:
+      - name: trailReserveTail
+        type: int
+        value: "2"
+    name: trailReserveTail
+  - doc: |-
+      maxPublicRunes bounds the size of the wire-safe Public message so no
+      single error can blow up logs or HTTP responses.
+    items:
+      - name: maxPublicRunes
+        type: int
+        value: "120"
+    name: maxPublicRunes
+  - doc: reasonPattern documents the SCREAMING_SNAKE_CASE shape expected for Reason.
+    items:
+      - name: reasonPattern
+        type: string
+        value: "\"^[A-Z][A-Z0-9_]*$\""
+    name: reasonPattern
+  - doc: |-
+      maxInt32Positive caps the dotted-quad Code at the largest non-negative
+      int32 value so the deprecated Code() int accessor never wraps to a
+      negative integer.
+    items:
+      - name: maxInt32Positive
+        type: uint32
+        value: "0x7FFFFFFF"
+    name: maxInt32Positive
+files:
+  - decls:
+      - CodeOf
+      - ReasonOf
+      - PublicOf
+      - PrivateOf
+      - FieldsOf
+      - HTTPStatusOf
+      - ExitCodeOf
+      - HasReason
+      - deepestError
+    name: accessors.go
+  - decls:
+      - shiftMajor
+      - MaskByMajor
+      - padThreshold10
+      - padThreshold100
+      - Code
+      - Major
+      - Pack
+      - Code.Major
+      - Code.Layer
+      - Code.Package
+      - Code.Serial
+      - Code.String
+      - Code.Padded
+      - itoaDecimal
+      - itoaPadded3
+    name: code.go
+  - decls:
+      - CodeInvalidCode
+    name: codes.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - defaultHTTPStatus
+      - defaultExitCode
+      - errorBuilderInitialCap
+      - errorBuilderPerTrailEntry
+      - Error
+      - DefineOption
+      - WithHTTPStatus
+      - WithExitCode
+      - NewError
+      - NewRuntime
+      - Define
+      - Static
+      - newValidationError
+      - Wrap
+      - wrapSDKCause
+      - newFromStdlibCause
+      - (*Error).Code
+      - (*Error).Reason
+      - (*Error).Public
+      - (*Error).Private
+      - (*Error).Fields
+      - (*Error).Trail
+      - (*Error).TrailTruncated
+      - (*Error).Is
+      - (*Error).matchesPrefix
+      - (*Error).matchesSentinel
+      - (*Error).Error
+      - (*Error).Source
+      - (*Error).Unwrap
+      - (*Error).HTTPStatus
+      - (*Error).ExitCode
+      - HasCode
+      - errCodeMatches
+      - hasCodeInSingleUnwrap
+      - hasCodeInMultiUnwrap
+    name: error.go
+  - decls:
+      - decimalBase
+      - floatPrec
+      - floatBitSize
+      - floatFormat
+      - fieldKind
+      - fieldInvalid
+      - fieldString
+      - fieldInt
+      - fieldBool
+      - fieldFloat
+      - FieldValue
+      - NewFieldValue
+      - String
+      - Int
+      - Int64
+      - Bool
+      - Float
+      - FieldValue.Key
+      - FieldValue.StringValue
+    name: field.go
+  - decls:
+      - codeStringMinLen
+      - octetMax
+      - inputEchoMax
+      - octetIdxMajor
+      - ParseCode
+      - scanOctets
+      - parseOctet
+      - digitsToOctet
+      - parseFailure
+    name: parse.go
+  - decls:
+      - PrefixMatcher
+      - NewPrefixMatcher
+      - (*PrefixMatcher).String
+      - (*PrefixMatcher).Error
+      - (*PrefixMatcher).Prefix
+      - (*PrefixMatcher).Mask
+    name: prefix_matcher.go
+  - decls:
+      - registrySentinel
+      - RegistryMarker
+    name: registry.go
+  - decls:
+      - maxTrailLen
+      - trailReserveTail
+      - appendTrail
+    name: trail.go
+  - decls:
+      - TrailOf
+    name: trailof.go
+  - decls:
+      - maxPublicRunes
+      - reasonPattern
+      - maxInt32Positive
+      - metaCodeAllowed
+      - validateDefineArgs
+      - validateCode
+      - validateReason
+      - validatePublic
+      - validatePrivate
+      - containsNewline
+      - isScreamingSnake
+      - isValidReasonRune
+      - isUpperLetter
+      - isDigit
+    name: validate.go
+  - decls:
+      - WrapParams
+    name: wrap_params.go
+functions:
+  - name: CodeOf
+    params: err error
+    results: c Code, ok bool
+  - name: ReasonOf
+    params: err error
+    results: reason string, ok bool
+  - name: PublicOf
+    params: err error
+    results: string
+  - name: PrivateOf
+    params: err error
+    results: string
+  - name: FieldsOf
+    params: err error
+    results: "[]FieldValue"
+  - name: HTTPStatusOf
+    params: err error
+    results: int
+  - name: ExitCodeOf
+    params: err error
+    results: int
+  - name: HasReason
+    params: err error, reason string
+    results: bool
+  - doc: |-
+      deepestError walks err via errors.As and returns the innermost *Error.
+      Unexported because only the public accessors should use it.
+    name: deepestError
+    params: err error
+    results: "*Error"
+  - name: Pack
+    params: mm Major, ll Layer, pp PkgCode, ss Serial
+    results: Code
+  - doc: |-
+      itoaDecimal returns the decimal representation of a uint8 (0-255) UNPADDED.
+      Internal helper — exported sibling is Code.String().
+    name: itoaDecimal
+    params: octet uint8
+    results: string
+  - doc: itoaPadded3 returns the zero-padded 3-digit decimal form ("000".. "255").
+    name: itoaPadded3
+    params: octet uint8
+    results: string
+  - name: WithHTTPStatus
+    params: status int
+    results: DefineOption
+  - name: WithExitCode
+    params: code int
+    results: DefineOption
+  - name: NewError
+    params: code Code, reason, public, private string, opts ...DefineOption
+    results: "*Error"
+  - name: NewRuntime
+    params: code Code, reason, public, private string, fields ...FieldValue
+    results: "*Error"
+  - name: Define
+    params: code Code, reason, public, private string, opts ...DefineOption
+    results: "*Error"
+  - name: Static
+    params: code Code, reason, public, private string, http, exit int
+    results: "*Error"
+  - doc: |-
+      newValidationError is the BOOTSTRAP constructor used by validateDefineArgs
+      to surface structural failures WITHOUT re-entering Define (which would
+      recurse into validateDefineArgs again and blow the stack at init).
+
+      Direct struct literal — does not call Define or validateDefineArgs.
+    name: newValidationError
+    params: code Code, reason, public string
+    results: "*Error"
+  - name: Wrap
+    params: cause error, params WrapParams, fields ...FieldValue
+    results: "*Error"
+  - doc: |-
+      wrapSDKCause builds the *Error returned when Wrap finds an *Error in
+      the cause chain. Extracted from Wrap so each path through Wrap stays
+      readable as a top-to-bottom case analysis instead of one nested branch.
+    name: wrapSDKCause
+    params: cause error, inner *Error, params WrapParams, fields []FieldValue
+    results: "*Error"
+  - doc: |-
+      newFromStdlibCause builds an *Error for causes that are NOT *Error.
+      Runtime-safe: validation failure on caller-supplied WrapParams returns
+      a typed *Error{CodeInvalidWrapParams} instead of panicking (v5 HIGH fix).
+    name: newFromStdlibCause
+    params: cause error, params WrapParams, fields []FieldValue
+    results: "*Error"
+  - name: HasCode
+    params: err error, c Code
+    results: bool
+  - doc: |-
+      errCodeMatches reports whether the outermost *Error layer of err
+      carries c either as its origin Code or anywhere in its trail.
+    name: errCodeMatches
+    params: err error, c Code
+    results: bool
+  - doc: |-
+      hasCodeInSingleUnwrap recurses through the single-error Unwrap()
+      interface to keep HasCode below the cyclo budget.
+    name: hasCodeInSingleUnwrap
+    params: err error, c Code
+    results: bool
+  - doc: |-
+      hasCodeInMultiUnwrap recurses through the multi-error Unwrap()
+      interface (e.g. errors.Join) to keep HasCode below the cyclo budget.
+    name: hasCodeInMultiUnwrap
+    params: err error, c Code
+    results: bool
+  - name: NewFieldValue
+    params: key, val string
+    results: FieldValue
+  - name: String
+    params: key, val string
+    results: FieldValue
+  - name: Int
+    params: key string, val int
+    results: FieldValue
+  - name: Int64
+    params: key string, val int64
+    results: FieldValue
+  - name: Bool
+    params: key string, val bool
+    results: FieldValue
+  - name: Float
+    params: key string, val float64
+    results: FieldValue
+  - name: ParseCode
+    params: s string
+    results: c Code, err error
+  - doc: |-
+      scanOctets walks s, finalises each dot-delimited segment via parseOctet,
+      and returns the resulting four-octet array. Extracted from ParseCode to
+      keep its cyclomatic complexity below the SDK ceiling.
+    name: scanOctets
+    params: s string
+    results: octets [codeSegmentCount]uint8, err error
+  - doc: |-
+      parseOctet validates and returns a single octet per ParseCode rules.
+      Extracted so the ParseCode main loop stays under the SDK's cyclomatic
+      complexity ceiling.
+    name: parseOctet
+    params: seg string
+    results: octet uint8, ok bool
+  - doc: |-
+      digitsToOctet reads seg as a base-10 unsigned integer and validates that
+      every byte is an ASCII digit and that the result fits in a uint8.
+      Extracted from parseOctet to keep its cyclomatic complexity below 9.
+    name: digitsToOctet
+    params: seg string
+    results: octet uint8, ok bool
+  - doc: |-
+      parseFailure builds the *Error returned by ParseCode. Wrapping it in a
+      helper keeps the call sites compact and centralises the Reason / Public
+      messaging.
+    name: parseFailure
+    params: input, detail string
+    results: "*Error"
+  - name: NewPrefixMatcher
+    params: prefix, mask Code
+    results: "*PrefixMatcher"
+  - name: RegistryMarker
+    results: string
+  - doc: |-
+      appendTrail returns the new trail slice and whether truncation occurred.
+      Contract:
+        - cause == nil (no prior trail) → trail = [next] unless next == 0.
+        - next == 0 → refuse to write a meaningless zero Code; existing trail
+          is preserved untouched. (v5 fix: protects HasCode / PrefixMatcher
+          from caller bugs on the origin-wins path where params.Code is
+          appended unchecked.)
+        - under cap → append, inherit cause.trailTruncated (monotonic OR).
+        - overflow → keep origin + (maxTrailLen-2) most recent entries + next;
+          trailTruncated transitions to true and stays true.
+    name: appendTrail
+    params: cause *Error, next Code
+    results: trail []Code, truncated bool
+  - name: TrailOf
+    params: err error
+    results: "[]Code"
+  - doc: validateDefineArgs applies Define's structural rules.
+    name: validateDefineArgs
+    params: code Code, reason, public, private string
+    results: "*Error"
+  - doc: |-
+      validateCode checks the dotted-quad Code. Rules (see ADR 0005):
+      1. code != 0
+      2. uint32(code) <= 0x7FFF_FFFF (safe int32 round-trip)
+      3. Layer(code) != 0 unless code is in metaCodeAllowed
+    name: validateCode
+    params: code Code
+    results: "*Error"
+  - doc: validateReason checks the SCREAMING_SNAKE_CASE shape of Reason.
+    name: validateReason
+    params: reason string
+    results: "*Error"
+  - doc: validatePublic checks Public is non-empty, capped, and newline-free.
+    name: validatePublic
+    params: public string
+    results: "*Error"
+  - doc: |-
+      validatePrivate checks Private is non-empty. v5 bug fix: this now cites
+      CodeInvalidPrivate (not CodeInvalidPublic as pre-ADR-0005).
+    name: validatePrivate
+    params: private string
+    results: "*Error"
+  - doc: containsNewline reports whether s contains any newline rune.
+    name: containsNewline
+    params: s string
+    results: bool
+  - doc: |-
+      isScreamingSnake reports whether s matches reasonPattern without pulling
+      regexp into the kernel package.
+    name: isScreamingSnake
+    params: s string
+    results: bool
+  - doc: |-
+      isValidReasonRune reports whether r is acceptable at position i inside a
+      Reason identifier.
+    name: isValidReasonRune
+    params: i int, r rune
+    results: bool
+  - doc: isUpperLetter reports whether r is an uppercase ASCII letter.
+    name: isUpperLetter
+    params: r rune
+    results: bool
+  - doc: isDigit reports whether r is an ASCII digit.
+    name: isDigit
+    params: r rune
+    results: bool
+imports:
+  errors: errors
+  fmt: fmt
+  slices: slices
+  strconv: strconv
+  strings: strings
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/errs
+  name: errs
+  purpose: Package errs — provides package-level introspection helpers that walk a cause chain and read fields from the deepest *Error encountered.
+types:
+  - kind: named
+    methods:
+      - name: Major
+        recv: c Code
+        results: Major
+      - name: Layer
+        recv: c Code
+        results: Layer
+      - name: Package
+        recv: c Code
+        results: PkgCode
+      - name: Serial
+        recv: c Code
+        results: Serial
+      - name: String
+        recv: c Code
+        results: string
+      - name: Padded
+        recv: c Code
+        results: string
+    name: Code
+    underlying: uint32
+  - doc: |-
+      Named octet types prevent positional-argument footguns in Pack.
+      PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+      variable name without shadowing.
+    items:
+      - name: Major
+        underlying: uint8
+      - name: Layer
+        underlying: uint8
+      - name: PkgCode
+        underlying: uint8
+      - name: Serial
+        underlying: uint8
+    kind: group
+    name: Major
+  - fields:
+      - name: code
+        type: Code
+      - name: reason
+        type: string
+      - name: public
+        type: string
+      - name: private
+        type: string
+      - name: fields
+        type: "[]FieldValue"
+      - name: trail
+        type: "[]Code"
+      - name: trailTruncated
+        type: bool
+      - name: httpOverride
+        type: int
+      - name: exitOverride
+        type: int
+      - name: source
+        type: error
+    kind: struct
+    methods:
+      - name: Code
+        recv: e *Error
+        results: Code
+      - name: Reason
+        recv: e *Error
+        results: string
+      - name: Public
+        recv: e *Error
+        results: string
+      - name: Private
+        recv: e *Error
+        results: string
+      - name: Fields
+        recv: e *Error
+        results: "[]FieldValue"
+      - name: Trail
+        recv: e *Error
+        results: "[]Code"
+      - name: TrailTruncated
+        recv: e *Error
+        results: bool
+      - name: Is
+        params: target error
+        recv: e *Error
+        results: bool
+      - doc: |-
+          matchesPrefix reports whether this Error's origin code or any trail
+          entry satisfies the *PrefixMatcher's (prefix, mask) pair. Extracted from
+          Is so the three target-type branches there each remain a single line.
+        name: matchesPrefix
+        params: pm *PrefixMatcher
+        recv: e *Error
+        results: bool
+      - doc: |-
+          matchesSentinel reports whether this Error and target (already typed
+          as *Error) refer to the same sentinel by (Code, Reason) — and falls
+          back to pointer equality if the codes do not match.
+        name: matchesSentinel
+        params: te *Error, target error
+        recv: e *Error
+        results: bool
+      - name: Error
+        recv: e *Error
+        results: string
+      - name: Source
+        recv: e *Error
+        results: error
+      - name: Unwrap
+        recv: e *Error
+        results: error
+      - name: HTTPStatus
+        recv: e *Error
+        results: int
+      - name: ExitCode
+        recv: e *Error
+        results: int
+    name: Error
+  - kind: named
+    name: DefineOption
+    underlying: func(e *Error)
+  - doc: |-
+      fieldKind discriminates a FieldValue's underlying type. The concrete
+      values are unexported so callers cannot construct a FieldValue by struct
+      literal — only the String/Int/Bool/Float/NewFieldValue helpers produce
+      well-formed instances.
+    kind: named
+    name: fieldKind
+    underlying: uint8
+  - fields:
+      - name: key
+        type: string
+      - name: kind
+        type: fieldKind
+      - name: str
+        type: string
+      - name: num
+        type: int64
+      - name: bl
+        type: bool
+      - name: fl
+        type: float64
+    kind: struct
+    methods:
+      - name: Key
+        recv: f FieldValue
+        results: string
+      - name: StringValue
+        recv: f FieldValue
+        results: string
+    name: FieldValue
+  - fields:
+      - name: prefix
+        type: Code
+      - name: mask
+        type: Code
+    kind: struct
+    methods:
+      - name: String
+        recv: p *PrefixMatcher
+        results: string
+      - name: Error
+        recv: p *PrefixMatcher
+        results: string
+      - name: Prefix
+        recv: p *PrefixMatcher
+        results: Code
+      - name: Mask
+        recv: p *PrefixMatcher
+        results: Code
+    name: PrefixMatcher
+  - fields:
+      - doc: Code is the dotted-quad identifier assigned to the wrapping Error.
+        name: Code
+        type: Code
+      - doc: Reason is the SCREAMING_SNAKE stable identifier of the wrapping Error.
+        name: Reason
+        type: string
+      - doc: Public is the wire-safe message (string literal at source level).
+        name: Public
+        type: string
+      - doc: Private is the log-only detailed message.
+        name: Private
+        type: string
+      - doc: |-
+          ExitCode optionally overrides the POSIX exit status of the wrapping
+          Error (default 70 EX_SOFTWARE); the zero value keeps the default. It
+          lets a stdlib cause be wrapped into an Error that carries the same
+          exit semantics as a sibling errs.Define sentinel — the origin-wins
+          path already inherits a cause Error's exit override, but the
+          stdlib-cause path has no Error to inherit from.
+        name: ExitCode
+        type: int
+    kind: struct
+    name: WrapParams
+vars:
+  - doc: |-
+      Package-level mutable state — all package `var` declarations live in one
+      grouped block to keep the static surface easy to audit.
+
+      A structural failure is reported as an *Error built by newValidationError,
+      a struct literal: the validator cannot mint its errors through Define, which
+      would recurse into it, and it needs no stdlib error either. So this package
+      obeys rule 2 like every other one — make guard holds it to SDK002 with no
+      exemption.
+    grouped: true
+    items:
+      - doc: |-
+          metaCodeAllowed is the whitelist — only these Codes may have Layer == 0.
+          Anything else with Layer==0 is rejected by validateCode as structurally
+          invalid (Layer=0 reserved for this package's meta-codes per ADR 0005).
+        name: metaCodeAllowed
+        value: |-
+          map[Code]struct{}{
+          		CodeInvalidCode:       {},
+          		CodeInvalidReason:     {},
+          		CodeInvalidPublic:     {},
+          		CodeInvalidPrivate:    {},
+          		CodeInvalidCodeString: {},
+          		CodeInvalidWrapParams: {},
+          	}
+    name: metaCodeAllowed

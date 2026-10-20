@@ -1,0 +1,100 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: PhaseStart reports a call to a component's [Start].
+    items:
+      - name: PhaseStart
+        type: Phase
+        value: "1"
+    name: PhaseStart
+  - doc: PhaseStop reports a call to a component's [Stop].
+    items:
+      - name: PhaseStop
+        type: Phase
+        value: "2"
+    name: PhaseStop
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Start
+      - Stop
+    name: lifecycle.go
+  - decls:
+      - ComponentValue
+    name: lifecycle_component.go
+  - decls:
+      - Phase
+      - PhaseStart
+      - PhaseStop
+      - Phase.String
+      - TransitionValue
+    name: lifecycle_phase.go
+imports:
+  context: context
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/lifecycle
+  name: lifecycle
+  purpose: Package lifecycle — ranges 0.2.19.* (ADR 0050 core/app/lifecycle block) and 0.3.49.* (ADR 0050 service/app/lifecycle block, declared here since ADR 0160).
+types:
+  - kind: named
+    name: Start
+    underlying: func(ctx context.Context) error
+  - kind: named
+    name: Stop
+    underlying: func(ctx context.Context) error
+  - fields:
+      - doc: |-
+          Name identifies the component in every [TransitionValue] and in every
+          error field. It must be non-empty and unique within one Lifecycle.
+        name: Name
+        type: string
+      - doc: Start brings the component up. It is called in registration order.
+        name: Start
+        type: Start
+      - doc: |-
+          Stop takes the component down. It is called ONLY if Start returned nil,
+          and in reverse of the order the components started in.
+        name: Stop
+        type: Stop
+    kind: struct
+    name: ComponentValue
+  - kind: named
+    methods:
+      - name: String
+        recv: p Phase
+        results: string
+    name: Phase
+    underlying: uint8
+  - fields:
+      - doc: Name is the component's registered name.
+        name: Name
+        type: string
+      - doc: Phase says whether this was the Start half or the Stop half.
+        name: Phase
+        type: Phase
+      - doc: Begun is the instant the call was made, read from the injected clock.
+        name: Begun
+        type: time.Time
+      - doc: |-
+          Ended is the instant the Lifecycle stopped waiting for it. On a
+          TimedOut transition that is when the budget expired, NOT when the
+          component eventually returned — the Lifecycle does not know when that
+          was, and reporting a guess would be worse than reporting the fact.
+        name: Ended
+        type: time.Time
+      - doc: |-
+          TimedOut reports that the component's Stop had not returned when its
+          budget expired. The goroutine was abandoned, not killed; see [Stop].
+        name: TimedOut
+        type: bool
+      - doc: |-
+          Err is what the component returned, verbatim, so the caller's errors.Is
+          keeps working. A panic is the one exception: it becomes
+          [ComponentPanicked] with the recovered value in a field.
+        name: Err
+        type: error
+    kind: struct
+    name: TransitionValue

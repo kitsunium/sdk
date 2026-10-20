@@ -1,0 +1,831 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*cappedBody).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*cappedBody).finish
+        kind: self
+      - id: c.once.Do
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.done == nil
+      - eval: |-
+          c.once.Do(func() {
+          		c.done(c.read, err)
+          	})
+        to: c.once.Do
+  - of: (*cappedBody).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*cappedBody).Read
+        kind: self
+      - id: c.inner.Read
+        kind: value
+      - id: c.tooLarge
+        kind: internal
+      - id: c.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, c.tooLarge()
+          when: c.read > c.limit
+      - bind: remaining
+        eval: c.limit - c.read + 1
+      - opt:
+          do:
+            - set: p
+              value: p[:remaining]
+          when: int64(len(p)) > remaining
+      - set: n, err
+        to: c.inner.Read
+        value: c.inner.Read(p)
+      - op: +=
+        set: c.read
+        value: int64(n)
+      - opt:
+          do:
+            - bind: refusal
+              eval: c.tooLarge()
+              to: c.tooLarge
+            - eval: c.finish(refusal)
+              to: c.finish
+            - return: 0, refusal
+          when: c.read > c.limit
+      - opt:
+          do:
+            - eval: c.finish(readOutcome(err))
+              to: c.finish
+          when: err != nil
+      - return: n, err
+  - of: readOutcome
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: errors.Is(err, io.EOF)
+      - return: err
+  - of: (*cappedBody).tooLarge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*cappedBody).tooLarge
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.ResponseTooLarge, errs.WrapParams{},
+          		errs.Int64("limit", c.limit))
+        to: errs
+  - of: (*cappedBody).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*cappedBody).Close
+        kind: self
+      - id: c.inner.Close
+        kind: value
+      - id: c.finish
+        kind: internal
+    steps:
+      - bind: err
+        eval: c.inner.Close()
+        to: c.inner.Close
+      - eval: c.finish(err)
+        to: c.finish
+      - return: err
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: withDefaults
+        kind: internal
+      - id: parseBase
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+                			errs.String("why", "a policy is required"))
+          when: policy == nil
+      - bind: full
+        eval: withDefaults(cfg)
+        to: withDefaults
+      - bind: base, berr
+        eval: parseBase(full.BaseURL)
+        to: parseBase
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - bind: guarded
+        eval: |-
+          &guard{
+          		next:     newTransport(full, id),
+          		policy:   policy,
+          		maxBytes: full.MaxResponseSize,
+          		hook:     hook,
+          	}
+      - return: |-
+          &Client{
+          		http: &http.Client{
+          			Transport:     guarded,
+          			Timeout:       full.TotalTimeout.Duration(),
+          			CheckRedirect: redirectLimiter(full.MaxRedirects),
+          		},
+          		base:    base,
+          		headers: canonicalHeaders(full.DefaultHeaders),
+          	}, nil
+  - of: canonicalHeaders
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(configured) == 0
+      - bind: out
+        eval: make(map[string]string, len(configured))
+      - loop:
+          do:
+            - set: out[http.CanonicalHeaderKey(name)]
+              value: value
+          key: name
+          range: configured
+          value: value
+      - return: out
+  - of: (*Client).HTTP
+    steps:
+      - return: c.http
+  - of: (*Client).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).Get
+        kind: self
+      - id: c.resolve
+        kind: internal
+      - id: http
+        kind: stdlib
+      - id: c.Do
+        kind: internal
+    steps:
+      - bind: target, terr
+        eval: c.resolve(path, query)
+        to: c.resolve
+      - opt:
+          do:
+            - return: corenet.ResponseValue{}, terr
+          when: terr != nil
+      - bind: req, rerr
+        eval: http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+        to: http
+      - opt:
+          do:
+            - return: |-
+                corenet.ResponseValue{}, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                			errs.String("why", "the request could not be built"))
+          when: rerr != nil
+      - return: c.Do(req)
+        to: c.Do
+  - of: (*Client).Do
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).Do
+        kind: self
+      - id: c.applyHeaders
+        kind: internal
+      - id: c.http.Do
+        kind: value
+      - id: readBody
+        kind: internal
+      - id: raw.Body.Close
+        kind: value
+    steps:
+      - eval: c.applyHeaders(req)
+        to: c.applyHeaders
+      - bind: raw, derr
+        eval: c.http.Do(req)
+        to: c.http.Do
+      - opt:
+          do:
+            - return: corenet.ResponseValue{}, unwrapClientError(derr)
+          when: derr != nil
+      - bind: body, berr
+        eval: readBody(raw.Body, raw.ContentLength)
+        to: readBody
+      - bind: cerr
+        eval: raw.Body.Close()
+        to: raw.Body.Close
+      - bind: out
+        eval: "corenet.ResponseValue{Status: raw.StatusCode, Header: raw.Header, Body: body}"
+      - opt:
+          do:
+            - return: "corenet.ResponseValue{Status: raw.StatusCode, Header: raw.Header}, bodyError(berr)"
+          when: berr != nil
+      - opt:
+          do:
+            - return: |-
+                out, errs.Wrap(corenet.CallFailed, errs.WrapParams{},
+                			errs.String("why", "the response body could not be closed"))
+          when: cerr != nil
+      - opt:
+          do:
+            - return: |-
+                out, errs.Wrap(corenet.CallFailed, errs.WrapParams{},
+                			errs.Int("status", raw.StatusCode))
+          when: raw.StatusCode < http.StatusOK || raw.StatusCode >= http.StatusMultipleChoices
+      - return: out, nil
+  - of: readBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: readBody
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: bytes
+        kind: stdlib
+      - id: buf.ReadFrom
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: io.ReadAll(source)
+              to: io
+          when: hint <= 0 || hint > maxPresizedRead
+      - bind: buf
+        eval: bytes.NewBuffer(make([]byte, 0, hint+bytes.MinRead))
+        to: bytes
+      - bind: _, rerr
+        eval: buf.ReadFrom(source)
+        to: buf.ReadFrom
+      - return: buf.Bytes(), rerr
+        to: buf.Bytes
+  - of: bodyError
+    participants:
+      - id: caller
+        kind: actor
+      - id: bodyError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok
+      - return: |-
+          errs.Wrap(corenet.CallFailed, errs.WrapParams{},
+          		errs.String("why", "the response body could not be read"))
+        to: errs
+  - of: (*Client).applyHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).applyHeaders
+        kind: self
+      - id: req.Header.Set
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: req.Header.Set(key, value)
+                    to: req.Header.Set
+                when: req.Header.Get(key) == ""
+          key: key
+          range: c.headers
+          value: value
+  - of: (*Client).resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).resolve
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: query.Encode
+        kind: value
+      - id: ref.String
+        kind: value
+      - id: c.base.ResolveReference(ref).String
+        kind: value
+    steps:
+      - bind: ref, perr
+        eval: url.Parse(path)
+        to: url
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                			errs.String("why", "the path could not be parsed"))
+          when: perr != nil
+      - opt:
+          do:
+            - set: ref.RawQuery
+              to: query.Encode
+              value: query.Encode()
+          when: len(query) > 0
+      - opt:
+          do:
+            - return: ref.String(), nil
+              to: ref.String
+          when: c.base == nil
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
+                			errs.String("why", "the path carries its own origin"))
+          when: ref.Scheme != "" || ref.Host != ""
+      - return: c.base.ResolveReference(ref).String(), nil
+        to: c.base.ResolveReference(ref).String
+  - of: parseBase
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseBase
+        kind: self
+      - id: url
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: raw == ""
+      - bind: parsed, perr
+        eval: url.Parse(raw)
+        to: url
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                			errs.String("why", "the base URL must be absolute"))
+          when: perr != nil || parsed.Scheme == "" || parsed.Host == ""
+      - return: parsed, nil
+  - of: newTransport
+    steps:
+      - return: |-
+          &http.Transport{
+          		DialContext: (&net.Dialer{
+          			Timeout:   cfg.DialTimeout.Duration(),
+          			KeepAlive: defaultKeepAlive,
+          		}).DialContext,
+          		TLSClientConfig:       id.ClientConfig(),
+          		TLSHandshakeTimeout:   cfg.HandshakeTimeout.Duration(),
+          		ResponseHeaderTimeout: cfg.ResponseTimeout.Duration(),
+          		ForceAttemptHTTP2:     true,
+          	}
+  - of: redirectLimiter
+    participants:
+      - id: caller
+        kind: actor
+      - id: redirectLimiter
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return:
+          closure:
+            params: _ *http.Request, via []*http.Request
+            results: error
+            steps:
+              - opt:
+                  do:
+                    - return: |-
+                        errs.Wrap(corenet.TooManyRedirects, errs.WrapParams{},
+                        				errs.Int("limit", maxRedirects))
+                      to: errs
+                  when: len(via) >= maxRedirects
+              - return: nil
+  - of: unwrapClientError
+    steps:
+      - bind: wrapped, ok
+        eval: errors.AsType[*url.Error](err)
+      - opt:
+          do:
+            - return: wrapped.Err
+          when: ok && wrapped.Err != nil
+      - return: err
+  - of: (*conjunction).Allow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conjunction).Allow
+        kind: self
+      - id: errs
+        kind: package
+      - id: m.Allow
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+                			errs.String("why", "no policy configured"))
+              to: errs
+          when: len(p.members) == 0
+      - loop:
+          do:
+            - bind: err
+              eval: m.Allow(req)
+              to: m.Allow
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          key: _
+          range: p.members
+          value: m
+      - return: nil
+  - of: withDefaults
+    participants:
+      - id: caller
+        kind: actor
+      - id: withDefaults
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: cfg.DialTimeout
+              to: corenet
+              value: corenet.DurationValue(defaultDialTimeout)
+          when: cfg.DialTimeout == 0
+      - opt:
+          do:
+            - set: cfg.HandshakeTimeout
+              to: corenet
+              value: corenet.DurationValue(defaultHandshakeTimeout)
+          when: cfg.HandshakeTimeout == 0
+      - opt:
+          do:
+            - set: cfg.ResponseTimeout
+              to: corenet
+              value: corenet.DurationValue(defaultResponseTimeout)
+          when: cfg.ResponseTimeout == 0
+      - opt:
+          do:
+            - set: cfg.TotalTimeout
+              to: corenet
+              value: corenet.DurationValue(defaultTotalTimeout)
+          when: cfg.TotalTimeout == 0
+      - opt:
+          do:
+            - set: cfg.MaxResponseSize
+              value: defaultMaxResponseSize
+          when: cfg.MaxResponseSize <= 0
+      - opt:
+          do:
+            - set: cfg.MaxRedirects
+              value: defaultMaxRedirects
+          when: cfg.MaxRedirects == 0
+      - return: cfg
+  - of: (*denyPolicy).Allow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*denyPolicy).Allow
+        kind: self
+      - id: checkPath
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: err
+        eval: checkPath(req.EscapedPath)
+        to: checkPath
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+                      				errs.String("why", "path explicitly denied"))
+                    to: errs
+                when: re.MatchString(req.EscapedPath)
+          key: _
+          range: p.patterns
+          value: re
+      - return: nil
+  - of: (*guard).RoundTrip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*guard).RoundTrip
+        kind: self
+      - id: req.URL.EscapedPath
+        kind: value
+      - id: g.policy.Allow
+        kind: value
+      - id: g.observe
+        kind: internal
+      - id: g.clockOrSystem
+        kind: internal
+      - id: clk.Now
+        kind: value
+      - id: g.next.RoundTrip
+        kind: value
+      - id: clk.Since
+        kind: value
+    steps:
+      - bind: escaped
+        eval: req.URL.EscapedPath()
+        to: req.URL.EscapedPath
+      - opt:
+          do:
+            - eval: |-
+                g.observe(corenet.CallValue{
+                			Method: req.Method,
+                			Host:   req.URL.Host,
+                			Path:   escaped,
+                			Err:    derr,
+                		})
+              to: g.observe
+            - return: nil, derr
+          init:
+            bind: derr
+            eval: g.policy.Allow(requestOf(req, escaped))
+            to: g.policy.Allow
+          when: derr != nil
+      - bind: clk
+        eval: g.clockOrSystem()
+        to: g.clockOrSystem
+      - bind: started
+        eval: clk.Now()
+        to: clk.Now
+      - set: resp, err
+        to: g.next.RoundTrip
+        value: g.next.RoundTrip(req)
+      - bind: elapsed
+        eval: clk.Since(started)
+        to: clk.Since
+      - opt:
+          do:
+            - eval: |-
+                g.observe(corenet.CallValue{
+                			Method:   req.Method,
+                			Host:     req.URL.Host,
+                			Path:     escaped,
+                			Duration: elapsed,
+                			Err:      err,
+                		})
+              to: g.observe
+            - return: |-
+                nil, errs.Wrap(corenet.CallFailed, errs.WrapParams{},
+                			errs.String("method", req.Method))
+          when: err != nil
+      - bind: capped
+        eval: "&cappedBody{inner: resp.Body, limit: g.maxBytes}"
+      - opt:
+          do:
+            - bind: call
+              eval: |-
+                corenet.CallValue{
+                			Method:   req.Method,
+                			Host:     req.URL.Host,
+                			Path:     escaped,
+                			Status:   resp.StatusCode,
+                			Duration: elapsed,
+                		}
+            - set: capped.done
+              value:
+                closure:
+                  params: read int64, cerr error
+                  steps:
+                    - set: call.Bytes
+                      value: read
+                    - set: call.Err
+                      value: cerr
+                    - eval: g.observe(call)
+                      to: g.observe
+          when: g.hook != nil
+      - set: resp.Body
+        value: capped
+      - return: resp, nil
+  - of: (*guard).clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: g.clk == nil
+      - return: g.clk
+  - of: (*guard).observe
+    steps:
+      - opt:
+          do:
+            - eval: g.hook(call)
+          when: g.hook != nil
+  - of: requestOf
+    steps:
+      - return: |-
+          corenet.RequestValue{
+          		Method:      req.Method,
+          		Scheme:      req.URL.Scheme,
+          		Host:        req.URL.Host,
+          		EscapedPath: escapedPath,
+          		RawQuery:    req.URL.RawQuery,
+          	}
+  - of: (*methodPolicy).Allow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*methodPolicy).Allow
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: _, ok
+        eval: p.allowed[strings.ToUpper(req.Method)]
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+                			errs.String("why", "method not allowed"), errs.String("method", req.Method))
+              to: errs
+          when: "!ok"
+      - return: nil
+  - of: checkPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkPath
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
+                			errs.String("why", "path is not absolute"))
+              to: errs
+          when: "!strings.HasPrefix(escapedPath, \"/\")"
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
+                			errs.String("why", "path carries a dot segment"))
+              to: errs
+          when: hasDotSegment(escapedPath)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
+                			errs.String("why", "path carries a percent-encoded separator"))
+              to: errs
+          when: hasEncodedSeparator(escapedPath)
+      - return: nil
+  - of: hasDotSegment
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: "true"
+                      when: foldsASCII(seg, want)
+                key: _
+                range: dotSegments
+                value: want
+          key: seg
+          range: strings.SplitSeq(strings.TrimPrefix(escapedPath, "/"), "/")
+      - return: "false"
+  - of: lowerASCII
+    steps:
+      - opt:
+          do:
+            - return: b + ('a' - 'A')
+          when: b >= 'A' && b <= 'Z'
+      - return: b
+  - of: (*pathPolicy).Allow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pathPolicy).Allow
+        kind: self
+      - id: checkPath
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: err
+        eval: checkPath(req.EscapedPath)
+        to: checkPath
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: re.MatchString(req.EscapedPath)
+          key: _
+          range: p.patterns
+          value: re
+      - return: |-
+          errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+          		errs.String("why", "path not in the allow list"))
+        to: errs
+  - of: AllowMethods
+    steps:
+      - bind: set
+        eval: make(map[string]struct{}, len(methods))
+      - loop:
+          do:
+            - set: set[strings.ToUpper(m)]
+              value: struct{}{}
+          key: _
+          range: methods
+          value: m
+      - return: "&methodPolicy{allowed: set}"
+  - of: AllowPaths
+    participants:
+      - id: caller
+        kind: actor
+      - id: AllowPaths
+        kind: self
+      - id: compileAnchored
+        kind: internal
+    steps:
+      - bind: compiled, cerr
+        eval: compileAnchored(patterns)
+        to: compileAnchored
+      - opt:
+          do:
+            - return: nil, cerr
+          when: cerr != nil
+      - return: "&pathPolicy{patterns: compiled}, nil"
+  - of: DenyPaths
+    participants:
+      - id: caller
+        kind: actor
+      - id: DenyPaths
+        kind: self
+      - id: compileAnchored
+        kind: internal
+    steps:
+      - bind: compiled, cerr
+        eval: compileAnchored(patterns)
+        to: compileAnchored
+      - opt:
+          do:
+            - return: nil, cerr
+          when: cerr != nil
+      - return: "&denyPolicy{patterns: compiled}, nil"
+  - of: Policies
+    steps:
+      - return: "&conjunction{members: members}"
+  - of: compileAnchored
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileAnchored
+        kind: self
+      - id: regexp
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]*regexp.Regexp, 0, len(patterns))
+      - loop:
+          do:
+            - bind: re, cerr
+              eval: regexp.Compile("^(?:" + raw + ")$")
+              to: regexp
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+                      				errs.String("why", "the path pattern could not be compiled"),
+                      				errs.String("pattern", raw))
+                when: cerr != nil
+            - set: out
+              value: append(out, re)
+          key: _
+          range: patterns
+          value: raw
+      - return: out, nil

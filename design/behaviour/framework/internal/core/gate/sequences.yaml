@@ -1,0 +1,162 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Outcome.String
+    steps:
+      - switch:
+          cases:
+            - case: OutcomeAllow
+              do:
+                - return: "\"allow\""
+            - case: OutcomeRefuse
+              do:
+                - return: "\"refuse\""
+            - case: OutcomeUpgrade
+              do:
+                - return: "\"upgrade\""
+            - default: true
+              do:
+                - return: "\"unset\""
+          "on": o
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    CodePolicyInvalid,
+          		Reason:  "POLICY_INVALID",
+          		Public:  "the gate policy is misconfigured",
+          		Private: "core/gate: " + detail,
+          	})
+        to: errs
+  - of: (*PolicyValue).Exempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PolicyValue).Exempt
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: p == nil
+      - bind: joined
+        eval: strings.Join(path, pathSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: "true"
+          when: slices.Contains(p.ExemptExact, joined)
+      - return: |-
+          slices.ContainsFunc(p.ExemptSubtree, func(root string) bool {
+          		return joined == root || strings.HasPrefix(joined, root+pathSeparator)
+          	})
+        to: slices
+  - of: (*PolicyValue).Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PolicyValue).Validate
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("no policy was supplied")
+              to: misconfigured
+          when: p == nil
+      - var:
+          name: faults
+          type: "[]string"
+      - set: faults
+        value: append(faults, p.unreachableEntries()...)
+      - set: faults
+        value: append(faults, p.lockouts()...)
+      - opt:
+          do:
+            - return: nil
+          when: len(faults) == 0
+      - return: misconfigured(strings.Join(faults, "; "))
+        to: misconfigured
+  - of: (*PolicyValue).unreachableEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PolicyValue).unreachableEntries
+        kind: self
+      - id: unmatchable
+        kind: internal
+    steps:
+      - bind: faults
+        eval: unmatchable("ExemptExact", p.ExemptExact)
+        to: unmatchable
+      - set: faults
+        value: append(faults, unmatchable("ExemptSubtree", p.ExemptSubtree)...)
+      - set: faults
+        value: append(faults, unmatchable("RecoveryPaths", p.RecoveryPaths)...)
+      - opt:
+          do:
+            - set: faults
+              value: |-
+                append(faults,
+                			"ExemptSubtree contains the empty path: a subtree root must name a command. "+
+                				"The bare root invocation belongs in ExemptExact, and an empty subtree "+
+                				"root would either cover nothing useful or cover everything")
+          when: slices.Contains(p.ExemptSubtree, "")
+      - return: faults
+  - of: strayWhitespace
+    participants:
+      - id: caller
+        kind: actor
+      - id: strayWhitespace
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: strings.TrimSpace(path) != path || strings.Contains(path, pathSeparator+pathSeparator)
+      - return: |-
+          strings.ContainsFunc(path, func(r rune) bool {
+          		return unicode.IsSpace(r) && string(r) != pathSeparator
+          	})
+        to: strings
+  - of: quote
+    steps:
+      - opt:
+          do:
+            - return: "\"the bare root invocation\""
+          when: path == ""
+      - return: "`\"` + path + `\"`"
+  - of: UpdateAction.Valid
+    steps:
+      - return: a >= UpdateRefuse && a <= UpdateWarn
+  - of: UpdateAction.String
+    steps:
+      - switch:
+          cases:
+            - case: UpdateRefuse
+              do:
+                - return: "\"refuse\""
+            - case: UpdateApply
+              do:
+                - return: "\"apply\""
+            - case: UpdateWarn
+              do:
+                - return: "\"warn\""
+            - default: true
+              do:
+                - return: "\"unset\""
+          "on": a

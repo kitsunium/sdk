@@ -1,0 +1,136 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      listenFdStart is SD_LISTEN_FDS_START: the first inherited socket is fd 3, after
+      stdin/stdout/stderr.
+    items:
+      - name: listenFdStart
+        type: int
+        value: "3"
+    name: listenFdStart
+  - doc: |-
+      exitOSErr is sysexits.h EX_OSERR (71), restated to wrap a cause under the
+      central LISTEN_FAILED sentinel without re-Defining the code.
+    items:
+      - name: exitOSErr
+        type: int
+        value: "71"
+    name: exitOSErr
+  - doc: Environment-variable names of the sd_listen_fds protocol.
+    grouped: true
+    items:
+      - name: envFds
+        type: string
+        value: "\"LISTEN_FDS\""
+      - name: envPID
+        type: string
+        value: "\"LISTEN_PID\""
+      - name: envFdNames
+        type: string
+        value: "\"LISTEN_FDNAMES\""
+    name: envFds
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - listenFdStart
+      - exitOSErr
+      - envFds
+      - dropErr
+      - clearCloexec
+      - wrapListen
+      - fdCount
+      - pidMatches
+      - splitNames
+      - Files
+      - Listeners
+      - WithNames
+      - Prepare
+      - listenerFile
+      - fileOrWrap
+      - envWithout
+      - clearEnv
+    name: sdlisten_unix.go
+functions:
+  - doc: |-
+      dropErr intentionally discards a non-actionable cleanup error (a best-effort
+      close or env unset), so the error audit treats the discard as deliberate.
+    name: dropErr
+    params: err error
+  - doc: |-
+      clearCloexec clears FD_CLOEXEC on fd via fcntl(F_SETFD, 0) so the inherited
+      socket survives a subsequent re-exec (e.g. a zero-downtime self-restart). A
+      fcntl failure is non-fatal: the fd is still usable for the immediate service,
+      just not guaranteed across a re-exec.
+    name: clearCloexec
+    params: fd int
+  - doc: wrapListen wraps an fd/socket cause onto the central ListenFailed sentinel.
+    name: wrapListen
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      fdCount parses LISTEN_FDS and verifies LISTEN_PID. ok is false (no error) when
+      the activation set is empty or addressed to a different pid; err is non-nil
+      only when LISTEN_FDS is present but malformed.
+    name: fdCount
+    results: n int, ok bool, err error
+  - doc: |-
+      pidMatches reports whether LISTEN_PID is absent (accepted) or equals this
+      process's pid. A set-but-mismatched LISTEN_PID means the fds are not ours.
+    name: pidMatches
+    results: bool
+  - doc: |-
+      splitNames returns n stream names from LISTEN_FDNAMES (colon-separated),
+      padding with "" when fewer names than fds are supplied.
+    name: splitNames
+    params: n int
+    results: "[]string"
+  - name: Files
+    params: unsetEnv bool
+    results: files []*os.File, err error
+  - name: Listeners
+    params: unsetEnv bool
+    results: lns []net.Listener, err error
+  - name: WithNames
+    params: unsetEnv bool
+    results: byName map[string][]*os.File, err error
+  - name: Prepare
+    params: child *coreproc.Spec, named map[string]net.Listener
+    results: error
+  - doc: |-
+      listenerFile returns the dup'd *os.File backing a TCP or Unix listener; other
+      listener kinds have no portable fd and are rejected.
+    name: listenerFile
+    params: ln net.Listener
+    results: f *os.File, err error
+  - doc: fileOrWrap passes through a recovered *os.File or wraps the File() error.
+    name: fileOrWrap
+    params: f *os.File, ferr error
+    results: file *os.File, err error
+  - doc: |-
+      envWithout returns env with any KEY= entries for the given keys removed, so
+      Prepare can re-set the activation variables without duplicates.
+    name: envWithout
+    params: env []string, keys ...string
+    results: "[]string"
+  - doc: |-
+      clearEnv unsets the activation environment variables so a grandchild does not
+      re-inherit them.
+    name: clearEnv
+imports:
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  net: net
+  os: os
+  slices: slices
+  strconv: strconv
+  strings: strings
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
+  name: listen
+  purpose: Package listen — non-Unix stub.
+types: []

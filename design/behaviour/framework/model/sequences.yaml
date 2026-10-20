@@ -1,0 +1,45 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - forward: core.IsEngine
+    of: IsEngine
+  - forward: core.ConnectorCatalog
+    of: ConnectorCatalog
+  - forward: core.ConnectorsOf
+    of: ConnectorsOf
+  - forward: core.SplitDoc
+    of: SplitDoc
+  - forward: core.NodeID
+    of: NodeID
+  - forward: core.EdgeID
+    of: EdgeID
+  - forward: core.CompareSource
+    of: CompareSource
+  - forward: core.Merge
+    of: Merge
+  - forward: core.ServiceOf
+    of: ServiceOf
+  - forward: core.ValidSegment
+    of: ValidSegment
+  - forward: core.ValidName
+    of: ValidName
+  - forward: core.ValidContract
+    of: ValidContract
+  - forward: core.ParseID
+    of: ParseID
+  - forward: core.BinaryID
+    of: BinaryID
+  - forward: core.RoleID
+    of: RoleID
+  - forward: core.LibraryID
+    of: LibraryID
+  - forward: core.Mermaid
+    of: Mermaid
+  - forward: core.QualifiedService
+    of: QualifiedService
+  - forward: core.ModulePrefix
+    of: ModulePrefix
+  - forward: core.UnderPrefix
+    of: UnderPrefix
+  - forward: core.TableName
+    of: TableName

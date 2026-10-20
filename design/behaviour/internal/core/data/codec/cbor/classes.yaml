@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/cbor
+  name: cbor
+  purpose: Package cbor declares the error codes and the sentinels of the CBOR codec, internal/service/data/codec/cbor — range 0.3.6.* (ADR 0005 service/data/codec/cbor block).
+types: []

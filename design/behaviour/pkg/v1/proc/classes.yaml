@@ -1,0 +1,132 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxPublicLen is the wire-safe Public ceiling (ADR 0005: ≤120 runes); the panic
+      message falls back to a capability-less form when naming them would exceed it.
+    items:
+      - name: maxPublicLen
+        type: int
+        value: "120"
+    name: maxPublicLen
+  - doc: The supervisable capabilities, one per platform-sensitive proc primitive.
+    grouped: true
+    items:
+      - doc: CapProcessSpawn is spawning + supervising a child process (process.Start).
+        name: CapProcessSpawn
+        type: Capability
+        value: iota
+      - doc: CapRlimit is applying per-process setrlimit-style limits (rlimit.Apply).
+        name: CapRlimit
+      - doc: CapUmaskNiceOOM is the spawn-time umask / nice / oom_score_adj knobs.
+        name: CapUmaskNiceOOM
+      - doc: CapCgroup is a kernel-enforced resource container (cgroup.Create).
+        name: CapCgroup
+      - doc: CapReaper is zombie reaping / subreaping (reaper.New).
+        name: CapReaper
+      - doc: CapSignalRelay is forwarding signals to a pid / process group (signal.Relay).
+        name: CapSignalRelay
+      - doc: CapSdNotify is the service-manager readiness/watchdog protocol (systemd/notify).
+        name: CapSdNotify
+      - doc: CapSocketActivation is inheriting a pre-opened listening socket (systemd/listen).
+        name: CapSocketActivation
+    name: CapProcessSpawn
+files:
+  - decls:
+      - maxPublicLen
+      - Capability
+      - CapProcessSpawn
+      - capabilityNames
+      - Capability.String
+      - Supported
+      - MissingCapabilities
+      - MustSupport
+      - unsupportedError
+    name: capability.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: Supported
+    params: c Capability
+    results: bool
+  - name: MissingCapabilities
+    params: caps ...Capability
+    results: "[]Capability"
+  - name: MustSupport
+    params: caps ...Capability
+  - doc: |-
+      unsupportedError builds the typed UnsupportedPlatform error carried by a
+      MustSupport panic: it reuses the central code 0.2.6.1 so a recover() classifies
+      it identically to the fallible paths, and names the missing capabilities (the
+      wire-safe Public falls back to a capability-less form past the 120-rune ceiling).
+    name: unsupportedError
+    params: missing []Capability
+    results: error
+imports:
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  runtime: runtime
+  slices: slices
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc
+  name: proc
+  purpose: Package proc is the capability-preflight facade for the process-supervision domain.
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: c Capability
+        results: string
+    name: Capability
+    underlying: int
+vars:
+  - grouped: true
+    items:
+      - doc: |-
+          capabilityNames maps each capability to its stable diagnostic name, indexed
+          by the Capability value so String stays a flat O(1) lookup.
+        name: capabilityNames
+        value: |-
+          [...]string{
+          		CapProcessSpawn:     "ProcessSpawn",
+          		CapRlimit:           "Rlimit",
+          		CapUmaskNiceOOM:     "UmaskNiceOOM",
+          		CapCgroup:           "Cgroup",
+          		CapReaper:           "Reaper",
+          		CapSignalRelay:      "SignalRelay",
+          		CapSdNotify:         "SdNotify",
+          		CapSocketActivation: "SocketActivation",
+          	}
+      - doc: |-
+          unixTargets is the SDK's Unix GOOS set (the capabilities gated to Unix).
+          illumos is listed apart from solaris because runtime.GOOS names it apart,
+          even though the solaris build tag also selects it.
+        name: unixTargets
+        value: "[]string{\"linux\", \"darwin\", \"freebsd\", \"openbsd\", \"netbsd\", \"dragonfly\", \"illumos\", \"solaris\"}"
+      - doc: unixAndWindows adds Windows to the Unix set (spawn / signal / reaper).
+        name: unixAndWindows
+        value: "[]string{\"linux\", \"darwin\", \"freebsd\", \"openbsd\", \"netbsd\", \"dragonfly\", \"illumos\", \"solaris\", \"windows\"}"
+      - doc: |-
+          capabilityGOOS lists the GOOS on which each capability has a native backend;
+          a capability absent from this map is unsupported everywhere.
+        name: capabilityGOOS
+        value: |-
+          map[Capability][]string{
+          		CapProcessSpawn:     unixAndWindows,
+          		CapSignalRelay:      unixAndWindows,
+          		CapReaper:           unixAndWindows,
+          		CapCgroup:           {"linux", "windows"},
+          		CapRlimit:           unixTargets,
+          		CapUmaskNiceOOM:     unixTargets,
+          		CapSdNotify:         unixTargets,
+          		CapSocketActivation: unixTargets,
+          	}
+      - doc: |-
+          UnsupportedPlatform is the central sentinel a missing capability surfaces. A
+          recover() of a [MustSupport] panic yields an error carrying this error's code.
+        name: UnsupportedPlatform
+        value: coreproc.UnsupportedPlatform
+    name: capabilityNames

@@ -1,0 +1,1610 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      compactSlack is how many stale entries the heap may hold beyond its live
+      ones before it is rebuilt: below it, a rebuild costs more than it frees.
+    items:
+      - name: compactSlack
+        type: int
+        value: "64"
+    name: compactSlack
+  - doc: |-
+      staleFactor is how many times the live entries the heap may hold before it
+      is rebuilt. With it, a rebuild is paid for by at least as many updates as
+      it drops, so an update stays O(log N) amortised.
+    items:
+      - name: staleFactor
+        type: int
+        value: "2"
+    name: staleFactor
+  - doc: What holds an entity during a flight.
+    grouped: true
+    items:
+      - doc: |-
+          readFlight is a read the machine records: it takes deletions only — a
+          writer waits for the lock and reads after it.
+        name: readFlight
+        type: flightKind
+        value: iota + 1
+      - doc: |-
+          transitionFlight is a transition: it takes writes too, since the write
+          is very often the transition's own.
+        name: transitionFlight
+    name: readFlight
+  - doc: |-
+      DefaultMinGap is the least time between the end of one run of a machine's
+      loop and the start of the next, when Config.MinGap is not positive: a burst
+      of writes is one run, and a transition chain advances one step per run.
+    items:
+      - name: DefaultMinGap
+        type: time.Duration
+        value: time.Second
+    name: DefaultMinGap
+  - doc: |-
+      DefaultMaxHistory is how many transitions a record keeps when
+      Config.MaxHistory is not positive.
+    items:
+      - name: DefaultMaxHistory
+        type: int
+        value: "20"
+    name: DefaultMaxHistory
+  - doc: |-
+      defaultBackoffBase and defaultBackoffMax bound the wait before an entity
+      whose automatic transition failed is tried again, when Config.Backoff has no
+      BaseDelay: 1s, doubling, held at a minute.
+    grouped: true
+    items:
+      - name: defaultBackoffBase
+        type: time.Duration
+        value: time.Second
+      - name: defaultBackoffMax
+        type: time.Duration
+        value: time.Minute
+    name: defaultBackoffBase
+  - grouped: true
+    items:
+      - doc: WakeStart is the first run, when Run starts.
+        name: WakeStart
+        type: Wake
+        value: iota + 1
+      - doc: "WakeDue is a run the loop woke for by itself: a transition fell due."
+        name: WakeDue
+      - doc: WakeChange is a run a write woke the loop for.
+        name: WakeChange
+    name: WakeStart
+  - grouped: true
+    items:
+      - doc: "LoopRunStarted reports a run starting: Wake and Started are set."
+        name: LoopRunStarted
+        type: LoopEventKind
+        value: iota + 1
+      - doc: "LoopRunEnded reports a run ending: every field is set."
+        name: LoopRunEnded
+      - doc: |-
+          LoopWaiting reports the loop re-armed to wake earlier, at Next, because
+          a write arrived while it slept.
+        name: LoopWaiting
+    name: LoopRunStarted
+  - doc: What ended a sleep of the loop.
+    grouped: true
+    items:
+      - doc: sleptCanceled is the caller's context ending.
+        name: sleptCanceled
+        type: slept
+        value: iota
+      - doc: sleptDue is the target instant coming.
+        name: sleptDue
+      - doc: sleptWoken is a write's wake.
+        name: sleptWoken
+    name: sleptCanceled
+  - doc: hookOnEnter and hookOnTransition name the two kinds of hook in a field.
+    grouped: true
+    items:
+      - name: hookOnEnter
+        type: string
+        value: "\"on-enter\""
+      - name: hookOnTransition
+        type: string
+        value: "\"on-transition\""
+    name: hookOnEnter
+files:
+  - decls:
+      - compactSlack
+      - staleFactor
+      - slot
+      - plan
+      - agenda
+      - newAgenda
+      - (*agenda).signal
+      - (*agenda).markDirty
+      - (*agenda).pending
+      - (*agenda).requeue
+      - (*agenda).schedule
+      - (*agenda).scheduleLocked
+      - (*agenda).unschedule
+      - (*agenda).forget
+      - (*agenda).restart
+      - (*agenda).failed
+      - (*agenda).heldBack
+      - (*agenda).succeeded
+      - (*agenda).take
+      - (*agenda).next
+      - (*agenda).isLive
+      - (*agenda).compact
+    name: agenda.go
+  - decls:
+      - eventKey
+      - blueprint
+      - freeze
+      - (*blueprint).automatic
+      - (*blueprint).declared
+      - (*blueprint).eventArrow
+      - (*arrow).dueAt
+      - verdict
+      - (*blueprint).evaluate
+    name: blueprint.go
+  - decls:
+      - readFlight
+      - flightKind
+      - flight
+      - record
+      - book
+      - newBook
+      - (*book).adjust
+      - (*book).adopt
+      - (*book).fly
+      - (*book).read
+      - (*book).open
+      - (*book).land
+      - (*book).touch
+      - (*book).step
+      - (*book).stepped
+      - (*book).reconcile
+      - (*book).moved
+      - (*book).forget
+      - (*book).dropped
+      - (*book).lockGate
+      - (*book).stateOf
+      - (*book).entered
+      - (*book).save
+      - (*record).value
+      - (*book).censusCopy
+      - (*book).lookup
+      - (*book).all
+      - journalFailure
+    name: book.go
+  - decls:
+      - DefaultMinGap
+      - DefaultMaxHistory
+      - defaultBackoffBase
+      - FiringValue
+      - Config
+      - settings
+      - resolve
+      - (*settings).sign
+      - (*settings).bracket
+      - (*settings).finish
+      - (*settings).reportErr
+      - (*settings).emit
+    name: config.go
+  - decls:
+      - arrow
+      - MachineSpec
+      - TransitionValue
+      - ChangeValue
+      - NewMachineSpec
+      - (*MachineSpec).Initial
+      - (*MachineSpec).On
+      - (*MachineSpec).After
+      - (*MachineSpec).At
+      - (*MachineSpec).When
+      - (*MachineSpec).OnEnter
+      - (*MachineSpec).OnTransition
+      - (*MachineSpec).Problems
+      - (*MachineSpec).States
+      - (*MachineSpec).Transitions
+      - (*MachineSpec).InitialState
+      - (*MachineSpec).Can
+      - (*MachineSpec).add
+      - (*MachineSpec).see
+      - (*MachineSpec).problem
+    name: definition.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - keyLock
+      - keyLocks
+      - newKeyLocks
+      - (*keyLocks).acquire
+      - (*keyLocks).drop
+      - abandoned
+      - hookScope
+      - hookScopeKey
+      - within
+      - inside
+    name: locks.go
+  - decls:
+      - WakeStart
+      - LoopRunStarted
+      - sleptCanceled
+      - Wake
+      - LoopEventKind
+      - slept
+      - Wake.String
+      - LoopEventKind.String
+      - LoopEvent
+      - stepResult
+      - (*StateMachine).Run
+      - (*StateMachine).Step
+      - (*StateMachine).run
+      - (*StateMachine).wait
+      - (*StateMachine).retarget
+      - (*StateMachine).sleep
+      - (*StateMachine).arm
+      - stopTimer
+      - (*StateMachine).step
+      - pass
+      - (*StateMachine).guarded
+      - (*StateMachine).process
+      - (*StateMachine).look
+      - (*StateMachine).inspect
+      - (*StateMachine).fire
+      - (*StateMachine).outcome
+      - (*StateMachine).failure
+      - (*StateMachine).reschedule
+    name: loop.go
+  - decls:
+      - StateMachine
+      - NewStateMachine
+      - checked
+      - (*StateMachine).open
+      - (*StateMachine).loadJournal
+      - (*StateMachine).syncJournal
+      - (*StateMachine).admit
+      - (*StateMachine).Census
+      - (*StateMachine).Record
+      - (*StateMachine).Records
+      - storeFailure
+    name: machine.go
+  - decls:
+      - (*StateMachine).Changed
+      - (*StateMachine).Deleted
+      - (*StateMachine).refresh
+      - (*StateMachine).landRead
+      - (*StateMachine).replan
+    name: notify.go
+  - decls:
+      - hookOnEnter
+      - landing
+      - pending
+      - (*StateMachine).Start
+      - (*StateMachine).Fire
+      - missingOr
+      - (*StateMachine).transition
+      - (*StateMachine).locked
+      - (*StateMachine).commit
+      - (*StateMachine).unchanged
+      - (*StateMachine).write
+      - refusedWrite
+      - (*StateMachine).settle
+      - (*StateMachine).enter
+      - (*StateMachine).announce
+      - (*StateMachine).notify
+      - hookPanic
+    name: transition.go
+functions:
+  - doc: newAgenda returns an empty agenda.
+    name: newAgenda
+    results: "*agenda"
+  - doc: freeze copies d and indexes the copy.
+    name: freeze
+    params: d *MachineSpec[E, S]
+    results: "*blueprint[E, S]"
+    typeParams: E any, S comparable
+  - doc: newBook returns an empty book counting every declared state at zero.
+    name: newBook
+    params: journal corestm.Journal[S], census map[S]int, limit int
+    results: "*book[S]"
+    typeParams: S comparable
+  - doc: |-
+      journalFailure wraps a journal error with the operation that failed; nil
+      stays nil.
+    name: journalFailure
+    params: err error, operation string
+    results: error
+  - doc: resolve returns cfg's behaviour with every default applied.
+    name: resolve
+    params: cfg *Config[E, S]
+    results: settings[E, S]
+    typeParams: E any, S comparable
+  - name: NewMachineSpec
+    params: state func(*E) *S
+    results: "*MachineSpec[E, S]"
+    typeParams: E any, S comparable
+  - doc: newKeyLocks returns an empty table.
+    name: newKeyLocks
+    results: "*keyLocks"
+  - doc: |-
+      abandoned is [corestm.WaitAbandoned] joined with the context's error, so the
+      verdict keeps its 503 and errors.Is still finds context.Canceled or
+      context.DeadlineExceeded.
+    name: abandoned
+    params: cause error
+    results: error
+  - doc: |-
+      within returns ctx marked as running an OnEnter hook of the machine whose
+      lock table is locks.
+    name: within
+    params: ctx context.Context, locks *keyLocks
+    results: context.Context
+  - doc: |-
+      inside reports whether ctx was handed to an OnEnter hook of the machine
+      whose lock table is locks, however far up the call.
+    name: inside
+    params: ctx context.Context, locks *keyLocks
+    results: bool
+  - doc: stopTimer stops timer when there is one.
+    name: stopTimer
+    params: timer clock.Timer
+  - name: NewStateMachine
+    params: ctx context.Context, def *MachineSpec[E, S], cfg *Config[E, S]
+    results: "*StateMachine[E, S], error"
+    typeParams: E any, S comparable
+  - doc: |-
+      checked returns the problems of def and cfg together: the declaration's
+      own, a missing Initial and a missing store.
+    name: checked
+    params: def *MachineSpec[E, S], cfg *Config[E, S]
+    results: "[]error"
+    typeParams: E any, S comparable
+  - doc: storeFailure wraps a store error with the operation that failed.
+    name: storeFailure
+    params: err error, operation string
+    results: error
+  - doc: missingOr is the error of a read that failed or found nothing.
+    name: missingOr
+    params: err error, key string
+    results: error
+  - doc: refusedWrite is the error of a write the store declined.
+    name: refusedWrite
+    params: create bool, key string
+    results: error
+  - doc: |-
+      hookPanic builds the error of a hook that panicked, with the stack of the
+      goroutine that panicked — captured here, inside the deferred recover, while
+      its frames are still on the stack.
+    name: hookPanic
+    params: kind, event string, value any
+    results: error
+imports:
+  atomic: sync/atomic
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
+  context: context
+  corestm: github.com/kitsunium/sdk/internal/core/app/statemachine
+  debug: runtime/debug
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  heap: github.com/kitsunium/sdk/internal/kernel/collections/heap
+  kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  maps: maps
+  slices: slices
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/statemachine
+  name: statemachine
+  purpose: "Package statemachine — hosts the agenda: when each entity's next automatic transition falls due, the entities written since the loop last looked, and the backoff of those whose transition failed."
+types:
+  - doc: |-
+      slot is one heap entry: key is due at due. seq identifies the entry, so an
+      entry replaced by a later schedule is recognised as stale when it surfaces.
+    fields:
+      - name: due
+        type: time.Time
+      - name: key
+        type: string
+      - name: seq
+        type: uint64
+    kind: struct
+    name: slot
+  - doc: plan is what the agenda holds for one key.
+    fields:
+      - doc: |-
+          notBefore holds back an entity whose transition failed: no automatic
+          transition of it before this instant.
+        name: notBefore
+        type: time.Time
+      - doc: seq is the live heap entry's; zero when the key is not scheduled.
+        name: seq
+        type: uint64
+      - doc: failures counts the consecutive failed transitions.
+        name: failures
+        type: int
+    kind: struct
+    name: plan
+  - doc: |-
+      agenda is a min-heap of due instants with ONE live entry per entity — its
+      earliest — and lazy deletion: rescheduling pushes a fresh entry and leaves
+      the old one to be recognised as stale and dropped when it reaches the top.
+      Finding the next transition due is therefore O(log N), where a sweep that
+      re-reads every entity is O(N). mu guards every field.
+
+      dirty holds the entities written since the loop last looked: their next due
+      instant is computed on the loop's goroutine, never on the writer's, because
+      computing it runs the caller's guards and instant functions.
+    fields:
+      - name: heap
+        type: "*heap.Heap[slot]"
+      - name: plans
+        type: map[string]*plan
+      - name: dirty
+        type: map[string]struct{}
+      - doc: "wake holds one token when the loop should look again: a write arrived."
+        name: wake
+        type: chan struct{}
+      - doc: |-
+          seq numbers the entries; it never repeats, so a forgotten key's stale
+          entries can never match a plan made later.
+        name: seq
+        type: uint64
+      - doc: live counts the entries that are not stale.
+        name: live
+        type: int
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: signal wakes the loop, without blocking when a wake is already pending.
+        name: signal
+        recv: a *agenda
+      - doc: |-
+          markDirty asks the loop to compute key's next due instant again, and wakes
+          it.
+        name: markDirty
+        params: key string
+        recv: a *agenda
+      - doc: pending reports whether written entities wait to be looked at.
+        name: pending
+        recv: a *agenda
+        results: bool
+      - doc: |-
+          requeue puts keys back among the dirty ones without waking the loop: a run
+          that stopped half-way leaves them for the next one.
+        name: requeue
+        params: keys []string
+        recv: a *agenda
+      - doc: schedule makes due key's next instant, never earlier than its backoff.
+        name: schedule
+        params: key string, due time.Time
+        recv: a *agenda
+      - doc: scheduleLocked is schedule under mu.
+        name: scheduleLocked
+        params: key string, due time.Time
+        recv: a *agenda
+      - doc: "unschedule takes key off the agenda: nothing it could do is due by itself."
+        name: unschedule
+        params: key string
+        recv: a *agenda
+      - doc: "forget drops everything the agenda holds for key: the entity is gone."
+        name: forget
+        params: key string
+        recv: a *agenda
+      - doc: |-
+          restart clears key's failures: it entered a new state, and what failed was a
+          transition out of the old one.
+        name: restart
+        params: key string
+        recv: a *agenda
+      - doc: |-
+          failed counts one more failure of key and schedules its retry at now plus
+          the backoff for that many failures. delay is the curve — the machine's
+          configured kernel/backoff.Value, handed over as its Delay method so the
+          agenda depends on "the wait after n failures" and on no curve type.
+        name: failed
+        params: key string, now time.Time, delay func(failures int) time.Duration
+        recv: a *agenda
+      - doc: |-
+          heldBack reports whether key's backoff still forbids an automatic
+          transition at now.
+        name: heldBack
+        params: key string, now time.Time
+        recv: a *agenda
+        results: bool
+      - doc: succeeded clears key's failures after a transition of it was stored.
+        name: succeeded
+        params: key string
+        recv: a *agenda
+      - doc: |-
+          take returns the keys the loop must look at, at now: every dirty key, and
+          every scheduled key due at or before now — each once, due keys first in
+          due order, then the dirty ones by key. Both are consumed: a due key leaves
+          the heap and a dirty key the dirty set.
+        name: take
+        params: now time.Time
+        recv: a *agenda
+        results: "[]string"
+      - doc: |-
+          next says when the loop should look again by itself: now when keys wait to
+          be looked at, the earliest due instant otherwise, zero when nothing is
+          scheduled.
+        name: next
+        params: now time.Time
+        recv: a *agenda
+        results: time.Time
+      - doc: isLive reports whether s is its key's current entry. The caller holds mu.
+        name: isLive
+        params: s slot
+        recv: a *agenda
+        results: bool
+      - doc: |-
+          compact rebuilds the heap once stale entries outnumber live ones by
+          staleFactor, so memory stays proportional to the entities scheduled. The
+          caller holds mu.
+        name: compact
+        recv: a *agenda
+    name: agenda
+  - doc: "eventKey addresses an event transition: its name and the state it leaves."
+    fields:
+      - name: event
+        type: string
+      - name: from
+        type: S
+    kind: struct
+    name: eventKey
+    typeParams: S comparable
+  - doc: |-
+      blueprint is a MachineSpec frozen for one machine. Every slice and map is a
+      copy, so a declaration that goes on after NewStateMachine reaches no machine.
+    fields:
+      - doc: state is the accessor of the entity's state field.
+        name: state
+        type: func(*E) *S
+      - doc: enter holds the OnEnter hooks per state.
+        name: enter
+        type: map[S][]func(context.Context, *E) error
+      - doc: events indexes event transitions by name and state left.
+        name: events
+        type: map[eventKey[S]]int
+      - doc: |-
+          auto lists, per state, the automatic transitions leaving it, in
+          declaration order — the order the first-declared rule reads.
+        name: auto
+        type: map[S][]int
+      - doc: |-
+          content says, per state, whether a transition leaving it depends on the
+          entity's content (At or When), so a write can move what is due.
+        name: content
+        type: map[S]bool
+      - doc: arrows is every transition, in declaration order.
+        name: arrows
+        type: "[]arrow[E, S]"
+      - doc: order lists every declared state.
+        name: order
+        type: "[]S"
+      - doc: after holds the OnTransition hooks.
+        name: after
+        type: "[]func(context.Context, ChangeValue[E, S]) error"
+      - doc: "creation is the arrow a Start takes: CreateEvent into the initial state."
+        name: creation
+        type: arrow[E, S]
+    kind: struct
+    methods:
+      - doc: automatic reports whether a transition the loop fires leaves state.
+        name: automatic
+        params: state S
+        recv: b *blueprint[E, S]
+        results: bool
+      - doc: declared returns the declared states, for a census that lists every one.
+        name: declared
+        recv: b *blueprint[E, S]
+        results: map[S]int
+      - doc: eventArrow returns the event transition by that name leaving from.
+        name: eventArrow
+        params: event string, from S
+        recv: b *blueprint[E, S]
+        results: arrow[E, S], bool
+      - doc: |-
+          evaluate asks every automatic transition leaving state whether it is due
+          for e at now. The FIRST declared transition that is due is the one to fire;
+          otherwise the verdict holds the earliest instant one falls due. A guard or
+          an instant function that panics is recovered as [corestm.FunctionPanicked].
+        name: evaluate
+        params: e E, state S, entered, now time.Time
+        recv: b *blueprint[E, S]
+        results: due verdict[E, S], err error
+    name: blueprint
+    typeParams: E any, S comparable
+  - doc: |-
+      verdict is what the evaluation of an entity decided: a transition to fire
+      now, or the instant the next one falls due (zero when none will by itself).
+    fields:
+      - name: fire
+        type: "*arrow[E, S]"
+      - name: next
+        type: time.Time
+    kind: struct
+    name: verdict
+    typeParams: E any, S comparable
+  - doc: flightKind says what holds an entity during a flight.
+    kind: named
+    name: flightKind
+    underlying: uint8
+  - doc: |-
+      flight marks an entity whose lock is held by something that read it or is
+      moving it. A deletion that arrives meanwhile is recorded on it instead of
+      waiting for the lock, so nothing the holder records afterwards brings the
+      entity back; a transition's flight takes writes too — the notification is
+      very often the transition's own write, and waiting for the lock would be
+      waiting for itself.
+    fields:
+      - doc: |-
+          deleted says the entity was deleted during the flight: its record must
+          not come back when the holder records what it read or stored.
+        name: deleted
+        type: bool
+      - doc: |-
+          touched says the entity was written during the flight: the transition
+          reads it again once it has stored, so the record ends up describing
+          what the store holds.
+        name: touched
+        type: bool
+      - doc: kind says what holds the entity, and so whether writes land here.
+        name: kind
+        type: flightKind
+    kind: struct
+    name: flight
+  - doc: record is one entity's bookkeeping.
+    fields:
+      - doc: entered is when the entity entered state.
+        name: entered
+        type: time.Time
+      - doc: state is the state the entity is in.
+        name: state
+        type: S
+      - doc: history is the latest transitions, oldest first.
+        name: history
+        type: "[]corestm.StepValue[S]"
+    kind: struct
+    methods:
+      - doc: value renders r as the journal's value, its history copied.
+        name: value
+        params: key string
+        recv: r *record[S]
+        results: corestm.RecordValue[S]
+    name: record
+    typeParams: S comparable
+  - doc: |-
+      book is a machine's bookkeeping. mu guards every field and is never held
+      across a call to the caller's code: a journal write is made under the key's
+      gate instead, taken BEFORE mu, so two writes of one key reach the journal in
+      the order the book made them while writes of different keys do not wait for
+      each other.
+    fields:
+      - doc: journal persists the records; nil keeps them in memory only.
+        name: journal
+        type: corestm.Journal[S]
+      - doc: records holds one record per entity the machine knows.
+        name: records
+        type: map[string]*record[S]
+      - doc: census counts entities per state; every declared state is present.
+        name: census
+        type: map[S]int
+      - doc: |-
+          declared says which states the definition names, so a census entry
+          for an undeclared state goes when its count falls to zero.
+        name: declared
+        type: map[S]bool
+      - doc: |-
+          flights marks the entities whose lock is held by a read or a
+          transition.
+        name: flights
+        type: map[string]*flight
+      - doc: limit is how many steps a record keeps.
+        name: limit
+        type: int
+      - doc: |-
+          gates orders the journal writes of one key: each key its own gate,
+          forgotten once nobody holds it or waits for it; see lockGate.
+        name: gates
+        type: "*keyLocks"
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: adjust moves the census count of state by delta. The caller holds mu.
+        name: adjust
+        params: state S, delta int
+        recv: b *book[S]
+      - doc: |-
+          adopt takes rec as its entity's record, as the opening reconciled it. A
+          history longer than the configured length keeps its latest steps.
+        name: adopt
+        params: rec corestm.RecordValue[S]
+        recv: b *book[S]
+      - doc: |-
+          fly marks key as held by a transition, which takes the writes and deletes
+          that arrive meanwhile. The caller holds the key's lock.
+        name: fly
+        params: key string
+        recv: b *book[S]
+        results: "*flight"
+      - doc: |-
+          read marks key as held by a read the caller will record: a deletion that
+          arrives meanwhile is caught, a write waits for the lock. The caller holds
+          the key's lock.
+        name: read
+        params: key string
+        recv: b *book[S]
+        results: "*flight"
+      - doc: open marks key as held by a flight of kind.
+        name: open
+        params: key string, kind flightKind
+        recv: b *book[S]
+        results: "*flight"
+      - doc: |-
+          land ends f, key's flight, and says what happened during it: whether the
+          entity was written — and not deleted, since a deleted entity has nothing to
+          read again — and whether it was deleted. A flight already landed, or
+          replaced by a later holder's, says nothing and leaves the later one alone.
+        name: land
+        params: key string, f *flight
+        recv: b *book[S]
+        results: touched, deleted bool
+      - doc: |-
+          touch records a write of key against its transition's flight, and reports
+          whether there was one — in which case the transition reads the entity again
+          once it has stored, and the caller must not wait for the lock.
+        name: touch
+        params: key string
+        recv: b *book[S]
+        results: bool
+      - doc: |-
+          step records a stored transition of key: its state, when it entered it and
+          the step in its history, and returns the journal's failure to write it —
+          for the caller to report once it holds no lock. Nothing is recorded when the
+          entity was deleted during the flight.
+        name: step
+        params: ctx context.Context, key string, s corestm.StepValue[S], f *flight
+        recv: b *book[S]
+        results: error
+      - doc: |-
+          stepped applies step s to key's record under mu and returns a copy to
+          write, or false when the entity was deleted during the flight.
+        name: stepped
+        params: key string, s corestm.StepValue[S], f *flight
+        recv: b *book[S]
+        results: corestm.RecordValue[S], bool
+      - doc: |-
+          reconcile brings key's record in line with state, read from the store at
+          now under f, the reader's flight. A state the record does not hold was
+          changed behind the machine's back: the record takes it with Entered set to
+          now, and no step — the machine knows the state, not a transition. An entity
+          deleted since the read is left forgotten. It reports whether the state
+          changed, and the journal's failure to write it, for the caller to report.
+        name: reconcile
+        params: ctx context.Context, key string, state S, now time.Time, f *flight
+        recv: b *book[S]
+        results: bool, error
+      - doc: |-
+          moved applies a state read from the store to key's record under mu, and
+          returns a copy to write when the record changed.
+        name: moved
+        params: key string, state S, now time.Time, f *flight
+        recv: b *book[S]
+        results: corestm.RecordValue[S], bool
+      - doc: |-
+          forget drops key's record — the entity was deleted — and tells a flight
+          holding it, so what its holder records next does not bring the record back.
+        name: forget
+        params: ctx context.Context, key string
+        recv: b *book[S]
+        results: error
+      - doc: |-
+          dropped drops key's record under mu, marking its flight, and reports
+          whether there was a record.
+        name: dropped
+        params: key string
+        recv: b *book[S]
+        results: bool
+      - doc: |-
+          lockGate takes the gate that orders the journal writes of key — taken
+          before mu, held across the journal call, never held while waiting for
+          anything else, so two gates are never held at once — and returns the
+          function that releases it. The gate is the key's alone: a table of 256
+          mutexes picked by the key's hash made two keys share one a time in 256 and
+          wait for each other's journal call, which
+          TestAJournalWriteHoldsOnlyItsOwnKey caught (#304).
+        name: lockGate
+        params: key string
+        recv: b *book[S]
+        results: func()
+      - doc: stateOf returns the state key's record holds.
+        name: stateOf
+        params: key string
+        recv: b *book[S]
+        results: state S, known bool
+      - doc: entered returns when key entered its state, as the book knows it.
+        name: entered
+        params: key string
+        recv: b *book[S]
+        results: time.Time, bool
+      - doc: |-
+          save writes rec to the journal. The caller holds the key's gate, which is
+          what orders two writes of one key, and NOT mu: the journal is the caller's
+          code. A failure is returned for the caller to REPORT once it holds no lock
+          — never to fail what it follows: the store is the source of truth, and a
+          lost record only costs a timer its origin after a restart.
+        name: save
+        params: ctx context.Context, rec corestm.RecordValue[S]
+        recv: b *book[S]
+        results: error
+      - doc: censusCopy returns the count of entities per state.
+        name: censusCopy
+        recv: b *book[S]
+        results: map[S]int
+      - doc: lookup returns key's record.
+        name: lookup
+        params: key string
+        recv: b *book[S]
+        results: corestm.RecordValue[S], bool
+      - doc: |-
+          all returns every record, the most recently entered state first and, for
+          equal instants, by key.
+        name: all
+        recv: b *book[S]
+        results: "[]corestm.RecordValue[S]"
+    name: book
+    typeParams: S comparable
+  - fields:
+      - doc: Key is the entity's key.
+        name: Key
+        type: string
+      - doc: Event is the transition's name.
+        name: Event
+        type: string
+      - doc: From is the state the entity is in.
+        name: From
+        type: S
+      - doc: To is the state it is about to enter.
+        name: To
+        type: S
+      - doc: "Trigger is a delay, a deadline or a guard: the loop fires nothing else."
+        name: Trigger
+        type: corestm.Trigger
+    kind: struct
+    name: FiringValue
+    typeParams: S comparable
+  - fields:
+      - doc: Store holds the entities. Required.
+        name: Store
+        type: corestm.Store[E]
+      - doc: |-
+          Journal keeps each entity's record beside the store. Nil keeps the
+          records in memory: after a restart every entity re-enters its state
+          when the machine opens, which restarts every After timer.
+        name: Journal
+        type: corestm.Journal[S]
+      - doc: |-
+          Clock is what the machine stamps and waits on. Nil is clock.System; a
+          clock.ManualClock drives every timer of a test.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          Actor reads, from the context a caller hands Start or Fire, who fired
+          the transition; the result lands in the record's history and in the
+          change hooks receive. Never called for a transition the loop fires.
+          Nil records nobody.
+        name: Actor
+        type: func(ctx context.Context) string
+      - doc: |-
+          Observe brackets every transition the machine's OWN loop fires — the
+          ones no caller can wrap: it is called before the transition with the
+          loop's context, returns the context the transition's hooks and store
+          calls run under — a tracer puts its span there — and a function the
+          engine calls with the outcome once the OnTransition hooks have run and
+          the loop has recorded it: a panic there is reported as LoopPanicked and
+          changes nothing, the transition stands. A caller wraps its own Start and
+          Fire itself. It is called while the loop holds the entity, so it must
+          not fire that entity. Nil observes nothing.
+        name: Observe
+        type: func(ctx context.Context, firing FiringValue[S]) (context.Context, func(err error))
+      - doc: |-
+          Report receives every error no caller's return value carries: an
+          OnTransition hook's failure, a Journal write that failed, and each
+          transition the loop could not fire. It is called with no lock of the
+          machine held, so it may read the machine — its census, a record — or
+          fire it. Nil drops them — the SDK does not write to stderr on the
+          caller's behalf (ADR 0030) — so wire it.
+        name: Report
+        type: func(ctx context.Context, err error)
+      - doc: |-
+          OnLoop is told what Run does: a run starting, a run ending with what
+          it fired and when the loop wakes next, and the loop re-arming earlier
+          because a write arrived. Called on the loop's goroutine; keep it short.
+          Nil observes nothing.
+        name: OnLoop
+        type: func(event LoopEvent)
+      - doc: |-
+          MinGap is the least time between the end of one run of the loop and
+          the start of the next. Not positive means DefaultMinGap.
+        name: MinGap
+        type: time.Duration
+      - doc: |-
+          Backoff is how long an entity whose automatic transition failed waits
+          before it is tried again, by consecutive failures. A zero BaseDelay
+          means 1s doubling to a minute.
+        name: Backoff
+        type: kbackoff.Value
+      - doc: |-
+          MaxHistory is how many transitions each record keeps. Not positive
+          means DefaultMaxHistory.
+        name: MaxHistory
+        type: int
+    kind: struct
+    name: Config
+    typeParams: E any, S comparable
+  - doc: settings is a Config with every default resolved.
+    fields:
+      - name: clock
+        type: clock.Timed
+      - name: actor
+        type: func(context.Context) string
+      - name: observe
+        type: func(context.Context, FiringValue[S]) (context.Context, func(error))
+      - name: report
+        type: func(context.Context, error)
+      - name: onLoop
+        type: func(LoopEvent)
+      - name: backoff
+        type: kbackoff.Value
+      - name: minGap
+        type: time.Duration
+      - name: history
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          sign records on p who fired it, as Config.Actor reads it from the caller's
+          context; nobody when there is no Actor.
+        name: sign
+        params: ctx context.Context, p *pending[E, S]
+        recv: s *settings[E, S]
+      - doc: bracket starts the observation of a transition the loop fires.
+        name: bracket
+        params: ctx context.Context, firing *FiringValue[S]
+        recv: s *settings[E, S]
+        results: context.Context, func(error)
+      - doc: |-
+          finish hands the observer's end the outcome of the transition it
+          bracketed, with a panic of its own recovered and returned: the transition
+          is stored or refused already, and the panic only reported.
+        name: finish
+        params: done func(error), key string, err error
+        recv: s *settings[E, S]
+        results: failed error
+      - doc: reportErr hands err to Config.Report, when there is one.
+        name: reportErr
+        params: ctx context.Context, err error
+        recv: s *settings[E, S]
+      - doc: emit hands event to Config.OnLoop, when there is one.
+        name: emit
+        params: event *LoopEvent
+        recv: s *settings[E, S]
+    name: settings
+    typeParams: E any, S comparable
+  - doc: |-
+      arrow is one declared transition. Its trigger says which of delay, instant
+      and guard is set.
+    fields:
+      - doc: instant is At's function; nil otherwise.
+        name: instant
+        type: func(E) (time.Time, bool)
+      - doc: guard is When's function; nil otherwise.
+        name: guard
+        type: func(E) bool
+      - doc: event is the transition's name.
+        name: event
+        type: string
+      - doc: delay is After's duration; zero otherwise.
+        name: delay
+        type: time.Duration
+      - doc: from and to are the states left and entered.
+        name: from
+        type: S
+      - doc: from and to are the states left and entered.
+        name: to
+        type: S
+      - doc: trigger is how the transition was declared.
+        name: trigger
+        type: corestm.Trigger
+    kind: struct
+    methods:
+      - doc: |-
+          dueAt says when x is due for e, which entered its state at entered: an
+          instant, possibly past; false when it is not due at all for now. A guard
+          that holds is due at the zero time, before any clock.
+        name: dueAt
+        params: e E, entered time.Time
+        recv: x *arrow[E, S]
+        results: time.Time, bool
+    name: arrow
+    typeParams: E any, S comparable
+  - fields:
+      - doc: state returns a pointer to the entity's state field.
+        name: state
+        type: func(*E) *S
+      - doc: enter holds the OnEnter hooks, per state, in declaration order.
+        name: enter
+        type: map[S][]func(context.Context, *E) error
+      - doc: initial is the state a new entity enters.
+        name: initial
+        type: S
+      - doc: order lists every state the declaration names, first mention first.
+        name: order
+        type: "[]S"
+      - doc: arrows lists the transitions in declaration order.
+        name: arrows
+        type: "[]arrow[E, S]"
+      - doc: after holds the OnTransition hooks in declaration order.
+        name: after
+        type: "[]func(context.Context, ChangeValue[E, S]) error"
+      - doc: problems lists the declaration's mistakes in the order they were made.
+        name: problems
+        type: "[]error"
+      - doc: hasInitial says Initial was called.
+        name: hasInitial
+        type: bool
+    kind: struct
+    methods:
+      - name: Initial
+        params: state S
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: "On"
+        params: event string, from, to S
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: After
+        params: event string, delay time.Duration, from, to S
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: At
+        params: event string, from, to S, instant func(E) (time.Time, bool)
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: When
+        params: event string, from, to S, guard func(E) bool
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: OnEnter
+        params: state S, hook func(context.Context, *E) error
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: OnTransition
+        params: hook func(context.Context, ChangeValue[E, S]) error
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - name: Problems
+        recv: d *MachineSpec[E, S]
+        results: "[]error"
+      - name: States
+        recv: d *MachineSpec[E, S]
+        results: "[]S"
+      - name: Transitions
+        recv: d *MachineSpec[E, S]
+        results: "[]TransitionValue[S]"
+      - name: InitialState
+        recv: d *MachineSpec[E, S]
+        results: state S, set bool
+      - name: Can
+        params: entity E, event string
+        recv: d *MachineSpec[E, S]
+        results: bool
+      - doc: add records a transition, refusing an unusable name and a duplicate.
+        name: add
+        params: a arrow[E, S]
+        recv: d *MachineSpec[E, S]
+        results: "*MachineSpec[E, S]"
+      - doc: see records states in the order they are first mentioned.
+        name: see
+        params: states ...S
+        recv: d *MachineSpec[E, S]
+      - doc: problem records one declaration mistake with its fields.
+        name: problem
+        params: sentinel *errs.Error, fields ...errs.FieldValue
+        recv: d *MachineSpec[E, S]
+    name: MachineSpec
+    typeParams: E any, S comparable
+  - fields:
+      - doc: Event is the transition's name.
+        name: Event
+        type: string
+      - doc: From is the state it leaves.
+        name: From
+        type: S
+      - doc: To is the state it enters.
+        name: To
+        type: S
+      - doc: "Trigger says how it fires: an event, a delay, a deadline or a guard."
+        name: Trigger
+        type: corestm.Trigger
+      - doc: Delay is After's duration; zero for every other trigger.
+        name: Delay
+        type: time.Duration
+    kind: struct
+    name: TransitionValue
+    typeParams: S comparable
+  - fields:
+      - doc: Entity is the entity as stored after the transition.
+        name: Entity
+        type: E
+      - doc: At is when the transition was stored.
+        name: At
+        type: time.Time
+      - doc: Key is the entity's key in the store.
+        name: Key
+        type: string
+      - doc: |-
+          Event is the transition's name; core/app/statemachine.CreateEvent for a
+          creation.
+        name: Event
+        type: string
+      - doc: |-
+          Actor is who fired it, as Config.Actor read it from the caller's
+          context; empty when the machine's loop fired it.
+        name: Actor
+        type: string
+      - doc: "From is the state left: the zero S for a creation."
+        name: From
+        type: S
+      - doc: To is the state entered.
+        name: To
+        type: S
+      - doc: Trigger says what fired it.
+        name: Trigger
+        type: corestm.Trigger
+    kind: struct
+    name: ChangeValue
+    typeParams: E any, S comparable
+  - doc: |-
+      keyLock serialises the transitions of one entity. It is a one-token
+      channel rather than a mutex so a caller whose context ends stops waiting.
+    fields:
+      - doc: gate holds a token while the lock is held.
+        name: gate
+        type: chan struct{}
+      - doc: refs counts the holders and waiters; guarded by keyLocks.mu.
+        name: refs
+        type: int
+    kind: struct
+    name: keyLock
+  - doc: |-
+      keyLocks hands out one lock per key and forgets a key nobody holds or waits
+      for, so the table stays as large as the entities in flight.
+    fields:
+      - name: byKey
+        type: map[string]*keyLock
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          acquire takes key's lock, waiting until it is free or ctx ends, and returns
+          the function that releases it. A context that ends first is [corestm.WaitAbandoned].
+
+          The release is idempotent — a second call does nothing — so a caller can
+          defer it for the panicking path and still hand it over to be called early:
+          a transition releases the lock before its OnTransition hooks run.
+        name: acquire
+        params: ctx context.Context, key string
+        recv: l *keyLocks
+        results: func(), error
+      - doc: drop removes one reference to key's lock, forgetting it with the last.
+        name: drop
+        params: key string, lock *keyLock
+        recv: l *keyLocks
+    name: keyLocks
+  - doc: |-
+      hookScope marks a context handed to an OnEnter hook with the lock table of
+      the machine running it — the table a nested transition would wait on;
+      parent links the machines running hooks further up the call.
+    fields:
+      - name: locks
+        type: "*keyLocks"
+      - name: parent
+        type: "*hookScope"
+    kind: struct
+    name: hookScope
+  - doc: hookScopeKey is the context key of the mark.
+    kind: struct
+    name: hookScopeKey
+  - kind: named
+    methods:
+      - name: String
+        recv: w Wake
+        results: string
+    name: Wake
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: k LoopEventKind
+        results: string
+    name: LoopEventKind
+    underlying: uint8
+  - doc: slept says what ended a sleep of the loop.
+    kind: named
+    name: slept
+    underlying: uint8
+  - fields:
+      - doc: Err joins what failed in the run; nil when nothing did.
+        name: Err
+        type: error
+      - doc: Started is when the run started.
+        name: Started
+        type: time.Time
+      - doc: Ended is when the run ended.
+        name: Ended
+        type: time.Time
+      - doc: |-
+          Next is when the loop wakes by itself next — never sooner than
+          Config.MinGap after the run ended; zero when only a write will wake it.
+        name: Next
+        type: time.Time
+      - doc: Fired counts the transitions the run stored.
+        name: Fired
+        type: int
+      - doc: Failed counts the transitions the run could not fire.
+        name: Failed
+        type: int
+      - doc: Kind says what is reported.
+        name: Kind
+        type: LoopEventKind
+      - doc: Wake says why the run started.
+        name: Wake
+        type: Wake
+    kind: struct
+    name: LoopEvent
+  - doc: stepResult is what one pass did.
+    fields:
+      - name: next
+        type: time.Time
+      - name: err
+        type: error
+      - name: fired
+        type: int
+      - name: failed
+        type: int
+    kind: struct
+    name: stepResult
+  - doc: |-
+      pass is what looking at one entity did: whether a transition was stored,
+      the failure that holds the entity back, and a failure that is not the
+      entity's — a journal write — which is only reported.
+    fields:
+      - name: failed
+        type: error
+      - name: late
+        type: error
+      - name: fired
+        type: bool
+    kind: struct
+    name: pass
+  - fields:
+      - name: store
+        type: corestm.Store[E]
+      - name: plan
+        type: "*blueprint[E, S]"
+      - name: book
+        type: "*book[S]"
+      - name: agenda
+        type: "*agenda"
+      - name: locks
+        type: "*keyLocks"
+      - name: cfg
+        type: settings[E, S]
+      - doc: running is held by a Run or a Step while it goes.
+        name: running
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - name: Run
+        params: ctx context.Context
+        recv: m *StateMachine[E, S]
+        results: error
+      - name: Step
+        params: ctx context.Context
+        recv: m *StateMachine[E, S]
+        results: time.Time, error
+      - doc: |-
+          run is one run of the loop, told to OnLoop. It returns when the loop wakes
+          by itself next and the earliest the next run may start.
+        name: run
+        params: ctx context.Context, wake Wake
+        recv: m *StateMachine[E, S]
+        results: at, floor time.Time
+      - doc: |-
+          wait sleeps until at, or until a write — but then not before floor — and
+          says why the next run starts. It reports false when ctx ends.
+        name: wait
+        params: ctx context.Context, at, floor time.Time
+        recv: m *StateMachine[E, S]
+        results: Wake, bool
+      - doc: |-
+          retarget moves the wait's target to floor when a write arrived before it
+          and floor comes sooner than the current target, and tells OnLoop.
+        name: retarget
+        params: at, floor time.Time, wake Wake
+        recv: m *StateMachine[E, S]
+        results: time.Time, Wake
+      - doc: |-
+          sleep blocks until at comes — never, when at is zero — until a write wakes
+          the loop, or until ctx ends, and says which.
+        name: sleep
+        params: ctx context.Context, at time.Time
+        recv: m *StateMachine[E, S]
+        results: slept
+      - doc: |-
+          arm returns a timer for at and its channel; no timer and a nil channel —
+          which never delivers — when at is zero.
+        name: arm
+        params: at time.Time
+        recv: m *StateMachine[E, S]
+        results: clock.Timer, <-chan time.Time
+      - doc: |-
+          step is one pass: take what is due or written, and look at each entity once.
+          Every failure is reported here, once the entity's lock is released.
+        name: step
+        params: ctx context.Context
+        recv: m *StateMachine[E, S]
+        results: stepResult
+      - doc: |-
+          guarded is process with a panic of the caller's own code — a store method,
+          a journal, an observer's start — recovered as that entity's failure: the
+          loop goes on, reports it, and tries the entity again after its backoff. The
+          entity's lock and flights are released by process's own deferred calls on
+          the way out. An observer's end has its panic recovered apart, by finish.
+        name: guarded
+        params: ctx context.Context, key string, now time.Time
+        recv: m *StateMachine[E, S]
+        results: looked pass
+      - doc: |-
+          process looks at one entity: it reads it, asks its automatic transitions
+          what is due, and fires the first declared one due — or schedules the
+          earliest.
+        name: process
+        params: ctx context.Context, key string, now time.Time
+        recv: m *StateMachine[E, S]
+        results: pass
+      - doc: |-
+          look reads key under a read's flight — so a deletion that arrives before
+          the record is made wins — records what it read, and returns the transition
+          due, when there is one. An entity deleted meanwhile fires nothing and
+          leaves the agenda. The caller holds the entity's lock.
+        name: look
+        params: ctx context.Context, key string, now time.Time
+        recv: m *StateMachine[E, S]
+        results: looked pass, due pending[E, S], ok bool
+      - doc: |-
+          inspect is the body of look: it reads the entity, reconciles its record,
+          and returns the first declared transition due — or schedules the earliest.
+        name: inspect
+        params: ctx context.Context, key string, now time.Time, f *flight
+        recv: m *StateMachine[E, S]
+        results: pass, pending[E, S], bool
+      - doc: |-
+          fire runs one transition the loop decided on, bracketed by Config.Observe.
+          The entity's lock is held and its release handed over; the transition
+          reports its own late failures once it has released it. The observer hears
+          the outcome only once the agenda holds it, so a panic of the observer's own
+          is reported and changes nothing: a stored transition is never retried.
+        name: fire
+        params: ctx context.Context, p pending[E, S], release func(), now time.Time
+        recv: m *StateMachine[E, S]
+        results: pass
+      - doc: |-
+          outcome records on the agenda what a transition the loop fired came to.
+          gone says the store refused the write because the entity was deleted.
+        name: outcome
+        params: ctx context.Context, key string, now time.Time, gone bool, err error
+        recv: m *StateMachine[E, S]
+        results: pass
+      - doc: |-
+          failure counts a failure of key and schedules its retry; the step reports
+          it once the entity's lock is released.
+        name: failure
+        params: key string, now time.Time, err error
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: |-
+          reschedule puts key back on the agenda at its next due instant, or takes it
+          off when nothing will fall due by itself.
+        name: reschedule
+        params: key string, v verdict[E, S]
+        recv: m *StateMachine[E, S]
+      - doc: |-
+          open reconciles the journal with the store and schedules every entity in a
+          state an automatic transition leaves.
+        name: open
+        params: ctx context.Context
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: loadJournal reads the journal into a map by key; no journal is an empty map.
+        name: loadJournal
+        params: ctx context.Context
+        recv: m *StateMachine[E, S]
+        results: map[string]corestm.RecordValue[S], error
+      - doc: |-
+          syncJournal saves the reconciled records and deletes the orphans — records
+          whose entity is no longer in the store.
+        name: syncJournal
+        params: ctx context.Context, saves []corestm.RecordValue[S], orphans map[string]corestm.RecordValue[S]
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: |-
+          admit schedules an entity met at opening: its next due instant when a
+          transition the loop fires leaves its state. A guard or an instant function
+          that panics here leaves the entity for the loop, which reports it.
+        name: admit
+        params: key string, entity E, state S, entered, now time.Time
+        recv: m *StateMachine[E, S]
+      - name: Census
+        recv: m *StateMachine[E, S]
+        results: map[S]int
+      - name: Record
+        params: key string
+        recv: m *StateMachine[E, S]
+        results: corestm.RecordValue[S], bool
+      - name: Records
+        recv: m *StateMachine[E, S]
+        results: "[]corestm.RecordValue[S]"
+      - name: Changed
+        params: ctx context.Context, key string
+        recv: m *StateMachine[E, S]
+        results: error
+      - name: Deleted
+        params: ctx context.Context, key string
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: |-
+          refresh reads the entity under key and brings its record and its place on
+          the agenda in line. The caller holds the entity's lock; the read is a
+          flight, so a deletion that arrives between the read and the record wins.
+        name: refresh
+        params: ctx context.Context, key string
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: |-
+          landRead ends a read's flight; an entity deleted during it leaves the
+          agenda, whatever the reader planned for it.
+        name: landRead
+        params: key string, f *flight
+        recv: m *StateMachine[E, S]
+      - doc: |-
+          replan puts key on the agenda for the loop to evaluate, or takes it off
+          when no timer and no guard leaves its state. changed says the entity entered
+          a state — a transition, or a change behind the machine's back — which
+          clears the failures of the state it left and always needs a new look;
+          otherwise only a state whose deadlines or guards read the entity does.
+        name: replan
+        params: key string, changed bool
+        recv: m *StateMachine[E, S]
+      - name: Start
+        params: ctx context.Context, entity E
+        recv: m *StateMachine[E, S]
+        results: E, error
+      - name: Fire
+        params: ctx context.Context, key, event string
+        recv: m *StateMachine[E, S]
+        results: E, error
+      - doc: |-
+          transition stores p, releases the entity's lock and runs the OnTransition
+          hooks. The caller holds the lock and hands its idempotent release over: it
+          is called before the OnTransition hooks, on every path — a panic included.
+          The late failures are reported here, once the lock is released.
+        name: transition
+        params: ctx context.Context, p pending[E, S], release func()
+        recv: m *StateMachine[E, S]
+        results: landing[E, S], error
+      - doc: |-
+          locked is the part of a transition that holds the entity's lock: the
+          flight, the commit and the settling, with the lock released on the way out
+          whatever happens — a hook's panic is already an error, but a store's is not.
+        name: locked
+        params: ctx context.Context, p pending[E, S], release func()
+        recv: m *StateMachine[E, S]
+        results: landed landing[E, S], err error
+      - doc: |-
+          commit performs p under the entity's lock: the new state, the OnEnter hooks,
+          the checks, the write and the recorded step. A hook that fails or panics
+          ends it with nothing stored.
+        name: commit
+        params: ctx context.Context, p pending[E, S], f *flight
+        recv: m *StateMachine[E, S]
+        results: landing[E, S], error
+      - doc: unchanged refuses an entity whose OnEnter hooks moved its state or its key.
+        name: unchanged
+        params: entity E, p pending[E, S]
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: |-
+          write inserts a created entity, or replaces the one the transition read,
+          and says whether the store refused it — the key taken, or the entity gone —
+          as opposed to failing.
+        name: write
+        params: ctx context.Context, entity E, p pending[E, S]
+        recv: m *StateMachine[E, S]
+        results: refused bool, err error
+      - doc: |-
+          settle ends f, the entity's flight; when the entity was written meanwhile,
+          it reads it again so the record describes what the store holds. The caller
+          still holds the entity's lock, so a failure is returned for it to report
+          later: the transition itself succeeded or failed on its own terms.
+        name: settle
+        params: ctx context.Context, key string, f *flight
+        recv: m *StateMachine[E, S]
+        results: error
+      - doc: enter runs one OnEnter hook with its panic recovered.
+        name: enter
+        params: ctx context.Context, hook func(context.Context, *E) error, entity *E, p pending[E, S]
+        recv: m *StateMachine[E, S]
+        results: err error
+      - doc: |-
+          announce runs the OnTransition hooks after a stored transition. A failure
+          is reported, and the next hook still runs.
+        name: announce
+        params: ctx context.Context, change ChangeValue[E, S]
+        recv: m *StateMachine[E, S]
+      - doc: notify runs one OnTransition hook with its panic recovered.
+        name: notify
+        params: ctx context.Context, hook func(context.Context, ChangeValue[E, S]) error, change ChangeValue[E, S]
+        recv: m *StateMachine[E, S]
+        results: err error
+    name: StateMachine
+    typeParams: E any, S comparable
+  - doc: |-
+      landing is what the locked part of a transition hands back: the change
+      stored, whether the store no longer held the entity, and the failures it
+      met that are not its own — a journal write, the re-read after a write during
+      the flight — which transition reports once no lock is held, since
+      Config.Report is the caller's code and may call the machine.
+    fields:
+      - name: late
+        type: error
+      - name: change
+        type: ChangeValue[E, S]
+      - doc: |-
+          gone says the store refused the write because the entity was deleted
+          meanwhile — told apart from a hook's error that merely carries the
+          same code.
+        name: gone
+        type: bool
+    kind: struct
+    name: landing
+    typeParams: E any, S comparable
+  - doc: |-
+      pending is a transition decided under its entity's lock and not yet
+      stored.
+    fields:
+      - doc: entity is the entity as read, or as handed to Start.
+        name: entity
+        type: E
+      - doc: key is the entity's key.
+        name: key
+        type: string
+      - doc: actor is who fired it; empty when the loop did.
+        name: actor
+        type: string
+      - doc: arrow is the transition taken.
+        name: arrow
+        type: arrow[E, S]
+      - doc: "create says it is a Start: the entity is inserted, not replaced."
+        name: create
+        type: bool
+    kind: struct
+    name: pending
+    typeParams: E any, S comparable

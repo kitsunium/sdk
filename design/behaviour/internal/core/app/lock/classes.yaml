@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/lock
+  name: lock
+  purpose: Package lock — ranges 0.2.21.* (ADR 0052 core/app/lock block) and 0.3.51.* (ADR 0052 service/app/lock block, declared here since ADR 0160).
+types: []

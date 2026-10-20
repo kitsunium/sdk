@@ -1,0 +1,479 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      CodeNoVendorKey identifies an install attempted by a build carrying no vendor
+      key. Match it with errs.HasCode: it is the one refusal a retry never fixes.
+    items:
+      - name: CodeNoVendorKey
+        type: errs.Code
+        value: coreupd.CodeNoVendorKey
+    name: CodeNoVendorKey
+  - doc: CodeSignatureMissing identifies a release whose manifest signature was absent.
+    items:
+      - name: CodeSignatureMissing
+        type: errs.Code
+        value: coreupd.CodeSignatureMissing
+    name: CodeSignatureMissing
+  - doc: |-
+      CodeSignatureInvalid identifies a manifest signature that did not verify. With
+      CodeSignatureMissing it is the supply-chain pair: no retry helps, and no manual
+      install is safe.
+    items:
+      - name: CodeSignatureInvalid
+        type: errs.Code
+        value: coreupd.CodeSignatureInvalid
+    name: CodeSignatureInvalid
+  - doc: |-
+      CodeChecksumMissing identifies an archive with no entry in the authenticated
+      manifest.
+    items:
+      - name: CodeChecksumMissing
+        type: errs.Code
+        value: coreupd.CodeChecksumMissing
+    name: CodeChecksumMissing
+  - doc: |-
+      CodeChecksumMismatch identifies an archive whose digest did not match its
+      authenticated manifest entry.
+    items:
+      - name: CodeChecksumMismatch
+        type: errs.Code
+        value: coreupd.CodeChecksumMismatch
+    name: CodeChecksumMismatch
+  - doc: CodeArchiveTooLarge identifies a release archive over the in-memory cap.
+    items:
+      - name: CodeArchiveTooLarge
+        type: errs.Code
+        value: coreupd.CodeArchiveTooLarge
+    name: CodeArchiveTooLarge
+  - doc: CodeAPIBodyTooLarge identifies release metadata over its read cap.
+    items:
+      - name: CodeAPIBodyTooLarge
+        type: errs.Code
+        value: coreupd.CodeAPIBodyTooLarge
+    name: CodeAPIBodyTooLarge
+  - doc: CodeInsecureRedirect identifies a redirect leaving HTTPS or over the hop bound.
+    items:
+      - name: CodeInsecureRedirect
+        type: errs.Code
+        value: coreupd.CodeInsecureRedirect
+    name: CodeInsecureRedirect
+  - doc: CodeUnexpectedStatus identifies an unusable status from the release host.
+    items:
+      - name: CodeUnexpectedStatus
+        type: errs.Code
+        value: coreupd.CodeUnexpectedStatus
+    name: CodeUnexpectedStatus
+  - doc: |-
+      CodeDownloadFailed identifies a download that did not complete. It is the
+      transient one: a retry is reasonable.
+    items:
+      - name: CodeDownloadFailed
+        type: errs.Code
+        value: coreupd.CodeDownloadFailed
+    name: CodeDownloadFailed
+  - doc: CodeDevBuild identifies a check on a build with no release version.
+    items:
+      - name: CodeDevBuild
+        type: errs.Code
+        value: coreupd.CodeDevBuild
+    name: CodeDevBuild
+  - doc: CodeCandidateNotFound identifies a requested candidate that does not exist.
+    items:
+      - name: CodeCandidateNotFound
+        type: errs.Code
+        value: coreupd.CodeCandidateNotFound
+    name: CodeCandidateNotFound
+  - doc: CodeNotPrerelease identifies a tag requested as a candidate that is stable.
+    items:
+      - name: CodeNotPrerelease
+        type: errs.Code
+        value: coreupd.CodeNotPrerelease
+    name: CodeNotPrerelease
+  - doc: CodeDraftRelease identifies a draft release, which exposes no asset.
+    items:
+      - name: CodeDraftRelease
+        type: errs.Code
+        value: coreupd.CodeDraftRelease
+    name: CodeDraftRelease
+  - doc: CodeInvalidTag identifies a tag that is not a valid semantic version.
+    items:
+      - name: CodeInvalidTag
+        type: errs.Code
+        value: coreupd.CodeInvalidTag
+    name: CodeInvalidTag
+  - doc: CodeBinaryNotInArchive identifies a verified archive missing the binary.
+    items:
+      - name: CodeBinaryNotInArchive
+        type: errs.Code
+        value: coreupd.CodeBinaryNotInArchive
+    name: CodeBinaryNotInArchive
+  - doc: CodeUnknownArchive identifies an asset in an unhandled container format.
+    items:
+      - name: CodeUnknownArchive
+        type: errs.Code
+        value: coreupd.CodeUnknownArchive
+    name: CodeUnknownArchive
+  - doc: |-
+      CodeElevationNotAuthorised identifies a replacement needing privilege the
+      operator did not opt into. Recoverable, but only through the opt-in.
+    items:
+      - name: CodeElevationNotAuthorised
+        type: errs.Code
+        value: coreupd.CodeElevationNotAuthorised
+    name: CodeElevationNotAuthorised
+  - doc: |-
+      CodeCandidateTagRequired identifies a candidate install asked for without
+      naming which candidate. It wraps errors.ErrUnsupported, so a caller matching
+      that instead still matches.
+    items:
+      - name: CodeCandidateTagRequired
+        type: errs.Code
+        value: svcupd.CodeCandidateTagRequired
+    name: CodeCandidateTagRequired
+  - doc: |-
+      CodeReleaseMetadataUnreadable identifies a release-API answer that arrived
+      whole and did not decode. The bytes came, so no transport retry applies.
+    items:
+      - name: CodeReleaseMetadataUnreadable
+        type: errs.Code
+        value: svcupd.CodeReleaseMetadataUnreadable
+    name: CodeReleaseMetadataUnreadable
+  - doc: |-
+      CodeArchiveUnreadable identifies a release archive that would not unpack. It
+      is raised only AFTER the signature and digest have both verified, so it is a
+      packaging or transfer fault and never a supply-chain signal.
+    items:
+      - name: CodeArchiveUnreadable
+        type: errs.Code
+        value: svcupd.CodeArchiveUnreadable
+    name: CodeArchiveUnreadable
+  - doc: |-
+      CodeExecutablePathUnresolved identifies an update that cannot name the file
+      it would replace. Nothing is attempted after it.
+    items:
+      - name: CodeExecutablePathUnresolved
+        type: errs.Code
+        value: svcupd.CodeExecutablePathUnresolved
+    name: CodeExecutablePathUnresolved
+  - doc: |-
+      CodeStagingFailed identifies a replacement that failed BEFORE the rename, so
+      the running binary is byte-for-byte as it was. That is the whole difference
+      between this and CodeReplacementFailed, and it is the fact an operator needs.
+    items:
+      - name: CodeStagingFailed
+        type: errs.Code
+        value: svcupd.CodeStagingFailed
+    name: CodeStagingFailed
+  - doc: |-
+      CodeReplacementFailed identifies a rename over the running executable that did
+      not land.
+    items:
+      - name: CodeReplacementFailed
+        type: errs.Code
+        value: svcupd.CodeReplacementFailed
+    name: CodeReplacementFailed
+  - doc: |-
+      CodeElevationFailed identifies an escalation the operator DID authorise and
+      that the system refused anyway. Unlike CodeElevationNotAuthorised, no
+      environment variable repairs it.
+    items:
+      - name: CodeElevationFailed
+        type: errs.Code
+        value: svcupd.CodeElevationFailed
+    name: CodeElevationFailed
+  - doc: |-
+      CodeProbeFailed identifies a replacement whose new binary did not answer the
+      probe the product declared with Service.WithProbe; the previous binary is put
+      back from <binary>.prev when it was kept (ADR 0150).
+    items:
+      - name: CodeProbeFailed
+        type: errs.Code
+        value: svcupd.CodeProbeFailed
+    name: CodeProbeFailed
+  - doc: |-
+      CandidateListSentinel is the tag value meaning "list the candidates rather
+      than install one".
+
+      It exists because a CLI flag taking an optional value has to spell "the flag
+      was given without a value" AS a value. A caller wires it into its own flag
+      definition, so the sentinel has to be reachable from outside the package that
+      consumes it.
+    items:
+      - name: CandidateListSentinel
+        type: string
+        value: svcupd.CandidateListSentinel
+    name: CandidateListSentinel
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - CodeNoVendorKey
+      - CodeSignatureMissing
+      - CodeSignatureInvalid
+      - CodeChecksumMissing
+      - CodeChecksumMismatch
+      - CodeArchiveTooLarge
+      - CodeAPIBodyTooLarge
+      - CodeInsecureRedirect
+      - CodeUnexpectedStatus
+      - CodeDownloadFailed
+      - CodeDevBuild
+      - CodeCandidateNotFound
+      - CodeNotPrerelease
+      - CodeDraftRelease
+      - CodeInvalidTag
+      - CodeBinaryNotInArchive
+      - CodeUnknownArchive
+      - CodeElevationNotAuthorised
+      - CodeCandidateTagRequired
+      - CodeReleaseMetadataUnreadable
+      - CodeArchiveUnreadable
+      - CodeExecutablePathUnresolved
+      - CodeStagingFailed
+      - CodeReplacementFailed
+      - CodeElevationFailed
+      - CodeProbeFailed
+      - CandidateListSentinel
+      - NoVendorKey
+      - Getter
+      - FileSystem
+      - Copier
+      - Update
+      - Candidate
+      - Source
+      - Service
+      - New
+      - NewWithDeps
+      - StdinIsTerminal
+    name: selfupdate.go
+functions:
+  - name: New
+    params: version string, src Source
+    results: "*Service"
+  - name: NewWithDeps
+    params: version string, src Source, client Getter, fs FileSystem, copier Copier
+    results: "*Service"
+  - name: StdinIsTerminal
+    results: bool
+imports:
+  coreupd: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  svcupd: github.com/kitsunium/sdk/framework/internal/service/selfupdate
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/selfupdate
+  name: selfupdate
+  purpose: Package selfupdate replaces the running binary with a newer signed release.
+types:
+  - alias: true
+    doc: Getter performs the HTTP GETs a self-update needs. It aliases the core port.
+    kind: alias
+    name: Getter
+    underlying: coreupd.Getter
+  - alias: true
+    doc: |-
+      FileSystem is the disk half of replacing a running binary. It aliases the core
+      port.
+    kind: alias
+    name: FileSystem
+    underlying: coreupd.FileSystem
+  - alias: true
+    doc: |-
+      Copier streams the verified archive to its destination. It aliases the core
+      port.
+    kind: alias
+    name: Copier
+    underlying: coreupd.Copier
+  - alias: true
+    doc: |-
+      Update is the outcome of a version check or an install. It aliases the core
+      value type.
+    kind: alias
+    name: Update
+    underlying: svcupd.UpdateValue
+  - alias: true
+    doc: Candidate is one release candidate. It aliases the core value type.
+    kind: alias
+    name: Candidate
+    underlying: svcupd.CandidateValue
+  - alias: true
+    doc: |-
+      Source says where releases come from and what they are called. It aliases the
+      service type: these are one engine's construction parameters, which ADR 0074
+      places with the engine rather than in the contract layer.
+    kind: alias
+    name: Source
+    underlying: svcupd.SourceValue
+  - alias: true
+    doc: |-
+      Service replaces the running binary with a newer signed release. It aliases
+      the service type — the engine handle, per ADR 0074.
+    kind: alias
+    name: Service
+    underlying: svcupd.Service
+vars:
+  - doc: |-
+      The sentinels a caller matches with errors.Is, one for each of the codes
+      above.
+
+      A facade that publishes a code and withholds the value it identifies is half
+      a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+      write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+      programs actually use and the only one that composes with errors.Join. PR
+      #184 fixed exactly this shape in the entitlement facade; lock, cache and
+      authz already publish theirs. This package was the outlier.
+
+      They are values rather than type aliases because a sentinel IS a value —
+      there is nothing to alias. The declared type is left off so each keeps its
+      *errs.Error, which is what lock and cache do, and what lets a caller reach
+      Code(), Public() and ExitCode() without a second lookup. Matching works
+      either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+      freshly wrapped error of the same identity and not merely the same pointer.
+    grouped: true
+    items:
+      - doc: |-
+          NoVendorKey is returned when the running build carries no vendor key,
+          so nothing could have authenticated the release. A REFUSAL, not a
+          degradation: there is no weaker check to fall back to.
+        name: NoVendorKey
+        value: coreupd.NoVendorKey
+      - doc: |-
+          SignatureMissing is returned when the detached signature over the
+          checksum manifest could not be fetched. An unsigned release is never
+          installed and no environment variable reopens that.
+        name: SignatureMissing
+        value: coreupd.SignatureMissing
+      - doc: |-
+          SignatureInvalid is returned when the manifest's signature does not
+          verify against the vendor key. With SignatureMissing it is the
+          supply-chain pair: no retry helps and no manual install is safe.
+        name: SignatureInvalid
+        value: coreupd.SignatureInvalid
+      - doc: |-
+          ChecksumMissing is returned when the authenticated manifest has no entry
+          for the archive being installed.
+        name: ChecksumMissing
+        value: coreupd.ChecksumMissing
+      - doc: |-
+          ChecksumMismatch is returned when the archive's digest does not match
+          its authenticated manifest entry — a corrupted download, or a release
+          whose assets changed after it was signed.
+        name: ChecksumMismatch
+        value: coreupd.ChecksumMismatch
+      - doc: |-
+          ArchiveTooLarge is returned when a release archive exceeds the size cap,
+          which exists because the bytes are buffered before anything has vouched
+          for them. It is also what an oversized checksums.txt raises, deliberately
+          — a truncated manifest fails signature verification, and reporting a size
+          problem as a supply-chain one is the worst advice this package can give.
+        name: ArchiveTooLarge
+        value: coreupd.ArchiveTooLarge
+      - doc: |-
+          APIBodyTooLarge is returned when a release-metadata response exceeds its
+          read cap.
+        name: APIBodyTooLarge
+        value: coreupd.APIBodyTooLarge
+      - doc: |-
+          InsecureRedirect is returned when a redirect leaves HTTPS or exceeds the
+          hop bound. Following it would hand the archive fetch to a plaintext hop.
+        name: InsecureRedirect
+        value: coreupd.InsecureRedirect
+      - doc: |-
+          UnexpectedStatus is returned when the release host answers with a status
+          the update path does not accept. Retryable.
+        name: UnexpectedStatus
+        value: coreupd.UnexpectedStatus
+      - doc: |-
+          DownloadFailed is returned when a download does not complete, including
+          a transport failure with no HTTP status at all. It is the sentinel a
+          retry policy keys on.
+        name: DownloadFailed
+        value: coreupd.DownloadFailed
+      - doc: |-
+          DevBuild is returned when a version check runs on a build carrying no
+          release version, so there is nothing to compare a release against. It is
+          an ANSWER rather than a fault — CheckForUpdate on a `go build` binary
+          reaches it every time — which is why ExplainUpgradeFailure has no case
+          for it: "rebuild from source" is NoVendorKey's advice, not this one's.
+        name: DevBuild
+        value: coreupd.DevBuild
+      - doc: |-
+          CandidateNotFound is returned when a requested release candidate does
+          not exist.
+        name: CandidateNotFound
+        value: coreupd.CandidateNotFound
+      - doc: |-
+          NotPrerelease is returned when a tag requested as a candidate is
+          reported as a stable release.
+        name: NotPrerelease
+        value: coreupd.NotPrerelease
+      - doc: DraftRelease is returned for a draft release, which exposes no asset.
+        name: DraftRelease
+        value: coreupd.DraftRelease
+      - doc: InvalidTag is returned for a tag that is not a valid semantic version.
+        name: InvalidTag
+        value: coreupd.InvalidTag
+      - doc: |-
+          BinaryNotInArchive is returned when a verified archive does not contain
+          the expected binary. The archive is authentic; it is a packaging fault
+          rather than an attack.
+        name: BinaryNotInArchive
+        value: coreupd.BinaryNotInArchive
+      - doc: |-
+          UnknownArchive is returned for an asset whose container format is not
+          handled.
+        name: UnknownArchive
+        value: coreupd.UnknownArchive
+      - doc: |-
+          ElevationNotAuthorised is returned when replacing the binary needs
+          privilege the operator did not opt into. Recoverable — but only through
+          the opt-in, which ExplainUpgradeFailure names.
+        name: ElevationNotAuthorised
+        value: coreupd.ElevationNotAuthorised
+      - doc: |-
+          CandidateTagRequired is returned by DownloadCandidate for an empty tag.
+          It wraps errors.ErrUnsupported, so a caller matching that instead still
+          matches.
+        name: CandidateTagRequired
+        value: svcupd.CandidateTagRequired
+      - doc: |-
+          ReleaseMetadataUnreadable is returned when the release API answers
+          within its cap and the body does not decode. The bytes arrived, so no
+          transport retry applies.
+        name: ReleaseMetadataUnreadable
+        value: svcupd.ReleaseMetadataUnreadable
+      - doc: |-
+          ArchiveUnreadable is returned when a release archive will not unpack. It
+          is raised only AFTER the signature and digest have both verified, so it
+          is a packaging or transfer fault and never a supply-chain signal.
+        name: ArchiveUnreadable
+        value: svcupd.ArchiveUnreadable
+      - doc: |-
+          ExecutablePathUnresolved is returned when the process cannot work out
+          which file on disk it runs from. Nothing is attempted after it.
+        name: ExecutablePathUnresolved
+        value: svcupd.ExecutablePathUnresolved
+      - doc: |-
+          StagingFailed is returned when the replacement failed BEFORE the rename,
+          so the running binary is byte-for-byte as it was. That is the whole
+          difference between this and ReplacementFailed.
+        name: StagingFailed
+        value: svcupd.StagingFailed
+      - doc: |-
+          ReplacementFailed is returned when the rename over the running
+          executable did not land.
+        name: ReplacementFailed
+        value: svcupd.ReplacementFailed
+      - doc: |-
+          ElevationFailed is returned when an escalation the operator DID
+          authorise was refused by the system. Unlike ElevationNotAuthorised, no
+          environment variable repairs it.
+        name: ElevationFailed
+        value: svcupd.ElevationFailed
+      - doc: |-
+          ProbeFailed is returned when the replaced binary did not answer its
+          probe; rolled_back says whether <binary>.prev was put back.
+        name: ProbeFailed
+        value: svcupd.ProbeFailed
+    name: NoVendorKey

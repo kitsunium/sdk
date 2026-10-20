@@ -1,0 +1,240 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*jsonCodec).Name
+    steps:
+      - return: "\"json\""
+  - of: (*jsonCodec).MIMETypes
+    steps:
+      - return: "[]string{\"application/json\", \"text/json\"}"
+  - of: (*jsonCodec).Extensions
+    steps:
+      - return: "[]string{\".json\"}"
+  - of: (*jsonCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonCodec).Marshal
+        kind: self
+      - id: marshalRawMessage
+        kind: internal
+      - id: stdjson
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: out, nil
+          init:
+            bind: out, ok
+            eval: marshalRawMessage(v)
+            to: marshalRawMessage
+          when: ok
+      - bind: out, jerr
+        eval: stdjson.Marshal(v)
+        to: stdjson
+      - opt:
+          do:
+            - return: out, nil
+          when: jerr == nil
+      - return: |-
+          nil, errs.Wrap(jerr, errs.WrapParams{
+          		Code:    corejson.CodeJSONMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "JSON encoding failed",
+          		Private: "service/data/codec/json.Marshal: encoding/json returned an error",
+          	})
+  - of: marshalRawMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalRawMessage
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - typeswitch:
+          bind: r
+          cases:
+            - do:
+                - opt:
+                    do:
+                      - return: "[]byte(\"null\"), true"
+                    when: len(r) == 0
+                - return: slices.Clone([]byte(r)), true
+                  to: slices
+              types: stdjson.RawMessage
+            - do:
+                - opt:
+                    do:
+                      - return: "[]byte(\"null\"), true"
+                    when: r == nil || len(*r) == 0
+                - return: slices.Clone([]byte(*r)), true
+                  to: slices
+              types: "*stdjson.RawMessage"
+            - default: true
+              do:
+                - return: nil, false
+          "on": v
+  - of: (*jsonCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonCodec).Unmarshal
+        kind: self
+      - id: stdjson
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: jerr
+        eval: stdjson.Unmarshal(data, v)
+        to: stdjson
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: |-
+          errs.Wrap(jerr, errs.WrapParams{
+          		Code:    corejson.CodeJSONUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "JSON decoding failed",
+          		Private: "service/data/codec/json.Unmarshal: encoding/json returned an error",
+          	})
+        to: errs
+  - of: (*jsonCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonCodec).Append
+        kind: self
+      - id: marshalRawMessage
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: stdjson
+        kind: stdlib
+      - id: enc.Encode
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: append(dst, out...), nil
+          init:
+            bind: out, ok
+            eval: marshalRawMessage(v)
+            to: marshalRawMessage
+          when: ok
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: enc
+        eval: stdjson.NewEncoder(buf)
+        to: stdjson
+      - bind: jerr
+        eval: enc.Encode(v)
+        to: enc.Encode
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                dst, errs.Wrap(jerr, errs.WrapParams{
+                			Code:    corejson.CodeJSONMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "JSON encoding failed",
+                			Private: "service/data/codec/json.Append: encoding/json returned an error",
+                		})
+          when: jerr != nil
+      - bind: encoded
+        eval: buf.Bytes()
+        to: buf.Bytes
+      - opt:
+          do:
+            - set: encoded
+              value: encoded[:n-1]
+          init:
+            bind: "n"
+            eval: len(encoded)
+          when: n > 0 && encoded[n-1] == '\n'
+      - set: dst
+        value: append(dst, encoded...)
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: dst, nil
+  - of: (*jsonCodec).NewEncoder
+    steps:
+      - return: "&jsonEncoder{inner: stdjson.NewEncoder(w)}"
+  - of: (*jsonCodec).NewDecoder
+    steps:
+      - return: "&jsonDecoder{inner: stdjson.NewDecoder(r)}"
+  - of: (*jsonDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonDecoder).Decode
+        kind: self
+      - id: d.inner.Decode
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: jerr
+        eval: d.inner.Decode(v)
+        to: d.inner.Decode
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: |-
+          errs.Wrap(jerr, errs.WrapParams{
+          		Code:    corejson.CodeJSONUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "JSON decoding failed",
+          		Private: "service/data/codec/json.Decoder.Decode: encoding/json returned an error",
+          	})
+        to: errs
+  - of: (*jsonDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonDecoder).More
+        kind: self
+      - id: d.inner.More
+        kind: value
+    steps:
+      - return: d.inner.More()
+        to: d.inner.More
+  - of: (*jsonEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonEncoder).Encode
+        kind: self
+      - id: e.inner.Encode
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: jerr
+        eval: e.inner.Encode(v)
+        to: e.inner.Encode
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: |-
+          errs.Wrap(jerr, errs.WrapParams{
+          		Code:    corejson.CodeJSONMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "JSON encoding failed",
+          		Private: "service/data/codec/json.Encoder.Encode: encoding/json returned an error",
+          	})
+        to: errs
+  - of: (*jsonEncoder).Close
+    steps:
+      - return: nil

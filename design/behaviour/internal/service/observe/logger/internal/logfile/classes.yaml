@@ -1,0 +1,87 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      KindSymlink is the value of the "kind" field both symlink refusals carry —
+      the policy one in RefuseSymlink and the kernel one ExplainOpenFailure
+      diagnoses. One sentinel per sink serves every open failure, so the field is
+      what lets a consumer tell "someone put a link at my log path" apart from a
+      full disk, at whichever of the two points caught it.
+    items:
+      - name: KindSymlink
+        type: string
+        value: "\"symlink\""
+    name: KindSymlink
+  - doc: The two field keys a refusal carries. Neither ever carries file content.
+    grouped: true
+    items:
+      - name: pathFieldKey
+        type: string
+        value: "\"path\""
+      - name: kindFieldKey
+        type: string
+        value: "\"kind\""
+    name: pathFieldKey
+  - doc: |-
+      openFlags is the OpenFile flag set Open uses. O_NOFOLLOW closes the TOCTOU
+      window between RefuseSymlink's os.Lstat and the open: with O_CREATE it
+      refuses a DANGLING link exactly as it refuses a live one, which matters
+      because the dangling one is the shape the attack takes — plant the link, let
+      the victim's O_CREATE make the file.
+
+      It governs the FINAL component only. A symbolic link at a PARENT component is
+      still traversed; that is the caller's own directory tree, and each sink's
+      "do NOT place the log file under an attacker-writable directory"
+      pre-condition is what covers it.
+    items:
+      - name: openFlags
+        type: int
+        value: os.O_APPEND | os.O_CREATE | os.O_WRONLY | syscall.O_NOFOLLOW
+    name: openFlags
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - KindSymlink
+      - pathFieldKey
+      - RefusalSpec
+      - Open
+      - RefuseSymlink
+      - ExplainOpenFailure
+    name: logfile.go
+  - decls:
+      - openFlags
+    name: open_flags_unix.go
+functions:
+  - name: Open
+    params: path string, perm os.FileMode, refusals *RefusalSpec
+    results: file *os.File, err error
+  - name: RefuseSymlink
+    params: path string, refusal *errs.WrapParams
+    results: error
+  - name: ExplainOpenFailure
+    params: path string, openErr error, refusal *errs.WrapParams
+    results: error
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  os: os
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile
+  name: logfile
+  purpose: "Package logfile is the hardened open both file sinks share: the append-only sink in internal/service/observe/logger/sink/file and the rotating one in internal/service/observe/logger/writer/rotfile, which re-runs it on every reopen after a rotation."
+types:
+  - fields:
+      - doc: |-
+          Symlink wraps the policy refusal: the final component is already a
+          symbolic link, so the open is never attempted.
+        name: Symlink
+        type: errs.WrapParams
+      - doc: |-
+          Open wraps a failed os.OpenFile — the kernel refusing a link planted
+          after the check among the causes, and a full disk among the others.
+        name: Open
+        type: errs.WrapParams
+    kind: struct
+    name: RefusalSpec

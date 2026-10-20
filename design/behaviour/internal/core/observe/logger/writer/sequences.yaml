@@ -1,0 +1,172 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewCredentialValue
+    steps:
+      - return: |-
+          CredentialValue{
+          		accessKeyID:     accessKeyID,
+          		secretAccessKey: secretAccessKey,
+          		sessionToken:    sessionToken,
+          	}
+  - of: CredentialValue.AccessKeyID
+    steps:
+      - return: c.accessKeyID
+  - of: CredentialValue.SecretAccessKey
+    steps:
+      - return: c.secretAccessKey
+  - of: CredentialValue.SessionToken
+    steps:
+      - return: c.sessionToken
+  - of: CredentialValue.String
+    steps:
+      - return: "\"<redacted>\""
+  - of: CredentialValue.GoString
+    steps:
+      - return: "\"<redacted>\""
+  - of: conflictText
+    participants:
+      - id: caller
+        kind: actor
+      - id: conflictText
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString(err.Error())
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(":")
+                    to: b.WriteString
+                when: i == 0
+            - eval: b.WriteString(" " + f.Key() + "=" + strconv.Quote(f.StringValue()))
+              to: b.WriteString
+          key: i
+          range: errs.FieldsOf(err)
+          value: f
+      - return: b.String()
+        to: b.String
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: plugin
+        kind: package
+      - id: f.Name
+        kind: internal
+      - id: publishFactory
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "fmt.Sprintf(\"writer.Register [%s WRITER_NIL]: %s\", CodeWriterNil, why)"
+          init:
+            bind: why
+            eval: plugin.Unusable(f)
+            to: plugin
+          when: why != ""
+      - bind: name
+        eval: f.Name()
+        to: f.Name
+      - opt:
+          do:
+            - panic: "fmt.Sprintf(\"writer.Register [%s WRITER_NAME_EMPTY]: empty Name\", CodeWriterNameEmpty)"
+          when: name == ""
+      - opt:
+          do:
+            - panic: conflictText(err)
+          init:
+            bind: err
+            eval: publishFactory(name, f)
+            to: publishFactory
+          when: err != nil
+      - return: f
+  - of: publishFactory
+    participants:
+      - id: caller
+        kind: actor
+      - id: publishFactory
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!registry.Publish(name, f)"
+      - return: |-
+          errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+          		errs.String("registrar", "writer.Register"), errs.String("name", string(name)))
+        to: errs
+  - of: Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lookup
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - return: registry.Lookup(n)
+        to: registry.Lookup
+  - of: Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: Open
+        kind: self
+      - id: Lookup
+        kind: internal
+      - id: factory.Open
+        kind: internal
+    steps:
+      - bind: factory, ok
+        eval: Lookup(n)
+        to: Lookup
+      - opt:
+          do:
+            - return: nil, WriterUnknownName
+          when: "!ok"
+      - return: factory.Open(cfg)
+        to: factory.Open
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: registry.Names
+        kind: value
+    steps:
+      - return: registry.Names()
+        to: registry.Names
+  - of: Name.String
+    steps:
+      - return: string(n)
+  - of: Name.Known
+    participants:
+      - id: caller
+        kind: actor
+      - id: Name.Known
+        kind: self
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: n == ""
+      - bind: _, found
+        eval: Lookup(n)
+        to: Lookup
+      - return: found

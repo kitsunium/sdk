@@ -1,0 +1,81 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Codec
+      - asn1Codec
+      - New
+      - (*asn1Codec).Name
+      - (*asn1Codec).MIMETypes
+      - (*asn1Codec).Extensions
+      - (*asn1Codec).Marshal
+      - (*asn1Codec).Append
+      - (*asn1Codec).Unmarshal
+    name: codec.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: New
+    results: codec.Codec
+imports:
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coreasn1: github.com/kitsunium/sdk/internal/core/data/codec/asn1
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  stdasn1: encoding/asn1
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/asn1
+  name: asn1
+  purpose: Package asn1 wraps encoding/asn1 as a codec.Codec implementation.
+types:
+  - doc: asn1Codec is the concrete Codec implementation for ASN.1 DER.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*asn1Codec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*asn1Codec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*asn1Codec"
+        results: "[]string"
+      - doc: Marshal encodes v into ASN.1 DER bytes.
+        name: Marshal
+        params: v any
+        recv: "*asn1Codec"
+        results: encoded []byte, err error
+      - doc: |-
+          Append encodes v as ASN.1 DER and appends the bytes to dst. Implements
+          the optional codec.Appender interface. Delegates to Marshal so the
+          wrap/error contract has a single source — stdlib encoding/asn1 lacks
+          a MarshalToBuffer-style direct-write API.
+        name: Append
+        params: dst []byte, v any
+        recv: c *asn1Codec
+        results: appended []byte, err error
+      - doc: |-
+          Unmarshal parses data as ASN.1 BER/DER into v. Trailing bytes past the
+          first decoded structure are accepted silently — this matches
+          encoding/asn1's own lenient contract and preserves compatibility with
+          callers that feed a known-sized prefix of a larger buffer. If strict
+          trailing-byte rejection becomes a requirement, add a dedicated
+          UnmarshalStrict helper rather than tightening this default.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*asn1Codec"
+        results: error
+    name: asn1Codec
+vars:
+  - doc: |-
+      Codec is the ASN.1 DER singleton, registered with core/data/codec at package load.
+      Binding the registration result to a named var is more idiomatic than
+      `var _ = codec.Register(...)` and keeps us clear of init().
+    items:
+      - name: Codec
+        type: codec.Codec
+        value: codec.Register(&asn1Codec{})
+    name: Codec

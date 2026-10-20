@@ -1,0 +1,96 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: algorithm is the canonical registry key for AES-256-GCM.
+        name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"aes-256-gcm\""
+      - doc: algID is the frozen 1-byte wire identifier embedded in each box header.
+        name: algID
+        type: byte
+        value: "0x01"
+      - doc: |-
+          nonceLen is GCM's standard 96-bit nonce; box layout is
+          [version][algID][12B nonce][ciphertext||tag].
+        name: nonceLen
+        type: int
+        value: "12"
+      - doc: headerLen is the fixed [version][algID] prefix length.
+        name: headerLen
+        type: int
+        value: "2"
+      - doc: gcmTagLen is the GCM authentication tag length appended by Seal.
+        name: gcmTagLen
+        type: int
+        value: "16"
+    name: algorithm
+files:
+  - decls:
+      - algorithm
+      - AEAD
+      - aesGCM
+      - aesGCM.Algorithm
+      - aesGCM.ID
+      - aesGCM.Seal
+      - aesGCM.Open
+      - newGCM
+    name: aesgcm.go
+  - decls: []
+    name: doc.go
+functions:
+  - doc: |-
+      newGCM builds the GCM cipher.AEAD from the raw key bytes. A key the cipher
+      rejects (it never should — Key is always KeyLen bytes) surfaces as the typed
+      InvalidKey. Takes []byte (not the Key) so the helper stays minimal.
+    name: newGCM
+    params: keyBytes []byte
+    results: gcm cipher.AEAD, err error
+imports:
+  aes: crypto/aes
+  cipher: crypto/cipher
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  rand: crypto/rand
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm
+  name: aesgcm
+  purpose: Package aesgcm registers the "aes-256-gcm" AEAD scheme (ADR 0013).
+types:
+  - doc: aesGCM implements core/crypto.AEAD over crypto/cipher's GCM mode.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: aesGCM
+        results: corecrypto.Algorithm
+      - doc: ID reports the frozen wire identifier used for Open dispatch.
+        name: ID
+        recv: aesGCM
+        results: byte
+      - doc: |-
+          Seal encrypts plaintext under key, binding aad, and returns the self-framed
+          box with a fresh random nonce. The only realistic failure is a host entropy
+          fault from crypto/rand.
+        name: Seal
+        params: key corecrypto.Key, plaintext, aad []byte
+        recv: aesGCM
+        results: box []byte, err error
+      - doc: |-
+          Open validates the framing, decrypts, and verifies aad. Every failure returns
+          the shared non-oracle DecryptionFailed so this scheme cannot become an oracle.
+        name: Open
+        params: key corecrypto.Key, box, aad []byte
+        recv: aesGCM
+        results: plaintext []byte, err error
+    name: aesGCM
+vars:
+  - doc: |-
+      AEAD is the registered AES-256-GCM scheme singleton (no init(); package-level
+      var initialiser, mirroring the codec convention).
+    items:
+      - name: AEAD
+        value: corecrypto.Register(aesGCM{})
+    name: AEAD

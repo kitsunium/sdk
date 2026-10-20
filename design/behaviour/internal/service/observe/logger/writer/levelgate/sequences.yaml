@@ -1,0 +1,54 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - opt:
+          do:
+            - return: inner
+          when: min == level.Info
+      - return: "&gateSink{inner: inner, min: min}"
+  - of: Floor
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: inner == nil
+      - return: "&gateSink{inner: inner, min: min}"
+  - of: (*gateSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gateSink).Write
+        kind: self
+      - id: s.inner.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: len(p), nil
+          when: r.Level < s.min
+      - return: s.inner.Write(ctx, r, p)
+        to: s.inner.Write
+  - of: (*gateSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gateSink).Flush
+        kind: self
+      - id: s.inner.Flush
+        kind: value
+    steps:
+      - return: s.inner.Flush(ctx)
+        to: s.inner.Flush
+  - of: (*gateSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gateSink).Close
+        kind: self
+      - id: s.inner.Close
+        kind: value
+    steps:
+      - return: s.inner.Close()
+        to: s.inner.Close

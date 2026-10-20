@@ -1,0 +1,1134 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: buildBase45Reverse
+    steps:
+      - var:
+          name: table
+          type: "[base45TableSize]int"
+      - loop:
+          do:
+            - set: table[i]
+              value: base45NotMember
+          key: i
+          range: table
+      - loop:
+          do:
+            - set: table[base45Alphabet[i]]
+              value: i
+          key: i
+          range: base45Alphabet
+      - return: table
+  - of: encodeBase45
+    steps:
+      - bind: out
+        eval: make([]byte, 0, (len(raw)/base45PairBytes)*base45GroupChars+base45TailChars)
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i+1 < len(raw)
+          do:
+            - bind: "n"
+              eval: int(raw[i])<<base45HighShift | int(raw[i+1])
+            - set: out
+              value: append(out, base45Alphabet[n%base45Radix])
+            - set: out
+              value: append(out, base45Alphabet[(n/base45Radix)%base45Radix])
+            - set: out
+              value: append(out, base45Alphabet[n/base45RadixSq])
+          post: i += base45PairBytes
+      - opt:
+          do:
+            - bind: "n"
+              eval: int(raw[i])
+            - set: out
+              value: append(out, base45Alphabet[n%base45Radix])
+            - set: out
+              value: append(out, base45Alphabet[n/base45Radix])
+          when: i < len(raw)
+      - return: out
+  - of: decodeBase45
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeBase45
+        kind: self
+      - id: base45Triple
+        kind: internal
+      - id: base45Pair
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: len(s)%base45GroupChars == 1
+      - bind: out
+        eval: make([]byte, 0, (len(s)/base45GroupChars)*base45PairBytes+1)
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i+base45TailChars < len(s)
+          do:
+            - bind: n, valOK
+              eval: base45Triple(s[i], s[i+1], s[i+base45GroupChars-1])
+              to: base45Triple
+            - opt:
+                do:
+                  - return: nil, false
+                when: "!valOK || n > base45MaxPair"
+            - set: out
+              value: append(out, byte(n>>base45HighShift), byte(n))
+          post: i += base45GroupChars
+      - opt:
+          do:
+            - bind: n, valOK
+              eval: base45Pair(s[i], s[i+1])
+              to: base45Pair
+            - opt:
+                do:
+                  - return: nil, false
+                when: "!valOK || n > base45MaxSingle"
+            - set: out
+              value: append(out, byte(n))
+          when: i < len(s)
+      - return: out, true
+  - of: base45Triple
+    steps:
+      - bind: d0, d1, d2
+        eval: base45Reverse[c0], base45Reverse[c1], base45Reverse[c2]
+      - opt:
+          do:
+            - return: 0, false
+          when: d0 == base45NotMember || d1 == base45NotMember || d2 == base45NotMember
+      - return: d0 + d1*base45Radix + d2*base45RadixSq, true
+  - of: base45Pair
+    steps:
+      - bind: d0, d1
+        eval: base45Reverse[c0], base45Reverse[c1]
+      - opt:
+          do:
+            - return: 0, false
+          when: d0 == base45NotMember || d1 == base45NotMember
+      - return: d0 + d1*base45Radix, true
+  - of: buildReverseTable
+    steps:
+      - var:
+          name: table
+          type: "[base45TableSize]int"
+      - loop:
+          do:
+            - set: table[i]
+              value: base45NotMember
+          key: i
+          range: table
+      - loop:
+          do:
+            - set: table[alphabet[i]]
+              value: i
+          key: i
+          range: alphabet
+      - return: table
+  - of: divmodInPlace
+    steps:
+      - bind: rem
+        eval: "0"
+      - loop:
+          do:
+            - bind: acc
+              eval: rem*byteBase + int(buf[i])
+            - set: buf[i]
+              value: byte(acc / radix)
+            - set: rem
+              value: acc % radix
+          key: i
+          range: buf
+      - return: rem
+  - of: trimLeadingZeros
+    steps:
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i < len(b) && b[i] == 0
+          do:
+            - op: ++
+              set: i
+      - return: b[i:]
+  - of: mulAddWindow
+    steps:
+      - bind: carry
+        eval: add
+      - loop:
+          cond: i >= start
+          do:
+            - bind: acc
+              eval: int(mag[i])*radix + carry
+            - set: mag[i]
+              value: byte(acc)
+            - set: carry
+              value: acc / byteBase
+          init: i := len(mag) - 1
+          post: i--
+      - loop:
+          cond: carry > 0
+          do:
+            - op: "--"
+              set: start
+            - set: mag[start]
+              value: byte(carry)
+            - op: /=
+              set: carry
+              value: byteBase
+      - return: start
+  - of: encodeBaseN
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeBaseN
+        kind: self
+      - id: trimLeadingZeros
+        kind: internal
+      - id: assembleBaseN
+        kind: internal
+    steps:
+      - bind: zeros
+        eval: "0"
+      - loop:
+          cond: zeros < len(raw) && raw[zeros] == 0
+          do:
+            - op: ++
+              set: zeros
+      - bind: buf
+        eval: make([]byte, len(raw)-zeros)
+      - eval: copy(buf, raw[zeros:])
+      - bind: digits
+        eval: make([]byte, 0, len(raw)*base45PairBytes)
+      - loop:
+          cond: len(buf) > 0
+          do:
+            - set: digits
+              value: append(digits, alphabet[divmodInPlace(buf, radix)])
+            - set: buf
+              to: trimLeadingZeros
+              value: trimLeadingZeros(buf)
+      - return: assembleBaseN(alphabet[0], zeros, digits)
+        to: assembleBaseN
+  - of: assembleBaseN
+    participants:
+      - id: caller
+        kind: actor
+      - id: assembleBaseN
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]byte, 0, zeros+len(digits))
+      - loop:
+          do:
+            - set: out
+              value: append(out, zeroChar)
+          range: zeros
+      - set: out
+        value: append(out, digits...)
+      - eval: slices.Reverse(out[zeros:])
+        to: slices
+      - return: out
+  - of: decodeBaseN
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeBaseN
+        kind: self
+      - id: mulAddWindow
+        kind: internal
+      - id: assembleDecoded
+        kind: internal
+    steps:
+      - bind: zeros
+        eval: "0"
+      - loop:
+          cond: zeros < len(s) && reverse[s[zeros]] == 0
+          do:
+            - op: ++
+              set: zeros
+      - bind: mag
+        eval: make([]byte, len(s))
+      - bind: start
+        eval: len(mag)
+      - loop:
+          do:
+            - bind: digit
+              eval: reverse[c]
+            - opt:
+                do:
+                  - return: nil, false
+                when: digit == base45NotMember
+            - set: start
+              to: mulAddWindow
+              value: mulAddWindow(mag, start, radix, digit)
+          key: _
+          range: s
+          value: c
+      - return: assembleDecoded(zeros, mag[start:]), true
+        to: assembleDecoded
+  - of: assembleDecoded
+    steps:
+      - bind: out
+        eval: make([]byte, 0, zeros+len(buf))
+      - loop:
+          do:
+            - set: out
+              value: append(out, 0)
+          range: zeros
+      - return: append(out, buf...)
+  - of: (*bufferingWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bufferingWriter).Write
+        kind: self
+      - id: b.buf.Write
+        kind: value
+    steps:
+      - return: b.buf.Write(p)
+        to: b.buf.Write
+  - of: (*bufferingWriter).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bufferingWriter).Close
+        kind: self
+      - id: convSizeExceeded
+        kind: internal
+      - id: b.codec.encodeBytes
+        kind: internal
+      - id: b.dst.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "convSizeExceeded(\"service/data/codec/baseenc.bufferingWriter.Close: base-conversion buffered input exceeds maxConvBytes\")"
+              to: convSizeExceeded
+          when: isBaseConversion(b.codec.variant) && b.buf.Len() > maxConvBytes
+      - bind: encoded
+        eval: b.codec.encodeBytes(b.buf.Bytes())
+        to: b.codec.encodeBytes
+      - bind: n, werr
+        eval: b.dst.Write(encoded)
+        to: b.dst.Write
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(werr, errs.WrapParams{
+                			Code:    corebaseenc.CodeBaseEncMarshalFailed,
+                			Reason:  "BASE_ENC_MARSHAL_FAILED",
+                			Public:  "base-N encoding failed",
+                			Private: "service/data/codec/baseenc.bufferingWriter.Close: underlying writer returned an error",
+                		}, errs.String("wrote", strconv.Itoa(n)), errs.String("want", strconv.Itoa(len(encoded))))
+              to: errs
+          when: werr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(io.ErrShortWrite, errs.WrapParams{
+                			Code:    corebaseenc.CodeBaseEncMarshalFailed,
+                			Reason:  "BASE_ENC_MARSHAL_FAILED",
+                			Public:  "base-N encoding failed",
+                			Private: "service/data/codec/baseenc.bufferingWriter.Close: short write of encoded payload",
+                		}, errs.String("wrote", strconv.Itoa(n)), errs.String("want", strconv.Itoa(len(encoded))))
+              to: errs
+          when: n < len(encoded)
+      - return: nil
+  - of: isBaseConversion
+    steps:
+      - return: v == variantBase58 || v == variantBase62
+  - of: (*baseencCodec).convAlphabet
+    steps:
+      - opt:
+          do:
+            - return: base58Alphabet
+          when: c.variant == variantBase58
+      - return: base62Alphabet
+  - of: (*baseencCodec).convRadix
+    steps:
+      - opt:
+          do:
+            - return: base58Radix
+          when: c.variant == variantBase58
+      - return: base62Radix
+  - of: (*baseencCodec).convReverse
+    steps:
+      - opt:
+          do:
+            - return: "&base58Reverse"
+          when: c.variant == variantBase58
+      - return: "&base62Reverse"
+  - of: (*baseencCodec).Name
+    steps:
+      - return: c.spec().name
+  - of: (*baseencCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(c.spec().mimeTypes)
+        to: slices
+  - of: (*baseencCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(c.spec().extensions)
+        to: slices
+  - of: (*baseencCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).Marshal
+        kind: self
+      - id: marshalJSONPooled
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: c.encodeBytes
+        kind: internal
+    steps:
+      - bind: jsonBytes, buf, merr
+        eval: marshalJSONPooled(v)
+        to: marshalJSONPooled
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(merr, errs.WrapParams{
+                			Code:    corebaseenc.CodeBaseEncMarshalFailed,
+                			Reason:  "BASE_ENC_MARSHAL_FAILED",
+                			Public:  "base-N encoding failed",
+                			Private: "service/data/codec/baseenc.Marshal: encoding/json.Marshal returned an error",
+                		})
+          when: merr != nil
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: "nil, convSizeExceeded(\"service/data/codec/baseenc.Marshal: base-conversion input exceeds maxConvBytes\")"
+          when: isBaseConversion(c.variant) && len(jsonBytes) > maxConvBytes
+      - bind: out
+        eval: c.encodeBytes(jsonBytes)
+        to: c.encodeBytes
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: out, nil
+  - of: marshalJSONPooled
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalJSONPooled
+        kind: self
+      - id: scratch
+        kind: package
+      - id: stdjson
+        kind: stdlib
+      - id: enc.Encode
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - set: buf
+        to: scratch
+        value: scratch.AcquireBuffer()
+      - bind: enc
+        eval: stdjson.NewEncoder(buf)
+        to: stdjson
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: nil, nil, merr
+          init:
+            bind: merr
+            eval: enc.Encode(v)
+            to: enc.Encode
+          when: merr != nil
+      - bind: b
+        eval: buf.Bytes()
+        to: buf.Bytes
+      - opt:
+          do:
+            - set: b
+              value: b[:n-1]
+          init:
+            bind: "n"
+            eval: len(b)
+          when: n > 0 && b[n-1] == '\n'
+      - return: b, buf, nil
+  - of: (*baseencCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).Unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: convSizeExceeded
+        kind: internal
+      - id: c.decodeBytes
+        kind: internal
+      - id: stdjson
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corebaseenc.CodeBaseEncSizeExceeded,
+                			Reason:  "BASE_ENC_SIZE_EXCEEDED",
+                			Public:  "base-N input exceeds size limit",
+                			Private: "service/data/codec/baseenc.Unmarshal: len(data) > maxBaseEncBytes",
+                		})
+              to: errs
+          when: len(data) > maxBaseEncBytes
+      - opt:
+          do:
+            - return: "convSizeExceeded(\"service/data/codec/baseenc.Unmarshal: base-conversion input exceeds maxConvEncodedBytes\")"
+              to: convSizeExceeded
+          when: isBaseConversion(c.variant) && len(data) > maxConvEncodedBytes
+      - bind: jsonBytes, derr
+        eval: c.decodeBytes(data)
+        to: c.decodeBytes
+      - opt:
+          do:
+            - return: derr
+          when: derr != nil
+      - bind: uerr
+        eval: stdjson.Unmarshal(jsonBytes, v)
+        to: stdjson
+      - opt:
+          do:
+            - return: nil
+          when: uerr == nil
+      - return: |-
+          errs.Wrap(uerr, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncUnmarshalFailed,
+          		Reason:  "BASE_ENC_UNMARSHAL_FAILED",
+          		Public:  "base-N decoding failed",
+          		Private: "service/data/codec/baseenc.Unmarshal: encoding/json.Unmarshal returned an error",
+          	})
+        to: errs
+  - of: (*baseencCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).Append
+        kind: self
+      - id: marshalJSONPooled
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: c.appendEncode
+        kind: internal
+    steps:
+      - bind: origLen
+        eval: len(dst)
+      - bind: jsonBytes, buf, merr
+        eval: marshalJSONPooled(v)
+        to: marshalJSONPooled
+      - opt:
+          do:
+            - return: |-
+                dst[:origLen], errs.Wrap(merr, errs.WrapParams{
+                			Code:    corebaseenc.CodeBaseEncMarshalFailed,
+                			Reason:  "BASE_ENC_MARSHAL_FAILED",
+                			Public:  "base-N encoding failed",
+                			Private: "service/data/codec/baseenc.Append: encoding/json.Marshal returned an error",
+                		})
+          when: merr != nil
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: "dst[:origLen], convSizeExceeded(\"service/data/codec/baseenc.Append: base-conversion input exceeds maxConvBytes\")"
+          when: isBaseConversion(c.variant) && len(jsonBytes) > maxConvBytes
+      - bind: out
+        eval: c.appendEncode(dst, jsonBytes)
+        to: c.appendEncode
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: out, nil
+  - of: (*baseencCodec).NewEncoder
+    steps:
+      - return: |-
+          &baseencEncoder{
+          		base: c.streamWriter(w),
+          	}
+  - of: (*baseencCodec).NewDecoder
+    steps:
+      - return: |-
+          &baseencDecoder{
+          		src: r,
+          		v:   c.variant,
+          	}
+  - of: (*baseencCodec).encodeBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).encodeBytes
+        kind: self
+      - id: base64.StdEncoding.Encode
+        kind: value
+      - id: base64.URLEncoding.Encode
+        kind: value
+      - id: base32.StdEncoding.Encode
+        kind: value
+      - id: encodeHex
+        kind: internal
+      - id: ascii85
+        kind: stdlib
+      - id: encodeBase45
+        kind: internal
+      - id: encodeBaseN
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: variantBase64
+              do:
+                - bind: encoded
+                  eval: make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
+                - eval: base64.StdEncoding.Encode(encoded, raw)
+                  to: base64.StdEncoding.Encode
+                - return: encoded
+            - case: variantBase64URL
+              do:
+                - bind: encoded
+                  eval: make([]byte, base64.URLEncoding.EncodedLen(len(raw)))
+                - eval: base64.URLEncoding.Encode(encoded, raw)
+                  to: base64.URLEncoding.Encode
+                - return: encoded
+            - case: variantBase32
+              do:
+                - bind: encoded
+                  eval: make([]byte, base32.StdEncoding.EncodedLen(len(raw)))
+                - eval: base32.StdEncoding.Encode(encoded, raw)
+                  to: base32.StdEncoding.Encode
+                - return: encoded
+            - case: variantBase16, variantHex
+              do:
+                - return: encodeHex(c.variant, raw)
+                  to: encodeHex
+            - case: variantASCII85
+              do:
+                - bind: buf
+                  eval: make([]byte, ascii85.MaxEncodedLen(len(raw)))
+                - bind: "n"
+                  eval: ascii85.Encode(buf, raw)
+                  to: ascii85
+                - return: buf[:n]
+            - case: variantBase45
+              do:
+                - return: encodeBase45(raw)
+                  to: encodeBase45
+            - case: variantBase58, variantBase62
+              do:
+                - return: encodeBaseN(raw, c.convAlphabet(), c.convRadix())
+                  to: encodeBaseN
+          "on": c.variant
+      - return: nil
+  - of: (*baseencCodec).decodeBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).decodeBytes
+        kind: self
+      - id: wrapDecode
+        kind: internal
+      - id: decodeASCII85
+        kind: internal
+      - id: wrapMalformed
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: variantBase64
+              do:
+                - return: wrapDecode(base64.StdEncoding.AppendDecode(nil, data))
+                  to: wrapDecode
+            - case: variantBase64URL
+              do:
+                - return: wrapDecode(base64.URLEncoding.AppendDecode(nil, data))
+                  to: wrapDecode
+            - case: variantBase32
+              do:
+                - return: wrapDecode(base32.StdEncoding.AppendDecode(nil, data))
+                  to: wrapDecode
+            - case: variantBase16, variantHex
+              do:
+                - return: wrapDecode(hex.AppendDecode(nil, data))
+                  to: wrapDecode
+            - case: variantASCII85
+              do:
+                - return: decodeASCII85(data)
+                  to: decodeASCII85
+            - case: variantBase45
+              do:
+                - return: wrapMalformed(decodeBase45(data))
+                  to: wrapMalformed
+            - case: variantBase58, variantBase62
+              do:
+                - return: wrapMalformed(decodeBaseN(data, c.convReverse(), c.convRadix()))
+                  to: wrapMalformed
+          "on": c.variant
+      - return: nil, nil
+  - of: wrapMalformed
+    steps:
+      - opt:
+          do:
+            - return: out, nil
+          when: ok
+      - return: |-
+          nil, errs.Wrap(nil, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncDecodeFailed,
+          		Reason:  "BASE_ENC_DECODE_FAILED",
+          		Public:  "base-N decoding failed",
+          		Private: "service/data/codec/baseenc: malformed base-conversion input (char outside the alphabet)",
+          	})
+  - of: encodeHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeHex
+        kind: self
+      - id: hex
+        kind: stdlib
+      - id: encodeHexUpperInto
+        kind: internal
+    steps:
+      - bind: encoded
+        eval: make([]byte, hex.EncodedLen(len(raw)))
+      - opt:
+          do:
+            - eval: hex.Encode(encoded, raw)
+              to: hex
+            - return: encoded
+          when: v != variantBase16
+      - eval: encodeHexUpperInto(encoded, raw)
+        to: encodeHexUpperInto
+      - return: encoded
+  - of: encodeHexUpperInto
+    steps:
+      - loop:
+          do:
+            - set: dst[i*hexDigitsPerByte]
+              value: hexUpperAlphabet[b>>hexNibbleBits]
+            - set: dst[i*hexDigitsPerByte+1]
+              value: hexUpperAlphabet[b&hexNibbleMask]
+          key: i
+          range: raw
+          value: b
+  - of: appendEncodeBase16Upper
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEncodeBase16Upper
+        kind: self
+      - id: hex
+        kind: stdlib
+      - id: encodeHexUpperInto
+        kind: internal
+    steps:
+      - bind: startLen
+        eval: len(dst)
+      - bind: width
+        eval: hex.EncodedLen(len(raw))
+        to: hex
+      - set: dst
+        value: slices.Grow(dst, width)[:startLen+width]
+      - eval: encodeHexUpperInto(dst[startLen:], raw)
+        to: encodeHexUpperInto
+      - return: dst
+  - of: appendEncodeASCII85
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEncodeASCII85
+        kind: self
+      - id: ascii85
+        kind: stdlib
+    steps:
+      - bind: buf
+        eval: make([]byte, ascii85.MaxEncodedLen(len(raw)))
+      - bind: "n"
+        eval: ascii85.Encode(buf, raw)
+        to: ascii85
+      - return: append(dst, buf[:n]...)
+  - of: (*baseencCodec).appendEncode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).appendEncode
+        kind: self
+      - id: base64.StdEncoding.AppendEncode
+        kind: value
+      - id: base64.URLEncoding.AppendEncode
+        kind: value
+      - id: base32.StdEncoding.AppendEncode
+        kind: value
+      - id: appendEncodeBase16Upper
+        kind: internal
+      - id: hex
+        kind: stdlib
+      - id: appendEncodeASCII85
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: variantBase64
+              do:
+                - return: base64.StdEncoding.AppendEncode(dst, raw)
+                  to: base64.StdEncoding.AppendEncode
+            - case: variantBase64URL
+              do:
+                - return: base64.URLEncoding.AppendEncode(dst, raw)
+                  to: base64.URLEncoding.AppendEncode
+            - case: variantBase32
+              do:
+                - return: base32.StdEncoding.AppendEncode(dst, raw)
+                  to: base32.StdEncoding.AppendEncode
+            - case: variantBase16
+              do:
+                - return: appendEncodeBase16Upper(dst, raw)
+                  to: appendEncodeBase16Upper
+            - case: variantHex
+              do:
+                - return: hex.AppendEncode(dst, raw)
+                  to: hex
+            - case: variantASCII85
+              do:
+                - return: appendEncodeASCII85(dst, raw)
+                  to: appendEncodeASCII85
+            - case: variantBase45, variantBase58, variantBase62
+              do:
+                - return: append(dst, c.encodeBytes(raw)...)
+          "on": c.variant
+      - return: dst
+  - of: (*baseencCodec).streamWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).streamWriter
+        kind: self
+      - id: base64
+        kind: stdlib
+      - id: base32
+        kind: stdlib
+      - id: ascii85
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: variantBase64
+              do:
+                - return: base64.NewEncoder(base64.StdEncoding, w)
+                  to: base64
+            - case: variantBase64URL
+              do:
+                - return: base64.NewEncoder(base64.URLEncoding, w)
+                  to: base64
+            - case: variantBase32
+              do:
+                - return: base32.NewEncoder(base32.StdEncoding, w)
+                  to: base32
+            - case: variantBase16, variantBase45, variantBase58, variantBase62
+              do:
+                - return: "&bufferingWriter{dst: w, codec: c}"
+            - case: variantHex
+              do:
+                - return: "nopWriteCloser{Writer: hex.NewEncoder(w)}"
+            - case: variantASCII85
+              do:
+                - return: ascii85.NewEncoder(w)
+                  to: ascii85
+          "on": c.variant
+      - return: "nopWriteCloser{Writer: w}"
+  - of: (*baseencCodec).streamReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencCodec).streamReader
+        kind: self
+      - id: base64
+        kind: stdlib
+      - id: base32
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+      - id: ascii85
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: variantBase64
+              do:
+                - return: base64.NewDecoder(base64.StdEncoding, r)
+                  to: base64
+            - case: variantBase64URL
+              do:
+                - return: base64.NewDecoder(base64.URLEncoding, r)
+                  to: base64
+            - case: variantBase32
+              do:
+                - return: base32.NewDecoder(base32.StdEncoding, r)
+                  to: base32
+            - case: variantBase16, variantHex
+              do:
+                - return: hex.NewDecoder(r)
+                  to: hex
+            - case: variantASCII85
+              do:
+                - return: ascii85.NewDecoder(r)
+                  to: ascii85
+            - case: variantBase45, variantBase58, variantBase62
+              do:
+                - return: "&decodeAllReader{src: r, v: c.variant}"
+          "on": c.variant
+      - return: r
+  - of: convSizeExceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: convSizeExceeded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncSizeExceeded,
+          		Reason:  "BASE_ENC_SIZE_EXCEEDED",
+          		Public:  "base-N input exceeds size limit",
+          		Private: where,
+          	})
+        to: errs
+  - of: wrapDecode
+    steps:
+      - opt:
+          do:
+            - return: out, nil
+          when: derr == nil
+      - return: |-
+          nil, errs.Wrap(derr, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncDecodeFailed,
+          		Reason:  "BASE_ENC_DECODE_FAILED",
+          		Public:  "base-N decoding failed",
+          		Private: "service/data/codec/baseenc: stdlib base-N decoder returned an error",
+          	})
+  - of: decodeASCII85
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeASCII85
+        kind: self
+      - id: ascii85
+        kind: stdlib
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: r
+        eval: ascii85.NewDecoder(bytes.NewReader(data))
+        to: ascii85
+      - bind: decoded, rerr
+        eval: io.ReadAll(r)
+        to: io
+      - opt:
+          do:
+            - return: decoded, nil
+          when: rerr == nil
+      - return: |-
+          nil, errs.Wrap(rerr, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncDecodeFailed,
+          		Reason:  "BASE_ENC_DECODE_FAILED",
+          		Public:  "base-N decoding failed",
+          		Private: "service/data/codec/baseenc: ascii85 decoder returned an error",
+          	})
+  - of: streamDecodeLimit
+    steps:
+      - opt:
+          do:
+            - return: maxConvEncodedBytes
+          when: isBaseConversion(v)
+      - return: maxBaseEncBytes
+  - of: (*decodeAllReader).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeAllReader).Read
+        kind: self
+      - id: streamDecodeLimit
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: "(&baseencCodec{variant: r.v}).decodeBytes"
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: r.dec.Read
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: limit
+              eval: streamDecodeLimit(r.v)
+              to: streamDecodeLimit
+            - bind: raw, rerr
+              eval: io.ReadAll(io.LimitReader(r.src, int64(limit)+1))
+              to: io
+            - opt:
+                do:
+                  - return: 0, rerr
+                when: rerr != nil
+            - opt:
+                do:
+                  - return: "0, convSizeExceeded(\"service/data/codec/baseenc: streaming decode input exceeds the size cap\")"
+                when: len(raw) > limit
+            - bind: decoded, derr
+              eval: "(&baseencCodec{variant: r.v}).decodeBytes(raw)"
+              to: "(&baseencCodec{variant: r.v}).decodeBytes"
+            - opt:
+                do:
+                  - return: 0, derr
+                when: derr != nil
+            - set: r.dec
+              to: bytes
+              value: bytes.NewReader(decoded)
+            - set: r.done
+              value: "true"
+          when: "!r.done"
+      - return: r.dec.Read(p)
+        to: r.dec.Read
+  - of: (*baseencDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencDecoder).Decode
+        kind: self
+      - id: stdjson
+        kind: stdlib
+      - id: d.jsonDec.Decode
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: d.jsonDec
+              to: stdjson
+              value: stdjson.NewDecoder(d.codec().streamReader(d.src))
+          when: d.jsonDec == nil
+      - bind: jerr
+        eval: d.jsonDec.Decode(v)
+        to: d.jsonDec.Decode
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: |-
+          errs.Wrap(jerr, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncUnmarshalFailed,
+          		Reason:  "BASE_ENC_UNMARSHAL_FAILED",
+          		Public:  "base-N decoding failed",
+          		Private: "service/data/codec/baseenc.Decoder.Decode: encoding/json returned an error",
+          	})
+        to: errs
+  - of: (*baseencDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencDecoder).More
+        kind: self
+      - id: d.jsonDec.More
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: d.src != nil
+          when: d.jsonDec == nil
+      - return: d.jsonDec.More()
+        to: d.jsonDec.More
+  - of: (*baseencDecoder).codec
+    steps:
+      - return: "&baseencCodec{variant: d.v}"
+  - of: (*baseencEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencEncoder).Encode
+        kind: self
+      - id: stdjson
+        kind: stdlib
+      - id: e.jsonEnc.Encode
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: e.jsonEnc
+              to: stdjson
+              value: stdjson.NewEncoder(e.base)
+          when: e.jsonEnc == nil
+      - bind: jerr
+        eval: e.jsonEnc.Encode(v)
+        to: e.jsonEnc.Encode
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: |-
+          errs.Wrap(jerr, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncMarshalFailed,
+          		Reason:  "BASE_ENC_MARSHAL_FAILED",
+          		Public:  "base-N encoding failed",
+          		Private: "service/data/codec/baseenc.Encoder.Encode: encoding/json returned an error",
+          	})
+        to: errs
+  - of: (*baseencEncoder).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*baseencEncoder).Close
+        kind: self
+      - id: e.base.Close
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: cerr
+        eval: e.base.Close()
+        to: e.base.Close
+      - opt:
+          do:
+            - return: nil
+          when: cerr == nil
+      - return: |-
+          errs.Wrap(cerr, errs.WrapParams{
+          		Code:    corebaseenc.CodeBaseEncMarshalFailed,
+          		Reason:  "BASE_ENC_MARSHAL_FAILED",
+          		Public:  "base-N encoding failed",
+          		Private: "service/data/codec/baseenc.Encoder.Close: base-N writer returned an error",
+          	})
+        to: errs
+  - of: nopWriteCloser.Close
+    steps:
+      - return: nil
+  - of: (*baseencCodec).spec
+    steps:
+      - return: "&variantSpecs[c.variant]"

@@ -1,0 +1,113 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Value.Delay
+    participants:
+      - id: caller
+        kind: actor
+      - id: Value.Delay
+        kind: self
+      - id: Widen
+        kind: internal
+    steps:
+      - return: Widen(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt), b.Jitter)
+        to: Widen
+  - of: Grow
+    participants:
+      - id: caller
+        kind: actor
+      - id: Grow
+        kind: self
+      - id: grow
+        kind: internal
+    steps:
+      - return: grow(base, ceiling, NormalMultiplier(multiplier), attempt)
+        to: grow
+  - of: Widen
+    participants:
+      - id: caller
+        kind: actor
+      - id: Widen
+        kind: self
+      - id: widen
+        kind: internal
+    steps:
+      - return: widen(delay, NormalJitter(jitter))
+        to: widen
+  - of: NormalMultiplier
+    steps:
+      - opt:
+          do:
+            - return: defaultMultiplier
+          when: math.IsNaN(multiplier) || multiplier <= 1
+      - return: multiplier
+  - of: NormalJitter
+    steps:
+      - opt:
+          do:
+            - return: noJitter
+          when: math.IsNaN(jitter)
+      - return: min(max(jitter, noJitter), maxJitter)
+  - of: grow
+    participants:
+      - id: caller
+        kind: actor
+      - id: grow
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: base <= 0
+      - bind: limit
+        eval: float64(maxDuration)
+      - opt:
+          do:
+            - set: limit
+              value: float64(ceiling)
+          when: ceiling > 0
+      - bind: delay
+        eval: float64(base)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: delay >= limit
+            - op: "*="
+              set: delay
+              value: multiplier
+          range: attempt - 1
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ceiling
+                when: ceiling > 0
+            - return: maxDuration
+          when: delay >= limit
+      - return: time.Duration(delay)
+        to: time
+  - of: widen
+    steps:
+      - opt:
+          do:
+            - return: delay
+          when: jitter <= noJitter || delay <= 0
+      - bind: width
+        eval: int64(float64(delay) * jitter)
+      - opt:
+          do:
+            - set: width
+              value: headroom
+          init:
+            bind: headroom
+            eval: int64(maxDuration - delay)
+          when: width > headroom
+      - opt:
+          do:
+            - return: delay
+          when: width <= 0
+      - return: delay + time.Duration(rand.Int64N(width))

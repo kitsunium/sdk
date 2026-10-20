@@ -1,0 +1,152 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Codec
+      - jsonCodec
+      - New
+      - (*jsonCodec).Name
+      - (*jsonCodec).MIMETypes
+      - (*jsonCodec).Extensions
+      - (*jsonCodec).Marshal
+      - marshalRawMessage
+      - (*jsonCodec).Unmarshal
+      - (*jsonCodec).Append
+      - (*jsonCodec).NewEncoder
+      - (*jsonCodec).NewDecoder
+    name: codec.go
+  - decls:
+      - jsonDecoder
+      - (*jsonDecoder).Decode
+      - (*jsonDecoder).More
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - jsonEncoder
+      - (*jsonEncoder).Encode
+      - (*jsonEncoder).Close
+    name: encoder.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: |-
+      marshalRawMessage recognises pre-encoded json.RawMessage / *json.RawMessage
+      values and returns their bytes verbatim (cloned so the caller cannot
+      mutate the underlying buffer through our return). Returns ok=false
+      when v isn't a recognised raw shape so the caller falls back to the
+      stdjson reflect path.
+    name: marshalRawMessage
+    params: v any
+    results: encoded []byte, ok bool
+imports:
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corejson: github.com/kitsunium/sdk/internal/core/data/codec/json
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  stdjson: encoding/json
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/json
+  name: json
+  purpose: Package json wraps encoding/json as a codec.Codec implementation registered under Format("json").
+types:
+  - doc: jsonCodec is the concrete Codec implementation for JSON.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*jsonCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias the codec recognises.
+        name: MIMETypes
+        recv: "*jsonCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension the codec recognises.
+        name: Extensions
+        recv: "*jsonCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal serialises v as JSON bytes. Pre-encoded inputs that already
+          carry valid JSON bytes (`json.RawMessage`, `*json.RawMessage`) take
+          a fast-path that bypasses the stdjson reflect + MarshalJSON
+          round-trip — the caller did the work, we just return the bytes
+          verbatim (after a defensive clone so the result is caller-owned).
+        name: Marshal
+        params: v any
+        recv: "*jsonCodec"
+        results: encoded []byte, err error
+      - doc: Unmarshal parses data as JSON into v.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*jsonCodec"
+        results: error
+      - doc: |-
+          Append encodes v as JSON and appends the bytes to dst. Implements the
+          optional codec.Appender interface so hot-path callers (logger encoder,
+          batch sinks) can write into a recycled buffer.
+
+          Uses a *bytes.Buffer pool + json.NewEncoder(buf).Encode(v) — replaces
+          the previous Marshal-then-append shape which paid a double copy
+          (stdjson.Marshal allocs+copies into a fresh []byte, then append copies
+          again into dst). The pool path encodes once into a reusable buffer
+          then copies once into dst — one alloc, one copy in steady state.
+        name: Append
+        params: dst []byte, v any
+        recv: "*jsonCodec"
+        results: appended []byte, err error
+      - doc: NewEncoder wraps w in a streaming codec.Encoder.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*jsonCodec"
+        results: codec.Encoder
+      - doc: NewDecoder wraps r in a streaming codec.Decoder.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*jsonCodec"
+        results: codec.Decoder
+    name: jsonCodec
+  - doc: jsonDecoder wraps *encoding/json.Decoder so it satisfies codec.Decoder.
+    fields:
+      - name: inner
+        type: "*stdjson.Decoder"
+    kind: struct
+    methods:
+      - doc: Decode reads the next value from the wrapped stdlib decoder.
+        name: Decode
+        params: v any
+        recv: d *jsonDecoder
+        results: error
+      - doc: More reports whether another JSON value remains in the stream.
+        name: More
+        recv: d *jsonDecoder
+        results: bool
+    name: jsonDecoder
+  - doc: jsonEncoder wraps *encoding/json.Encoder so it satisfies codec.Encoder.
+    fields:
+      - name: inner
+        type: "*stdjson.Encoder"
+    kind: struct
+    methods:
+      - doc: Encode serialises v through the wrapped stdlib encoder.
+        name: Encode
+        params: v any
+        recv: e *jsonEncoder
+        results: error
+      - doc: Close is a no-op because the stdlib encoder does not own the writer.
+        name: Close
+        recv: "*jsonEncoder"
+        results: error
+    name: jsonEncoder
+vars:
+  - doc: |-
+      Codec is the JSON singleton, registered with core/data/codec at package
+      load. Binding the registration result to a named var is more idiomatic
+      than `var _ = codec.Register(...)` and keeps us clear of init().
+    items:
+      - name: Codec
+        type: codec.Codec
+        value: codec.Register(&jsonCodec{})
+    name: Codec

@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch
+  name: jsonpatch
+  purpose: Package jsonpatch computes the structural difference between two JSON documents as RFC 6902 operations — add, remove and replace, each at an RFC 6901 JSON Pointer — with the value each operation writes and the value it replaces or removes (ADR 0143).
+types: []

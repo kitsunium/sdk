@@ -1,0 +1,59 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - sampleSink
+      - New
+      - (*sampleSink).Write
+      - (*sampleSink).Flush
+      - (*sampleSink).Close
+    name: sample_sink.go
+functions:
+  - name: New
+    params: downstream corelogger.Sink, rate int
+    results: sink corelogger.Sink, err error
+imports:
+  atomic: sync/atomic
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coresample: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/sample
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/sample
+  name: sample
+  purpose: Package sample implements a 1-of-N rate-limiter Sink.
+types:
+  - doc: |-
+      sampleSink keeps every Nth Write; the rest are discarded. The counter
+      is atomic so concurrent producers do not need a mutex on the hot path.
+    fields:
+      - doc: downstream receives every Nth Write.
+        name: downstream
+        type: corelogger.Sink
+      - doc: rate is the sampling denominator — every Nth call is forwarded.
+        name: rate
+        type: uint64
+      - doc: counter tracks the producer call count; atomically incremented per Write.
+        name: counter
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - doc: |-
+          Write forwards every Nth call to the downstream sink. Dropped calls
+          return (0, nil) so callers cannot tell the difference.
+        name: Write
+        params: ctx context.Context, rec corelogger.RecordEvent, p []byte
+        recv: s *sampleSink
+        results: n int, err error
+      - doc: Flush forwards to the downstream sink so its own buffers settle.
+        name: Flush
+        params: ctx context.Context
+        recv: s *sampleSink
+        results: error
+      - doc: Close forwards to the downstream sink so its own resources release.
+        name: Close
+        recv: s *sampleSink
+        results: error
+    name: sampleSink

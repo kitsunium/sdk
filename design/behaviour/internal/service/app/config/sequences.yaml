@@ -1,0 +1,1834 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: EnvSource
+    steps:
+      - return: "envSource{prefix: prefix}"
+  - of: envSource.Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: envSource.Load
+        kind: self
+      - id: matchPrefix
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: coerceEnvInto
+        kind: internal
+    steps:
+      - bind: match
+        eval: matchPrefix(s.prefix)
+        to: matchPrefix
+      - bind: out
+        eval: make(map[string]any, len(os.Environ()))
+      - loop:
+          do:
+            - bind: key, val, ok
+              eval: strings.Cut(kv, "=")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - continue: true
+                when: "!strings.HasPrefix(key, match)"
+            - bind: short
+              eval: strings.ToLower(strings.TrimPrefix(key, match))
+              to: strings
+            - eval: coerceEnvInto(out, short, val)
+              to: coerceEnvInto
+          key: _
+          range: os.Environ()
+          value: kv
+      - return: out, nil
+  - of: envSource.Describe
+    participants:
+      - id: caller
+        kind: actor
+      - id: envSource.Describe
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: s.lookup
+        kind: internal
+    steps:
+      - bind: top, _, _
+        eval: strings.Cut(key, ".")
+        to: strings
+      - bind: variable, _, found
+        eval: s.lookup(top)
+        to: s.lookup
+      - opt:
+          do:
+            - return: coreconfig.LayerEnv, matchPrefix(s.prefix) + strings.ToUpper(top)
+          when: "!found"
+      - return: coreconfig.LayerEnv, variable
+  - of: envSource.lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: envSource.lookup
+        kind: self
+      - id: matchPrefix
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: match
+        eval: matchPrefix(s.prefix)
+        to: matchPrefix
+      - loop:
+          do:
+            - bind: name, val, ok
+              eval: strings.Cut(kv, "=")
+              to: strings
+            - opt:
+                do:
+                  - set: variable, raw, found
+                    value: name, val, true
+                when: ok && strings.HasPrefix(name, match) && strings.EqualFold(strings.TrimPrefix(name, match), key)
+          key: _
+          range: os.Environ()
+          value: kv
+      - return: variable, raw, found
+  - of: matchPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: matchPrefix
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: prefix == ""
+      - bind: name
+        eval: strings.TrimRight(prefix, "_")
+        to: strings
+      - opt:
+          do:
+            - return: "\"_\""
+          when: name == ""
+      - return: name + "_"
+  - of: coerceEnvInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: coerceEnvInto
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: dec.UseNumber
+        kind: value
+      - id: dec.Decode
+        kind: value
+      - id: num.Int64
+        kind: value
+      - id: num.Float64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: out[key]
+              value: val
+            - return: ""
+          when: "!json.Valid([]byte(val))"
+      - bind: dec
+        eval: json.NewDecoder(strings.NewReader(val))
+        to: json
+      - eval: dec.UseNumber()
+        to: dec.UseNumber
+      - var:
+          name: parsed
+          type: any
+      - opt:
+          do:
+            - set: out[key]
+              value: val
+            - return: ""
+          init:
+            bind: err
+            eval: dec.Decode(&parsed)
+            to: dec.Decode
+          when: err != nil
+      - bind: num, isNum
+        eval: parsed.(json.Number)
+      - opt:
+          do:
+            - set: out[key]
+              value: parsed
+            - return: ""
+          when: "!isNum"
+      - opt:
+          do:
+            - set: out[key]
+              value: i
+            - return: ""
+          init:
+            bind: i, intErr
+            eval: num.Int64()
+            to: num.Int64
+          when: intErr == nil
+      - opt:
+          do:
+            - set: out[key]
+              value: f
+            - return: ""
+          init:
+            bind: f, floatErr
+            eval: num.Float64()
+            to: num.Float64
+          when: floatErr == nil
+      - set: out[key]
+        value: val
+  - of: FileSource
+    steps:
+      - return: "fileSource{format: format, path: path}"
+  - of: fileSource.Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: fileSource.Load
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: parseDocument
+        kind: internal
+    steps:
+      - bind: data, err
+        eval: os.ReadFile(s.path)
+        to: os
+      - opt:
+          do:
+            - return: nil, wrapAs(coreconfig.ConfigSourceFailed, err)
+          when: err != nil
+      - return: parseDocument(s.format, data)
+        to: parseDocument
+  - of: fileSource.Describe
+    steps:
+      - return: coreconfig.LayerFile, s.path
+  - of: parseDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseDocument
+        kind: self
+      - id: codec
+        kind: package
+      - id: c.Unmarshal
+        kind: value
+    steps:
+      - bind: c, ok
+        eval: codec.Lookup(format)
+        to: codec
+      - opt:
+          do:
+            - return: nil, kerrs.Wrap(coreconfig.ConfigSourceFailed, kerrs.WrapParams{}, kerrs.String("format", string(format)))
+          when: "!ok"
+      - bind: out
+        eval: make(map[string]any, 0)
+      - opt:
+          do:
+            - return: nil, wrapAs(coreconfig.ConfigSourceFailed, err)
+          init:
+            bind: err
+            eval: c.Unmarshal(data, &out)
+            to: c.Unmarshal
+          when: err != nil
+      - return: out, nil
+  - of: FSSource
+    steps:
+      - return: "fsSource{fsys: fsys, format: format, path: path}"
+  - of: fsSource.Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: fsSource.Load
+        kind: self
+      - id: fs
+        kind: stdlib
+      - id: parseDocument
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, kerrs.Wrap(coreconfig.ConfigSourceFailed, kerrs.WrapParams{}, kerrs.String("fs", "nil"))
+          when: s.fsys == nil
+      - opt:
+          do:
+            - return: nil, kerrs.Wrap(coreconfig.ConfigSourceFailed, kerrs.WrapParams{}, kerrs.String("path", s.path))
+          when: "!fs.ValidPath(s.path)"
+      - bind: data, err
+        eval: fs.ReadFile(s.fsys, s.path)
+        to: fs
+      - opt:
+          do:
+            - return: nil, wrapAs(coreconfig.ConfigSourceFailed, err)
+          when: err != nil
+      - return: parseDocument(s.format, data)
+        to: parseDocument
+  - of: fsSource.Describe
+    steps:
+      - return: coreconfig.LayerFile, s.path
+  - of: Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: Load
+        kind: self
+      - id: loadInto
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: loadInto(target, nil, sources)
+        to: loadInto
+      - return: err
+  - of: LoadSchema
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadSchema
+        kind: self
+      - id: rejectSchema
+        kind: internal
+      - id: loadInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rejectSchema("", "the schema is nil; build one with NewSchema")
+              to: rejectSchema
+          when: schema == nil
+      - bind: _, err
+        eval: loadInto(target, schema, sources)
+        to: loadInto
+      - return: err
+  - of: loadInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: loadInto
+        kind: self
+      - id: mergeLayers
+        kind: internal
+      - id: restoreRawSecrets
+        kind: internal
+      - id: schema.checkKeys
+        kind: internal
+      - id: decodeInto
+        kind: internal
+      - id: checkDecoded
+        kind: internal
+    steps:
+      - bind: merged, layers, mergeErr
+        eval: mergeLayers(schema, sources)
+        to: mergeLayers
+      - opt:
+          do:
+            - return: mergedLayers{}, mergeErr
+          when: mergeErr != nil
+      - eval: restoreRawSecrets(merged, layers, secretKeysOf(schema))
+        to: restoreRawSecrets
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: mergedLayers{}, keyErr
+                init:
+                  bind: keyErr
+                  eval: schema.checkKeys(merged)
+                  to: schema.checkKeys
+                when: keyErr != nil
+          when: schema != nil
+      - opt:
+          do:
+            - return: mergedLayers{}, decodeErr
+          init:
+            bind: decodeErr
+            eval: decodeInto(merged, target)
+            to: decodeInto
+          when: decodeErr != nil
+      - opt:
+          do:
+            - return: mergedLayers{}, checkErr
+          init:
+            bind: checkErr
+            eval: checkDecoded(target, schema)
+            to: checkDecoded
+          when: checkErr != nil
+      - return: "mergedLayers{layers: layers, merged: merged}, nil"
+  - of: mergeLayers
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeLayers
+        kind: self
+      - id: deepMerge
+        kind: internal
+      - id: src.Load
+        kind: value
+    steps:
+      - set: merged
+        value: make(map[string]any, 0)
+      - set: layers
+        value: make([]layerValue, 0, len(sources)+1)
+      - opt:
+          do:
+            - eval: deepMerge(merged, schema.defaults)
+              to: deepMerge
+            - set: layers
+              value: "append(layers, layerValue{position: -1, values: schema.defaults})"
+          when: schema != nil
+      - loop:
+          do:
+            - bind: layer, loadErr
+              eval: src.Load()
+              to: src.Load
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: nil, nil, loadErr
+                      when: errs.HasCode(loadErr, coreconfig.CodeConfigSourceFailed)
+                  - return: nil, nil, wrapAs(coreconfig.ConfigSourceFailed, loadErr)
+                when: loadErr != nil
+            - eval: deepMerge(merged, layer)
+              to: deepMerge
+            - set: layers
+              value: "append(layers, layerValue{source: src, position: position, values: layer})"
+          key: position
+          range: sources
+          value: src
+      - return: merged, layers, nil
+  - of: secretKeysOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: secretKeysOf
+        kind: self
+      - id: secretKeysByType.Load
+        kind: value
+      - id: collectVocabulary
+        kind: internal
+      - id: secretKeysByType.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: schema.secrets
+          when: schema != nil
+      - bind: typ
+        eval: reflect.TypeFor[T]()
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: secrets
+                init:
+                  bind: secrets, ok
+                  eval: cached.(map[string]secretHold)
+                when: ok
+          init:
+            bind: cached, found
+            eval: secretKeysByType.Load(typ)
+            to: secretKeysByType.Load
+          when: found
+      - bind: _, secrets
+        eval: collectVocabulary(typ)
+        to: collectVocabulary
+      - eval: secretKeysByType.Store(typ, secrets)
+        to: secretKeysByType.Store
+      - return: secrets
+  - of: restoreRawSecrets
+    participants:
+      - id: caller
+        kind: actor
+      - id: restoreRawSecrets
+        kind: self
+      - id: lastSupplier
+        kind: internal
+      - id: env.lookup
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: hold != secretDirect || strings.Contains(key, keySeparator)
+            - bind: env, supplied
+              eval: lastSupplier(layers, key)
+              to: lastSupplier
+            - opt:
+                do:
+                  - continue: true
+                when: "!supplied"
+            - opt:
+                do:
+                  - set: merged[key]
+                    value: raw
+                init:
+                  bind: _, raw, found
+                  eval: env.lookup(key)
+                  to: env.lookup
+                when: found
+          key: key
+          range: secrets
+          value: hold
+  - of: checkDecoded
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDecoded
+        kind: self
+      - id: schema.Check
+        kind: internal
+      - id: rejectViolations
+        kind: internal
+      - id: validator.Validate
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: rejectViolations(report)
+                    to: rejectViolations
+                init:
+                  bind: report
+                  eval: schema.Check(*target)
+                  to: schema.Check
+                when: "!report.OK()"
+          when: schema != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: wrapAs(coreconfig.ConfigValidationFailed, err)
+                    to: wrapAs
+                init:
+                  bind: err
+                  eval: validator.Validate()
+                  to: validator.Validate
+                when: err != nil
+          init:
+            bind: validator, ok
+            eval: any(target).(coreconfig.Validator)
+          when: ok
+      - return: nil
+  - of: decodeInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeInto
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: wrapAs
+        kind: internal
+    steps:
+      - bind: raw, err
+        eval: json.Marshal(merged)
+        to: json
+      - opt:
+          do:
+            - return: wrapAs(coreconfig.ConfigDecodeFailed, err)
+              to: wrapAs
+          when: err != nil
+      - opt:
+          do:
+            - return: wrapAs(coreconfig.ConfigDecodeFailed, err)
+              to: wrapAs
+          init:
+            bind: err
+            eval: json.Unmarshal(raw, target)
+            to: json
+          when: err != nil
+      - return: nil
+  - of: deepMerge
+    participants:
+      - id: caller
+        kind: actor
+      - id: deepMerge
+        kind: self
+      - id: cloneNested
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - eval: deepMerge(existing, sub)
+                          to: deepMerge
+                        - continue: true
+                      init:
+                        bind: existing, ok
+                        eval: dst[key].(map[string]any)
+                      when: ok
+                init:
+                  bind: sub, ok
+                  eval: val.(map[string]any)
+                when: ok
+            - opt:
+                do:
+                  - set: dst[key]
+                    to: cloneNested
+                    value: cloneNested(sub)
+                  - continue: true
+                init:
+                  bind: sub, ok
+                  eval: val.(map[string]any)
+                when: ok
+            - set: dst[key]
+              value: val
+          key: key
+          range: src
+          value: val
+  - of: cloneNested
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneNested
+        kind: self
+      - id: cloneArray
+        kind: internal
+    steps:
+      - bind: out
+        eval: make(map[string]any, len(src))
+      - loop:
+          do:
+            - typeswitch:
+                bind: typed
+                cases:
+                  - do:
+                      - set: out[key]
+                        to: cloneNested
+                        value: cloneNested(typed)
+                    types: map[string]any
+                  - do:
+                      - set: out[key]
+                        to: cloneArray
+                        value: cloneArray(typed)
+                    types: "[]any"
+                  - default: true
+                    do:
+                      - set: out[key]
+                        value: val
+                "on": val
+          key: key
+          range: src
+          value: val
+      - return: out
+  - of: cloneArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneArray
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: cloneNested
+        kind: internal
+    steps:
+      - bind: out
+        eval: slices.Clone(src)
+        to: slices
+      - loop:
+          do:
+            - typeswitch:
+                bind: typed
+                cases:
+                  - do:
+                      - set: out[i]
+                        to: cloneNested
+                        value: cloneNested(typed)
+                    types: map[string]any
+                  - do:
+                      - set: out[i]
+                        to: cloneArray
+                        value: cloneArray(typed)
+                    types: "[]any"
+                "on": element
+          key: i
+          range: out
+          value: element
+      - return: out
+  - of: LoadWithOrigins
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadWithOrigins
+        kind: self
+      - id: loadInto
+        kind: internal
+      - id: collectVocabulary
+        kind: internal
+      - id: originsOf
+        kind: internal
+    steps:
+      - bind: loaded, loadErr
+        eval: loadInto(target, nil, sources)
+        to: loadInto
+      - opt:
+          do:
+            - return: nil, loadErr
+          when: loadErr != nil
+      - bind: known, secrets
+        eval: collectVocabulary(reflect.TypeFor[T]())
+        to: collectVocabulary
+      - return: originsOf(known, secrets, loaded), nil
+        to: originsOf
+  - of: LoadSchemaWithOrigins
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadSchemaWithOrigins
+        kind: self
+      - id: loadInto
+        kind: internal
+      - id: originsOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectSchema("", "the schema is nil; build one with NewSchema")
+          when: schema == nil
+      - bind: loaded, loadErr
+        eval: loadInto(target, schema, sources)
+        to: loadInto
+      - opt:
+          do:
+            - return: nil, loadErr
+          when: loadErr != nil
+      - return: originsOf(schema.known, schema.secrets, loaded), nil
+        to: originsOf
+  - of: originsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: originsOf
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: attribute
+        kind: internal
+    steps:
+      - bind: keys
+        eval: slices.Sorted(maps.Keys(known))
+        to: slices
+      - bind: origins
+        eval: make([]coreconfig.OriginValue, 0, len(keys))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: known[key] != keyLeaf
+            - bind: layer, detail
+              eval: attribute(loaded, key)
+              to: attribute
+            - set: origins
+              value: |-
+                append(origins, coreconfig.OriginValue{
+                			Key: key, Layer: layer, Detail: detail, Secret: secrets[key] != secretNone,
+                		})
+          key: _
+          range: keys
+          value: key
+      - return: origins
+  - of: attribute
+    participants:
+      - id: caller
+        kind: actor
+      - id: attribute
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: describeLayer
+        kind: internal
+    steps:
+      - bind: segments
+        eval: strings.Split(key, keySeparator)
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", \"\""
+          when: "!lookupKey(loaded.merged, segments)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: describeLayer(candidate, key)
+                    to: describeLayer
+                when: lookupKey(candidate.values, segments)
+          key: _
+          range: slices.Backward(loaded.layers)
+          value: candidate
+      - return: "\"\", \"\""
+  - of: describeLayer
+    participants:
+      - id: caller
+        kind: actor
+      - id: describeLayer
+        kind: self
+      - id: describer.Describe
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: coreconfig.LayerDefault, ""
+          when: layer.source == nil
+      - opt:
+          do:
+            - return: describer.Describe(key)
+              to: describer.Describe
+          init:
+            bind: describer, ok
+            eval: layer.source.(coreconfig.Describer)
+          when: ok
+      - return: coreconfig.LayerSource, strconv.Itoa(layer.position)
+  - of: PollWatcher
+    steps:
+      - return: "pollWatcher{path: path, interval: interval}"
+  - of: pollWatcher.Watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: pollWatcher.Watch
+        kind: self
+      - id: w.validateInputs
+        kind: internal
+      - id: w.stat
+        kind: internal
+      - id: wrapAs
+        kind: internal
+      - id: w.poll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: w.validateInputs(onChange)
+            to: w.validateInputs
+          when: err != nil
+      - bind: lastMod, lastSize, err
+        eval: w.stat()
+        to: w.stat
+      - opt:
+          do:
+            - return: wrapAs(coreconfig.ConfigWatchFailed, err)
+              to: wrapAs
+          when: err != nil
+      - return: w.poll(ctx, onChange, lastMod, lastSize)
+        to: w.poll
+  - of: pollWatcher.poll
+    participants:
+      - id: caller
+        kind: actor
+      - id: pollWatcher.poll
+        kind: self
+      - id: w.waiter().NewTicker
+        kind: value
+      - id: ticker.Stop
+        kind: value
+      - id: ticker.C
+        kind: value
+      - id: w.stat
+        kind: internal
+      - id: wrapAs
+        kind: internal
+    steps:
+      - bind: ticker
+        eval: w.waiter().NewTicker(w.interval)
+        to: w.waiter().NewTicker
+      - defer: ticker.Stop()
+        to: ticker.Stop
+      - bind: ticks
+        eval: ticker.C()
+        to: ticker.C
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: nil
+                  - comm: <-ticks
+                    do:
+                      - bind: mod, size, statErr
+                        eval: w.stat()
+                        to: w.stat
+                      - opt:
+                          do:
+                            - return: wrapAs(coreconfig.ConfigWatchFailed, statErr)
+                              to: wrapAs
+                          when: statErr != nil
+                      - opt:
+                          do:
+                            - set: lastMod, lastSize
+                              value: mod, size
+                            - eval: onChange()
+                          when: mod != lastMod || size != lastSize
+          forever: true
+  - of: pollWatcher.waiter
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: w.clk == nil
+      - return: w.clk
+  - of: pollWatcher.validateInputs
+    participants:
+      - id: caller
+        kind: actor
+      - id: pollWatcher.validateInputs
+        kind: self
+      - id: withCause
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: withCause(coreconfig.ConfigWatchFailed, causeNonPositiveInterval)
+              to: withCause
+          when: w.interval <= 0
+      - opt:
+          do:
+            - return: withCause(coreconfig.ConfigWatchFailed, causeNilOnChange)
+              to: withCause
+          when: onChange == nil
+      - return: nil
+  - of: pollWatcher.stat
+    participants:
+      - id: caller
+        kind: actor
+      - id: pollWatcher.stat
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: info.ModTime().UnixNano
+        kind: value
+    steps:
+      - bind: info, statErr
+        eval: os.Stat(w.path)
+        to: os
+      - opt:
+          do:
+            - return: 0, 0, statErr
+          when: statErr != nil
+      - return: info.ModTime().UnixNano(), info.Size(), nil
+        to: info.ModTime().UnixNano
+  - of: NewSchemaValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSchemaValue
+        kind: self
+      - id: composeRule
+        kind: internal
+      - id: compileKeys
+        kind: internal
+      - id: built.rejectSelfContradiction
+        kind: internal
+    steps:
+      - bind: tagRules, tagErr
+        eval: svcvalidation.Struct[T](svcvalidation.StructConfig{})
+      - opt:
+          do:
+            - return: nil, tagErr
+          when: tagErr != nil
+      - bind: constraint
+        eval: composeRule(tagRules, spec.Rule)
+        to: composeRule
+      - bind: compiled, keyErr
+        eval: compileKeys[T](spec)
+        to: compileKeys
+      - opt:
+          do:
+            - return: nil, keyErr
+          when: keyErr != nil
+      - bind: built
+        eval: |-
+          &SchemaValue[T]{
+          		defaults:   compiled.defaults,
+          		declared:   compiled.declared,
+          		required:   compiled.required,
+          		known:      compiled.known,
+          		secrets:    compiled.secrets,
+          		strict:     !spec.AllowUnknownKeys,
+          		constraint: constraint,
+          	}
+      - opt:
+          do:
+            - return: nil, selfErr
+          init:
+            bind: selfErr
+            eval: built.rejectSelfContradiction()
+            to: built.rejectSelfContradiction
+          when: selfErr != nil
+      - return: built, nil
+  - of: composeRule
+    participants:
+      - id: caller
+        kind: actor
+      - id: composeRule
+        kind: self
+      - id: svcvalidation
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: tagRules
+          when: extra == nil
+      - return: svcvalidation.All(tagRules, extra)
+        to: svcvalidation
+  - of: (*SchemaValue).Source
+    steps:
+      - return: "schemaSource{defaults: s.defaults}"
+  - of: (*SchemaValue).Check
+    steps:
+      - return: s.constraint(corevalidation.RootPath, value)
+  - of: (*SchemaValue).checkKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SchemaValue).checkKeys
+        kind: self
+      - id: missingKeys
+        kind: internal
+      - id: unknownKeys
+        kind: internal
+      - id: rejectKeys
+        kind: internal
+    steps:
+      - bind: missing
+        eval: missingKeys(merged, s.required)
+        to: missingKeys
+      - bind: unknown
+        eval: unknownKeys(merged, s.known, s.strict)
+        to: unknownKeys
+      - return: rejectKeys(missing, unknown)
+        to: rejectKeys
+  - of: compileKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileKeys
+        kind: self
+      - id: collectVocabulary
+        kind: internal
+      - id: buildDefaultLayer
+        kind: internal
+      - id: buildRequired
+        kind: internal
+    steps:
+      - bind: known, secrets
+        eval: collectVocabulary(reflect.TypeFor[T]())
+        to: collectVocabulary
+      - bind: layer, declared, layerErr
+        eval: buildDefaultLayer(spec.Defaults, known)
+        to: buildDefaultLayer
+      - opt:
+          do:
+            - return: compiledKeys{}, layerErr
+          when: layerErr != nil
+      - bind: required, requiredErr
+        eval: buildRequired(spec.Required, known, declared)
+        to: buildRequired
+      - opt:
+          do:
+            - return: compiledKeys{}, requiredErr
+          when: requiredErr != nil
+      - return: "compiledKeys{defaults: layer, declared: declared, required: required, known: known, secrets: secrets}, nil"
+  - of: buildDefaultLayer
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildDefaultLayer
+        kind: self
+      - id: placeDefault
+        kind: internal
+      - id: normaliseLayer
+        kind: internal
+    steps:
+      - bind: raw
+        eval: make(map[string]any, len(defaults))
+      - bind: keys
+        eval: make([]string, 0, len(defaults))
+      - bind: seen
+        eval: make(map[string]bool, len(defaults))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, nil, placeErr
+                init:
+                  bind: placeErr
+                  eval: placeDefault(raw, def, known, seen)
+                  to: placeDefault
+                when: placeErr != nil
+            - set: keys
+              value: append(keys, def.Key)
+          key: _
+          range: defaults
+          value: def
+      - bind: normalised, normErr
+        eval: normaliseLayer(raw)
+        to: normaliseLayer
+      - opt:
+          do:
+            - return: nil, nil, normErr
+          when: normErr != nil
+      - return: normalised, keys, nil
+  - of: placeDefault
+    participants:
+      - id: caller
+        kind: actor
+      - id: placeDefault
+        kind: self
+      - id: addressKey
+        kind: internal
+      - id: json
+        kind: stdlib
+      - id: rejectSchema
+        kind: internal
+      - id: nestKey
+        kind: internal
+    steps:
+      - bind: segments, addressErr
+        eval: addressKey(def.Key, known, seen)
+        to: addressKey
+      - opt:
+          do:
+            - return: addressErr
+          when: addressErr != nil
+      - opt:
+          do:
+            - return: rejectSchema(def.Key, "the default value cannot be encoded as configuration")
+              to: rejectSchema
+          init:
+            bind: _, marshalErr
+            eval: json.Marshal(def.Value)
+            to: json
+          when: marshalErr != nil
+      - set: seen[def.Key]
+        value: "true"
+      - opt:
+          do:
+            - return: rejectSchema(def.Key, "the key is declared both as a value and as a table")
+              to: rejectSchema
+          init:
+            bind: placed
+            eval: nestKey(raw, segments, def.Value)
+            to: nestKey
+          when: "!placed"
+      - return: nil
+  - of: buildRequired
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildRequired
+        kind: self
+      - id: addressKey
+        kind: internal
+      - id: rejectDefaultedRequirement
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(required) == 0
+      - bind: resolved
+        eval: make([]requiredKey, 0, len(required))
+      - bind: seen
+        eval: make(map[string]bool, len(required))
+      - loop:
+          do:
+            - bind: segments, addressErr
+              eval: addressKey(key, known, seen)
+              to: addressKey
+            - opt:
+                do:
+                  - return: nil, addressErr
+                when: addressErr != nil
+            - opt:
+                do:
+                  - return: nil, overlapErr
+                init:
+                  bind: overlapErr
+                  eval: rejectDefaultedRequirement(key, declared)
+                  to: rejectDefaultedRequirement
+                when: overlapErr != nil
+            - set: seen[key]
+              value: "true"
+            - set: resolved
+              value: "append(resolved, requiredKey{key: key, segments: segments})"
+          key: _
+          range: required
+          value: key
+      - return: resolved, nil
+  - of: addressKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: addressKey
+        kind: self
+      - id: splitKey
+        kind: internal
+    steps:
+      - bind: parts, wellFormed
+        eval: splitKey(key)
+        to: splitKey
+      - opt:
+          do:
+            - return: nil, rejectSchema(key, "the key is empty, or has an empty segment; keys are dot-separated names")
+          when: "!wellFormed"
+      - opt:
+          do:
+            - return: nil, rejectSchema(key, "the key is declared twice")
+          when: seen[key]
+      - opt:
+          do:
+            - return: nil, rejectSchema(key, "the key names no field of the target type; keys use json tag names")
+          init:
+            bind: _, addresses
+            eval: known[key]
+          when: "!addresses"
+      - return: parts, nil
+  - of: rejectDefaultedRequirement
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectDefaultedRequirement
+        kind: self
+      - id: rejectSchema
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!keysOverlap(key, other)"
+            - return: rejectSchema(key, "the key is declared both required and with a default")
+              to: rejectSchema
+          key: _
+          range: declared
+          value: other
+      - return: nil
+  - of: keysOverlap
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: left == right
+      - return: strings.HasPrefix(left, right+keySeparator) || strings.HasPrefix(right, left+keySeparator)
+  - of: normaliseLayer
+    participants:
+      - id: caller
+        kind: actor
+      - id: normaliseLayer
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: decoder.UseNumber
+        kind: value
+      - id: decoder.Decode
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: make(map[string]any, 0), nil
+          when: len(raw) == 0
+      - bind: encoded, marshalErr
+        eval: json.Marshal(raw)
+        to: json
+      - opt:
+          do:
+            - return: nil, rejectSchema("", "the default layer cannot be encoded as configuration")
+          when: marshalErr != nil
+      - bind: decoder
+        eval: json.NewDecoder(bytes.NewReader(encoded))
+        to: json
+      - eval: decoder.UseNumber()
+        to: decoder.UseNumber
+      - bind: out
+        eval: make(map[string]any, len(raw))
+      - opt:
+          do:
+            - return: nil, rejectSchema("", "the default layer cannot be decoded as configuration")
+          init:
+            bind: decodeErr
+            eval: decoder.Decode(&out)
+            to: decoder.Decode
+          when: decodeErr != nil
+      - return: out, nil
+  - of: (*SchemaValue).rejectSelfContradiction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SchemaValue).rejectSelfContradiction
+        kind: self
+      - id: decodeInto
+        kind: internal
+      - id: rejectSchema
+        kind: internal
+      - id: s.Check
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(s.declared) == 0
+      - var:
+          name: probe
+          type: T
+      - opt:
+          do:
+            - return: rejectSchema("", "a default does not decode into the field it targets")
+              to: rejectSchema
+          init:
+            bind: decodeErr
+            eval: decodeInto(s.defaults, &probe)
+            to: decodeInto
+          when: decodeErr != nil
+      - bind: report
+        eval: s.Check(probe)
+        to: s.Check
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!coversPath(s.declared, violation.Path)"
+            - return: rejectSchema(violation.Path, "the default violates the "+violation.Rule+" rule the schema declares for this key")
+              to: rejectSchema
+          key: _
+          range: report
+          value: violation
+      - return: nil
+  - of: splitKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitKey
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: key == ""
+      - bind: parts
+        eval: strings.Split(key, keySeparator)
+        to: strings
+      - opt:
+          do:
+            - return: nil, false
+          when: slices.Contains(parts, "")
+      - return: parts, true
+  - of: nestKey
+    steps:
+      - bind: level
+        eval: dst
+      - loop:
+          do:
+            - typeswitch:
+                bind: existing
+                cases:
+                  - do:
+                      - bind: next
+                        eval: make(map[string]any, 1)
+                      - set: level[segment]
+                        value: next
+                      - set: level
+                        value: next
+                    types: nil
+                  - do:
+                      - set: level
+                        value: existing
+                    types: map[string]any
+                  - default: true
+                    do:
+                      - return: "false"
+                "on": level[segment]
+          key: _
+          range: segments[:len(segments)-1]
+          value: segment
+      - bind: leaf
+        eval: segments[len(segments)-1]
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, occupied
+            eval: level[leaf].(map[string]any)
+          when: occupied
+      - set: level[leaf]
+        value: value
+      - return: "true"
+  - of: collectVocabulary
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectVocabulary
+        kind: self
+      - id: walk.walkKeys
+        kind: internal
+    steps:
+      - bind: walk
+        eval: |-
+          keyWalk{
+          		keys:     make(map[string]keyKind, expectedKeys),
+          		secrets:  make(map[string]secretHold, 0),
+          		visiting: make(map[reflect.Type]bool, expectedDepth),
+          	}
+      - eval: walk.walkKeys(typ, "")
+        to: walk.walkKeys
+      - return: walk.keys, walk.secrets
+  - of: keyWalk.walkKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyWalk.walkKeys
+        kind: self
+      - id: derefStruct
+        kind: internal
+      - id: w.walkField
+        kind: internal
+    steps:
+      - bind: target, _
+        eval: derefStruct(typ)
+        to: derefStruct
+      - opt:
+          do:
+            - return: ""
+          when: target.Kind() != reflect.Struct || w.visiting[target]
+      - set: w.visiting[target]
+        value: "true"
+      - defer: delete(w.visiting, target)
+      - loop:
+          do:
+            - eval: w.walkField(field, base)
+              to: w.walkField
+          key: field
+          range: target.Fields()
+  - of: keyWalk.walkField
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyWalk.walkField
+        kind: self
+      - id: keyName
+        kind: internal
+      - id: w.walkKeys
+        kind: internal
+      - id: joinKey
+        kind: internal
+      - id: descends
+        kind: internal
+      - id: kindOf
+        kind: internal
+      - id: secretHoldOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!field.IsExported() && !embeds(field)"
+      - bind: name, travels
+        eval: keyName(field)
+        to: keyName
+      - opt:
+          do:
+            - return: ""
+          when: "!travels"
+      - opt:
+          do:
+            - eval: w.walkKeys(field.Type, base)
+              to: w.walkKeys
+            - return: ""
+          when: field.Anonymous && !hasJSONName(field)
+      - bind: path
+        eval: joinKey(base, name)
+        to: joinKey
+      - bind: table
+        eval: descends(field.Type)
+        to: descends
+      - set: w.keys[path]
+        to: kindOf
+        value: kindOf(table)
+      - opt:
+          do:
+            - set: w.secrets[path]
+              value: hold
+          init:
+            bind: hold
+            eval: secretHoldOf(field.Type)
+            to: secretHoldOf
+          when: hold != secretNone
+      - opt:
+          do:
+            - eval: w.walkKeys(field.Type, path)
+              to: w.walkKeys
+          when: table
+  - of: kindOf
+    steps:
+      - opt:
+          do:
+            - return: keyTable
+          when: table
+      - return: keyLeaf
+  - of: joinKey
+    steps:
+      - opt:
+          do:
+            - return: segment
+          when: base == ""
+      - return: base + keySeparator + segment
+  - of: keyName
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyName
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: tag
+        eval: field.Tag.Get(jsonTagName)
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: field.Name, true
+          when: tag == ""
+      - bind: declared, _, _
+        eval: strings.Cut(tag, tagOptionSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: declared == tagOptOut
+      - opt:
+          do:
+            - return: field.Name, true
+          when: declared == ""
+      - return: declared, true
+  - of: embeds
+    participants:
+      - id: caller
+        kind: actor
+      - id: embeds
+        kind: self
+      - id: derefStruct
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!field.Anonymous"
+      - bind: target, _
+        eval: derefStruct(field.Type)
+        to: derefStruct
+      - return: target.Kind() == reflect.Struct
+  - of: hasJSONName
+    participants:
+      - id: caller
+        kind: actor
+      - id: hasJSONName
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: tag
+        eval: field.Tag.Get(jsonTagName)
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: "false"
+          when: tag == ""
+      - bind: declared, _, _
+        eval: strings.Cut(tag, tagOptionSeparator)
+        to: strings
+      - return: declared != "" && declared != tagOptOut
+  - of: descends
+    participants:
+      - id: caller
+        kind: actor
+      - id: descends
+        kind: self
+      - id: derefStruct
+        kind: internal
+      - id: decodesItself
+        kind: internal
+    steps:
+      - bind: target, _
+        eval: derefStruct(typ)
+        to: derefStruct
+      - opt:
+          do:
+            - return: "false"
+          when: target.Kind() != reflect.Struct
+      - return: "!decodesItself(target)"
+        to: decodesItself
+  - of: decodesItself
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodesItself
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - bind: pointer
+        eval: reflect.PointerTo(typ)
+        to: reflect
+      - return: pointer.Implements(jsonUnmarshalerType) || pointer.Implements(textUnmarshalerType)
+  - of: derefStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: derefStruct
+        kind: self
+      - id: typ.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: typ.Elem(), true
+              to: typ.Elem
+          when: typ.Kind() == reflect.Pointer
+      - return: typ, false
+  - of: secretHoldOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: secretHoldOf
+        kind: self
+      - id: typ.Elem
+        kind: value
+    steps:
+      - bind: hold
+        eval: secretDirect
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: reflect.Pointer
+                    do:
+                      - set: typ
+                        to: typ.Elem
+                        value: typ.Elem()
+                  - case: reflect.Slice, reflect.Array, reflect.Map
+                    do:
+                      - set: typ, hold
+                        value: typ.Elem(), secretNested
+                  - default: true
+                    do:
+                      - opt:
+                          do:
+                            - return: hold
+                          when: typ == secretValueType
+                      - return: secretNone
+                "on": typ.Kind()
+          range: maxContainerDepth
+      - return: secretNone
+  - of: unknownKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownKeys
+        kind: self
+      - id: collectUnknown
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!strict"
+      - var:
+          name: unknown
+          type: "[]string"
+      - eval: collectUnknown(merged, "", known, &unknown)
+        to: collectUnknown
+      - eval: slices.Sort(unknown)
+        to: slices
+      - return: unknown
+  - of: collectUnknown
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectUnknown
+        kind: self
+      - id: joinKey
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: path
+              eval: joinKey(base, name)
+              to: joinKey
+            - bind: kind, addressable
+              eval: known[path]
+            - opt:
+                do:
+                  - set: "*out"
+                    value: append(*out, path)
+                  - continue: true
+                when: "!addressable"
+            - opt:
+                do:
+                  - eval: collectUnknown(sub, path, known, out)
+                    to: collectUnknown
+                init:
+                  bind: sub, isTable
+                  eval: value.(map[string]any)
+                when: isTable && kind == keyTable
+          key: name
+          range: level
+          value: value
+  - of: rejectSchema
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectSchema
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coreconfig.ConfigSchemaInvalid, kerrs.WrapParams{},
+          		kerrs.String("key", clipEcho(key, maxKeyEchoRunes)),
+          		kerrs.String("clause", clause))
+        to: kerrs
+  - of: rejectKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectKeys
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: failures
+        eval: make([]error, 0, keyFailureKinds)
+      - opt:
+          do:
+            - set: failures
+              value: append(failures, rejectKeyList(coreconfig.ConfigKeyMissing, "missing", missing))
+          when: len(missing) > 0
+      - opt:
+          do:
+            - set: failures
+              value: append(failures, rejectKeyList(coreconfig.ConfigUnknownKey, "unknown", unknown))
+          when: len(unknown) > 0
+      - switch:
+          cases:
+            - case: "0"
+              do:
+                - return: nil
+            - case: "1"
+              do:
+                - return: failures[0]
+            - default: true
+              do:
+                - return: errors.Join(failures...)
+                  to: errors
+          "on": len(failures)
+  - of: rejectKeyList
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectKeyList
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(sentinel, kerrs.WrapParams{},
+          		kerrs.Int(counter, len(keys)),
+          		kerrs.String("keys", clipEcho(strings.Join(keys, keyListSeparator), maxKeyListRunes)))
+        to: kerrs
+  - of: rejectViolations
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectViolations
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: first
+        eval: report[0]
+      - return: |-
+          kerrs.Wrap(coreconfig.ConfigValidationFailed, kerrs.WrapParams{},
+          		kerrs.Int("violations", len(report)),
+          		kerrs.String("rule", first.Rule),
+          		kerrs.String("keys", clipEcho(strings.Join(report.Paths(), keyListSeparator), maxKeyListRunes)))
+        to: kerrs
+  - of: clipEcho
+    steps:
+      - bind: runes
+        eval: "[]rune(text)"
+      - opt:
+          do:
+            - return: text
+          when: len(runes) <= limit
+      - return: string(runes[:limit]) + echoTruncationMark
+  - of: schemaSource.Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: schemaSource.Load
+        kind: self
+      - id: cloneNested
+        kind: internal
+    steps:
+      - return: cloneNested(s.defaults), nil
+        to: cloneNested
+  - of: schemaSource.Describe
+    steps:
+      - return: coreconfig.LayerDefault, ""
+  - of: wrapAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAs
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: sentinel
+          when: cause == nil
+      - return: kerrs.Wrap(errors.Join(sentinel, cause), kerrs.WrapParams{}, kerrs.String("cause", cause.Error()))
+        to: kerrs
+  - of: withCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: withCause
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.Wrap(sentinel, kerrs.WrapParams{}, kerrs.String("cause", cause))
+        to: kerrs

@@ -1,0 +1,578 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: maxMails bounds the mailbox list.
+    items:
+      - name: maxMails
+        type: int
+        value: "1000"
+    name: maxMails
+  - doc: |-
+      defaultMails is how many mails the mailbox lists when the Studio does not
+      say.
+    items:
+      - name: defaultMails
+        type: int
+        value: "200"
+    name: defaultMails
+  - doc: Environment kit dev gives the process it launches, describing the build.
+    grouped: true
+    items:
+      - name: envDevBuiltAt
+        value: "\"KIT_DEV_BUILT_AT\""
+      - name: envDevBuildMs
+        value: "\"KIT_DEV_BUILD_MS\""
+      - name: envDevBuilds
+        value: "\"KIT_DEV_REBUILDS\""
+      - name: envDevChanged
+        value: "\"KIT_DEV_CHANGED\""
+      - name: envDevMore
+        value: "\"KIT_DEV_CHANGED_MORE\""
+      - name: maxDevChanged
+        type: int
+        value: "20"
+    name: envDevBuiltAt
+  - doc: Bounds of the profiles.
+    grouped: true
+    items:
+      - doc: |-
+          flameMinShare prunes a flame frame costing less than this share of
+          the total.
+        name: flameMinShare
+        type: float64
+        value: "0.005"
+      - doc: flameMaxDepth stops a flame graph this deep.
+        name: flameMaxDepth
+        type: int
+        value: "64"
+      - name: topFuncs
+        type: int
+        value: "25"
+      - name: topNodeFuncs
+        type: int
+        value: "8"
+    name: flameMinShare
+  - doc: Bounds of the goroutine view.
+    grouped: true
+    items:
+      - name: maxGoroutineGroups
+        type: int
+        value: "300"
+      - name: maxGroupStack
+        type: int
+        value: "32"
+    name: maxGoroutineGroups
+  - doc: |-
+      studioCSP is the content security policy of the Studio. It shares the
+      product's origin and shows attacker-controllable data — titles, errors,
+      identifiers — so it runs nothing that is not its own bundle.
+    items:
+      - name: studioCSP
+        value: |-
+          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
+          	"frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    name: studioCSP
+  - doc: tracesShown is how many of the latest traces the trace list gives.
+    items:
+      - name: tracesShown
+        type: int
+        value: "100"
+    name: tracesShown
+  - doc: Limits of the source endpoint.
+    grouped: true
+    items:
+      - name: sourceContext
+        type: int
+        value: "12"
+      - name: sourceMaxLines
+        type: int
+        value: "400"
+    name: sourceContext
+files:
+  - decls:
+      - maxMails
+      - defaultMails
+      - studio.mountDevTools
+      - studio.mountStoreTools
+      - studio.serveProcess
+      - studio.serveHeapProfile
+      - studio.serveGoroutines
+      - studio.serveLogs
+      - studio.serveMails
+      - studio.serveMail
+    name: devtools.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - envDevBuiltAt
+      - studioEnv
+      - studioSettings
+      - settingFrom
+      - devForced
+      - devBuildOf
+      - changedFiles
+      - positiveInt
+    name: env.go
+  - decls:
+      - serveEvents
+      - relay
+    name: events.go
+  - decls:
+      - flameMinShare
+      - maxGoroutineGroups
+      - funcOwners
+      - foldProfile
+      - funcCosts
+      - flameOf
+      - ownersOf
+      - (*funcOwners).addNode
+      - ownFunc
+      - (*funcOwners).owner
+      - (*funcOwners).attribute
+      - (*funcOwners).source
+      - goroutinesOf
+      - functionsOf
+      - sourceFunc
+      - heap
+      - goroutines
+      - round2
+    name: profile.go
+  - decls:
+      - studioCSP
+      - tracesShown
+      - methods
+      - studio
+      - mount
+      - studio.mountNotFound
+      - studio.serveTrace
+      - studio.serveInstances
+      - studio.serveItems
+      - studio.guard
+      - answer
+      - loopback
+    name: routes.go
+  - decls:
+      - sourceContext
+      - sourceLanguages
+      - studio.serveSource
+      - atoiOr
+    name: source.go
+  - decls:
+      - driver
+      - Enable
+    name: studioengine.go
+  - decls:
+      - _
+    name: studioengine_compliance.go
+  - decls:
+      - localeFiles
+      - translator
+      - openWords
+      - catalogueFile
+      - catalogueOf
+      - (*translator).Languages
+      - (*translator).Keys
+      - (*translator).Render
+    name: words.go
+functions:
+  - doc: studioEnv reads what the tool's variables ask of the Studio.
+    name: studioEnv
+    params: getenv func(string) string
+    results: plug.StudioEnvValue
+  - doc: |-
+      studioSettings are the tool's variables as the settings of a run show
+      them: the Studio, its remote clients and the static analysis, each with
+      its value and where it came from.
+    name: studioSettings
+    params: getenv func(string) string, s plug.StudioStateValue
+    results: "[]model.Setting"
+  - doc: |-
+      settingFrom is where the setting read from name comes from: its option
+      when the code gives one, the environment when name is set, its default
+      otherwise. kit dev never sets one of the tool's variables as its own
+      (kit labels only those it lets kit dev set).
+    name: settingFrom
+    params: getenv func(string) string, option bool, name string
+    results: string
+  - doc: |-
+      devForced are the variables kit dev says it set itself for this launch
+      (model.VarDevForced), as it names them: a label and nothing else.
+    name: devForced
+    params: getenv func(string) string
+    results: "[]string"
+  - doc: |-
+      devBuildOf reads what kit dev said about the build it launched, or nil
+      when the process was not started by kit dev.
+    name: devBuildOf
+    params: getenv func(string) string
+    results: "*model.DevBuild"
+  - doc: |-
+      changedFiles are the files a dev build says changed, one a line: local
+      paths only, at most maxDevChanged.
+    name: changedFiles
+    params: raw string
+    results: "[]string"
+  - doc: positiveInt is raw as a positive integer, 0 when it is not one.
+    name: positiveInt
+    params: raw string
+    results: int
+  - doc: |-
+      serveEvents streams the app's live events as Server-Sent Events. The
+      stream opens with a hello carrying the graph revision, so a Studio that
+      reconnects after a reload knows whether to fetch the graph again.
+
+      The stream itself — framing, the keep-alive comment a proxy needs to see,
+      the bound on each frame's write, the end on disconnect — is the SDK's
+      net/sse; the Studio's own is only which events, in which order.
+    name: serveEvents
+    params: host plug.StudioHost
+    results: http.HandlerFunc
+  - doc: |-
+      relay sends the hello, then every event the host streams, until the
+      client, the stream or the app stops. An event that does not encode is
+      skipped; one that cannot be written ends the stream.
+    name: relay
+    params: host plug.StudioHost, stream *sse.Stream
+  - doc: |-
+      foldProfile charges every sample of p to a node — by its app_node label
+      for a CPU profile, by the innermost node code on its stack for the heap —
+      and answers the fold as the Studio reads it: milliseconds of CPU, bytes of
+      heap.
+    name: foldProfile
+    params: p *profiling.Profile, kind string, owners *funcOwners, source sourceFunc
+    results: "*model.Profile, error"
+  - doc: |-
+      funcCosts are the costliest functions, each with the node it belongs to —
+      node, or the one whose code it is — and where it is, when the graph or the
+      product's module knows.
+    name: funcCosts
+    params: top []profiling.FunctionCost, owners *funcOwners, node string, round func(int64) float64, source sourceFunc
+    results: "[]model.FuncCost"
+  - doc: |-
+      flameOf is a flame frame as the Studio reads it, each frame with the node
+      whose code it is.
+    name: flameOf
+    params: n *profiling.FlameNode, owners *funcOwners, round func(int64) float64
+    results: "*model.FlameNode"
+  - doc: |-
+      ownersOf reads the owners of functions off the graph: handlers' ranges
+      and, once the static analysis has run, every node's code.
+    name: ownersOf
+    params: g *model.Graph
+    results: "*funcOwners"
+  - doc: |-
+      ownFunc records node as an owner of fn, under its name and its canonical
+      one.
+    name: ownFunc
+    params: m map[string][]string, fn, node string
+  - doc: |-
+      goroutinesOf groups goroutines by node, loop, state and top frame, largest
+      group first.
+    name: goroutinesOf
+    params: gs []profiling.Goroutine, at time.Time
+    results: "*model.Goroutines"
+  - doc: functionsOf names a stack's frames, innermost first.
+    name: functionsOf
+    params: stack []profiling.Frame
+    results: "[]string"
+  - doc: heap captures the live heap, after a collection, and folds it onto g.
+    name: heap
+    params: g *model.Graph, source sourceFunc
+    results: "*model.Profile, error"
+  - doc: goroutines groups every goroutine of the process, read at at.
+    name: goroutines
+    params: at time.Time
+    results: "*model.Goroutines, error"
+  - doc: round2 rounds v to two decimals.
+    name: round2
+    params: v float64
+    results: float64
+  - doc: mount registers the Studio's routes on mux, each behind guard.
+    name: mount
+    params: mux *http.ServeMux, host plug.StudioHost
+  - doc: |-
+      answer replies to r with v encoded as JSON, or with err as kit answers an
+      error; a value that does not encode is kit's internal error, said as kit
+      said it.
+    name: answer
+    params: s studio, w http.ResponseWriter, r *http.Request, v T, err error
+    typeParams: T any
+  - doc: loopback reports whether a remote address is this machine.
+    name: loopback
+    params: remote string
+    results: bool
+  - doc: |-
+      atoiOr is text as a decimal integer, or fallback when it is not one: a
+      query parameter the Studio may leave out.
+    name: atoiOr
+    params: text string, fallback int
+    results: int
+  - name: Enable
+  - doc: |-
+      openWords compiles the catalogues of languages against english, kit's own
+      sentences by key: a catalogue that does not decode, a sentence that does
+      not compile, refuse the whole.
+    name: openWords
+    params: english map[string]string
+    results: plug.Translator, error
+  - doc: "catalogueFile reads lang's catalogue: a JSON object of sentences by key."
+    name: catalogueFile
+    params: lang string
+    results: map[string]string, error
+  - doc: catalogueOf is sentences as one language's catalogue, every one uncounted.
+    name: catalogueOf
+    params: sentences map[string]string
+    results: i18n.Catalogue
+imports:
+  cmp: cmp
+  embed: embed
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  filepath: path/filepath
+  http: net/http
+  i18n: github.com/kitsunium/sdk/pkg/v1/app/i18n
+  json: encoding/json
+  math: math
+  model: github.com/kitsunium/sdk/framework/model
+  net: net
+  path: path
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  profiling: github.com/kitsunium/sdk/pkg/v1/observe/profiling
+  slices: slices
+  sse: github.com/kitsunium/sdk/pkg/v1/net/sse
+  strconv: strconv
+  strings: strings
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/studioengine
+  name: studioengine
+  purpose: "Package studioengine is what framework/app/studio plugs into the framework (ADR 0179 §1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and their handlers — the graph, the live events as a Server-Sent Events stream (the SDK's net/sse), traces, source, instances, items, and the dev tools with the profiler (the SDK's profiling) —, the tool's variables the framework dev and the Studio set, and the framework's sentences in the languages after English — the catalogues the Studio shows its reader's language from, compiled by the SDK's i18n (Q6)."
+types:
+  - doc: |-
+      funcOwners maps the functions of nodes' code to their nodes: the function
+      a node runs (its entry), and every function its code reaches.
+    fields:
+      - name: entries
+        type: map[string][]string
+      - name: code
+        type: map[string][]string
+      - name: sources
+        type: map[string]*model.Source
+    kind: struct
+    methods:
+      - doc: |-
+          addNode records the functions node n owns: its handler and entry, whose
+          samples are its own, and the code it runs.
+        name: addNode
+        params: n *model.Node
+        recv: o *funcOwners
+      - doc: |-
+          owner returns the one node whose code fn is, or "" when there is none or
+          several: a helper shared by two nodes says nothing about which one ran.
+          A node's entry function wins over a function its code merely reaches.
+        name: owner
+        params: fn string
+        recv: o *funcOwners
+        results: string, bool
+      - doc: |-
+          attribute returns the node of the innermost frame that belongs to exactly
+          one node.
+        name: attribute
+        params: stack []profiling.Frame
+        recv: o *funcOwners
+        results: string
+      - doc: source returns where fn is, when the graph knows it.
+        name: source
+        params: fn string
+        recv: o *funcOwners
+        results: "*model.Source"
+    name: funcOwners
+  - doc: |-
+      sourceFunc says where the function fn, at file:line, lies in the product,
+      nil when it knows none: the host's Locate.
+    kind: named
+    name: sourceFunc
+    underlying: func(file string, line int, fn string) *model.Source
+  - doc: studio is the Studio's routes over one running app.
+    fields:
+      - name: host
+        type: plug.StudioHost
+    kind: struct
+    methods:
+      - doc: |-
+          mountDevTools registers the dev tools' routes through api, which puts each
+          behind the Studio's guard.
+        name: mountDevTools
+        params: api func(pattern string, h http.HandlerFunc)
+        recv: s studio
+      - doc: |-
+          mountStoreTools registers the dev tools that read the stores and the
+          databases: the databases, a field's former values, a record's versions, a
+          store's trash, and the Privacy page. They are served only with the store
+          subsystem — without it there is no store to read.
+        name: mountStoreTools
+        params: api func(pattern string, h http.HandlerFunc)
+        recv: s studio
+      - doc: |-
+          serveProcess answers GET /_app/api/process: a fresh sample, for polling;
+          404 when no sampler is plugged in — a product that did not import
+          framework/app/server, which serves no route anyway.
+        name: serveProcess
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          serveHeapProfile answers GET /_app/api/profile/heap: the live heap, after
+          a collection, folded onto the graph.
+        name: serveHeapProfile
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          serveGoroutines answers GET /_app/api/goroutines: every goroutine, grouped
+          by the node it works for, the loop it belongs to, what it waits on, and
+          its innermost frame that is not the runtime's.
+        name: serveGoroutines
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: serveLogs answers GET /_app/api/logs?trace=&node=&level=&limit=.
+        name: serveLogs
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          serveMails answers GET /_app/api/mail?limit=: every mailer's mail,
+          newest first.
+        name: serveMails
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: "serveMail answers GET /_app/api/mail/{id}: one whole mail."
+        name: serveMail
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          mountNotFound answers every method but HEAD under prefix with a not found
+          that says message.
+        name: mountNotFound
+        params: api func(pattern string, h http.HandlerFunc), prefix, message string
+        recv: s studio
+      - doc: |-
+          serveTrace answers GET /_app/api/traces/{id}: one trace, while the app
+          keeps it.
+        name: serveTrace
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          serveInstances answers GET /_app/api/instances?workflow=: a workflow's
+          entities and where each is.
+        name: serveInstances
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          serveItems answers GET /_app/api/items?store=: a store's latest entities,
+          through the same redaction as payloads: a store of accounts holds password
+          hashes and token digests, and personal data (ADR 0006), which the Studio
+          has no reason to show.
+        name: serveItems
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+      - doc: |-
+          guard refuses a request that does not come from this machine, or whose
+          Host is not an allowed name. The Host check stops DNS rebinding — a page
+          on another site reaching a local port through a name it controls; the
+          address check stops everyone else on the network, whatever Host they send.
+        name: guard
+        params: h http.Handler
+        recv: s studio
+        results: http.Handler
+      - doc: |-
+          serveSource answers GET /_app/api/source?file=&module=&line=&end=: lines
+          of a source file around a range. It serves only files the graph itself
+          points at — never a path the request makes up —, as the host reads them:
+          a regular file within its root, never a link (StudioHost.Source). So no
+          request reaches .env, .git or the data directory.
+        name: serveSource
+        params: w http.ResponseWriter, r *http.Request
+        recv: s studio
+    name: studio
+  - doc: |-
+      translator says kit's sentences in the languages after English: one
+      printer each over one store, whose fallback is kit's English.
+    fields:
+      - doc: store holds every catalogue, English the fallback.
+        name: store
+        type: "*i18n.Store"
+      - doc: tags are the languages' tags, by the name kit gives them.
+        name: tags
+        type: map[string]i18n.Tag
+      - doc: printers render one language each, by the name kit gives it.
+        name: printers
+        type: map[string]*i18n.Printer
+    kind: struct
+    methods:
+      - doc: Languages are the languages after English, in the Studio's order.
+        name: Languages
+        recv: t *translator
+        results: "[]string"
+      - doc: |-
+          Keys are the keys of lang's catalogue, sorted; nil for a language kit does
+          not speak after English.
+        name: Keys
+        params: lang string
+        recv: t *translator
+        results: "[]string"
+      - doc: Render is key's sentence in lang with args.
+        name: Render
+        params: lang, key string, args map[string]string
+        recv: t *translator
+        results: string, error
+    name: translator
+vars:
+  - doc: |-
+      methods are the methods a route of the Studio's prefix answers, HEAD
+      aside: every one kit routes.
+    items:
+      - name: methods
+        value: "[]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}"
+    name: methods
+  - doc: sourceLanguages are the files the source endpoint serves, by extension.
+    items:
+      - name: sourceLanguages
+        value: |-
+          map[string]string{
+          	".go": "go", ".js": "javascript", ".mjs": "javascript", ".ts": "typescript",
+          	".html": "xml", ".css": "css", ".json": "json",
+          }
+    name: sourceLanguages
+  - doc: |-
+      driver is what Enable plugs into kit: the tool's variables and the
+      Studio's routes.
+    items:
+      - name: driver
+        value: |-
+          plug.StudioDriverConfig{
+          	Env:      studioEnv,
+          	Settings: studioSettings,
+          	Forced:   devForced,
+          	DevBuild: devBuildOf,
+          	Mount:    mount,
+          }
+    name: driver
+  - doc: |-
+      : Asserts at compile time that translator is the catalogues
+      plug.Translator describes.
+    items:
+      - name: _
+        type: plug.Translator
+        value: (*translator)(nil)
+    name: _
+  - grouped: true
+    items:
+      - name: localeFiles
+        type: embed.FS
+      - doc: |-
+          languages are the languages kit speaks after English, in the order the
+          Studio lists them: one catalogue each, locales/<language>.json.
+        name: languages
+        value: "[]string{\"fr\"}"
+      - doc: words is what Enable plugs into kit.
+        name: words
+        value: "plug.WordsConfig{Open: openWords}"
+    name: localeFiles

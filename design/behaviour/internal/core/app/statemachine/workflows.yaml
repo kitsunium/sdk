@@ -1,0 +1,15 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: ParseTrigger
+    steps:
+      - loop:
+          cond: int(i) < len(triggerNames)
+          do:
+            - opt:
+                do:
+                  - return: i, nil
+                when: triggerNames[i] == name
+          init: i := TriggerStart
+          post: i++
+      - return: 0, errs.Wrap(TriggerUnknown, errs.WrapParams{}, errs.Int("length", len(name)))

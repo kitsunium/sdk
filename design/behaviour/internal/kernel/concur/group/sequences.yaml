@@ -1,0 +1,333 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Collect
+    participants:
+      - id: caller
+        kind: actor
+      - id: Collect
+        kind: self
+      - id: New
+        kind: internal
+      - id: runner.Go
+        kind: internal
+      - id: runner.Wait
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(fns) == 0
+      - bind: out
+        eval: make([]T, len(fns))
+      - bind: runner, _
+        eval: New(parent, limit)
+        to: New
+      - loop:
+          do:
+            - eval: |-
+                runner.Go(func(ctx context.Context) error {
+                			value, err := fn(ctx)
+                			//: a failing task leaves its slot at the zero value, which is why
+                			//: the slice below is discarded rather than returned.
+                			if err != nil {
+                				//: the group keeps the FIRST of these and cancels the rest.
+                				return err
+                			}
+                			//: disjoint index per task; Wait's WaitGroup is the happens-before
+                			//: edge that makes every write visible to the caller.
+                			out[i] = value
+                			//: this task succeeded.
+                			return nil
+                		})
+              to: runner.Go
+          key: i
+          range: fns
+          value: fn
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: runner.Wait()
+            to: runner.Wait
+          when: err != nil
+      - return: out, nil
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: limit
+              value: "1"
+          when: limit < 1
+      - bind: ctx, cancel
+        eval: context.WithCancelCause(parent)
+        to: context
+      - bind: runner
+        eval: "&Group{ctx: ctx, cancel: cancel, sem: make(chan struct{}, limit)}"
+      - return: runner, ctx
+  - of: NewJoined
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewJoined
+        kind: self
+      - id: New
+        kind: internal
+    steps:
+      - bind: runner, ctx
+        eval: New(parent, limit)
+        to: New
+      - set: runner.failures
+        value: new([]error)
+      - return: runner, ctx
+  - of: (*Group).Go
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Go
+        kind: self
+      - id: g.wg.Add
+        kind: value
+      - id: g.runJoined
+        kind: internal
+      - id: g.run
+        kind: internal
+    steps:
+      - send:
+          chan: g.sem
+          value: struct{}{}
+      - eval: g.wg.Add(1)
+        to: g.wg.Add
+      - opt:
+          do:
+            - go: g.runJoined(fn, g.reserve())
+              to: g.runJoined
+            - return: ""
+          when: g.failures != nil
+      - go: g.run(fn)
+        to: g.run
+  - of: (*Group).reserve
+    steps:
+      - lock:
+          mutex: g.mu
+      - set: "*g.failures"
+        value: append(*g.failures, nil)
+      - return: len(*g.failures) - 1
+  - of: (*Group).runJoined
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).runJoined
+        kind: self
+      - id: g.run
+        kind: internal
+    steps:
+      - eval: |-
+          g.run(func(ctx context.Context) error {
+          		err := fn(ctx)
+          		//: a success leaves its slot nil, which errors.Join drops.
+          		if err != nil {
+          			g.record(slot, err)
+          		}
+          		//: run still cancels the siblings on the first failure.
+          		return err
+          	})
+        to: g.run
+  - of: (*Group).Wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Wait
+        kind: self
+      - id: g.wg.Wait
+        kind: value
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - eval: g.wg.Wait()
+        to: g.wg.Wait
+      - eval: g.cancel(nil)
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - bind: panicked, err
+        eval: g.panicked, g.err
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+      - opt:
+          do:
+            - panic: "*panicked"
+          when: panicked != nil
+      - opt:
+          do:
+            - return: errors.Join(*g.failures...)
+              to: errors
+          when: g.failures != nil
+      - return: err
+  - of: (*Group).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).run
+        kind: self
+      - id: g.capturePanic
+        kind: internal
+      - id: g.fail
+        kind: internal
+    steps:
+      - defer: |-
+          func() {
+          		<-g.sem
+          		g.wg.Done()
+          	}()
+      - defer: g.capturePanic()
+        to: g.capturePanic
+      - opt:
+          do:
+            - eval: g.fail(err)
+              to: g.fail
+          init:
+            bind: err
+            eval: fn(g.ctx)
+          when: err != nil
+  - of: (*Group).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).record
+        kind: self
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+    steps:
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - set: (*g.failures)[slot]
+        value: err
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+  - of: (*Group).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).fail
+        kind: self
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+    steps:
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - bind: first
+        eval: g.err == nil
+      - opt:
+          do:
+            - set: g.err
+              value: err
+          when: first
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: "!first"
+      - eval: g.cancel(err)
+  - of: (*Group).capturePanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).capturePanic
+        kind: self
+      - id: g.mu.Lock
+        kind: value
+      - id: newPanicValue
+        kind: internal
+      - id: g.mu.Unlock
+        kind: value
+    steps:
+      - bind: raised
+        eval: recover()
+      - opt:
+          do:
+            - return: ""
+          when: raised == nil
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - opt:
+          do:
+            - set: g.panicked
+              to: newPanicValue
+              value: newPanicValue(raised)
+          when: g.panicked == nil
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+      - eval: g.cancel(nil)
+  - of: newPanicValue
+    steps:
+      - return: "&PanicValue{Raised: raised, Stack: debug.Stack()}"
+  - of: PanicValue.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: PanicValue.String
+        kind: self
+      - id: out.WriteString
+        kind: value
+      - id: out.Write
+        kind: value
+      - id: out.String
+        kind: value
+    steps:
+      - var:
+          name: out
+          type: strings.Builder
+      - eval: "out.WriteString(\"kernel/concur/group: panic in task: \")"
+        to: out.WriteString
+      - eval: out.WriteString(renderRaised(p.Raised))
+        to: out.WriteString
+      - eval: out.WriteString("\noriginating goroutine stack:\n")
+        to: out.WriteString
+      - eval: out.Write(p.Stack)
+        to: out.Write
+      - return: out.String()
+        to: out.String
+  - of: renderRaised
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderRaised
+        kind: self
+      - id: typed.Error
+        kind: value
+      - id: typed.String
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: typed
+          cases:
+            - do:
+                - return: typed
+              types: string
+            - do:
+                - return: typed.Error()
+                  to: typed.Error
+              types: error
+            - do:
+                - return: typed.String()
+                  to: typed.String
+              types: interface{ String() string }
+          "on": raised
+      - return: "\"non-textual panic value (see PanicValue.Raised)\""

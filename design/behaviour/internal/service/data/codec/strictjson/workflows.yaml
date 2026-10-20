@@ -1,0 +1,21 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: boundPointer
+    steps:
+      - opt:
+          do:
+            - return: pointer
+          when: len(pointer) <= MaxPointerBytes
+      - bind: cut
+        eval: pointer[:MaxPointerBytes]
+      - loop:
+          cond: index >= 0
+          do:
+            - opt:
+                do:
+                  - return: cut[:index]
+                when: cut[index] == '/'
+          init: index := len(cut) - 1
+          post: index--
+      - return: "\"\""

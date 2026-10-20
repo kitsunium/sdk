@@ -1,0 +1,215 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          KindInvalid is the zero AttrKind — FIRST in the iota run for exactly
+          that reason. It belongs to the zero [AttrValue] and to nothing else:
+          [NewRequestValue] drops an attribute carrying it, so a kind-less
+          attribute is ABSENT rather than present and unusable.
+        name: KindInvalid
+        type: AttrKind
+        value: iota
+      - doc: KindString is a single text value — a department, a tenant, a region.
+        name: KindString
+      - doc: KindInt64 is a whole number — an age, a level, a Unix timestamp.
+        name: KindInt64
+      - doc: KindBool is a flag — mfa_satisfied, account_locked, is_internal.
+        name: KindBool
+      - doc: |-
+          KindStrings is an unordered set of text values — the roles a subject
+          holds, the groups it belongs to, the scopes a token carries.
+        name: KindStrings
+    name: KindInvalid
+  - grouped: true
+    items:
+      - doc: |-
+          Abstain means this policy has no opinion about this request. It is the
+          zero value — FIRST in the iota run for exactly that reason — and it
+          grants nothing: composition preserves it, and the closure refuses it.
+        name: Abstain
+        type: Decision
+        value: iota
+      - doc: |-
+          Allow means this policy permits the request. It is the ONLY value that
+          grants, and under deny-overrides it can still be defeated by a [Deny]
+          from any other policy in the composition.
+        name: Allow
+      - doc: |-
+          Deny means this policy refuses the request. It is absorbing: no [Allow]
+          anywhere in a composition can outvote it (ADR 0057 §D2).
+        name: Deny
+    name: Abstain
+files:
+  - decls:
+      - AttrKind
+      - KindInvalid
+      - AttrValue
+      - AttrString
+      - AttrInt64
+      - AttrBool
+      - AttrStrings
+      - AttrValue.Key
+      - AttrValue.Kind
+      - AttrValue.StringValue
+      - AttrValue.Int64Value
+      - AttrValue.BoolValue
+      - AttrValue.StringsValue
+      - AttrValue.Contains
+    name: attr_value.go
+  - decls:
+      - Policy
+      - Condition
+    name: authz.go
+  - decls:
+      - Decision
+      - Abstain
+      - Decision.Granted
+      - Decision.Valid
+      - Decision.String
+    name: decision.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - RequestValue
+      - NewRequestValue
+      - RequestValue.Subject
+      - RequestValue.Action
+      - RequestValue.Resource
+      - RequestValue.Attr
+      - RequestValue.AttrCount
+    name: request_value.go
+functions:
+  - name: AttrString
+    params: key, value string
+    results: AttrValue
+  - name: AttrInt64
+    params: key string, value int64
+    results: AttrValue
+  - name: AttrBool
+    params: key string, value bool
+    results: AttrValue
+  - name: AttrStrings
+    params: key string, values ...string
+    results: AttrValue
+  - name: NewRequestValue
+    params: subject, action, resource string, attrs ...AttrValue
+    results: RequestValue
+imports:
+  context: context
+  slices: slices
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/security/authz
+  name: authz
+  purpose: Package authz — hosts AttrValue, one typed fact about a request.
+types:
+  - kind: named
+    name: AttrKind
+    underlying: uint8
+  - fields:
+      - doc: "key names the attribute. Empty is not a name: NewRequestValue drops it."
+        name: key
+        type: string
+      - doc: kind selects which of the payload members below is meaningful.
+        name: kind
+        type: AttrKind
+      - doc: text carries KindString.
+        name: text
+        type: string
+      - doc: number carries KindInt64.
+        name: number
+        type: int64
+      - doc: flag carries KindBool.
+        name: flag
+        type: bool
+      - doc: |-
+          list carries KindStrings; it is cloned in and cloned out, so no caller
+          can mutate an attribute another goroutine is evaluating.
+        name: list
+        type: "[]string"
+    kind: struct
+    methods:
+      - name: Key
+        recv: a AttrValue
+        results: string
+      - name: Kind
+        recv: a AttrValue
+        results: AttrKind
+      - name: StringValue
+        recv: a AttrValue
+        results: value string, ok bool
+      - name: Int64Value
+        recv: a AttrValue
+        results: value int64, ok bool
+      - name: BoolValue
+        recv: a AttrValue
+        results: value, ok bool
+      - name: StringsValue
+        recv: a AttrValue
+        results: values []string, ok bool
+      - name: Contains
+        params: want string
+        recv: a AttrValue
+        results: found, ok bool
+    name: AttrValue
+  - kind: named
+    name: Policy
+    underlying: func(ctx context.Context, request RequestValue) (Decision, error)
+  - kind: named
+    name: Condition
+    underlying: func(request RequestValue) (bool, error)
+  - kind: named
+    methods:
+      - name: Granted
+        recv: d Decision
+        results: bool
+      - name: Valid
+        recv: d Decision
+        results: bool
+      - name: String
+        recv: d Decision
+        results: string
+    name: Decision
+    underlying: uint8
+  - fields:
+      - doc: |-
+          subject is the authenticated principal, exactly as internal/core/security/session
+          or internal/core/security/token reported it. Empty means anonymous, which is a
+          legitimate request and never a special case: it matches whatever the
+          caller's rules say about the empty subject, which is normally nothing,
+          which is an abstention, which the closure refuses.
+        name: subject
+        type: string
+      - doc: action is the verb being attempted.
+        name: action
+        type: string
+      - doc: resource is the kind of thing being acted on.
+        name: resource
+        type: string
+      - doc: |-
+          attrs is the fact bag, keyed by attribute name. Every entry has a
+          non-empty key and a valid kind — NewRequestValue enforces both — so a
+          lookup that succeeds always yields a usable attribute.
+        name: attrs
+        type: map[string]AttrValue
+    kind: struct
+    methods:
+      - name: Subject
+        recv: r RequestValue
+        results: string
+      - name: Action
+        recv: r RequestValue
+        results: string
+      - name: Resource
+        recv: r RequestValue
+        results: string
+      - name: Attr
+        params: key string
+        recv: r RequestValue
+        results: attr AttrValue, ok bool
+      - name: AttrCount
+        recv: r RequestValue
+        results: int
+    name: RequestValue

@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Unlimited is the concurrency limit that bounds nothing: a slot is always
+      free, so [Group].Go never waits for one. It has to be written out — a zero
+      limit is clamped to one, never read as "no limit".
+    items:
+      - name: Unlimited
+        type: int
+        value: kgroup.Unlimited
+    name: Unlimited
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Unlimited
+    name: group.go
+imports:
+  kgroup: github.com/kitsunium/sdk/internal/kernel/concur/group
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/concur/group
+  name: group
+  purpose: "Package group runs a set of tasks concurrently and gives their caller one place to wait: one bounded degree of parallelism, one error — the first, or every one of them — and the panic a child goroutine would otherwise take the whole process down with, delivered to the waiter instead."
+types: []

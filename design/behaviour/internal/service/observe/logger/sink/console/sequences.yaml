@@ -1,0 +1,75 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - opt:
+          do:
+            - return: nil, coreconsole.WriterNil
+          when: w == nil
+      - return: "&consoleSink{w: w}, nil"
+  - of: NewStderr
+    steps:
+      - return: "&consoleSink{w: os.Stderr}"
+  - of: NewStdout
+    steps:
+      - return: "&consoleSink{w: os.Stdout}"
+  - of: (*consoleSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consoleSink).Write
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.w.Write
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    coreconsole.CodeCtxCancelled,
+                			Reason:  "CTX_CANCELLED",
+                			Public:  "Logging aborted due to cancellation",
+                			Private: "service/observe/logger/sink/console.Write saw a cancelled context",
+                		}, errs.Int("level", int(r.Level)))
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: written, werr
+        eval: s.w.Write(p)
+        to: s.w.Write
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                written, errs.Wrap(werr, errs.WrapParams{
+                			Code:    coreconsole.CodeWriteFailed,
+                			Reason:  "WRITE_FAILED",
+                			Public:  "Console write failed",
+                			Private: "service/observe/logger/sink/console.Write underlying writer returned an error",
+                		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
+          when: werr != nil
+      - return: written, nil
+  - of: (*consoleSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consoleSink).Flush
+        kind: self
+      - id: ctx.Err
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx != nil && ctx.Err() != nil
+      - return: nil
+  - of: (*consoleSink).Close
+    steps:
+      - return: nil

@@ -1,0 +1,20 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: toLowerASCII
+    steps:
+      - bind: b
+        eval: make([]byte, len(s))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: b[i]
+                    value: s[i] + ('a' - 'A')
+                  - continue: true
+                when: s[i] >= 'A' && s[i] <= 'Z'
+            - set: b[i]
+              value: s[i]
+          key: i
+          range: len(s)
+      - return: string(b)

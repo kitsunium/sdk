@@ -1,0 +1,187 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Unlimited is the concurrency limit that bounds nothing: a slot is always
+      free, so [Group.Go] never waits for one.
+
+      It has to be written out. A zero that silently meant "no limit" would be a
+      value the caller never chose doing something they never asked for, and a
+      zero that meant "no task may run" is the deadlock ADR 0031 exists to remove
+      from this SDK — errgroup's SetLimit(0) parks every Go call forever. Naming
+      the case leaves neither reading available to a typo.
+    items:
+      - name: Unlimited
+        type: int
+        value: math.MaxInt
+    name: Unlimited
+files:
+  - decls:
+      - Collect
+    name: collect.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Unlimited
+      - Group
+      - New
+      - NewJoined
+      - (*Group).Go
+      - (*Group).reserve
+      - (*Group).runJoined
+      - (*Group).Wait
+      - (*Group).run
+      - (*Group).record
+      - (*Group).fail
+      - (*Group).capturePanic
+    name: group.go
+  - decls:
+      - PanicValue
+      - newPanicValue
+      - PanicValue.String
+      - renderRaised
+    name: panic.go
+functions:
+  - name: Collect
+    params: parent context.Context, limit int, fns []func(ctx context.Context) (value T, err error)
+    results: results []T, err error
+    typeParams: T any
+  - name: New
+    params: parent context.Context, limit int
+    results: "*Group, context.Context"
+  - name: NewJoined
+    params: parent context.Context, limit int
+    results: "*Group, context.Context"
+  - doc: |-
+      newPanicValue captures raised together with the stack of the goroutine that
+      is unwinding.
+    name: newPanicValue
+    params: raised any
+    results: "*PanicValue"
+  - doc: |-
+      renderRaised turns the recovered value into text, preferring the payload's
+      own rendering when it has one.
+    name: renderRaised
+    params: raised any
+    results: string
+imports:
+  context: context
+  debug: runtime/debug
+  errors: errors
+  math: math
+  strings: strings
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/group
+  name: group
+  purpose: Package group — the typed fan-out built on the Group.
+types:
+  - fields:
+      - doc: |-
+          ctx is handed to every task. It is stored rather than closed over so a
+          task signature can name it, which is what stops a caller from wiring the
+          wrong context into a goroutine they did not write.
+        name: ctx
+        type: context.Context
+      - doc: |-
+          cancel releases ctx. It carries a cause so a sibling can tell "another
+          task failed, with this error" from "the parent went away".
+        name: cancel
+        type: context.CancelCauseFunc
+      - doc: |-
+          sem is the concurrency bound. A token is taken in Go, before the
+          goroutine exists, and returned when the task ends.
+        name: sem
+        type: chan struct{}
+      - doc: wg reaches zero exactly when every started task has returned.
+        name: wg
+        type: sync.WaitGroup
+      - doc: |-
+          mu guards the outcome fields below, which any task may write and Wait
+          reads.
+        name: mu
+        type: sync.Mutex
+      - doc: err is the first non-nil error a task returned.
+        name: err
+        type: error
+      - doc: panicked is the first panic a task raised, with its originating stack.
+        name: panicked
+        type: "*PanicValue"
+      - doc: |-
+          failures is non-nil exactly in a group from NewJoined, whose Wait
+          reports every error: one slot per submitted task, in submission order,
+          nil until that task fails. A pointer, so a first-error group pays one
+          word for the mode it does not use and nothing per task.
+        name: failures
+        type: "*[]error"
+    kind: struct
+    methods:
+      - name: Go
+        params: fn func(ctx context.Context) error
+        recv: g *Group
+      - doc: |-
+          reserve claims the next slot of a joined group's failure list and returns
+          its index: the task's position among the submissions.
+        name: reserve
+        recv: g *Group
+        results: int
+      - doc: |-
+          runJoined runs fn as run does, keeping its error in the failure slot the
+          submission reserved. It is a separate path so a first-error group's
+          goroutine carries no slot it would never use.
+        name: runJoined
+        params: fn func(ctx context.Context) error, slot int
+        recv: g *Group
+      - name: Wait
+        recv: g *Group
+        results: error
+      - doc: |-
+          run executes fn and releases the group's hold on its goroutine. It exists as
+          a method rather than a closure so the defer ordering below is reviewable in
+          one place — it is what makes a panic recoverable AND the slot returned.
+        name: run
+        params: fn func(ctx context.Context) error
+        recv: g *Group
+      - doc: record stores err in a joined group's failure list at slot.
+        name: record
+        params: slot int, err error
+        recv: g *Group
+      - doc: |-
+          fail records the first error and cancels the group so its siblings can stop.
+
+          In a first-error group later errors are dropped on purpose: the group
+          reports the failure that STARTED the shutdown, and almost every error after
+          it is a consequence of the cancellation the first one caused. Reporting a
+          cascade would bury the cause. A joined group has already kept each of them
+          in its failure list (record); here it only decides the cause, like any other.
+
+          Only the call that records the first error cancels. Recording and cancelling
+          are two steps, and the first cancel is the one whose cause sticks, so if
+          every failing task cancelled, a task that lost the race to record could win
+          the race to cancel — and context.Cause would name a different error than
+          Wait returns. TestWaitAndTheContextCauseNameTheSameFailure is the guard.
+        name: fail
+        params: err error
+        recv: g *Group
+      - doc: |-
+          capturePanic recovers a task's panic on the task's own goroutine — the only
+          place recover() can see it — and turns it into a value Wait can re-raise.
+        name: capturePanic
+        recv: g *Group
+    name: Group
+  - fields:
+      - doc: Raised is the value the original panic carried, verbatim.
+        name: Raised
+        type: any
+      - doc: |-
+          Stack is the stack of the goroutine that ran the task, captured at
+          recovery.
+        name: Stack
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: String
+        recv: p PanicValue
+        results: string
+    name: PanicValue

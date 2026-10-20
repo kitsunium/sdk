@@ -1,0 +1,71 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: fractionDigits
+    steps:
+      - loop:
+          do:
+            - bind: digit
+              eval: "0"
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: 0, false
+                      when: frac[i] < '0' || frac[i] > '9'
+                  - set: digit
+                    value: int(frac[i] - '0')
+                when: i < len(frac)
+            - set: value
+              value: value*digitBase + digit
+          key: i
+          range: qualityScale
+      - return: value, true
+  - of: validRange
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: text == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isRangeByte(text[i])"
+          key: i
+          range: len(text)
+      - return: "true"
+  - of: hasLink
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: step.tag == tag
+          key: _
+          range: chain
+          value: step
+      - return: "false"
+  - of: placeSubtags
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: len(sub) == scriptSubtagLen && script == "" && region == ""
+                    do:
+                      - set: script
+                        value: sub
+                  - case: (len(sub) == alphaRegionLen || len(sub) == digitRegionLen) && region == ""
+                    do:
+                      - set: region
+                        value: sub
+                  - default: true
+                    do:
+                      - return: "\"\", \"\", false"
+          key: _
+          range: rest
+          value: sub
+      - return: script, region, true

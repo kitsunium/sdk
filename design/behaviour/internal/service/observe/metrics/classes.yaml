@@ -1,0 +1,2227 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultMaxSeriesPerInstrument is the bound a Meter uses when MeterConfig
+      leaves the knob unset. 2000 distinct attribute sets per instrument name is
+      the figure the OpenTelemetry SDKs settled on for the same problem: high
+      enough that a sanely-attributed metric never reaches it, low enough that a
+      metric which does reach it has not yet cost meaningful memory.
+    items:
+      - name: DefaultMaxSeriesPerInstrument
+        type: int
+        value: "2000"
+    name: DefaultMaxSeriesPerInstrument
+  - doc: |-
+      OTLPMetricsPath is the URL path OTLP/HTTP reserves for the metrics signal.
+      The specification names it under §OTLP/HTTP Request; an endpoint is a full
+      URL used as-is, so a caller spells the path themselves and this constant is
+      what they spell it with.
+    items:
+      - name: OTLPMetricsPath
+        type: string
+        value: "\"/v1/metrics\""
+    name: OTLPMetricsPath
+  - doc: |-
+      DefaultOTLPTimeout bounds one export round trip when OTLPHTTPConfig leaves
+      Timeout unset. Ten seconds is the value the OpenTelemetry protocol exporter
+      specification itself defaults OTEL_EXPORTER_OTLP_TIMEOUT to, so it is a
+      clamp onto the specification's own number rather than a figure this SDK
+      invented (ADR 0031).
+    items:
+      - name: DefaultOTLPTimeout
+        type: time.Duration
+        value: otlp.DefaultTimeout
+    name: DefaultOTLPTimeout
+  - doc: |-
+      DefaultOTLPMaxResponseBytes caps how much of a collector's response body is
+      read. A conforming response is an ExportMetricsServiceResponse or a Status
+      message — hundreds of bytes. The cap exists because the body is the one part
+      of this exchange a REMOTE party controls its length of, and an exporter that
+      read it whole would hand a hostile or broken collector a way to exhaust the
+      process that is only trying to report its metrics.
+
+      It also bounds the drain that recycles the connection after the verdict —
+      always this default rather than OTLPHTTPConfig.MaxResponseBytes, because
+      that knob bounds what is read into memory and the drain keeps nothing.
+    items:
+      - name: DefaultOTLPMaxResponseBytes
+        type: int64
+        value: otlp.DefaultMaxResponseBytes
+    name: DefaultOTLPMaxResponseBytes
+  - doc: |-
+      rejectedFieldKey is the errs Field key a partial success carries the
+      rejected count under. It never carries remote-controlled text.
+    items:
+      - name: rejectedFieldKey
+        type: string
+        value: "\"rejected_data_points\""
+    name: rejectedFieldKey
+  - doc: |-
+      otlpJSONExporterName is the registered name of the default OTLP/JSON
+      exporter, which writes to stderr (ADR 0030). It names the ENCODING, not the
+      protocol, because an OTLP/protobuf encoder would register beside it.
+    items:
+      - name: otlpJSONExporterName
+        type: coremetrics.ExporterName
+        value: "\"otlpjson\""
+    name: otlpJSONExporterName
+  - doc: |-
+      The three AggregationTemporality enum values, copied from
+      opentelemetry/proto/metrics/v1/metrics.proto. OTLP/JSON encodes an enum as
+      its INTEGER, never as its name (specification §JSON Protobuf Encoding), which
+      is the one place OTLP/JSON deviates from the generic proto3 JSON mapping.
+    grouped: true
+    items:
+      - doc: |-
+          otlpTemporalityUnspecified is AGGREGATION_TEMPORALITY_UNSPECIFIED. The
+          schema's own comment reads "UNSPECIFIED is the default
+          AggregationTemporality, it MUST not be used" — so this constant names
+          the value this encoder REFUSES, never one it emits.
+        name: otlpTemporalityUnspecified
+        type: int
+        value: iota
+      - doc: otlpTemporalityDelta is AGGREGATION_TEMPORALITY_DELTA.
+        name: otlpTemporalityDelta
+      - doc: otlpTemporalityCumulative is AGGREGATION_TEMPORALITY_CUMULATIVE.
+        name: otlpTemporalityCumulative
+    name: otlpTemporalityUnspecified
+  - doc: |-
+      prometheusExporterName is the registered name of the default Prometheus
+      exporter, which writes to stderr (ADR 0030).
+    items:
+      - name: prometheusExporterName
+        type: coremetrics.ExporterName
+        value: "\"prometheus\""
+    name: prometheusExporterName
+  - doc: |-
+      The three TYPE names the exposition format defines for the SDK's instrument
+      kinds. Summary and untyped exist in the format but have no SDK instrument.
+    grouped: true
+    items:
+      - name: promTypeCounter
+        type: string
+        value: "\"counter\""
+      - name: promTypeGauge
+        type: string
+        value: "\"gauge\""
+      - name: promTypeHistogram
+        type: string
+        value: "\"histogram\""
+    name: promTypeCounter
+  - doc: |-
+      The suffixes a histogram family is spelled with, plus the reserved label that
+      carries a bucket's inclusive upper bound and the mandatory last bound.
+    grouped: true
+    items:
+      - name: bucketSuffix
+        type: string
+        value: "\"_bucket\""
+      - name: sumSuffix
+        type: string
+        value: "\"_sum\""
+      - name: countSuffix
+        type: string
+        value: "\"_count\""
+      - name: boundLabelKey
+        type: string
+        value: "\"le\""
+      - name: positiveInfBound
+        type: string
+        value: "\"+Inf\""
+      - doc: |-
+          noBound is the boundLabelKey-absent sentinel. The empty string is safe
+          as a sentinel because every bound this exporter emits is a formatted
+          float, and no formatted float is empty.
+        name: noBound
+        type: string
+        value: "\"\""
+      - doc: |-
+          reservedLabelPrefix is what Prometheus reserves for its own internal
+          labels; a label so named is dropped during relabelling, so a series
+          carrying one silently loses a dimension at the server.
+        name: reservedLabelPrefix
+        type: string
+        value: "\"__\""
+    name: bucketSuffix
+  - doc: |-
+      textExporterName is the registered name of the default text exporter, which
+      writes to stderr (ADR 0030).
+    items:
+      - name: textExporterName
+        type: coremetrics.ExporterName
+        value: "\"text\""
+    name: textExporterName
+  - doc: decimalBase / floatBitSize are the strconv formatting parameters.
+    grouped: true
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+      - name: floatBitSize
+        type: int
+        value: "64"
+    name: decimalBase
+  - doc: The three kind words and the two monotonicity words the header line uses.
+    grouped: true
+    items:
+      - name: textKindSum
+        type: string
+        value: "\"sum\""
+      - name: textKindGauge
+        type: string
+        value: "\"gauge\""
+      - name: textKindHistogram
+        type: string
+        value: "\"histogram\""
+      - name: textMonotonic
+        type: string
+        value: "\"monotonic\""
+      - name: textNonMonotonic
+        type: string
+        value: "\"non_monotonic\""
+    name: textKindSum
+  - doc: minSortableSeries is the shortest slice worth handing to a sort.
+    items:
+      - name: minSortableSeries
+        type: int
+        value: "2"
+    name: minSortableSeries
+  - grouped: true
+    items:
+      - doc: kindCounter marks a name bound to a synchronous monotonic Counter.
+        name: kindCounter
+        type: instrumentKind
+        value: iota
+      - doc: |-
+          kindUpDownCounter marks a name bound to a synchronous non-monotonic
+          UpDownCounter.
+        name: kindUpDownCounter
+      - doc: kindGauge marks a name bound to a Gauge.
+        name: kindGauge
+      - doc: kindHistogram marks a name bound to a Histogram.
+        name: kindHistogram
+      - doc: kindObservableCounter marks a name bound to an asynchronous monotonic sum.
+        name: kindObservableCounter
+      - doc: |-
+          kindObservableUpDownCounter marks a name bound to an asynchronous
+          non-monotonic sum.
+        name: kindObservableUpDownCounter
+      - doc: kindObservableGauge marks a name bound to an asynchronous gauge.
+        name: kindObservableGauge
+    name: kindCounter
+  - grouped: true
+    items:
+      - doc: groupSum is SnapshotValue.Sums.
+        name: groupSum
+        type: outputGroup
+        value: iota
+      - doc: groupGauge is SnapshotValue.Gauges.
+        name: groupGauge
+      - doc: groupHistogram is SnapshotValue.Histograms.
+        name: groupHistogram
+    name: groupSum
+  - doc: |-
+      maxStackAttrs is how many attributes the lookup path sorts without touching
+      the heap. Eight is already an unusual number of dimensions on one metric;
+      beyond it the sort falls back to a heap clone, which is correct and merely
+      slower — the pathological case pays, the normal one does not.
+    items:
+      - name: maxStackAttrs
+        type: int
+        value: "8"
+    name: maxStackAttrs
+  - doc: |-
+      seriesKeyCap is the stack scratch the encoded series key is built in. A key
+      is the instrument name plus every key and typed value, each tagged and
+      length-prefixed or fixed-width, so 192 bytes covers a long name with a
+      handful of attributes. Overflowing it costs one heap slice on that call,
+      nothing more.
+    items:
+      - name: seriesKeyCap
+        type: int
+        value: "192"
+    name: seriesKeyCap
+files:
+  - decls:
+      - carved
+    name: carved.go
+  - decls:
+      - DefaultMaxSeriesPerInstrument
+      - MeterConfig
+      - MeterConfig.resolve
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - OTLPMetricsPath
+      - DefaultOTLPTimeout
+      - DefaultOTLPMaxResponseBytes
+      - rejectedFieldKey
+      - otlpSignal
+      - otlpHTTPExporter
+      - NewOTLPHTTPExporter
+      - OTLPRetryable
+      - (*otlpHTTPExporter).Name
+      - (*otlpHTTPExporter).Export
+    name: exporter_otlphttp.go
+  - decls:
+      - otlpJSONExporterName
+      - otlpTemporalityUnspecified
+      - otlpEncodeFailure
+      - otlpJSONExporter
+      - EncodeOTLPJSON
+      - otlpMetricList
+      - appendOTLPSums
+      - otlpSumPoints
+      - appendOTLPGauges
+      - otlpGaugePoints
+      - appendOTLPHistograms
+      - otlpHistogramPoints
+      - otlpTemporality
+      - checkOTLPBucketLayout
+      - otlpBucketCounts
+      - otlpExplicitBounds
+      - newOTLPJSONExporter
+      - NewOTLPJSONExporter
+      - (*otlpJSONExporter).Name
+      - (*otlpJSONExporter).Export
+    name: exporter_otlpjson.go
+  - decls:
+      - prometheusExporterName
+      - promTypeCounter
+      - bucketSuffix
+      - Prometheus
+      - prometheusExporter
+      - newPrometheusExporter
+      - NewPrometheusExporter
+      - (*prometheusExporter).Name
+      - (*prometheusExporter).Export
+      - renderExposition
+      - appendPromSums
+      - appendPromGauges
+      - appendPromHistograms
+      - appendHistogramSeries
+      - appendHelpLine
+      - appendEscapedHelp
+      - appendTypeLine
+      - appendSample
+      - appendBucket
+      - appendPromLabels
+      - promFloat
+      - checkTemporality
+      - checkMetricName
+      - checkAttrNames
+      - validMetricName
+      - metricNameByte
+      - validLabelName
+      - labelNameByte
+    name: exporter_prometheus.go
+  - decls:
+      - textExporterName
+      - decimalBase
+      - textKindSum
+      - Text
+      - textExporter
+      - newTextExporter
+      - NewTextExporter
+      - (*textExporter).Name
+      - (*textExporter).Export
+      - appendResourceLine
+      - appendScopeLine
+      - appendWindowLine
+      - appendSums
+      - appendGauges
+      - appendHistograms
+      - appendMetricHeader
+      - appendSeriesLine
+      - appendAttrs
+      - appendAttrPair
+      - appendQuoted
+      - appendEscapedValue
+      - sortedKeys
+    name: exporter_text.go
+  - decls:
+      - memGauge
+      - (*memGauge).Set
+      - (*memGauge).Add
+      - (*memGauge).load
+      - newMemGauge
+    name: gauge.go
+  - decls:
+      - memHistogram
+      - newHistogram
+      - (*memHistogram).Record
+      - (*memHistogram).snapshot
+      - (*memHistogram).RecordDuration
+    name: histogram.go
+  - decls:
+      - minSortableSeries
+      - memMeter
+      - NewMeter
+      - NewMeterWithConfig
+      - newMemMeter
+      - (*memMeter).Counter
+      - (*memMeter).UpDownCounter
+      - (*memMeter).Gauge
+      - (*memMeter).Histogram
+      - (*memMeter).Collect
+      - collectSums
+      - collectGauges
+      - collectHistograms
+      - carve
+      - sizeGroups
+      - sortPoints
+      - sumAttrs
+      - gaugeAttrs
+      - histogramAttrs
+    name: meter.go
+  - decls:
+      - (*memMeter).Describe
+    name: meter_describe.go
+  - decls:
+      - observer
+      - (*memMeter).ObservableCounter
+      - (*memMeter).ObservableUpDownCounter
+      - (*memMeter).ObservableGauge
+      - (*memMeter).register
+      - (*memMeter).runObservers
+      - (*memMeter).observeSum
+      - (*memMeter).observeGauge
+      - observableBuilder
+    name: meter_observable.go
+  - decls:
+      - metricHeader
+    name: metric_header.go
+  - decls:
+      - instrumentKind
+      - kindCounter
+      - outputGroup
+      - groupSum
+      - instrumentKind.group
+      - instrumentKind.monotonic
+      - nameState
+      - (*nameState).seriesCap
+      - (*nameState).overflowSeries
+      - (*memMeter).bindName
+    name: name_state.go
+  - decls:
+      - otlpPartialSuccess
+      - (*otlpPartialSuccess).RejectedCount
+      - decodeRejected
+    name: otlp_export_response.go
+  - decls:
+      - otlpRequest
+      - otlpResourceMetrics
+      - otlpScopeMetrics
+      - otlpMetric
+      - otlpGauge
+      - otlpSum
+      - otlpHistogram
+      - otlpNumberDataPoint
+      - otlpHistogramDataPoint
+    name: otlp_request.go
+  - decls:
+      - OTLPHTTPConfig
+    name: otlphttp_config.go
+  - decls:
+      - maxStackAttrs
+      - seriesKeyCap
+      - overflowAttrs
+      - sortAttrs
+      - appendSeriesKey
+      - appendSized
+      - cloneAttrs
+      - compareAttrs
+    name: series.go
+  - decls:
+      - seriesEntry
+    name: series_entry.go
+  - decls:
+      - seriesStore
+      - newSeriesStore
+      - (*seriesStore).lookup
+      - (*seriesStore).admit
+      - retain
+      - (*seriesStore).overflow
+    name: series_store.go
+  - decls:
+      - memSum
+      - (*memSum).Add
+      - (*memSum).Inc
+      - (*memSum).Dec
+      - (*memSum).observe
+      - (*memSum).collect
+      - newCounter
+      - newUpDownCounter
+      - newObservableCounter
+      - newObservableUpDownCounter
+    name: sum.go
+functions:
+  - name: NewOTLPHTTPExporter
+    params: name coremetrics.ExporterName, cfg OTLPHTTPConfig
+    results: exporter coremetrics.Exporter, err error
+  - name: OTLPRetryable
+    params: err error
+    results: bool
+  - name: EncodeOTLPJSON
+    params: snap coremetrics.SnapshotValue
+    results: doc []byte, err error
+  - doc: |-
+      otlpMetricList flattens the snapshot's three name-keyed maps into the single
+      metrics[] array a ScopeMetrics carries.
+
+      Sums, then gauges, then histograms, each in ascending name order — the same
+      walk the text exporter takes, and the reason a snapshot renders
+      byte-identically twice in a row. OTLP itself imposes no order on metrics[];
+      determinism is what makes the output diffable and its tests writable.
+    name: otlpMetricList
+    params: snap coremetrics.SnapshotValue
+    results: list []otlpMetric, err error
+  - doc: |-
+      appendOTLPSums renders each sum name as one Metric carrying a Sum message.
+
+      A Counter and an UpDownCounter both land here, told apart by isMonotonic —
+      the OTel model's own economy, and the reason there is one point shape for two
+      instruments.
+    name: appendOTLPSums
+    params: list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlp.Uint64
+    results: metrics []otlpMetric, err error
+  - doc: |-
+      otlpSumPoints renders one sum name's series as NumberDataPoints carrying
+      asInt, because a sum in this SDK is an int64 accumulator.
+    name: otlpSumPoints
+    params: series []coremetrics.SumValue, start, end otlp.Uint64
+    results: "[]otlpNumberDataPoint"
+  - doc: |-
+      appendOTLPGauges renders each gauge name as one Metric carrying a Gauge
+      message. A Gauge has no aggregationTemporality field — a sampled reading
+      covers no window — so there is nothing here to refuse.
+    name: appendOTLPGauges
+    params: list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlp.Uint64
+    results: "[]otlpMetric"
+  - doc: |-
+      otlpGaugePoints renders one gauge name's series as NumberDataPoints carrying
+      asDouble, because a gauge reading is a float64.
+    name: otlpGaugePoints
+    params: series []coremetrics.GaugeValue, start, end otlp.Uint64
+    results: "[]otlpNumberDataPoint"
+  - doc: |-
+      appendOTLPHistograms renders each histogram name as one Metric carrying a
+      Histogram message of explicit-bucket data points.
+    name: appendOTLPHistograms
+    params: list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlp.Uint64
+    results: metrics []otlpMetric, err error
+  - doc: |-
+      otlpHistogramPoints renders one histogram name's series, validating each
+      bucket ladder first.
+
+      Counts ride through unchanged: the snapshot stores them PER BUCKET and OTLP's
+      bucketCounts is per bucket too, so unlike the Prometheus connector — which
+      has to build a cumulative ladder as it walks — there is nothing to convert.
+    name: otlpHistogramPoints
+    params: name string, series []coremetrics.HistogramValue, start, end otlp.Uint64
+    results: points []otlpHistogramDataPoint, err error
+  - doc: |-
+      otlpTemporality maps a Temporality onto its AggregationTemporality integer,
+      and refuses everything else.
+
+      UNSPECIFIED is not mapped to 0, although 0 is what it means: the schema says
+      that value "MUST not be used", and a receiver handed it either drops the
+      metric or guesses. Guessing is exactly the failure ADR 0044 exists to
+      prevent — the same number under the two settings is two different facts — so
+      this encoder refuses instead. A Meter resolves the knob at construction, so a
+      snapshot can only carry an unresolved temporality when it was hand-built or
+      cast; both are programmer errors, and both fail on the first export.
+    name: otlpTemporality
+    params: name string, temporality coremetrics.Temporality
+    results: value int, err error
+  - doc: |-
+      checkOTLPBucketLayout refuses a histogram point whose buckets the schema
+      cannot express.
+
+      The schema states the invariant in the comments this checks, one for one:
+      "The number of elements in bucket_counts array must be by one greater than
+      the number of elements in explicit_bounds array", and "The values in the
+      explicit_bounds array must be strictly increasing". A non-finite bound
+      violates the second by construction — the bucket above the last declared
+      bound is ALREADY (bound, +infinity), so declaring +Inf as a bound creates a
+      second, permanently empty bucket covering the same range, and NaN is not an
+      ordering at all.
+
+      This is where OTLP and the Prometheus connector diverge on the same input.
+      Prometheus SKIPS a non-finite bound, which it can afford because le="+Inf" is
+      a mandatory separate line there; skipping here would break the count relation
+      above, so the loss is named and refused instead of silently encoded.
+    name: checkOTLPBucketLayout
+    params: name string, point coremetrics.HistogramValue
+    results: error
+  - doc: |-
+      otlpBucketCounts widens the snapshot's per-bucket counts into the 64-bit
+      decimal strings the wire wants. The values are unchanged: the snapshot is
+      already per bucket, which is what OTLP asks for.
+    name: otlpBucketCounts
+    params: counts []uint64
+    results: "[]otlp.Uint64"
+  - doc: |-
+      otlpExplicitBounds renders the declared upper bounds. The field is
+      explicit_bounds in the schema, which is why the snapshot calls it Bounds
+      rather than Buckets.
+    name: otlpExplicitBounds
+    params: bounds []float64
+    results: "[]otlp.Double"
+  - doc: newOTLPJSONExporter is the shared constructor.
+    name: newOTLPJSONExporter
+    params: name coremetrics.ExporterName, dst io.Writer
+    results: "*otlpJSONExporter"
+  - name: NewOTLPJSONExporter
+    params: name coremetrics.ExporterName, dst io.Writer
+    results: coremetrics.Exporter
+  - doc: newPrometheusExporter is the shared constructor.
+    name: newPrometheusExporter
+    params: name coremetrics.ExporterName, dst io.Writer
+    results: "*prometheusExporter"
+  - name: NewPrometheusExporter
+    params: name coremetrics.ExporterName, dst io.Writer
+    results: coremetrics.Exporter
+  - doc: |-
+      renderExposition builds the whole document, one block per kind, each in
+      sorted-name order so two exports of one snapshot are byte-identical.
+
+      The Resource and the Scope are read and DROPPED — see checkTemporality's
+      neighbours in CLAUDE.md for why they are not emitted as a target_info metric.
+    name: renderExposition
+    params: snap coremetrics.SnapshotValue
+    results: doc []byte, err error
+  - doc: |-
+      appendPromSums renders each sum name as a "counter" or a "gauge" family.
+
+      A NON-MONOTONIC sum is typed `gauge`, not `counter`, and that is the
+      OpenTelemetry-to-Prometheus mapping rather than a convenience: `rate()` on a
+      counter treats every decrease as a process restart and re-extrapolates from
+      zero, so an up-down counter exposed as a counter reports a fabricated spike
+      each time its value falls.
+    name: appendPromSums
+    params: buf []byte, metrics map[string]coremetrics.SumMetricValue
+    results: doc []byte, err error
+  - doc: appendPromGauges renders each gauge name as a "gauge" family.
+    name: appendPromGauges
+    params: buf []byte, metrics map[string]coremetrics.GaugeMetricValue
+    results: doc []byte, err error
+  - doc: |-
+      appendPromHistograms renders each histogram name as a "histogram" family:
+      the cumulative _bucket ladder, then _sum and _count.
+    name: appendPromHistograms
+    params: |2
+
+      	buf []byte, metrics map[string]coremetrics.HistogramMetricValue,
+    results: doc []byte, err error
+  - doc: |-
+      appendHistogramSeries writes one histogram series: the cumulative _bucket
+      ladder including the mandatory le="+Inf" line, then _sum and _count.
+
+      The meter stores a PER-BUCKET count (Record increments exactly one slot); the
+      format wants a CUMULATIVE one — bucket le="b" reports every observation ≤ b.
+      The running total below is that conversion, and it is also what makes the
+      ladder monotonic by construction.
+
+      le="+Inf" carries the ladder's own total rather than point.Count. The two
+      are equal at rest, and under a concurrent Record they can differ by the
+      observations in flight, because Record bumps its bucket and the total count
+      as two separate atomics and snapshot reads them at two instants. Deriving
+      +Inf from Count instead would make it possible for +Inf to come out BELOW the
+      bucket beneath it — a non-monotonic ladder, which is the worse violation of
+      the two. No single number restores atomicity here; only a lock would, and the
+      instruments are lock-free on purpose.
+    name: appendHistogramSeries
+    params: buf []byte, name string, point coremetrics.HistogramValue
+    results: "[]byte"
+  - doc: |-
+      appendHelpLine appends "# HELP <name> <docstring>\n" — and nothing at all
+      when the metric has no description.
+
+      That day arrived: ADR 0044 adopted the OTel data model, ADR 0067 gave the
+      Meter a Describer sibling, and the OTel-to-Prometheus interoperability
+      specification says outright that "OTLP metric point descriptions become HELP
+      metadata". An ABSENT description still emits nothing: HELP is optional in the
+      exposition format, and a blank docstring on every scrape is the placeholder
+      this exporter refused to invent before there was anything real to print.
+
+      The format permits exactly one HELP and one TYPE line per metric name, which
+      is why this call sits inside the same header-per-name step as
+      appendTypeLine rather than anywhere near the per-series loop. HELP goes ABOVE
+      TYPE, which is the order the format's own published examples use.
+    name: appendHelpLine
+    params: buf []byte, name, description string
+    results: "[]byte"
+  - doc: |-
+      appendEscapedHelp writes a HELP docstring with the format's OWN two escapes:
+      a backslash doubles and a line feed becomes "\n".
+
+      It is deliberately NOT appendEscapedValue, which escapes a third character.
+      A label value is a QUOTED token, so a double quote inside it would close the
+      value early and has to be escaped; a HELP docstring is the unquoted rest of
+      the line, so the format says only "the backslash and the line feed characters
+      have to be escaped" and a quote is an ordinary character. Escaping it anyway
+      would put a literal backslash into the help text an operator reads —
+      corrupting the prose to defend against a delimiter that is not there.
+
+      The line feed is the one that matters. A description is prose the caller
+      wrote, and it may legitimately contain anything; unescaped, a newline inside
+      it ends the HELP comment and the remainder of the description is parsed as a
+      sample line — the same forged-line hazard TestPrometheusExporterEscapes-
+      AdversarialLabelValues pins for label values, one line higher up.
+    name: appendEscapedHelp
+    params: buf []byte, description string
+    results: "[]byte"
+  - doc: appendTypeLine appends "# TYPE <name> <kind>\n".
+    name: appendTypeLine
+    params: buf []byte, name, kind string
+    results: "[]byte"
+  - doc: |-
+      appendSample appends one sample line: "<name><suffix>{<labels>} <value>\n".
+      It is the shape every family member but a bucket takes.
+    name: appendSample
+    params: buf []byte, name, suffix string, attrs []coreotel.AttrValue, value string
+    results: "[]byte"
+  - doc: |-
+      appendBucket appends one cumulative bucket line:
+      "<name>_bucket{<labels>,le="<bound>"} <count>\n".
+
+      It is its own function rather than a sixth parameter on appendSample because
+      a bucket line IS a different shape: it is the only one carrying the reserved
+      `le` dimension, and the only one whose value is a running total rather than
+      the series' own reading.
+    name: appendBucket
+    params: buf []byte, name string, attrs []coreotel.AttrValue, bound, count string
+    results: "[]byte"
+  - doc: |-
+      appendPromLabels renders {k="v",…[,le="<bound>"]}. A dimensionless series
+      with no bound renders as a bare name, which the format's own examples do.
+
+      EVERY value is quoted, whatever the attribute's type: a Prometheus label
+      value is a string and there is no second option. That is the type loss this
+      connector is named for — Int64("v", 1) and String("v", "1") are two series in
+      the snapshot and one series on this wire, and no encoding of a typed value
+      into a string avoids it, because the target has one value type.
+    name: appendPromLabels
+    params: buf []byte, attrs []coreotel.AttrValue, bound string
+    results: "[]byte"
+  - doc: |-
+      promFloat spells a float64 the way the exposition format wants it.
+
+      The format says a value is "a float represented as required by Go's
+      ParseFloat()", and names NaN / +Inf / -Inf as valid. strconv.FormatFloat with
+      'g' and precision -1 produces exactly those three spellings, and the shortest
+      round-tripping decimal otherwise — which is also what produced the published
+      example values (`1.7560473e+07`, `12.47`) in the format's own documentation.
+      Pinned by TestPromFloatSpellsTheFormatsOwnExamples.
+    name: promFloat
+    params: value float64
+    results: string
+  - doc: |-
+      checkTemporality refuses a metric whose temporality is not cumulative:
+      delta, and also an unresolved or cast value, which a Meter never produces
+      and a hand-built snapshot can.
+
+      The exposition format has no temporality field, and a Prometheus server reads
+      every counter as cumulative: `rate()` differences successive scrapes itself.
+      Handing it delta values means it differences numbers that are ALREADY
+      differences — the reported rate becomes the second derivative, and a value
+      smaller than the previous one is read as a counter reset and re-extrapolated
+      from zero. Nothing in the document would say so, and no dashboard would look
+      broken; it would just be wrong.
+
+      Refusing is safe for the same reason refusing a name is: a meter's
+      temporality is chosen at construction and constant for the process, so this
+      fails on the first scrape or never. It cannot start failing under traffic.
+    name: checkTemporality
+    params: name string, temporality coremetrics.Temporality
+    results: error
+  - doc: |-
+      checkMetricName refuses an instrument name the format cannot carry.
+
+      The offending name rides in a FIELD, not in the public message: Public is a
+      string literal by rule 4, and the name is the one thing here that did not
+      come from this package.
+    name: checkMetricName
+    params: name string
+    results: error
+  - doc: |-
+      checkAttrNames refuses an attribute set the format cannot carry. bucketBound
+      additionally reserves "le", which a histogram spends on its bucket bound.
+
+      This is where an OTel-conventional key meets the wall: "http.request.method"
+      is the spelling the semantic conventions specify and the dot is outside the
+      label-name grammar. The interoperability specification says to replace the
+      offending byte with "_"; this connector refuses instead, because that mapping
+      is not injective — "a.b", "a-b" and "a b" all become "a_b" — and merging two
+      distinct dimensions is the one failure a metrics pipeline cannot detect
+      afterwards. See CLAUDE.md §What the Prometheus connector loses.
+    name: checkAttrNames
+    params: attrs []coreotel.AttrValue, bucketBound bool
+    results: error
+  - doc: |-
+      validMetricName reports whether s matches [a-zA-Z_:][a-zA-Z0-9_:]*, the
+      metric-name grammar of the text exposition format.
+    name: validMetricName
+    params: s string
+    results: bool
+  - doc: metricNameByte reports whether c is legal in a metric name at that position.
+    name: metricNameByte
+    params: c byte, first bool
+    results: bool
+  - doc: |-
+      validLabelName reports whether s matches [a-zA-Z_][a-zA-Z0-9_]*, the
+      label-name grammar of the text exposition format. It is the metric-name
+      grammar MINUS the colon, which Prometheus reserves for recording rules.
+    name: validLabelName
+    params: s string
+    results: bool
+  - doc: labelNameByte reports whether c is legal in a label name at that position.
+    name: labelNameByte
+    params: c byte, first bool
+    results: bool
+  - doc: newTextExporter is the shared constructor.
+    name: newTextExporter
+    params: name coremetrics.ExporterName, dst io.Writer
+    results: "*textExporter"
+  - name: NewTextExporter
+    params: name coremetrics.ExporterName, dst io.Writer
+    results: coremetrics.Exporter
+  - doc: appendResourceLine renders the producer's attributes, carried once.
+    name: appendResourceLine
+    params: buf []byte, resource coreotel.ResourceValue
+    results: "[]byte"
+  - doc: |-
+      appendScopeLine renders the instrumentation scope. Version is omitted when
+      empty rather than printed as an empty string, because the specification makes
+      it optional and an empty one says nothing.
+    name: appendScopeLine
+    params: buf []byte, scope coreotel.ScopeValue
+    results: "[]byte"
+  - doc: |-
+      appendWindowLine renders the interval every point below covers. Under
+      cumulative temporality start repeats across collections; under delta it
+      advances, which is the difference the two words on the metric lines name.
+    name: appendWindowLine
+    params: buf []byte, start, end time.Time
+    results: "[]byte"
+  - doc: appendSums renders each sum name as a header plus one line per series.
+    name: appendSums
+    params: buf []byte, metrics map[string]coremetrics.SumMetricValue
+    results: "[]byte"
+  - doc: |-
+      appendGauges renders each gauge name as a header plus one line per series. A
+      gauge has neither temporality nor monotonicity, so its header carries neither.
+    name: appendGauges
+    params: buf []byte, metrics map[string]coremetrics.GaugeMetricValue
+    results: "[]byte"
+  - doc: |-
+      appendHistograms renders each histogram series' observation count. The full
+      bucket layout is reachable through the Snapshot API — this exporter is a
+      diagnostic, not a wire format.
+    name: appendHistograms
+    params: buf []byte, metrics map[string]coremetrics.HistogramMetricValue
+    results: "[]byte"
+  - doc: |-
+      appendMetricHeader appends
+      "# metric <name> <kind>[ <temporality>][ <mono>][ description=\"…\"]".
+      An empty qualifier is omitted rather than printed blank, which is what makes
+      the gauge header shorter than the sum header instead of ragged.
+
+      This exporter RENDERS the description, where a wire format may or may not.
+      It is the diagnostic that prints the whole model — resource, scope, window,
+      temporality, monotonicity, each attribute with its type visible — precisely
+      because those are the facts a caller cannot otherwise see. A description is
+      now one of them, and an exporter that dropped it would be answering "did my
+      Describe call reach the snapshot?" with silence. It goes LAST so that the
+      qualifier positions every existing grep depends on do not move.
+    name: appendMetricHeader
+    params: buf []byte, header metricHeader
+    results: "[]byte"
+  - doc: appendSeriesLine appends "name{k=v,…} value\n" to buf.
+    name: appendSeriesLine
+    params: buf []byte, name string, attrs []coreotel.AttrValue, value string
+    results: "[]byte"
+  - doc: appendAttrs renders {k=v,…}. A dimensionless series renders as a bare name.
+    name: appendAttrs
+    params: buf []byte, attrs []coreotel.AttrValue
+    results: "[]byte"
+  - doc: |-
+      appendAttrPair renders one k=v pair with the value's TYPE visible: a string
+      is quoted and escaped, a bool / integer / double is printed bare.
+
+      That asymmetry is the point of this exporter. Every wire format the SDK
+      targets flattens a bool into the two letters "true"; a diagnostic that did
+      the same would hide the one thing the typed attribute model added.
+
+      The key is escaped exactly as a string value is. It is structure, and
+      normally a literal at the call site — but a key derived from data, or one in
+      a hand-built snapshot, can carry a newline, and one line per series is this
+      format's only framing, so an unescaped key forged the very line the value
+      escaping exists to prevent. For an ordinary key the bytes are unchanged.
+    name: appendAttrPair
+    params: buf []byte, attr coreotel.AttrValue
+    results: "[]byte"
+  - doc: appendQuoted renders "…" with backslash, quote and newline escaped inside.
+    name: appendQuoted
+    params: buf []byte, value string
+    results: "[]byte"
+  - doc: |-
+      appendEscapedValue writes a string value with backslash, quote and newline
+      escaped.
+
+      A string attribute value is data — a URL, a header, a user-supplied tenant
+      id. Without escaping, a value containing a quote or a newline forges a line
+      that a reader of this output parses as another series, which turns a metrics
+      dump into an injection surface. The three escapes are the Prometheus text
+      convention, so the output stays readable by the same eyes and tools.
+    name: appendEscapedValue
+    params: buf []byte, value string
+    results: "[]byte"
+  - doc: sortedKeys returns the map keys in ascending order for stable output.
+    name: sortedKeys
+    params: m map[string]V
+    results: "[]string"
+    typeParams: V any
+  - doc: |-
+      newMemGauge builds a zeroed gauge. A package-level function value so the
+      Meter's create path passes it without allocating a closure.
+    name: newMemGauge
+    results: "*memGauge"
+  - doc: newHistogram builds a histogram with a sorted copy of bounds.
+    name: newHistogram
+    params: bounds []float64
+    results: "*memHistogram"
+  - name: NewMeter
+    results: coremetrics.FullMeter
+  - name: NewMeterWithConfig
+    params: cfg MeterConfig
+    results: coremetrics.FullMeter
+  - doc: |-
+      newMemMeter builds the concrete meter. It exists so that the two exported
+      constructors stay small enough to inline, which is not cosmetic: inlining is
+      what lets a caller's `var m FullMeter = NewMeter()` carry the CONCRETE type
+      to the call sites below it, and that is what lets the compiler devirtualise
+      `m.Counter(name, attrs...)` and prove the variadic attribute slice does not
+      escape. Behind an opaque interface it must assume it does, and every
+      attributed observation costs one small heap allocation. Measured, and pinned
+      by the allocation gate; see BENCH.md §Caveats.
+    name: newMemMeter
+    params: cfg MeterConfig
+    results: "*memMeter"
+  - doc: |-
+      collectSums groups every sum series under its instrument name, carrying the
+      meter's temporality and each name's monotonicity onto the metric.
+    name: collectSums
+    params: |2
+
+      	store map[string]*seriesEntry[*memSum], names map[string]*nameState,
+      	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
+    results: map[string]coremetrics.SumMetricValue
+  - doc: |-
+      collectGauges groups every gauge series under its instrument name. A gauge
+      carries no temporality, so neither does this walk.
+    name: collectGauges
+    params: |2
+
+      	store map[string]*seriesEntry[*memGauge], names map[string]*nameState,
+      	descriptions map[string]string,
+    results: map[string]coremetrics.GaugeMetricValue
+  - doc: collectHistograms groups every histogram series under its instrument name.
+    name: collectHistograms
+    params: |2
+
+      	store map[string]*seriesEntry[*memHistogram], names map[string]*nameState,
+      	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
+    results: map[string]coremetrics.HistogramMetricValue
+  - doc: |-
+      carve yields one carved slot per instrument name of group, all cut out of a
+      SINGLE backing array.
+
+      The alternative — letting each name's slice allocate and grow on its own —
+      makes a collection cost one allocation per instrument NAME plus a doubling
+      copy per name that carries many series. Both scale with exactly the axis this
+      feature bounds, on the path a scraper walks every few seconds. One arena
+      makes it a constant.
+
+      The per-name sizes come from the meter's own bookkeeping rather than a
+      counting pass over the store: names already knows how many series each name
+      holds, and summed over the names of one group that is exactly storeLen.
+    name: carve
+    params: |2
+
+      	storeLen int, names map[string]*nameState, group outputGroup,
+    results: func(func(string, carved[V]) bool)
+    typeParams: V any
+  - doc: |-
+      sizeGroups is the map capacity a collection pre-sizes to. A group cannot have
+      more distinct names than it has series, and names spans every group — sizing
+      on the smaller of the two keeps a meter with a thousand counters from
+      pre-sizing an empty gauge map for a thousand.
+    name: sizeGroups
+    params: names map[string]*nameState, storeLen int
+    results: int
+  - doc: |-
+      sortPoints orders one name's series by attribute set so a snapshot renders
+      identically twice in a row given the same values.
+    name: sortPoints
+    params: points []V, attrsOf func(V) []coreotel.AttrValue
+    typeParams: V any
+  - doc: sumAttrs projects a sum series' attribute set.
+    name: sumAttrs
+    params: p coremetrics.SumValue
+    results: "[]coreotel.AttrValue"
+  - doc: gaugeAttrs projects a gauge series' attribute set.
+    name: gaugeAttrs
+    params: p coremetrics.GaugeValue
+    results: "[]coreotel.AttrValue"
+  - doc: histogramAttrs projects a histogram series' attribute set.
+    name: histogramAttrs
+    params: p coremetrics.HistogramValue
+    results: "[]coreotel.AttrValue"
+  - doc: observableBuilder returns the constructor for an observable sum of kind.
+    name: observableBuilder
+    params: kind instrumentKind
+    results: func() *memSum
+  - doc: |-
+      decodeRejected reads a 2xx body's rejected count through this signal's own
+      partial-success message — the SignalSpec.DecodeRejected the shared sender
+      calls. A fresh message per response: nothing is kept between exports.
+    name: decodeRejected
+    params: payload []byte
+    results: int64
+  - doc: |-
+      sortAttrs returns attrs ordered by Key, writing into buf when it fits so the
+      common case never allocates.
+
+      Sorting is what makes an attribute SET a set: without it {a,b} and {b,a}
+      encode to two different keys and silently become two series, which both
+      doubles cardinality and splits one metric's total across two rows that no
+      exporter can recombine.
+
+      The result aliases either buf or a fresh heap slice; callers must copy it
+      before storing it.
+    name: sortAttrs
+    params: buf, attrs []coreotel.AttrValue
+    results: "[]coreotel.AttrValue"
+  - doc: |-
+      appendSeriesKey appends the canonical encoding of (kind, name, sorted) to dst
+      and returns the grown slice.
+
+      Every string is LENGTH-PREFIXED rather than separator-delimited, and every
+      value carries its KIND TAG. An attribute value is data — a route, a tenant
+      id, a status code — so with a delimiter a caller who can influence one value
+      can forge another series' key and have two unrelated series silently
+      accumulate into one. Length prefixes make the encoding injective over
+      strings; the attribute kind tag extends that injectivity across TYPES, so
+      String("v", "1") and Int64("v", 1) stay two series rather than merging into
+      one on the strength of spelling the same in decimal.
+
+      The INSTRUMENT kind opens the key for a different reason: four instrument
+      kinds now share one store, because a Counter and an UpDownCounter produce the
+      same point shape. Without it, `Counter("x")` and `UpDownCounter("x")` would
+      resolve to the same key, the second call would HIT the read lock, and the
+      cross-kind conflict would never reach bindName — one name would silently
+      carry both monotonicities. One byte on a stack buffer buys that check back
+      without a second map read per observation.
+    name: appendSeriesKey
+    params: dst []byte, kind instrumentKind, name string, sorted []coreotel.AttrValue
+    results: "[]byte"
+  - doc: appendSized appends uvarint(len(s)) followed by s.
+    name: appendSized
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      cloneAttrs returns an owned copy of src, or nil for the dimensionless set.
+      The copy is what lets the meter share its attribute slice with every snapshot
+      while the caller's stack scratch stays on the stack.
+    name: cloneAttrs
+    params: src []coreotel.AttrValue
+    results: "[]coreotel.AttrValue"
+  - doc: |-
+      compareAttrs orders two sorted attribute sets lexicographically — key, then
+      the value's canonical identity, then the shorter set first on a common
+      prefix. Used at Collect time to make a snapshot's series order deterministic.
+    name: compareAttrs
+    params: a, b []coreotel.AttrValue
+    results: int
+  - doc: newSeriesStore returns an empty store bound to the meter that owns it.
+    name: newSeriesStore
+    params: meter *memMeter
+    results: seriesStore[T]
+    typeParams: T any
+  - doc: |-
+      retain copies key into an owned string, which is the ONE place in the fetch
+      path a series key is meant to allocate: a map key outlives the caller's stack
+      scratch, so it has to be copied. Every other use of the key indexes a map
+      with string(bytes) directly, which the compiler turns into a lookup that
+      allocates nothing.
+    name: retain
+    params: key []byte
+    results: string
+  - doc: newCounter builds a zeroed monotonic sum.
+    name: newCounter
+    results: "*memSum"
+  - doc: newUpDownCounter builds a zeroed non-monotonic sum.
+    name: newUpDownCounter
+    results: "*memSum"
+  - doc: newObservableCounter builds a monotonic sum written by a callback.
+    name: newObservableCounter
+    results: "*memSum"
+  - doc: newObservableUpDownCounter builds a non-monotonic sum written by a callback.
+    name: newObservableUpDownCounter
+    results: "*memSum"
+imports:
+  atomic: sync/atomic
+  binary: encoding/binary
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+  coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  maps: maps
+  math: math
+  os: os
+  otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/metrics
+  name: metrics
+  purpose: Package metrics — one instrument name's slot in a collection arena.
+types:
+  - doc: |-
+      carved is one instrument name's slot in a collection arena: the kind its
+      name is bound to, and an empty, exactly-sized window to append its series
+      into.
+    fields:
+      - name: kind
+        type: instrumentKind
+      - name: window
+        type: "[]V"
+    kind: struct
+    name: carved
+    typeParams: V any
+  - fields:
+      - doc: |-
+          MaxSeriesPerInstrument bounds how many distinct attribute sets ONE
+          instrument name may hold. Beyond it, further sets fold into a single
+          aggregated overflow series rather than allocating — see
+          seriesStore.admit for that policy and what it costs.
+
+          Non-positive CLAMPS to DefaultMaxSeriesPerInstrument. It does NOT mean
+          "unbounded", and there is no setting that does (ADR 0031): a caller who
+          leaves this zero has not decided that memory is free, they have not yet
+          learned the question exists, and the zero value must not be the
+          dangerous answer. A caller who genuinely wants a huge bound types a
+          huge number, and the number is then in their source where a reviewer
+          can see it.
+
+          The bound is PER NAME rather than per meter so that one exploding
+          attribute on http_requests_total cannot starve db_queries_total of the
+          series it needs; each metric's failure stays its own.
+        name: MaxSeriesPerInstrument
+        type: int
+      - doc: |-
+          Temporality says which window a collected sum or histogram covers.
+
+          Unset CLAMPS to TemporalityCumulative, because that is what this meter
+          DOES when nothing tells it otherwise: it accumulates into atomics and
+          never resets them. TemporalityDelta makes Collect consume the window it
+          reports, which means a delta meter has exactly one reader — two
+          independent collectors would each receive part of the observations.
+          Any value that is neither of the three constants panics
+          (InvalidTemporality); it can only come from a cast.
+        name: Temporality
+        type: coremetrics.Temporality
+      - doc: |-
+          Resource identifies the producer of the telemetry and is carried once
+          per snapshot. An absent service.name is filled with
+          coreotel.UnknownService, which is what the OpenTelemetry
+          specification mandates rather than a value this SDK invented.
+        name: Resource
+        type: coreotel.ResourceValue
+      - doc: |-
+          Scope identifies the instrumentation that mints the instruments. An
+          empty Name resolves to coremetrics.DefaultScopeName; Version stays
+          empty when the caller has none, because it is optional in the
+          specification and inventing one would be a claim about code this
+          package cannot see.
+        name: Scope
+        type: coreotel.ScopeValue
+      - doc: |-
+          Clock supplies the snapshot window's endpoints. Nil resolves to
+          clock.System, matching every other port in this SDK that takes one.
+          Only Now and Since are used, so the frozen two-method clock.Clock is
+          enough and a two-method test double still satisfies it (ADR 0039).
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          resolve returns the configuration a Meter is actually built from: every knob
+          clamped or refused, nothing left inert.
+        name: resolve
+        recv: c MeterConfig
+        results: MeterConfig
+    name: MeterConfig
+  - doc: |-
+      otlpHTTPExporter POSTs each snapshot to an OTLP collector as OTLP/JSON.
+
+      It holds no mutable state, so unlike the writer-bound exporters it needs no
+      mutex: the sender is safe for concurrent use, and every request builds its
+      own body from its own snapshot.
+    fields:
+      - doc: name is the exporter's registry-shaped name; it is never registered.
+        name: name
+        type: coremetrics.ExporterName
+      - doc: sender is the shared transport, speaking this signal's vocabulary.
+        name: sender
+        type: "*otlp.Sender"
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/metrics.Exporter.
+        name: Name
+        recv: e *otlpHTTPExporter
+        results: coremetrics.ExporterName
+      - doc: |-
+          Export encodes snap and POSTs it, returning a typed verdict.
+
+          An encoding refusal returns before any socket is touched; everything after
+          it — the request, the bounded read, the drain, the verdict — is the shared
+          sender's, under this signal's codes.
+        name: Export
+        params: snap coremetrics.SnapshotValue
+        recv: e *otlpHTTPExporter
+        results: error
+    name: otlpHTTPExporter
+  - doc: |-
+      otlpJSONExporter writes each snapshot to dst as one OTLP/JSON document.
+
+      It is the encoder bound to an io.Writer and nothing more — no network, no
+      retry, no endpoint. That separation is the point: a caller who wants the
+      bytes calls EncodeOTLPJSON, a caller who wants them on a stream binds this,
+      and a caller who wants them at a collector binds NewOTLPHTTPExporter. Each
+      surface fails in exactly one way.
+
+      The shared stream serialises the single write for the reason textExporter's
+      mutex does — core/observe/metrics.Exporter requires concurrency safety and the
+      writer is caller-supplied. Encoding happens before it, outside the lock, so
+      a slow writer serialises callers without also serialising the work.
+    fields:
+      - doc: name is the exporter's registry key.
+        name: name
+        type: coremetrics.ExporterName
+      - doc: stream is the newline-delimited document stream bound to the writer.
+        name: stream
+        type: "*otlp.Stream"
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/metrics.Exporter.
+        name: Name
+        recv: e *otlpJSONExporter
+        results: coremetrics.ExporterName
+      - doc: |-
+          Export encodes the whole snapshot, then writes it once, so a refusal leaves
+          dst untouched and the only remaining error surface is the single write.
+        name: Export
+        params: snap coremetrics.SnapshotValue
+        recv: e *otlpJSONExporter
+        results: error
+    name: otlpJSONExporter
+  - doc: |-
+      prometheusExporter renders a Snapshot as a Prometheus text exposition
+      document: one "# TYPE" header per instrument name, then that name's series.
+
+      It is a DELIBERATELY LOSSY CONNECTOR, not a rendering of this SDK's data
+      model. The model is OpenTelemetry's; the Prometheus text exposition format
+      predates most of it and has no field for the parts it lacks. What is lost,
+      and why each loss is a loss rather than a bug, is enumerated in
+      internal/service/observe/metrics/CLAUDE.md §What the Prometheus connector loses. The
+      short list: temporality (anything but cumulative is REFUSED rather than
+      mis-labelled), the
+      attribute's TYPE, the Resource, the Scope, and exemplars the SDK does not
+      produce at all.
+
+      mu serialises the single dst.Write for the same reason textExporter's does —
+      core/observe/metrics.Exporter requires concurrency safety and dst is caller-supplied.
+      Rendering happens outside the lock, so a slow writer serialises callers
+      without also serialising the formatting.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: name
+        type: coremetrics.ExporterName
+      - name: dst
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/metrics.Exporter.
+        name: Name
+        recv: e *prometheusExporter
+        results: coremetrics.ExporterName
+      - doc: |-
+          Export renders the whole snapshot into one buffer, then writes it once.
+
+          A name the format cannot carry, or a temporality it cannot express, aborts
+          the WHOLE document before the write, so a scraper never receives a partial
+          exposition — a truncated document parses as a complete one, and the series it
+          is missing look like series that stopped existing.
+        name: Export
+        params: snap coremetrics.SnapshotValue
+        recv: e *prometheusExporter
+        results: error
+    name: prometheusExporter
+  - doc: |-
+      textExporter renders a Snapshot as a newline-delimited diagnostic document.
+
+      Unlike the Prometheus exporter it is LOSSLESS about the model: it prints the
+      Resource, the Scope, the collection window and each metric's temporality and
+      monotonicity, because those are exactly the facts a caller cannot otherwise
+      see and the reason this file exists at all. The grammar is
+
+      	# resource <k>=<v> …
+      	# scope name="…" [version="…"]
+      	# window start="…" end="…"
+      	# metric <name> <sum|gauge|histogram> [<temporality>] [monotonic|non_monotonic] [description="…"]
+      	<name>{<k>=<v>,…} <value>
+
+      with one "# metric" header per instrument name followed by that name's
+      series — one pass over the snapshot, because the snapshot is keyed by name.
+      A string attribute value is quoted and escaped; a bool, integer or double is
+      printed bare, so the ATTRIBUTE'S TYPE is visible in the output rather than
+      flattened into a string the way a wire format would flatten it.
+
+      mu serialises the single dst.Write. core/observe/metrics.Exporter documents that
+      implementations MUST be safe for concurrent use, and dst is caller-supplied:
+      os.Stdout tolerates concurrent writes on most platforms, but a bytes.Buffer
+      or a plain os.File does not. Rendering happens outside the lock — only the
+      write is guarded — so a slow writer serialises callers without also
+      serialising the formatting work.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: name
+        type: coremetrics.ExporterName
+      - name: dst
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/metrics.Exporter.
+        name: Name
+        recv: e *textExporter
+        results: coremetrics.ExporterName
+      - doc: |-
+          Export renders the whole snapshot into one buffer, then writes it once so the
+          only error surface is the single dst.Write.
+        name: Export
+        params: snap coremetrics.SnapshotValue
+        recv: e *textExporter
+        results: error
+    name: textExporter
+  - doc: |-
+      memGauge is an instantaneous float64 value stored as IEEE-754 bits in an
+      atomic.Uint64 (lock-free Set/Add via compare-and-swap).
+
+      It carries no temporality flag and no delta bookkeeping, and that is the OTel
+      data model rather than an omission: a gauge is a SAMPLED READING, so there is
+      no window for it to cover and OTLP's Gauge message has no temporality field.
+      An observable gauge writes through the same Set a synchronous one does.
+    fields:
+      - name: bits
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - doc: Set replaces the gauge value.
+        name: Set
+        params: value float64
+        recv: g *memGauge
+      - doc: Add adjusts the gauge by delta via a compare-and-swap retry loop.
+        name: Add
+        params: delta float64
+        recv: g *memGauge
+      - doc: load reads the current value for Collect.
+        name: load
+        recv: g *memGauge
+        results: float64
+    name: memGauge
+  - doc: |-
+      memHistogram records observations into sorted upper-bound buckets plus a +Inf
+      overflow slot; counts/sum/count are atomic for a lock-free Record.
+    fields:
+      - name: bounds
+        type: "[]float64"
+      - name: counts
+        type: "[]atomic.Uint64"
+      - name: sumBits
+        type: atomic.Uint64
+      - name: count
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - doc: Record observes value into its bucket and updates the running sum/count.
+        name: Record
+        params: value float64
+        recv: h *memHistogram
+      - doc: |-
+          snapshot copies the histogram into the exportable point type, consuming the
+          window when the meter is a delta reader.
+
+          Under delta every slot is SWAPPED to zero rather than read, so an observation
+          is reported exactly once. The swaps are separate atomics, so a Record racing
+          a collection can land its bucket in one window and its sum in the next; the
+          same skew already exists on the read path and the instruments are lock-free
+          on purpose. What cannot happen is double counting, which is what a
+          read-then-store would have allowed.
+        name: snapshot
+        params: delta bool
+        recv: h *memHistogram
+        results: coremetrics.HistogramValue
+      - doc: RecordDuration observes d as seconds (latency-histogram convenience).
+        name: RecordDuration
+        params: d time.Duration
+        recv: h *memHistogram
+    name: memHistogram
+  - doc: |-
+      memMeter is the in-memory Meter: one seriesStore per snapshot group, guarded
+      by an RWMutex. A fetch of an EXISTING series takes only the read lock; the
+      write lock is held for creation alone. The instruments themselves are
+      lock-free. Satisfies core FullMeter.
+    fields:
+      - doc: maxSeries is the per-name cardinality bound, already clamped positive.
+        name: maxSeries
+        type: int
+      - doc: temporality is already resolved — never TemporalityUnspecified.
+        name: temporality
+        type: coremetrics.Temporality
+      - doc: |-
+          resource and scope are normalised once and shared by every snapshot;
+          neither is mutated after construction.
+        name: resource
+        type: coreotel.ResourceValue
+      - name: scope
+        type: coreotel.ScopeValue
+      - name: clk
+        type: clock.Clock
+      - doc: |-
+          collectMu serialises Collect against itself. Collect is a MUTATION
+          under delta temporality (it consumes the window it reports) and it is
+          one under any temporality once an observable is registered (a callback
+          writes the series it reports). Two concurrent collections would then
+          each carry away part of the data with no way to notice.
+        name: collectMu
+        type: sync.Mutex
+      - doc: |-
+          startTime opens the window the next snapshot covers. Guarded by
+          collectMu; it advances only under delta temporality.
+        name: startTime
+        type: time.Time
+      - name: mu
+        type: sync.RWMutex
+      - name: sums
+        type: seriesStore[*memSum]
+      - name: gauges
+        type: seriesStore[*memGauge]
+      - name: histograms
+        type: seriesStore[*memHistogram]
+      - name: names
+        type: map[string]*nameState
+      - doc: |-
+          observers holds every registered asynchronous instrument, read once per
+          Collect. Guarded by mu.
+        name: observers
+        type: "[]observer"
+      - doc: |-
+          descriptions maps an instrument NAME to its docstring. Guarded by mu,
+          and deliberately NIL until the first Describe: a nil map reads as the
+          empty one, so a meter nobody documents allocates nothing here and
+          Collect still finds "" for every name. See meter_describe.go.
+
+          It is a map of its own rather than a field on nameState because a
+          description is NON-IDENTIFYING (the OTel data model says so) and carries
+          no instrument kind, while every nameState does. Storing it there would
+          force Describe to invent a kind for a name that may never mint an
+          instrument.
+        name: descriptions
+        type: map[string]string
+    kind: struct
+    methods:
+      - doc: |-
+          Counter returns the monotonic sum series identified by name + attrs, creating
+          it once. A name already bound to a different instrument kind panics with
+          InstrumentKindConflict; an unusable attribute set panics with
+          InvalidAttribute.
+        name: Counter
+        params: name string, attrs ...coreotel.AttrValue
+        recv: m *memMeter
+        results: coremetrics.Counter
+      - doc: |-
+          UpDownCounter returns the non-monotonic sum series identified by name +
+          attrs, creating it once. Fetching a Counter name as an UpDownCounter panics
+          with InstrumentKindConflict — it would flip Monotonic on a metric a backend
+          has already learned to read as never decreasing.
+        name: UpDownCounter
+        params: name string, attrs ...coreotel.AttrValue
+        recv: m *memMeter
+        results: coremetrics.UpDownCounter
+      - doc: Gauge returns the gauge series identified by name + attrs, creating it once.
+        name: Gauge
+        params: name string, attrs ...coreotel.AttrValue
+        recv: m *memMeter
+        results: coremetrics.Gauge
+      - doc: |-
+          Histogram returns the histogram series identified by name + attrs, creating
+          it once with buckets. The buckets are fixed at creation and ignored on every
+          later fetch of the same series — counts already recorded are positional, so
+          re-bucketing would attach every stored count to a boundary it was never
+          measured against.
+        name: Histogram
+        params: |2
+
+          	name string, buckets []float64, attrs ...coreotel.AttrValue,
+        recv: m *memMeter
+        results: coremetrics.Histogram
+      - doc: |-
+          Collect copies every series into a SnapshotValue.
+
+          It is serialised against itself by collectMu, and it is a MUTATION twice
+          over: every registered observable callback is run to produce this window's
+          values, and under delta temporality every synchronous accumulator is swapped
+          to zero. The RWMutex still only guards the maps — the instruments themselves
+          stay lock-free.
+        name: Collect
+        recv: m *memMeter
+        results: coremetrics.SnapshotValue
+      - doc: |-
+          Describe binds description to the instrument called name, satisfying
+          core/observe/metrics.Describer.
+
+          It is a WIRING-TIME call, not an observation. Nothing on the fetch path reads
+          the description, the map it lives in is nil until this method is called for
+          the first time, and a meter nobody describes therefore pays exactly one extra
+          map-header word in its struct and nothing else. The hot path is untouched by
+          design — see BENCH.md.
+
+          The name is NOT bound to an instrument kind here, which is the one asymmetry
+          with ObservableCounter's registration. A description is non-identifying in the
+          OTel data model, so there is no kind it could imply, and binding one would
+          force a caller to describe an instrument only AFTER minting it — an ordering
+          rule with no reason behind it. Describing a name that never becomes an
+          instrument is therefore legal and simply never reaches a snapshot; a
+          description with no metric has nowhere to be wrong.
+
+          # Two refusals, both panics
+
+          Describe has nowhere to put an error — its signature returns nothing, exactly
+          as Counter(name) returns a Counter — and both mistakes below are programming
+          ones: a description is a literal at a wiring site, constant for the process,
+          so this fails on the first boot or never. That is the same argument bindName
+          makes for InstrumentKindConflict, and the same class of failure.
+
+            - An EMPTY description panics with InvalidDescription. Accepting it would
+              be a call that does nothing, which is the inert outcome ADR 0031 bans.
+            - A DIFFERENT description for a name that already has one panics with
+              DescriptionConflict. Identical text is idempotent: two packages
+              documenting one metric the same way have not disagreed.
+
+          The OpenTelemetry SDK specification resolves this conflict differently — it
+          says to keep the first description and log a warning. This SDK refuses
+          instead, for two reasons it states rather than inherits: core/observe/metrics has no
+          logger to warn through (and acquiring one would invert the layer order), and
+          "first wins, quietly" is precisely the outcome where the losing wiring site
+          stays wrong forever while its author reads a dashboard that looks fine.
+        name: Describe
+        params: name, description string
+        recv: m *memMeter
+      - doc: |-
+          ObservableCounter registers a monotonic sum read at collection time. The
+          callback reports the ABSOLUTE total; under delta temporality the meter
+          differences successive reports itself.
+
+          Registrations accumulate rather than replace, which is what the OTel API
+          specifies: two packages may both contribute to one instrument name. Binding
+          the name here — at registration, not at the first collection — is what makes
+          a conflict with a synchronous instrument of the same name fail at wiring time
+          rather than inside a scrape.
+        name: ObservableCounter
+        params: name string, observe coremetrics.Int64Callback
+        recv: m *memMeter
+      - doc: ObservableUpDownCounter registers a non-monotonic sum read at collection time.
+        name: ObservableUpDownCounter
+        params: name string, observe coremetrics.Int64Callback
+        recv: m *memMeter
+      - doc: ObservableGauge registers a sampled reading taken at collection time.
+        name: ObservableGauge
+        params: name string, observe coremetrics.Float64Callback
+        recv: m *memMeter
+      - doc: |-
+          register binds the name to its kind and appends the observer.
+
+          A nil callback is dropped rather than stored: it is a registration that
+          observes nothing, and calling it at collection time would panic inside a
+          scrape — far from the wiring that caused it. The name is still bound, so the
+          kind conflict a later synchronous fetch would cause is still detected.
+        name: register
+        params: obs observer
+        recv: m *memMeter
+      - doc: |-
+          runObservers reads every registered asynchronous instrument into its series.
+          Caller holds collectMu and NO other lock.
+
+          The observer list is copied out under the read lock and the callbacks run
+          with no lock held, because a callback resolves series through the ordinary
+          fetch path and would otherwise deadlock against the lock its own collection
+          holds. A callback that calls Collect on this meter blocks on collectMu
+          instead, which is a deadlock the documentation forbids rather than one the
+          implementation can prevent.
+        name: runObservers
+        params: delta bool
+        recv: m *memMeter
+      - doc: |-
+          observeSum publishes one absolute integer reading into its series, creating
+          the series on first sight and honouring the cardinality bound exactly as a
+          synchronous fetch does.
+
+          A folded observable is worth stating plainly: past the bound every further
+          attribute set lands in ONE overflow series, and each callback report
+          OVERWRITES the previous one rather than adding to it, so the overflow series
+          of an observable shows the last set reported and not their total. That is the
+          honest consequence of an absolute-valued instrument meeting a fold, and it is
+          why an observable's attributes should be a small fixed set.
+        name: observeSum
+        params: |2
+
+          	name string, kind instrumentKind, value int64, attrs []coreotel.AttrValue, delta bool,
+        recv: m *memMeter
+      - doc: observeGauge publishes one sampled reading into its series.
+        name: observeGauge
+        params: name string, value float64, attrs []coreotel.AttrValue
+        recv: m *memMeter
+      - doc: |-
+          bindName returns the per-name state, binding the name to want on first use
+          and panicking with InstrumentKindConflict when it is already bound to a
+          different kind. Caller holds mu for writing.
+
+          Fetching an instrument is not a fallible operation in the port's shape —
+          Counter(name) returns a Counter, full stop — so there is nowhere to put an
+          error. And the mistake is always a programming one: the same metric name
+          bound to two kinds means one of the two call sites is wrong, and every value
+          it records lands in an instrument nothing will ever read. A Counter name
+          fetched as an UpDownCounter is the same defect wearing a subtler coat — it
+          would flip Monotonic on a metric a backend has already learned to trust.
+        name: bindName
+        params: name string, want instrumentKind
+        recv: m *memMeter
+        results: "*nameState"
+    name: memMeter
+  - doc: |-
+      observer is one registered asynchronous instrument. Exactly one of the two
+      callbacks is set, decided by kind: the two sum kinds report integers, the
+      gauge kind reports a double.
+    fields:
+      - name: name
+        type: string
+      - name: kind
+        type: instrumentKind
+      - name: int64Cb
+        type: coremetrics.Int64Callback
+      - name: floatCb
+        type: coremetrics.Float64Callback
+    kind: struct
+    name: observer
+  - doc: |-
+      metricHeader is everything one "# metric" line says about an instrument
+      name. Each field is empty when the kind does not have it: a gauge has neither
+      a temporality nor a monotonicity, and any metric may have no description.
+
+      A struct rather than six parameters, which is the OPPOSITE of the call
+      seriesStore.admit makes — and the difference is which path each one is on.
+      admit runs per OBSERVATION, where Go's field-insensitive escape analysis
+      turns a grouped argument into two heap allocations (BENCH.md §Caveats).
+      This runs once per instrument NAME per export, at scrape rate, where the
+      grouping costs nothing and reads better than six positional strings.
+    fields:
+      - name: name
+        type: string
+      - name: kind
+        type: string
+      - name: temporality
+        type: string
+      - name: monotonicity
+        type: string
+      - name: description
+        type: string
+    kind: struct
+    name: metricHeader
+  - doc: |-
+      instrumentKind discriminates a name's bound instrument type. There are seven
+      because the OTel instrument set has seven: four synchronous and three
+      observable, minus the synchronous Gauge this SDK spells as the plain Gauge.
+    kind: named
+    methods:
+      - doc: group reports which snapshot map this kind's series are collected into.
+        name: group
+        recv: k instrumentKind
+        results: outputGroup
+      - doc: |-
+          monotonic reports whether this kind's Sum carries Monotonic = true. It is
+          meaningless for a gauge or a histogram, which never read it.
+        name: monotonic
+        recv: k instrumentKind
+        results: bool
+    name: instrumentKind
+    underlying: uint8
+  - doc: |-
+      outputGroup is the snapshot map a kind's series land in. Four instrument
+      kinds share one Sum map because the OTel data model has ONE sum point shape
+      and puts monotonicity and synchronicity elsewhere — on the metric, and on
+      nothing the wire can see at all.
+    kind: named
+    name: outputGroup
+    underlying: uint8
+  - doc: |-
+      nameState is what a Meter knows about one instrument NAME, as opposed to one
+      series: the kind it is bound to, how many series it has admitted, and the key
+      of its overflow series once one exists. Guarded by memMeter.mu.
+
+      Kind and bound both belong to the name rather than the series because
+      attributes vary within one metric and neither of these does: every series
+      under http_requests_total is a counter, and they share one quota.
+    fields:
+      - name: kind
+        type: instrumentKind
+      - doc: |-
+          series counts ADMITTED attribute sets, excluding the overflow series.
+          The overflow series is deliberately outside the bound: it is the one
+          extra slot that makes the bound observable instead of silent.
+        name: series
+        type: int
+      - doc: |-
+          overflowKey is the encoded series key of this name's overflow series,
+          computed on first overflow and cached. Empty until then.
+        name: overflowKey
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          seriesCap is how many series this name holds, overflow included. Collect
+          uses it as an exact capacity: without it a name with many series regrows its
+          slice by doubling, and the copying that costs scales with cardinality — the
+          axis the whole feature exists to keep affordable.
+        name: seriesCap
+        recv: s *nameState
+        results: int
+      - doc: |-
+          overflowSeries returns the key and attribute set of name's overflow series,
+          computing the key once.
+        name: overflowSeries
+        params: name string
+        recv: s *nameState
+        results: key string, attrs []coreotel.AttrValue
+    name: nameState
+  - doc: |-
+      otlpPartialSuccess is ExportMetricsPartialSuccess. The shared sender decodes
+      a 2xx body into it (otlp.DecodeRejected), and it is the only part of that
+      decoding that differs between the two signals: the member is
+      rejectedDataPoints here and rejectedSpans for traces.
+
+      errorMessage is declared so the shape matches the schema and encoding/json
+      has somewhere to put it; its value is never read into an error, because it
+      is unbounded remote-controlled text and an errs Field goes straight into
+      structured logs.
+    fields:
+      - name: RejectedDataPoints
+        type: otlp.LenientInt64
+      - name: ErrorMessage
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          RejectedCount implements otlp.RejectedCounter: how many data points the
+          collector says it rejected, zero being "fully accepted".
+        name: RejectedCount
+        recv: p *otlpPartialSuccess
+        results: int64
+    name: otlpPartialSuccess
+  - doc: |-
+      otlpRequest is ExportMetricsServiceRequest — the body of a POST to
+      /v1/metrics. Exactly one resourceMetrics entry, because one Meter has exactly
+      one Resource.
+    fields:
+      - name: ResourceMetrics
+        type: "[]otlpResourceMetrics"
+    kind: struct
+    name: otlpRequest
+  - doc: |-
+      otlpResourceMetrics is ResourceMetrics: resource (1) + scopeMetrics (2).
+      schemaUrl (3) is absent for the reason ADR 0044 §Decision 4 gives — it is
+      optional, nothing here produces one, and an always-empty field is a
+      placeholder.
+    fields:
+      - name: Resource
+        type: otlp.ResourceMessage
+      - name: ScopeMetrics
+        type: "[]otlpScopeMetrics"
+    kind: struct
+    name: otlpResourceMetrics
+  - doc: |-
+      otlpScopeMetrics is ScopeMetrics: scope (1) + metrics (2), with the same
+      schemaUrl omission as otlpResourceMetrics.
+    fields:
+      - name: Scope
+        type: otlp.ScopeMessage
+      - name: Metrics
+        type: "[]otlpMetric"
+    kind: struct
+    name: otlpScopeMetrics
+  - doc: |-
+      otlpMetric is Metric: name (1) + description (2), plus the data oneof —
+      gauge (5), sum (7), histogram (9). Exactly one of the three pointers is
+      non-nil, which is how a oneof is spelled in Go.
+
+      description is `string description = 2;` in the schema — a PLAIN proto3
+      string, with no `optional` and therefore NO explicit presence. "" and absent
+      are the same value to a receiver, so this is the opposite case from the three
+      fields ADR 0048 emits at their zero: `asInt`/`asDouble` are oneof members and
+      a histogram point's `sum` is `optional double`, both of which HAVE presence,
+      and `isMonotonic` is emitted because false is its surprising answer. An empty
+      description has no surprising answer — it means nobody wrote one — so it is
+      omitted, which is also what the proto3-JSON default mapping does with a
+      default-valued field.
+
+      unit (3) is still absent: a Meter records none, and an empty string for it
+      would be a placeholder (rule 5).
+    fields:
+      - name: Name
+        type: string
+      - name: Description
+        type: string
+      - name: Gauge
+        type: "*otlpGauge"
+      - name: Sum
+        type: "*otlpSum"
+      - name: Histogram
+        type: "*otlpHistogram"
+    kind: struct
+    name: otlpMetric
+  - doc: |-
+      otlpGauge is Gauge: dataPoints (1) and nothing else. There is no
+      aggregationTemporality field on this message, in the schema or in this SDK's
+      model, because a sampled reading covers no window.
+    fields:
+      - name: DataPoints
+        type: "[]otlpNumberDataPoint"
+    kind: struct
+    name: otlpGauge
+  - doc: |-
+      otlpSum is Sum: dataPoints (1) + aggregationTemporality (2) + isMonotonic (3).
+
+      isMonotonic is ALWAYS emitted, although proto3 JSON would omit a false bool.
+      It is the one field that tells a Counter from an UpDownCounter, and omitting
+      it would make the field disappear in exactly the case that carries the
+      surprising answer. A receiver reads the same value either way; a human
+      reading the payload, and the test that pins these bytes, do not.
+    fields:
+      - name: DataPoints
+        type: "[]otlpNumberDataPoint"
+      - name: AggregationTemporality
+        type: int
+      - name: IsMonotonic
+        type: bool
+    kind: struct
+    name: otlpSum
+  - doc: |-
+      otlpHistogram is Histogram: dataPoints (1) + aggregationTemporality (2).
+      Exponential histograms are a separate message this SDK does not produce
+      (ADR 0044 §Deferred).
+    fields:
+      - name: DataPoints
+        type: "[]otlpHistogramDataPoint"
+      - name: AggregationTemporality
+        type: int
+    kind: struct
+    name: otlpHistogram
+  - doc: |-
+      otlpNumberDataPoint is NumberDataPoint — the point shape a Sum and a Gauge
+      share: startTimeUnixNano (2), timeUnixNano (3), asDouble (4), asInt (6),
+      attributes (7).
+
+      The two value fields are POINTERS because they are oneof members, which have
+      explicit presence: an omitted oneof means "no case selected", not "the
+      default", so a counter sitting at 0 must still emit asInt.
+
+      exemplars (5) and flags (8) are absent: this SDK produces no exemplar
+      (ADR 0044 §Deferred — no tracing domain, so no span id to carry) and sets no
+      data-point flag.
+    fields:
+      - name: StartTimeUnixNano
+        type: otlp.Uint64
+      - name: TimeUnixNano
+        type: otlp.Uint64
+      - name: AsDouble
+        type: "*otlp.Double"
+      - name: AsInt
+        type: "*otlp.Int64"
+      - name: Attributes
+        type: "[]otlp.KeyValue"
+    kind: struct
+    name: otlpNumberDataPoint
+  - doc: |-
+      otlpHistogramDataPoint is HistogramDataPoint, again in field-number order:
+      startTimeUnixNano (2), timeUnixNano (3), count (4), sum (5), bucketCounts (6),
+      explicitBounds (7), attributes (9).
+
+      sum is a POINTER because the schema declares it `optional double`: it has
+      explicit presence, so an emitted 0 means "the observations summed to zero"
+      and an omitted field means "no sum was recorded". This SDK always has one, so
+      it is always emitted — including when it is 0, which omitempty would have
+      swallowed.
+
+      min (11) and max (12) are absent: the meter tracks neither, and both are
+      optional. exemplars (8) and flags (10) are absent for the reasons
+      otlpNumberDataPoint gives.
+    fields:
+      - name: StartTimeUnixNano
+        type: otlp.Uint64
+      - name: TimeUnixNano
+        type: otlp.Uint64
+      - name: Count
+        type: otlp.Uint64
+      - name: Sum
+        type: "*otlp.Double"
+      - name: BucketCounts
+        type: "[]otlp.Uint64"
+      - name: ExplicitBounds
+        type: "[]otlp.Double"
+      - name: Attributes
+        type: "[]otlp.KeyValue"
+    kind: struct
+    name: otlpHistogramDataPoint
+  - kind: named
+    name: OTLPHTTPConfig
+    underlying: otlp.HTTPConfig
+  - doc: |-
+      seriesEntry binds one instrument instance to the identity it was created
+      under. name and attrs are written once at creation and never mutated, which
+      is what lets Collect hand the attribute slice straight to the snapshot
+      instead of cloning one slice per series per collection.
+    fields:
+      - name: name
+        type: string
+      - name: attrs
+        type: "[]coreotel.AttrValue"
+      - name: inst
+        type: T
+    kind: struct
+    name: seriesEntry
+    typeParams: T any
+  - doc: |-
+      seriesStore holds every live series of ONE snapshot group (sums, gauges or
+      histograms), keyed by the canonical series key (name + sorted attribute set,
+      see series.go).
+
+      Flat, not nested by name: one map read resolves an attributed fetch, where a
+      name→attrs nesting would cost two on the path every observation walks.
+
+      The store is keyed on the GROUP rather than on the instrument kind because a
+      Counter and an UpDownCounter produce the same point shape and land in the
+      same snapshot map; which of the two a name is bound to lives on its
+      nameState, where it is decided once instead of per series.
+
+      meter is a back-pointer to the meter that owns the store. It is a FIELD
+      rather than a sixth parameter on admit for a measured reason: Go's escape
+      analysis is field-INSENSITIVE on a struct parameter, so grouping the series'
+      identity (name, kind, key, attrs) into one value to shorten the signature
+      makes the whole group escape the moment the name is stored on an entry —
+      which drags the caller's stack scratch onto the heap and costs two
+      allocations per observation. Moving the meter out of the signature keeps the
+      four identity arguments separate and the fetch path allocation-free.
+    fields:
+      - name: meter
+        type: "*memMeter"
+      - name: byKey
+        type: map[string]*seriesEntry[T]
+    kind: struct
+    methods:
+      - doc: |-
+          lookup resolves an EXISTING series under the meter's read lock.
+
+          key is []byte rather than a string on purpose: `m[string(b)]` compiles to a
+          lookup that does not allocate, while converting first costs one allocation on
+          a path that runs once per observation.
+        name: lookup
+        params: key []byte
+        recv: s *seriesStore[T]
+        results: inst T, ok bool
+      - doc: |-
+          admit resolves — or creates — the series for (name, kind, key, sorted) under
+          the meter's WRITE lock.
+
+          Once the name has reached its cardinality bound, a NEW attribute set is not
+          rejected and not dropped: it is folded into the name's single overflow
+          series. That choice and its cost:
+
+            - Memory is bounded. This is the whole point: an unbounded attribute set is
+              a process-killing leak, not a reporting inconvenience.
+            - Nothing is silently lost. A counter's grand total across all its series
+              stays correct, because every increment still lands somewhere.
+            - The breakdown IS lost, irrecoverably. Once folded, an observation's
+              attributes are gone; no downstream aggregation can recover which set it
+              came from.
+            - Which series keep their identity is ARRIVAL-ORDER dependent. The first
+              MaxSeriesPerInstrument attribute sets seen win, so two replicas of the
+              same service can fold different sets into overflow and disagree about
+              what is visible. That is the real cost of not evicting.
+            - The condition is VISIBLE. A series carrying sdk_metric_overflow=true
+              appears in every snapshot from then on, so an operator reading a
+              dashboard learns their attributes blew up. A typed error cannot be
+              returned from an accessor whose signature hands back a Counter without
+              changing every call site, and dropping the observation would be exactly
+              the inert behaviour ADR 0031 exists to ban.
+
+          key stays []byte here too: an instrument already in overflow misses the read
+          lock on EVERY observation and lands in this function every time, so a string
+          conversion on entry would trade the memory leak the bound prevents for GC
+          pressure with the same cause. The conversion happens only on insertion,
+          where the key is actually retained.
+        name: admit
+        params: |2
+
+          	name string, kind instrumentKind, key []byte, sorted []coreotel.AttrValue, build func() T,
+        recv: s *seriesStore[T]
+        results: T
+      - doc: |-
+          overflow resolves — or creates once — the aggregated overflow series of name.
+          Caller holds the write lock and has already established that the bound is
+          reached.
+        name: overflow
+        params: state *nameState, name string, build func() T
+        recv: s *seriesStore[T]
+        results: T
+    name: seriesStore
+    typeParams: T any
+  - doc: |-
+      memSum is the storage behind BOTH counter kinds: an atomic int64 total plus
+      the two flags that decide what may be written to it and how a delta window is
+      computed from it.
+
+      One type rather than two because the OTel data model has one Sum point and
+      puts monotonicity on the metric. The two flags are written once at creation
+      and never mutated, so reading them on the hot path is a predictable branch on
+      an immutable field, not synchronisation. previous and reports are the
+      opposite: collection-time bookkeeping for an observed series, mutated only
+      under collectMu.
+    fields:
+      - name: v
+        type: atomic.Int64
+      - doc: |-
+          previous is the last ABSOLUTE value an observable callback reported.
+          Touched only from Collect, which memMeter serialises with collectMu,
+          so it needs no atomic. Unused by a synchronous sum.
+        name: previous
+        type: int64
+      - doc: |-
+          reports counts the callback's reports of an observed series during the
+          collection in progress: observe adds one, a delta collect reads and
+          clears it. Zero at collection time is a series the callback did not
+          mention, whose window is therefore empty — v still holds the last
+          window, and is never swapped. Guarded by collectMu exactly as previous
+          is. Unused by a synchronous sum.
+        name: reports
+        type: uint32
+      - doc: |-
+          monotonic refuses a non-positive Add, which is what makes a Counter a
+          Counter. An UpDownCounter clears it.
+        name: monotonic
+        type: bool
+      - doc: |-
+          observed marks a series whose value is written by a callback at
+          collection time rather than accumulated by the caller.
+        name: observed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Add adjusts the total by delta.
+
+          On a MONOTONIC sum a non-positive delta is ignored: a Counter that could go
+          down is an UpDownCounter, and a backend reading Monotonic = true is entitled
+          to treat a decrease as a process restart. That is also why Dec below is inert
+          on a Counter reached through a type assertion rather than a compile error —
+          the interface a Counter is handed out behind does not carry Dec at all.
+        name: Add
+        params: delta int64
+        recv: s *memSum
+      - doc: Inc adds one, which is a valid step for both monotonicities.
+        name: Inc
+        recv: s *memSum
+      - doc: Dec subtracts one. It is inert on a monotonic sum, for the reason Add gives.
+        name: Dec
+        recv: s *memSum
+      - doc: |-
+          observe records the ABSOLUTE value a callback reported, converting it to the
+          meter's temporality.
+
+          Under cumulative temporality the absolute value IS the report. Under delta it
+          is not: an observable states a running total (goroutines allocated since
+          boot), so the window is the difference from the previous observation.
+          Remembering that previous value, and counting that this collection reported
+          the series at all, is the bookkeeping an asynchronous instrument needs that a
+          synchronous one does not.
+
+          A MONOTONIC total that went down is read as a RESET, and the window is the
+          new absolute: whatever restarted behind the callback (a process restart
+          zeroes its counters) has counted exactly that much since. Differencing it
+          instead would put a negative delta on a sum whose metric says Monotonic,
+          which no reader of a monotonic sum is prepared to receive. An up-down total
+          is a signed quantity, so its decrease stays a signed window. The cumulative
+          path publishes a decrease as reported, and a cumulative reader applies the
+          same reading of a drop itself.
+
+          Caller holds memMeter.collectMu, which is what makes previous and reports
+          safe to touch without an atomic.
+        name: observe
+        params: absolute int64, delta bool
+        recv: s *memSum
+      - doc: |-
+          collect reads the value for a snapshot, consuming the window when the meter
+          is a delta reader.
+
+          An OBSERVED series is never swapped to zero, because v is not its
+          accumulator: observe OVERWRITES v with the whole window each time the
+          callback reports the series, and derives that window from previous, never
+          from v. What a delta read consumes for such a series is the REPORT, which the
+          reports field counts. A series its callback did not report in this
+          collection saw nothing, so it reads zero — exactly what an untouched
+          synchronous series reads — rather than the window stored for some EARLIER
+          collection, which a backend summing deltas would otherwise count again on
+          every scrape until the series came back. previous is left alone, so a series
+          that comes back is differenced against its last reading.
+        name: collect
+        params: delta bool
+        recv: s *memSum
+        results: int64
+    name: memSum
+vars:
+  - doc: |-
+      otlpSignal is this signal's vocabulary for the shared OTLP/HTTP sender: its
+      own codes (0.3.45.7-10) and its own wording, byte for byte what this
+      exporter returned before the transport was shared.
+    items:
+      - name: otlpSignal
+        value: |-
+          otlp.SignalSpec{
+          	EndpointInvalid: coremetrics.OTLPEndpointInvalid,
+          	EndpointUnparsable: errs.WrapParams{
+          		Code:    coremetrics.CodeOTLPEndpointInvalid,
+          		Reason:  "OTLP_ENDPOINT_INVALID",
+          		Public:  "The OTLP endpoint is not an absolute http or https URL with a path",
+          		Private: "service/observe/metrics: the configured OTLP endpoint could not be parsed as a URL",
+          	},
+          	RequestUnbuildable: errs.WrapParams{
+          		Code:    coremetrics.CodeOTLPExportRejected,
+          		Reason:  "OTLP_EXPORT_REJECTED",
+          		Public:  "The OTLP collector rejected the metrics payload",
+          		Private: "service/observe/metrics: the OTLP/HTTP request could not be built",
+          	},
+          	TransportFault: errs.WrapParams{
+          		Code:    coremetrics.CodeOTLPExportUnavailable,
+          		Reason:  "OTLP_EXPORT_UNAVAILABLE",
+          		Public:  "The OTLP collector is unreachable or overloaded",
+          		Private: "service/observe/metrics: the OTLP/HTTP request failed before a response was read",
+          	},
+          	Rejected:       coremetrics.OTLPExportRejected,
+          	Unavailable:    coremetrics.OTLPExportUnavailable,
+          	PartialSuccess: coremetrics.OTLPPartialSuccess,
+          	RejectedField:  rejectedFieldKey,
+          	DecodeRejected: decodeRejected,
+          }
+    name: otlpSignal
+  - grouped: true
+    items:
+      - doc: |-
+          otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
+          under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
+          field of the tree is a Go primitive or one of the shared Marshalers — and
+          still typed rather than swallowed.
+        name: otlpEncodeFailure
+        value: |-
+          errs.WrapParams{
+          		Code:    coremetrics.CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The metrics exporter failed to ship the snapshot",
+          		Private: "service/observe/metrics: the OTLP/JSON encoder could not render the payload",
+          	}
+      - doc: |-
+          otlpWriteFailure is the wrap a writer fault leaves under when the
+          writer-bound exporter emits a document: this signal's EXPORT_FAILED.
+        name: otlpWriteFailure
+        value: |-
+          errs.WrapParams{
+          		Code:    coremetrics.CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The metrics exporter failed to ship the snapshot",
+          		Private: "service/observe/metrics: OTLP/JSON exporter writer returned an error",
+          	}
+      - doc: |-
+          OTLPJSON is the default OTLP/JSON exporter, registered to write each snapshot
+          to stderr as one newline-terminated document. Use NewOTLPJSONExporter for a
+          custom writer/name, EncodeOTLPJSON for the bytes alone, or
+          NewOTLPHTTPExporter to actually ship them to a collector.
+
+          stderr, not stdout, for the reason ADR 0030 gives in full on Text: importing
+          a package must never arm a writer on a stream the process may be using as a
+          protocol channel. This instance is a diagnostic — the production path is
+          NewOTLPHTTPExporter, which is never registered because arming a network
+          client on import would be strictly worse than arming a writer.
+        name: OTLPJSON
+        value: coremetrics.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
+    name: otlpEncodeFailure
+  - doc: |-
+      Prometheus is the default Prometheus connector, registered to write snapshots
+      to stderr. Use NewPrometheusExporter for the writer a scrape actually needs.
+
+      stderr, not stdout, for the reason ADR 0030 gives in full on Text: importing
+      a package must never arm a writer on a stream the process may be using as a
+      protocol channel. The registered instance is a diagnostic — the production
+      path is NewPrometheusExporter(name, w) inside an HTTP handler, where w is the
+      http.ResponseWriter the scraper is waiting on, and no default is involved.
+    items:
+      - name: Prometheus
+        value: coremetrics.RegisterExporter(newPrometheusExporter(prometheusExporterName, os.Stderr))
+    name: Prometheus
+  - doc: |-
+      Text is the default text exporter, registered to write snapshots to stderr.
+      Use NewTextExporter for a custom writer/name (not added to the registry).
+
+      The destination is stderr, not stdout, because importing a package must never
+      arm a writer on a stream the process may be using as a protocol channel. A
+      daemon that speaks JSON-RPC on stdout (an MCP server in stdio mode), a filter
+      that pipes structured output downstream, any `cmd | jq` — each of them is
+      corrupted by a single Export("text", ...) if the default writer is stdout,
+      and the import that armed it is invisible at the call site. Diagnostics
+      belong on stderr; a caller who genuinely wants stdout asks for it by name
+      with NewTextExporter(name, os.Stdout). ADR 0030.
+    items:
+      - name: Text
+        value: coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Stderr))
+    name: Text
+  - doc: |-
+      overflowAttrs is the attribute set of the single aggregated series a name
+      folds into once its cardinality bound is reached. Package-level and never
+      mutated.
+
+      The value is a BOOL, not the string "true". Before typed attributes it had to
+      be a string because a value was a string everywhere the snapshot was going;
+      that reason expired with the OTel attribute model. The Prometheus rendering
+      is byte-identical either way, and an OTLP payload now carries a real boolean.
+    items:
+      - name: overflowAttrs
+        value: "[]coreotel.AttrValue{coreotel.Bool(coremetrics.OverflowAttrKey, true)}"
+    name: overflowAttrs

@@ -1,0 +1,766 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewABAC
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewABAC
+        kind: self
+      - id: validateRules
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: validateRules(rules)
+            to: validateRules
+          when: err != nil
+      - bind: members
+        eval: slices.Clone(rules)
+        to: slices
+      - return: |-
+          func(_ context.Context, request coreauthz.RequestValue) (decision coreauthz.Decision, err error) {
+          		//: evaluation needs no context: a condition is pure and does no I/O.
+          		return evaluateRules(members, request)
+          	}, nil
+  - of: evaluateRules
+    participants:
+      - id: caller
+        kind: actor
+      - id: evaluateRules
+        kind: self
+      - id: foldResult
+        kind: internal
+    steps:
+      - bind: granted
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: rule.Action != request.Action() || rule.Resource != request.Resource()
+            - bind: holds, err
+              eval: rule.When(request)
+            - opt:
+                do:
+                  - return: coreauthz.Deny, err
+                when: err != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!holds"
+            - opt:
+                do:
+                  - return: coreauthz.Deny, nil
+                when: rule.Effect == coreauthz.Deny
+            - set: granted
+              value: "true"
+          key: _
+          range: rules
+          value: rule
+      - return: foldResult(granted), nil
+        to: foldResult
+  - of: Check
+    participants:
+      - id: caller
+        kind: actor
+      - id: Check
+        kind: self
+      - id: denied
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: denied(request, outcomeUnevaluable, coreauthz.PolicyMisconfigured)
+              to: denied
+          when: policy == nil
+      - bind: decision, err
+        eval: policy(ctx, request)
+      - opt:
+          do:
+            - return: denied(request, outcomeUnevaluable, err)
+              to: denied
+          when: err != nil
+      - opt:
+          do:
+            - return: denied(request, outcomeUnevaluable, coreauthz.PolicyMisconfigured)
+              to: denied
+          when: "!decision.Valid()"
+      - opt:
+          do:
+            - return: nil
+          when: decision.Granted()
+      - return: denied(request, outcomeLabel(decision), nil)
+        to: denied
+  - of: outcomeLabel
+    steps:
+      - opt:
+          do:
+            - return: outcomeDeny
+          when: decision == coreauthz.Deny
+      - return: outcomeAbstain
+  - of: denied
+    participants:
+      - id: caller
+        kind: actor
+      - id: denied
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: |-
+          []errs.FieldValue{
+          		errs.String("outcome", outcome),
+          		errs.String("subject", request.Subject()),
+          		errs.String("action", request.Action()),
+          		errs.String("resource", request.Resource()),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.String("cause_reason", causeReason(cause)))
+            - set: fields
+              value: append(fields, errs.String("cause_code", causeCode(cause)))
+          when: cause != nil
+      - return: errs.Wrap(coreauthz.PermissionDenied, errs.WrapParams{}, fields...)
+        to: errs
+  - of: causeReason
+    participants:
+      - id: caller
+        kind: actor
+      - id: causeReason
+        kind: self
+      - id: errs
+        kind: package
+      - id: cause.Error
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: reason
+          init:
+            bind: reason, ok
+            eval: errs.ReasonOf(cause)
+            to: errs
+          when: ok
+      - return: cause.Error()
+        to: cause.Error
+  - of: causeCode
+    participants:
+      - id: caller
+        kind: actor
+      - id: causeCode
+        kind: self
+      - id: errs
+        kind: package
+      - id: code.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: code.String()
+              to: code.String
+          init:
+            bind: code, ok
+            eval: errs.CodeOf(cause)
+            to: errs
+          when: ok
+      - return: "\"-\""
+  - of: Must
+    steps:
+      - opt:
+          do:
+            - panic: err
+          when: err != nil
+      - return: policy
+  - of: MustCondition
+    steps:
+      - opt:
+          do:
+            - panic: err
+          when: err != nil
+      - return: condition
+  - of: Not
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"Not: condition is nil\", \"\")"
+          when: inner == nil
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: one evaluation; the two results are read together.
+          		innerHolds, innerErr := inner(request)
+          		//: the failure is propagated, NEVER inverted into a hold.
+          		if innerErr != nil {
+          			//: false alongside the error, so a caller reading only the bool
+          			//: still fails closed.
+          			return false, innerErr
+          		}
+          		//: a real answer inverts.
+          		return !innerHolds, nil
+          	}, nil
+  - of: AllOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: AllOf
+        kind: self
+      - id: checkedMembers
+        kind: internal
+    steps:
+      - bind: members, err
+        eval: checkedMembers("AllOf", conditions)
+        to: checkedMembers
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: fold with the conjunction's identity.
+          		return foldConditions(members, request, true)
+          	}, nil
+  - of: AnyOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: AnyOf
+        kind: self
+      - id: checkedMembers
+        kind: internal
+    steps:
+      - bind: members, err
+        eval: checkedMembers("AnyOf", conditions)
+        to: checkedMembers
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: fold with the disjunction's identity.
+          		return foldConditions(members, request, false)
+          	}, nil
+  - of: checkedMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkedMembers
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(name+\": no conditions\", \"\")"
+          when: len(conditions) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "nil, conditionFault(name+\": condition is nil\", \"\")"
+                when: condition == nil
+          key: _
+          range: conditions
+          value: condition
+      - return: slices.Clone(conditions), nil
+        to: slices
+  - of: DenyOverrides
+    participants:
+      - id: caller
+        kind: actor
+      - id: DenyOverrides
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: evaluateAll
+        kind: internal
+    steps:
+      - bind: members
+        eval: slices.Clone(policies)
+        to: slices
+      - return:
+          closure:
+            params: ctx context.Context, request coreauthz.RequestValue
+            results: decision coreauthz.Decision, err error
+            steps:
+              - return: evaluateAll(ctx, members, request)
+                to: evaluateAll
+  - of: evaluateAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: evaluateAll
+        kind: self
+      - id: foldResult
+        kind: internal
+    steps:
+      - bind: granted
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: coreauthz.Deny, misconfigured(index, "nil policy")
+                when: member == nil
+            - bind: memberDecision, memberErr
+              eval: member(ctx, request)
+            - opt:
+                do:
+                  - return: coreauthz.Deny, memberErr
+                when: memberErr != nil
+            - opt:
+                do:
+                  - return: coreauthz.Deny, misconfigured(index, memberDecision.String())
+                when: "!memberDecision.Valid()"
+            - opt:
+                do:
+                  - return: coreauthz.Deny, nil
+                when: memberDecision == coreauthz.Deny
+            - set: granted
+              value: granted || memberDecision.Granted()
+          key: index
+          range: members
+          value: member
+      - return: foldResult(granted), nil
+        to: foldResult
+  - of: foldResult
+    steps:
+      - opt:
+          do:
+            - return: coreauthz.Allow
+          when: granted
+      - return: coreauthz.Abstain
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coreauthz.PolicyMisconfigured, errs.WrapParams{},
+          		errs.Int("member_index", index),
+          		errs.String("member_detail", detail))
+        to: errs
+  - of: AttrEquals
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"AttrEquals: key is empty\", key)"
+          when: key == ""
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: absence and kind mismatch both leave as errors, never as false.
+          		attr, err := lookupAttr(request, key, coreauthz.KindString)
+          		if err != nil {
+          			//: unevaluable — the caller's fold treats this as absorbing.
+          			return false, err
+          		}
+          		//: the kind is guaranteed by lookupAttr, so ok is not re-checked.
+          		got, _ := attr.StringValue()
+          		//: a plain comparison, on two values that both really exist.
+          		return got == want, nil
+          	}, nil
+  - of: AttrIsTrue
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"AttrIsTrue: key is empty\", key)"
+          when: key == ""
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: absence and kind mismatch both leave as errors, never as false.
+          		attr, err := lookupAttr(request, key, coreauthz.KindBool)
+          		if err != nil {
+          			//: unevaluable — absorbing in every combinator.
+          			return false, err
+          		}
+          		//: the kind is guaranteed by lookupAttr, so ok is not re-checked.
+          		got, _ := attr.BoolValue()
+          		//: present and set is the only holding case.
+          		return got, nil
+          	}, nil
+  - of: AttrAtLeast
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"AttrAtLeast: key is empty\", key)"
+          when: key == ""
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: absence and kind mismatch both leave as errors, never as false.
+          		attr, err := lookupAttr(request, key, coreauthz.KindInt64)
+          		if err != nil {
+          			//: unevaluable — absorbing in every combinator.
+          			return false, err
+          		}
+          		//: the kind is guaranteed by lookupAttr, so ok is not re-checked.
+          		got, _ := attr.Int64Value()
+          		//: a numeric comparison on a value that really is numeric — the whole
+          		//: point of the typed bag, since "9" > "10" as text.
+          		return got >= lo, nil
+          	}, nil
+  - of: AttrContains
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"AttrContains: key is empty\", key)"
+          when: key == ""
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"AttrContains: want is empty\", key)"
+          when: want == ""
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: absence and kind mismatch both leave as errors, never as false.
+          		attr, err := lookupAttr(request, key, coreauthz.KindStrings)
+          		if err != nil {
+          			//: unevaluable — absorbing in every combinator.
+          			return false, err
+          		}
+          		//: Contains scans in place; the kind is already guaranteed.
+          		found, _ := attr.Contains(want)
+          		//: an empty set does not contain want, and that IS an answer.
+          		return found, nil
+          	}, nil
+  - of: AttrMatchesSubject
+    steps:
+      - opt:
+          do:
+            - return: "nil, conditionFault(\"AttrMatchesSubject: key is empty\", key)"
+          when: key == ""
+      - return: |-
+          func(request coreauthz.RequestValue) (holds bool, err error) {
+          		//: absence and kind mismatch both leave as errors, never as false.
+          		attr, err := lookupAttr(request, key, coreauthz.KindString)
+          		if err != nil {
+          			//: unevaluable — absorbing in every combinator.
+          			return false, err
+          		}
+          		//: the kind is guaranteed by lookupAttr, so ok is not re-checked.
+          		owner, _ := attr.StringValue()
+          		//: an empty subject never matches, not even an empty owner.
+          		return request.Subject() != "" && owner == request.Subject(), nil
+          	}, nil
+  - of: lookupAttr
+    participants:
+      - id: caller
+        kind: actor
+      - id: lookupAttr
+        kind: self
+      - id: request.Attr
+        kind: value
+    steps:
+      - bind: found, ok
+        eval: request.Attr(key)
+        to: request.Attr
+      - opt:
+          do:
+            - return: coreauthz.AttrValue{}, attrFault(coreauthz.AttributeMissing, key, want, coreauthz.KindInvalid)
+          when: "!ok"
+      - opt:
+          do:
+            - return: coreauthz.AttrValue{}, attrFault(coreauthz.AttributeKindMismatch, key, want, found.Kind())
+          when: found.Kind() != want
+      - return: found, nil
+  - of: NewRBAC
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRBAC
+        kind: self
+      - id: validateRBAC
+        kind: internal
+      - id: indexGrants
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: validateRBAC(cfg)
+            to: validateRBAC
+          when: err != nil
+      - bind: holders
+        eval: indexGrants(cfg.Grants)
+        to: indexGrants
+      - bind: rolesAttr
+        eval: cfg.RolesAttr
+      - return: |-
+          func(_ context.Context, request coreauthz.RequestValue) (decision coreauthz.Decision, err error) {
+          		//: evaluation needs no context: the table is in memory and does no I/O.
+          		return evaluateRBAC(holders, rolesAttr, request)
+          	}, nil
+  - of: evaluateRBAC
+    participants:
+      - id: caller
+        kind: actor
+      - id: evaluateRBAC
+        kind: self
+      - id: request.Attr
+        kind: value
+      - id: attr.Contains
+        kind: value
+    steps:
+      - bind: attr, ok
+        eval: request.Attr(rolesAttr)
+        to: request.Attr
+      - opt:
+          do:
+            - return: coreauthz.Deny, attrFault(coreauthz.AttributeMissing, rolesAttr, coreauthz.KindStrings, coreauthz.KindInvalid)
+          when: "!ok"
+      - opt:
+          do:
+            - return: coreauthz.Deny, attrFault(coreauthz.AttributeKindMismatch, rolesAttr, coreauthz.KindStrings, attr.Kind())
+          when: attr.Kind() != coreauthz.KindStrings
+      - bind: roles
+        eval: "holders[PermissionValue{Action: request.Action(), Resource: request.Resource()}]"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: coreauthz.Allow, nil
+                init:
+                  bind: held, _
+                  eval: attr.Contains(role)
+                  to: attr.Contains
+                when: held
+          key: _
+          range: roles
+          value: role
+      - return: coreauthz.Abstain, nil
+  - of: attrFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: attrFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(sentinel, errs.WrapParams{},
+          		errs.String("attribute", key),
+          		errs.String("want_kind", kindName(want)),
+          		errs.String("got_kind", kindName(got)))
+        to: errs
+  - of: indexGrants
+    steps:
+      - bind: holders
+        eval: make(map[PermissionValue][]string, len(grants))
+      - loop:
+          do:
+            - loop:
+                do:
+                  - set: holders[permission]
+                    value: append(holders[permission], grant.Role)
+                key: _
+                range: grant.Permissions
+                value: permission
+          key: _
+          range: grants
+          value: grant
+      - return: holders
+  - of: validateRBAC
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateRBAC
+        kind: self
+      - id: grantFault
+        kind: internal
+      - id: validateGrant
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: grantFault("RolesAttr is empty", -1, "")
+              to: grantFault
+          when: cfg.RolesAttr == ""
+      - opt:
+          do:
+            - return: grantFault("Grants is empty", -1, "")
+              to: grantFault
+          when: len(cfg.Grants) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: validateGrant(index, grant)
+                  to: validateGrant
+                when: err != nil
+          key: index
+          range: cfg.Grants
+          value: grant
+      - return: nil
+  - of: validateGrant
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateGrant
+        kind: self
+      - id: grantFault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: grantFault("Role is empty", index, "")
+              to: grantFault
+          when: grant.Role == ""
+      - opt:
+          do:
+            - return: grantFault("Permissions is empty", index, grant.Role)
+              to: grantFault
+          when: len(grant.Permissions) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: grantFault("permission has an empty Action or Resource", index, grant.Role)
+                    to: grantFault
+                when: permission.Action == "" || permission.Resource == ""
+          key: _
+          range: grant.Permissions
+          value: permission
+      - return: nil
+  - of: validateRules
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateRules
+        kind: self
+      - id: ruleFault
+        kind: internal
+      - id: validateRule
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ruleFault("no rules", -1, "")
+              to: ruleFault
+          when: len(rules) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: validateRule(index, rule)
+                  to: validateRule
+                when: err != nil
+          key: index
+          range: rules
+          value: rule
+      - return: nil
+  - of: validateRule
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateRule
+        kind: self
+      - id: ruleFault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ruleFault("Name is empty", index, "")
+              to: ruleFault
+          when: rule.Name == ""
+      - opt:
+          do:
+            - return: ruleFault("Action or Resource is empty", index, rule.Name)
+              to: ruleFault
+          when: rule.Action == "" || rule.Resource == ""
+      - opt:
+          do:
+            - return: ruleFault("When is nil", index, rule.Name)
+              to: ruleFault
+          when: rule.When == nil
+      - opt:
+          do:
+            - return: ruleFault("Effect is not Allow or Deny, got "+rule.Effect.String(), index, rule.Name)
+              to: ruleFault
+          when: rule.Effect != coreauthz.Allow && rule.Effect != coreauthz.Deny
+      - return: nil
+  - of: grantFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: grantFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coreauthz.GrantInvalid, errs.WrapParams{},
+          		errs.String("detail", detail),
+          		errs.Int("grant_index", index),
+          		errs.String("role", role))
+        to: errs
+  - of: ruleFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: ruleFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coreauthz.RuleInvalid, errs.WrapParams{},
+          		errs.String("detail", detail),
+          		errs.Int("rule_index", index),
+          		errs.String("rule", name))
+        to: errs
+  - of: conditionFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: conditionFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coreauthz.ConditionInvalid, errs.WrapParams{},
+          		errs.String("detail", detail),
+          		errs.String("attribute", attribute))
+        to: errs
+  - of: kindName
+    steps:
+      - switch:
+          cases:
+            - case: coreauthz.KindString
+              do:
+                - return: "\"string\""
+            - case: coreauthz.KindInt64
+              do:
+                - return: "\"int64\""
+            - case: coreauthz.KindBool
+              do:
+                - return: "\"bool\""
+            - case: coreauthz.KindStrings
+              do:
+                - return: "\"strings\""
+            - case: coreauthz.KindInvalid
+              do:
+                - return: "\"absent\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": kind

@@ -1,0 +1,2499 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: checkChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkChain
+        kind: self
+      - id: pathchain
+        kind: package
+      - id: wrapAs
+        kind: internal
+      - id: plantable
+        kind: internal
+      - id: chainRedirected
+        kind: internal
+    steps:
+      - bind: steps, resolveErr
+        eval: pathchain.Resolve(dir)
+        to: pathchain
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, resolveErr, kerrs.String("op", "resolve-dir"))
+              to: wrapAs
+          when: resolveErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!step.Indirect"
+            - bind: plantedByAnyone, observed
+              eval: plantable(step.Container)
+              to: plantable
+            - opt:
+                do:
+                  - continue: true
+                when: "!plantedByAnyone"
+            - return: chainRedirected(dir, step, observed)
+              to: chainRedirected
+          key: _
+          range: steps
+          value: step
+      - return: nil
+  - of: chainRedirected
+    participants:
+      - id: caller
+        kind: actor
+      - id: chainRedirected
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - return: |-
+          wrapAs(coresession.PathRedirected, nil,
+          		kerrs.String("path", step.Path),
+          		kerrs.String("dir", dir),
+          		kerrs.String("kind", kindIndirection),
+          		kerrs.String("target", step.Target),
+          		kerrs.String("observed", observed))
+        to: wrapAs
+  - of: digestsEqual
+    steps:
+      - return: subtle.ConstantTimeCompare([]byte(stored), []byte(presented)) == 1
+  - of: Config.window
+    steps:
+      - bind: clk
+        eval: c.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "window{idle: c.IdleTimeout, absolute: c.AbsoluteTimeout, clk: clk}"
+  - of: validateWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateWindow
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coresession.InvalidConfig, nil, kerrs.String("field", "IdleTimeout"))
+              to: wrapAs
+          when: idle <= 0
+      - opt:
+          do:
+            - return: wrapAs(coresession.InvalidConfig, nil, kerrs.String("field", "AbsoluteTimeout"))
+              to: wrapAs
+          when: absolute <= 0
+      - opt:
+          do:
+            - return: |-
+                wrapAs(coresession.InvalidConfig, nil,
+                			kerrs.String("field", "IdleTimeout"),
+                			kerrs.String("constraint", "IdleTimeout < AbsoluteTimeout"))
+              to: wrapAs
+          when: idle >= absolute
+      - return: nil
+  - of: encodeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeRecord
+        kind: self
+      - id: appendString
+        kind: internal
+      - id: appendTime
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - bind: buf
+        eval: make([]byte, 0, encodedSize(rec))
+      - set: buf
+        value: append(buf, recordVersion)
+      - set: buf
+        to: appendString
+        value: appendString(buf, rec.digest)
+      - set: buf
+        to: appendString
+        value: appendString(buf, rec.subject)
+      - set: buf
+        to: appendTime
+        value: appendTime(buf, rec.createdAt)
+      - set: buf
+        to: appendTime
+        value: appendTime(buf, rec.lastSeen)
+      - set: buf
+        to: appendTime
+        value: appendTime(buf, rec.absoluteExpiry)
+      - set: buf
+        to: binary.BigEndian.AppendUint32
+        value: binary.BigEndian.AppendUint32(buf, uint32(len(rec.data)))
+      - loop:
+          do:
+            - set: buf
+              to: appendString
+              value: appendString(buf, key)
+            - set: buf
+              to: appendString
+              value: appendString(buf, rec.data[key])
+          key: _
+          range: slices.Sorted(maps.Keys(rec.data))
+          value: key
+      - return: buf
+  - of: encodedSize
+    steps:
+      - bind: size
+        eval: versionLen + timeFields*timeLen + lenPrefix
+      - op: +=
+        set: size
+        value: stringFields*lenPrefix + len(rec.digest) + len(rec.subject)
+      - loop:
+          do:
+            - op: +=
+              set: size
+              value: pairStrings*lenPrefix + len(key) + len(value)
+          key: key
+          range: rec.data
+          value: value
+      - return: size
+  - of: appendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendString
+        kind: self
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - set: buf
+        to: binary.BigEndian.AppendUint32
+        value: binary.BigEndian.AppendUint32(buf, uint32(len(value)))
+      - return: append(buf, value...)
+  - of: appendTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTime
+        kind: self
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - return: binary.BigEndian.AppendUint64(buf, uint64(value.UnixNano()))
+        to: binary.BigEndian.AppendUint64
+  - of: decodeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRecord
+        kind: self
+      - id: decodeHeader
+        kind: internal
+      - id: decodeData
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.RecordCorrupt, nil)
+          when: len(raw) < versionLen || raw[0] != recordVersion
+      - bind: head, off, ok
+        eval: decodeHeader(raw, versionLen)
+        to: decodeHeader
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.RecordCorrupt, nil)
+          when: "!ok"
+      - bind: payload, ok
+        eval: decodeData(raw, off)
+        to: decodeData
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.RecordCorrupt, nil)
+          when: "!ok"
+      - set: head.data
+        value: payload
+      - return: head, nil
+  - of: decodeHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeHeader
+        kind: self
+      - id: takeString
+        kind: internal
+      - id: takeTime
+        kind: internal
+    steps:
+      - bind: digest, off, ok
+        eval: takeString(raw, off)
+        to: takeString
+      - opt:
+          do:
+            - return: record{}, 0, false
+          when: "!ok"
+      - bind: subject, off, ok
+        eval: takeString(raw, off)
+        to: takeString
+      - opt:
+          do:
+            - return: record{}, 0, false
+          when: "!ok"
+      - bind: created, off, ok
+        eval: takeTime(raw, off)
+        to: takeTime
+      - opt:
+          do:
+            - return: record{}, 0, false
+          when: "!ok"
+      - bind: seen, off, ok
+        eval: takeTime(raw, off)
+        to: takeTime
+      - opt:
+          do:
+            - return: record{}, 0, false
+          when: "!ok"
+      - bind: expiry, off, ok
+        eval: takeTime(raw, off)
+        to: takeTime
+      - opt:
+          do:
+            - return: record{}, 0, false
+          when: "!ok"
+      - return: |-
+          record{
+          		digest: digest, subject: subject,
+          		createdAt: created, lastSeen: seen, absoluteExpiry: expiry,
+          	}, off, true
+  - of: decodeData
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeData
+        kind: self
+      - id: binary.BigEndian.Uint32
+        kind: value
+      - id: takePair
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: off+lenPrefix > len(raw)
+      - bind: count
+        eval: "binary.BigEndian.Uint32(raw[off : off+lenPrefix])"
+        to: binary.BigEndian.Uint32
+      - op: +=
+        set: "off"
+        value: lenPrefix
+      - opt:
+          do:
+            - return: nil, false
+          when: count > uint32(maxDataEntries)
+      - opt:
+          do:
+            - return: nil, true
+          when: count == 0
+      - set: payload
+        value: make(map[string]string, int(count))
+      - loop:
+          do:
+            - bind: key, value, next, pairOK
+              eval: takePair(raw, off)
+              to: takePair
+            - opt:
+                do:
+                  - return: nil, false
+                when: "!pairOK"
+            - set: payload[key]
+              value: value
+            - set: "off"
+              value: next
+          range: count
+      - return: payload, off == len(raw)
+  - of: takePair
+    participants:
+      - id: caller
+        kind: actor
+      - id: takePair
+        kind: self
+      - id: takeString
+        kind: internal
+    steps:
+      - set: key, off, ok
+        to: takeString
+        value: takeString(raw, off)
+      - opt:
+          do:
+            - return: "\"\", \"\", 0, false"
+          when: "!ok"
+      - set: value, off, ok
+        to: takeString
+        value: takeString(raw, off)
+      - opt:
+          do:
+            - return: "\"\", \"\", 0, false"
+          when: "!ok"
+      - return: key, value, off, true
+  - of: takeString
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeString
+        kind: self
+      - id: binary.BigEndian.Uint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"\", 0, false"
+          when: off+lenPrefix > len(raw)
+      - bind: size
+        eval: "binary.BigEndian.Uint32(raw[off : off+lenPrefix])"
+        to: binary.BigEndian.Uint32
+      - op: +=
+        set: "off"
+        value: lenPrefix
+      - opt:
+          do:
+            - return: "\"\", 0, false"
+          when: size > uint32(maxStringLen)
+      - bind: end
+        eval: off + int(size)
+      - opt:
+          do:
+            - return: "\"\", 0, false"
+          when: end > len(raw)
+      - return: string(raw[off:end]), end, true
+  - of: takeTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeTime
+        kind: self
+      - id: time.Unix(0, nanos).UTC
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}, 0, false
+          when: off+timeLen > len(raw)
+      - bind: nanos
+        eval: "int64(binary.BigEndian.Uint64(raw[off : off+timeLen]))"
+      - return: time.Unix(0, nanos).UTC(), off + timeLen, true
+        to: time.Unix(0, nanos).UTC
+  - of: boundSubject
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundSubject
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coresession.PayloadTooLarge, nil, kerrs.String("field", "subject"))
+              to: wrapAs
+          when: len(subject) > maxStringLen
+      - return: nil
+  - of: boundPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundPayload
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coresession.PayloadTooLarge, nil)
+              to: wrapAs
+          when: len(data) > maxDataEntries
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: wrapAs(coresession.PayloadTooLarge, nil)
+                    to: wrapAs
+                when: len(key) > maxStringLen || len(value) > maxStringLen
+          key: key
+          range: data
+          value: value
+      - return: nil
+  - of: FileConfig.waiter
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: FileConfig.pollInterval
+    steps:
+      - opt:
+          do:
+            - return: c.Poll
+          when: c.Poll > 0
+      - return: DefaultPoll
+  - of: FileConfig.window
+    steps:
+      - bind: clk
+        eval: c.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "window{idle: c.IdleTimeout, absolute: c.AbsoluteTimeout, clk: clk}"
+  - of: FileConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: FileConfig.validate
+        kind: self
+      - id: validateWindow
+        kind: internal
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateWindow(c.IdleTimeout, c.AbsoluteTimeout)
+            to: validateWindow
+          when: err != nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.InvalidConfig, nil, kerrs.String("field", "Dir"))
+              to: wrapAs
+          when: c.Dir == ""
+      - opt:
+          do:
+            - return: wrapAs(coresession.InvalidConfig, nil, kerrs.String("field", "Poll"))
+              to: wrapAs
+          when: c.Poll < 0
+      - opt:
+          do:
+            - return: wrapAs(coresession.InvalidConfig, nil, kerrs.String("field", "Key"))
+              to: wrapAs
+          when: len(c.Key.Bytes()) != corecrypto.KeyLen
+      - return: nil
+  - of: openEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: openEntry
+        kind: self
+      - id: lookAt
+        kind: internal
+      - id: entryKind
+        kind: internal
+      - id: root.OpenFile
+        kind: value
+      - id: sameEntry
+        kind: internal
+      - id: opened.Close
+        kind: value
+    steps:
+      - bind: before, present, lookErr
+        eval: lookAt(root, name)
+        to: lookAt
+      - opt:
+          do:
+            - return: nil, "", lookErr
+          when: lookErr != nil
+      - opt:
+          do:
+            - return: nil, kind, nil
+          init:
+            bind: kind, wrong
+            eval: entryKind(before)
+            to: entryKind
+          when: wrong
+      - bind: opened, openErr
+        eval: root.OpenFile(name, flag, perm)
+        to: root.OpenFile
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, kindSymlink, nil
+                when: isLinkNow(root, name)
+            - return: nil, "", openErr
+          when: openErr != nil
+      - bind: kind, proveErr
+        eval: sameEntry(root, name, opened, before, present)
+        to: sameEntry
+      - opt:
+          do:
+            - return: opened, "", nil
+          when: proveErr == nil && kind == ""
+      - bind: closeErr
+        eval: opened.Close()
+        to: opened.Close
+      - opt:
+          do:
+            - return: nil, "", cmp.Or(proveErr, closeErr)
+          when: proveErr != nil
+      - return: nil, kind, closeErr
+  - of: readEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: readEntry
+        kind: self
+      - id: openEntry
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: file.Close
+        kind: value
+    steps:
+      - bind: file, found, openErr
+        eval: openEntry(root, name, os.O_RDONLY, 0)
+        to: openEntry
+      - opt:
+          do:
+            - return: nil, found, openErr
+          when: openErr != nil || found != ""
+      - bind: raw, readErr
+        eval: io.ReadAll(file)
+        to: io
+      - bind: closeErr
+        eval: file.Close()
+        to: file.Close
+      - return: raw, "", cmp.Or(readErr, closeErr)
+  - of: lookAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: lookAt
+        kind: self
+      - id: root.Lstat
+        kind: value
+    steps:
+      - bind: info, statErr
+        eval: root.Lstat(name)
+        to: root.Lstat
+      - opt:
+          do:
+            - return: nil, false, nil
+          when: errors.Is(statErr, fs.ErrNotExist)
+      - opt:
+          do:
+            - return: nil, false, statErr
+          when: statErr != nil
+      - return: info, true, nil
+  - of: entryKind
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: info == nil
+      - opt:
+          do:
+            - return: kindSymlink, true
+          when: info.Mode()&fs.ModeSymlink != 0
+      - opt:
+          do:
+            - return: kindNotRegular, true
+          when: "!info.Mode().IsRegular()"
+      - return: "\"\", false"
+  - of: sameEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: sameEntry
+        kind: self
+      - id: handle.Stat
+        kind: value
+      - id: lookAt
+        kind: internal
+      - id: entryKind
+        kind: internal
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: held, statErr
+        eval: handle.Stat()
+        to: handle.Stat
+      - opt:
+          do:
+            - return: "\"\", statErr"
+          when: statErr != nil
+      - opt:
+          do:
+            - return: kindNotRegular, nil
+          when: "!held.Mode().IsRegular()"
+      - bind: want
+        eval: before
+      - opt:
+          do:
+            - bind: now, nowPresent, nowErr
+              eval: lookAt(root, name)
+              to: lookAt
+            - opt:
+                do:
+                  - return: "\"\", nowErr"
+                when: nowErr != nil
+            - opt:
+                do:
+                  - return: cmp.Or(kind, kindReplaced), nil
+                    to: cmp
+                init:
+                  bind: kind, wrong
+                  eval: entryKind(now)
+                  to: entryKind
+                when: "!nowPresent || wrong"
+            - set: want
+              value: now
+          when: "!present"
+      - opt:
+          do:
+            - return: kindReplaced, nil
+          when: "!os.SameFile(held, want)"
+      - return: "\"\", nil"
+  - of: isLinkNow
+    participants:
+      - id: caller
+        kind: actor
+      - id: isLinkNow
+        kind: self
+      - id: lookAt
+        kind: internal
+      - id: entryKind
+        kind: internal
+    steps:
+      - bind: info, present, lookErr
+        eval: lookAt(root, name)
+        to: lookAt
+      - bind: kind, _
+        eval: entryKind(info)
+        to: entryKind
+      - return: lookErr == nil && present && kind == kindSymlink
+  - of: (*fileStore).withLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).withLock
+        kind: self
+      - id: checkContext
+        kind: internal
+      - id: f.enter
+        kind: internal
+      - id: f.leave
+        kind: internal
+      - id: f.takeFlock
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctxErr
+          init:
+            bind: ctxErr
+            eval: checkContext(ctx)
+            to: checkContext
+          when: ctxErr != nil
+      - opt:
+          do:
+            - return: gateErr
+          init:
+            bind: gateErr
+            eval: f.enter(ctx)
+            to: f.enter
+          when: gateErr != nil
+      - defer: f.leave()
+        to: f.leave
+      - opt:
+          do:
+            - return: lockErr
+          init:
+            bind: lockErr
+            eval: f.takeFlock(ctx)
+            to: f.takeFlock
+          when: lockErr != nil
+      - defer: |-
+          func() {
+          		//: a release that fails leaves the store wedged for every other
+          		//: operation, so it is CHECKED rather than discarded — and reported
+          		//: only when fn had nothing worse to say.
+          		if unlockErr := flock.Unlock(f.lock); unlockErr != nil {
+          			//: LockFailed, subordinate to fn's own verdict.
+          			err = cmp.Or(err, wrapAs(coresession.LockFailed, unlockErr))
+          		}
+          	}()
+      - opt:
+          do:
+            - return: ctxErr
+          init:
+            bind: ctxErr
+            eval: checkContext(ctx)
+            to: checkContext
+          when: ctxErr != nil
+      - return: fn()
+  - of: (*fileStore).enter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).enter
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - send:
+                chan: f.gate
+                value: struct{}{}
+            - return: nil
+          when: ctx == nil
+      - select:
+          cases:
+            - comm: f.gate <- struct{}{}
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: wrapAs(coresession.StoreUnavailable, ctx.Err(), kerrs.String("op", "gate"))
+                  to: wrapAs
+  - of: (*fileStore).leave
+    steps:
+      - eval: <-f.gate
+  - of: (*fileStore).takeFlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).takeFlock
+        kind: self
+      - id: flock
+        kind: package
+      - id: wrapAs
+        kind: internal
+      - id: f.waitPoll
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: taken, flockErr
+              eval: flock.TryLock(f.lock)
+              to: flock
+            - opt:
+                do:
+                  - return: wrapAs(coresession.LockFailed, flockErr)
+                    to: wrapAs
+                when: flockErr != nil
+            - opt:
+                do:
+                  - return: nil
+                when: taken
+            - opt:
+                do:
+                  - return: waitErr
+                init:
+                  bind: waitErr
+                  eval: f.waitPoll(ctx)
+                  to: f.waitPoll
+                when: waitErr != nil
+          forever: true
+  - of: (*fileStore).waitPoll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).waitPoll
+        kind: self
+      - id: f.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Done
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - bind: timer
+        eval: f.clk.NewTimer(f.poll)
+        to: f.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: done
+        eval: noDone
+      - opt:
+          do:
+            - set: done
+              to: ctx.Done
+              value: ctx.Done()
+          when: ctx != nil
+      - select:
+          cases:
+            - comm: <-done
+              do:
+                - return: wrapAs(coresession.StoreUnavailable, ctx.Err(), kerrs.String("op", "lock"))
+                  to: wrapAs
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: checkContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkContext
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ctx == nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, ctxErr, kerrs.String("op", "context"))
+              to: wrapAs
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - return: nil
+  - of: (*fileStore).liveLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).liveLocked
+        kind: self
+      - id: id.Digest
+        kind: value
+      - id: f.readLocked
+        kind: internal
+      - id: f.removeLocked
+        kind: internal
+    steps:
+      - bind: digest
+        eval: id.Digest()
+        to: id.Digest
+      - bind: rec, readErr
+        eval: f.readLocked(digest)
+        to: f.readLocked
+      - opt:
+          do:
+            - return: record{}, readErr
+          when: readErr != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: record{}, cmp.Or(wrapAs(coresession.Expired, nil), removeErr)
+                init:
+                  bind: removeErr
+                  eval: f.removeLocked(digest)
+                  to: f.removeLocked
+                when: removeErr != nil
+            - return: record{}, wrapAs(coresession.Expired, nil)
+          when: "!f.win.live(rec, now)"
+      - return: rec, nil
+  - of: (*fileStore).removeLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).removeLocked
+        kind: self
+      - id: f.unlinkLocked
+        kind: internal
+      - id: f.flushLocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unlinkErr
+          init:
+            bind: unlinkErr
+            eval: f.unlinkLocked(digest)
+            to: f.unlinkLocked
+          when: unlinkErr != nil
+      - return: f.flushLocked("sync-dir-remove")
+        to: f.flushLocked
+  - of: (*fileStore).unlinkLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).unlinkLocked
+        kind: self
+      - id: recordName
+        kind: internal
+      - id: f.root.Remove
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - bind: name, nameErr
+        eval: recordName(digest)
+        to: recordName
+      - opt:
+          do:
+            - return: nameErr
+          when: nameErr != nil
+      - bind: removeErr
+        eval: f.root.Remove(name)
+        to: f.root.Remove
+      - opt:
+          do:
+            - return: nil
+          when: removeErr == nil || errors.Is(removeErr, fs.ErrNotExist)
+      - return: wrapAs(coresession.StoreUnavailable, removeErr, kerrs.String("op", "remove"))
+        to: wrapAs
+  - of: (*fileStore).New
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).New
+        kind: self
+      - id: mintID
+        kind: internal
+      - id: f.withLock
+        kind: internal
+      - id: f.win.build
+        kind: internal
+    steps:
+      - bind: id, mintErr
+        eval: mintID(f.source)
+        to: mintID
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, mintErr
+          when: mintErr != nil
+      - var:
+          name: rec
+          type: record
+      - bind: lockErr
+        eval: |-
+          f.withLock(ctx, func() error {
+          		//: a file already under this digest means the random source repeated
+          		//: itself; overwriting it would hand one caller another's session.
+          		if f.exists(id.Digest()) {
+          			//: IdentifierCollision — nothing is written.
+          			return wrapAs(coresession.IdentifierCollision, nil)
+          		}
+          		rec = f.win.mint(id.Digest(), "", f.win.clk.Now())
+          		//: seal, write beside, rename into place.
+          		return f.writeLocked(rec)
+          	})
+        to: f.withLock
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, lockErr
+          when: lockErr != nil
+      - return: f.win.build(id, rec)
+        to: f.win.build
+  - of: (*fileStore).exists
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).exists
+        kind: self
+      - id: recordName
+        kind: internal
+      - id: lookAt
+        kind: internal
+    steps:
+      - bind: name, nameErr
+        eval: recordName(digest)
+        to: recordName
+      - opt:
+          do:
+            - return: "false"
+          when: nameErr != nil
+      - bind: _, present, lookErr
+        eval: lookAt(f.root, name)
+        to: lookAt
+      - return: present || lookErr != nil
+  - of: (*fileStore).Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).Load
+        kind: self
+      - id: f.withLock
+        kind: internal
+      - id: f.win.build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, coresession.InvalidID
+          when: id.IsZero()
+      - var:
+          name: rec
+          type: record
+      - bind: lockErr
+        eval: |-
+          f.withLock(ctx, func() error {
+          		now := f.win.clk.Now()
+          		live, liveErr := f.liveLocked(id, now)
+          		//: NotFound, Expired, RecordCorrupt or StoreUnavailable.
+          		if liveErr != nil {
+          			//: propagate unchanged.
+          			return liveErr
+          		}
+          		//: sliding IS the idle timeout — and it is why Load takes the exclusive
+          		//: lock rather than a shared one.
+          		rec = f.win.slide(live, now)
+          		//: persist the slide, or the window would reset on every restart.
+          		return f.writeLocked(rec)
+          	})
+        to: f.withLock
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, lockErr
+          when: lockErr != nil
+      - return: f.win.build(id, rec)
+        to: f.win.build
+  - of: assertPrivateFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: assertPrivateFile
+        kind: self
+      - id: file.Chmod
+        kind: internal
+      - id: wrapAs
+        kind: internal
+      - id: file.Stat
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, chmodErr, kerrs.String("op", "chmod-temp"))
+              to: wrapAs
+          init:
+            bind: chmodErr
+            eval: file.Chmod(fileMode)
+            to: file.Chmod
+          when: chmodErr != nil
+      - bind: info, statErr
+        eval: file.Stat()
+        to: file.Stat
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, statErr, kerrs.String("op", "stat-temp"))
+              to: wrapAs
+          when: statErr != nil
+      - opt:
+          do:
+            - return: |-
+                wrapAs(coresession.DirectoryUnsafe, nil,
+                			kerrs.String("subject", "record"), kerrs.String("want", fileMode.String()))
+              to: wrapAs
+          when: info.Mode().Perm()&^fileMode != 0
+      - return: nil
+  - of: writeAndSync
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeAndSync
+        kind: self
+      - id: file.Write
+        kind: internal
+      - id: wrapAs
+        kind: internal
+      - id: file.Sync
+        kind: internal
+      - id: file.Close
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, writeErr, kerrs.String("op", "write"))
+              to: wrapAs
+          init:
+            bind: _, writeErr
+            eval: file.Write(payload)
+            to: file.Write
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, syncErr, kerrs.String("op", "sync"))
+              to: wrapAs
+          init:
+            bind: syncErr
+            eval: file.Sync()
+            to: file.Sync
+          when: syncErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, closeErr, kerrs.String("op", "close"))
+              to: wrapAs
+          init:
+            bind: closeErr
+            eval: file.Close()
+            to: file.Close
+          when: closeErr != nil
+      - return: nil
+  - of: flushHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: flushHeld
+        kind: self
+      - id: root.Open
+        kind: value
+      - id: handle.Sync
+        kind: value
+    steps:
+      - bind: handle, openErr
+        eval: root.Open(".")
+        to: root.Open
+      - opt:
+          do:
+            - return: openErr
+          when: openErr != nil
+      - defer: |-
+          func() {
+          		err = cmp.Or(err, handle.Close())
+          	}()
+      - return: handle.Sync()
+        to: handle.Sync
+  - of: removeTemp
+    participants:
+      - id: caller
+        kind: actor
+      - id: removeTemp
+        kind: self
+      - id: root.Remove
+        kind: value
+      - id: firstFailure
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: firstFailure(cause, removeErr, "remove-temp")
+              to: firstFailure
+          init:
+            bind: removeErr
+            eval: root.Remove(name)
+            to: root.Remove
+          when: removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist)
+      - return: cause
+  - of: firstFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: firstFailure
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - return: cmp.Or(cause, wrapAs(coresession.StoreUnavailable, fallback, kerrs.String("op", op)))
+        to: cmp
+  - of: NewFileStore
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewFileStore
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: openStoreDir
+        kind: internal
+      - id: openLocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, validationErr
+          init:
+            bind: validationErr
+            eval: cfg.validate()
+            to: cfg.validate
+          when: validationErr != nil
+      - opt:
+          do:
+            - return: nil, coreproc.UnsupportedPlatform
+          when: "!platformNative"
+      - bind: root, dirErr
+        eval: openStoreDir(cfg.Dir)
+        to: openStoreDir
+      - opt:
+          do:
+            - return: nil, dirErr
+          when: dirErr != nil
+      - return: openLocked(cfg, root)
+        to: openLocked
+  - of: openStoreDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: openStoreDir
+        kind: self
+      - id: checkChain
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: errors
+        kind: stdlib
+      - id: narrowHeld
+        kind: internal
+      - id: assertHeldDir
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, chainErr
+          init:
+            bind: chainErr
+            eval: checkChain(dir)
+            to: checkChain
+          when: chainErr != nil
+      - bind: _, statErr
+        eval: os.Stat(dir)
+        to: os
+      - bind: created
+        eval: errors.Is(statErr, fs.ErrNotExist)
+        to: errors
+      - opt:
+          do:
+            - return: nil, wrapAs(coresession.StoreUnavailable, mkErr, kerrs.String("op", "mkdir"))
+          init:
+            bind: mkErr
+            eval: os.MkdirAll(dir, dirMode)
+            to: os
+          when: mkErr != nil
+      - bind: held, openErr
+        eval: os.OpenRoot(dir)
+        to: os
+      - opt:
+          do:
+            - return: nil, wrapAs(coresession.StoreUnavailable, openErr, kerrs.String("op", "open-dir"))
+          when: openErr != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, releaseDir(held, wrapAs(coresession.StoreUnavailable, chmodErr, kerrs.String("op", "chmod-dir")))
+                init:
+                  bind: chmodErr
+                  eval: narrowHeld(held)
+                  to: narrowHeld
+                when: chmodErr != nil
+          when: created
+      - opt:
+          do:
+            - return: nil, releaseDir(held, heldErr)
+          init:
+            bind: heldErr
+            eval: assertHeldDir(held, dir)
+            to: assertHeldDir
+          when: heldErr != nil
+      - return: held, nil
+  - of: narrowHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: narrowHeld
+        kind: self
+      - id: root.Open
+        kind: value
+      - id: handle.Chmod
+        kind: value
+      - id: handle.Close
+        kind: value
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: handle, openErr
+        eval: root.Open(".")
+        to: root.Open
+      - opt:
+          do:
+            - return: openErr
+          when: openErr != nil
+      - bind: chmodErr
+        eval: handle.Chmod(dirMode)
+        to: handle.Chmod
+      - bind: closeErr
+        eval: handle.Close()
+        to: handle.Close
+      - return: cmp.Or(chmodErr, closeErr)
+        to: cmp
+  - of: assertHeldDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: assertHeldDir
+        kind: self
+      - id: root.Stat
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: held, statErr
+        eval: root.Stat(".")
+        to: root.Stat
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, statErr, kerrs.String("op", "stat-dir"))
+              to: wrapAs
+          when: statErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.DirectoryUnsafe, nil, kerrs.String("want", dirMode.String()))
+              to: wrapAs
+          when: held.Mode().Perm()&^dirMode != 0
+      - bind: named, namedErr
+        eval: os.Stat(dir)
+        to: os
+      - opt:
+          do:
+            - return: |-
+                wrapAs(coresession.PathRedirected, namedErr,
+                			kerrs.String("path", dir), kerrs.String("dir", dir), kerrs.String("kind", kindHeldReplaced))
+              to: wrapAs
+          when: namedErr != nil || !os.SameFile(held, named)
+      - return: nil
+  - of: releaseDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseDir
+        kind: self
+      - id: root.Close
+        kind: value
+      - id: firstFailure
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: firstFailure(cause, closeErr, "dir-close")
+              to: firstFailure
+          init:
+            bind: closeErr
+            eval: root.Close()
+            to: root.Close
+          when: closeErr != nil
+      - return: cause
+  - of: openLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: openLocked
+        kind: self
+      - id: openLockFile
+        kind: internal
+    steps:
+      - bind: lock, lockErr
+        eval: openLockFile(root, cfg.Dir)
+        to: openLockFile
+      - opt:
+          do:
+            - return: nil, releaseDir(root, lockErr)
+          when: lockErr != nil
+      - return: |-
+          &fileStore{
+          		dir: cfg.Dir, root: root, lock: lock, key: cfg.Key, gate: make(chan struct{}, 1),
+          		clk: cfg.waiter(), poll: cfg.pollInterval(),
+          		win: cfg.window(), source: rand.Reader,
+          		syncDir: func() error {
+          			//: the held directory, never a path that could have moved.
+          			return flushHeld(root)
+          		},
+          	}, nil
+  - of: openLockFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: openLockFile
+        kind: self
+      - id: openEntry
+        kind: internal
+    steps:
+      - bind: opened, found, openErr
+        eval: openEntry(root, lockName, os.O_CREATE|os.O_RDWR, fileMode)
+        to: openEntry
+      - opt:
+          do:
+            - return: nil, wrapAs(coresession.StoreUnavailable, openErr, kerrs.String("op", "lock-open"), kerrs.String("kind", found))
+          when: found == kindNotRegular
+      - opt:
+          do:
+            - return: |-
+                nil, wrapAs(coresession.PathRedirected, openErr,
+                			kerrs.String("path", filepath.Join(dir, lockName)), kerrs.String("dir", dir), kerrs.String("kind", found))
+          when: found != ""
+      - opt:
+          do:
+            - return: nil, wrapAs(coresession.StoreUnavailable, openErr, kerrs.String("op", "lock-open"))
+          when: openErr != nil
+      - return: opened, nil
+  - of: (*fileStore).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).Close
+        kind: self
+      - id: f.lock.Close
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: f.root.Close
+        kind: value
+      - id: firstFailure
+        kind: internal
+    steps:
+      - var:
+          name: released
+          type: error
+      - opt:
+          do:
+            - set: released
+              to: wrapAs
+              value: wrapAs(coresession.StoreUnavailable, lockErr, kerrs.String("op", "lock-close"))
+          init:
+            bind: lockErr
+            eval: f.lock.Close()
+            to: f.lock.Close
+          when: lockErr != nil
+      - opt:
+          do:
+            - set: released
+              to: firstFailure
+              value: firstFailure(released, rootErr, "dir-close")
+          init:
+            bind: rootErr
+            eval: f.root.Close()
+            to: f.root.Close
+          when: rootErr != nil
+      - return: released
+  - of: recordName
+    steps:
+      - opt:
+          do:
+            - return: "\"\", coresession.InvalidID"
+          when: "!isDigest(digest)"
+      - return: digest + recordSuffix, nil
+  - of: aad
+    steps:
+      - return: "[]byte(recordAAD + digest)"
+  - of: (*fileStore).readLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).readLocked
+        kind: self
+      - id: recordName
+        kind: internal
+      - id: readEntry
+        kind: internal
+      - id: f.decodeAt
+        kind: internal
+    steps:
+      - bind: name, nameErr
+        eval: recordName(digest)
+        to: recordName
+      - opt:
+          do:
+            - return: record{}, nameErr
+          when: nameErr != nil
+      - bind: raw, found, readErr
+        eval: readEntry(f.root, name)
+        to: readEntry
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.StoreUnavailable, readErr, kerrs.String("op", "read"), kerrs.String("kind", found))
+          when: found == kindNotRegular
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.RecordCorrupt, readErr)
+          when: found != ""
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.NotFound, nil)
+          when: errors.Is(readErr, fs.ErrNotExist)
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.StoreUnavailable, readErr, kerrs.String("op", "read"))
+          when: readErr != nil
+      - return: f.decodeAt(raw, digest)
+        to: f.decodeAt
+  - of: (*fileStore).decodeAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).decodeAt
+        kind: self
+      - id: corecrypto
+        kind: package
+      - id: decodeRecord
+        kind: internal
+    steps:
+      - bind: plain, openErr
+        eval: corecrypto.Open(f.key, raw, aad(digest))
+        to: corecrypto
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.RecordCorrupt, nil)
+          when: openErr != nil
+      - bind: rec, decodeErr
+        eval: decodeRecord(plain)
+        to: decodeRecord
+      - opt:
+          do:
+            - return: record{}, decodeErr
+          when: decodeErr != nil
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.RecordCorrupt, nil)
+          when: "!digestsEqual(rec.digest, digest)"
+      - return: rec, nil
+  - of: (*fileStore).writeLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).writeLocked
+        kind: self
+      - id: recordName
+        kind: internal
+      - id: corecrypto
+        kind: package
+      - id: wrapAs
+        kind: internal
+      - id: f.publish
+        kind: internal
+      - id: f.flushLocked
+        kind: internal
+    steps:
+      - bind: name, nameErr
+        eval: recordName(rec.digest)
+        to: recordName
+      - opt:
+          do:
+            - return: nameErr
+          when: nameErr != nil
+      - bind: box, sealErr
+        eval: corecrypto.Seal(sealAlgorithm, f.key, encodeRecord(rec), aad(rec.digest))
+        to: corecrypto
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, sealErr, kerrs.String("op", "seal"))
+              to: wrapAs
+          when: sealErr != nil
+      - opt:
+          do:
+            - return: publishErr
+          init:
+            bind: publishErr
+            eval: f.publish(name, box)
+            to: f.publish
+          when: publishErr != nil
+      - return: f.flushLocked("sync-dir-publish")
+        to: f.flushLocked
+  - of: (*fileStore).flushLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).flushLocked
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, syncErr, kerrs.String("op", op))
+              to: wrapAs
+          init:
+            bind: syncErr
+            eval: f.syncDir()
+          when: syncErr != nil
+      - return: nil
+  - of: (*fileStore).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).publish
+        kind: self
+      - id: f.root.OpenFile
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: assertPrivateFile
+        kind: internal
+      - id: writeAndSync
+        kind: internal
+      - id: f.root.Rename
+        kind: value
+    steps:
+      - bind: tmpName
+        eval: tempPrefix + rand.Text()
+      - bind: tmp, createErr
+        eval: f.root.OpenFile(tmpName, os.O_RDWR|os.O_CREATE|os.O_EXCL, fileMode)
+        to: f.root.OpenFile
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, createErr, kerrs.String("op", "create-temp"))
+              to: wrapAs
+          when: createErr != nil
+      - defer: |-
+          func() {
+          		//: the happy path owns nothing to clean up.
+          		if err == nil {
+          			//: published.
+          			return
+          		}
+          		//: fs.ErrClosed is the ordinary case here — writeAndSync closes on its
+          		//: own success path, so a rename failure reaches this line with a
+          		//: closed descriptor, and that is not a failure of anything.
+          		if closeErr := tmp.Close(); closeErr != nil && !errors.Is(closeErr, fs.ErrClosed) {
+          			//: subordinate to the failure that brought us here.
+          			err = firstFailure(err, closeErr, "close-temp")
+          		}
+          		//: remove the orphan and return the cause unchanged.
+          		err = removeTemp(f.root, tmpName, err)
+          	}()
+      - opt:
+          do:
+            - return: modeErr
+          init:
+            bind: modeErr
+            eval: assertPrivateFile(tmp)
+            to: assertPrivateFile
+          when: modeErr != nil
+      - opt:
+          do:
+            - return: writeErr
+          init:
+            bind: writeErr
+            eval: writeAndSync(tmp, payload)
+            to: writeAndSync
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.StoreUnavailable, renameErr, kerrs.String("op", "rename"))
+              to: wrapAs
+          init:
+            bind: renameErr
+            eval: f.root.Rename(tmpName, name)
+            to: f.root.Rename
+          when: renameErr != nil
+      - return: nil
+  - of: (*fileStore).Save
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).Save
+        kind: self
+      - id: session.Data
+        kind: value
+      - id: boundPayload
+        kind: internal
+      - id: f.withLock
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coresession.InvalidID
+          when: session.ID().IsZero()
+      - bind: data
+        eval: session.Data()
+        to: session.Data
+      - opt:
+          do:
+            - return: boundErr
+          init:
+            bind: boundErr
+            eval: boundPayload(data)
+            to: boundPayload
+          when: boundErr != nil
+      - return: |-
+          f.withLock(ctx, func() error {
+          		rec, liveErr := f.liveLocked(session.ID(), f.win.clk.Now())
+          		//: NotFound or Expired.
+          		if liveErr != nil {
+          			//: nothing is written.
+          			return liveErr
+          		}
+          		//: THE fixation guard, identical to the memory store's — the two stores
+          		//: answer the same question the same way, which is what makes the port
+          		//: a contract rather than a suggestion.
+          		if session.Subject() != rec.subject {
+          			//: FixationRefused; Regenerate is the operation that was wanted.
+          			return wrapAs(coresession.FixationRefused, nil)
+          		}
+          		rec.data = data
+          		//: seal and publish atomically.
+          		return f.writeLocked(rec)
+          	})
+        to: f.withLock
+  - of: (*fileStore).Regenerate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).Regenerate
+        kind: self
+      - id: boundSubject
+        kind: internal
+      - id: mintID
+        kind: internal
+      - id: f.withLock
+        kind: internal
+      - id: f.win.build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, coresession.InvalidID
+          when: current.IsZero()
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, boundErr
+          init:
+            bind: boundErr
+            eval: boundSubject(subject)
+            to: boundSubject
+          when: boundErr != nil
+      - bind: next, mintErr
+        eval: mintID(f.source)
+        to: mintID
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, mintErr
+          when: mintErr != nil
+      - var:
+          name: rotated
+          type: record
+      - bind: lockErr
+        eval: |-
+          f.withLock(ctx, func() error {
+          		var rotateErr error
+          		rotated, rotateErr = f.rotateLocked(current, next, subject)
+          		//: propagate the first failure unchanged.
+          		return rotateErr
+          	})
+        to: f.withLock
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, lockErr
+          when: lockErr != nil
+      - return: f.win.build(next, rotated)
+        to: f.win.build
+  - of: (*fileStore).rotateLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).rotateLocked
+        kind: self
+      - id: f.win.clk.Now
+        kind: value
+      - id: f.liveLocked
+        kind: internal
+      - id: f.win.rotate
+        kind: internal
+      - id: f.writeLocked
+        kind: internal
+      - id: f.unlinkLocked
+        kind: internal
+      - id: f.flushLocked
+        kind: internal
+    steps:
+      - bind: now
+        eval: f.win.clk.Now()
+        to: f.win.clk.Now
+      - bind: live, liveErr
+        eval: f.liveLocked(current, now)
+        to: f.liveLocked
+      - opt:
+          do:
+            - return: record{}, liveErr
+          when: liveErr != nil
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.IdentifierCollision, nil)
+          when: f.exists(next.Digest())
+      - bind: rotated
+        eval: f.win.rotate(live, next.Digest(), subject, now)
+        to: f.win.rotate
+      - opt:
+          do:
+            - return: record{}, writeErr
+          init:
+            bind: writeErr
+            eval: f.writeLocked(rotated)
+            to: f.writeLocked
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: record{}, f.withdrawLocked(rotated.digest, unlinkErr)
+          init:
+            bind: unlinkErr
+            eval: f.unlinkLocked(live.digest)
+            to: f.unlinkLocked
+          when: unlinkErr != nil
+      - opt:
+          do:
+            - return: record{}, flushErr
+          init:
+            bind: flushErr
+            eval: f.flushLocked("sync-dir-remove")
+            to: f.flushLocked
+          when: flushErr != nil
+      - return: rotated, nil
+  - of: (*fileStore).withdrawLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).withdrawLocked
+        kind: self
+      - id: f.removeLocked
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(cause, kerrs.WrapParams{}, kerrs.String("withdraw", withdrawErr.Error()))
+              to: kerrs
+          init:
+            bind: withdrawErr
+            eval: f.removeLocked(digest)
+            to: f.removeLocked
+          when: withdrawErr != nil
+      - return: cause
+  - of: (*fileStore).Destroy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).Destroy
+        kind: self
+      - id: f.withLock
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: id.IsZero()
+      - return: |-
+          f.withLock(ctx, func() error {
+          		//: an absent file is success.
+          		return f.removeLocked(id.Digest())
+          	})
+        to: f.withLock
+  - of: (*fileStore).Sweep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).Sweep
+        kind: self
+      - id: f.withLock
+        kind: internal
+    steps:
+      - bind: lockErr
+        eval: |-
+          f.withLock(ctx, func() error {
+          		entries, readErr := fs.ReadDir(f.root.FS(), ".")
+          		//: a directory that cannot be listed is a backend fault.
+          		if readErr != nil {
+          			//: StoreUnavailable.
+          			return wrapAs(coresession.StoreUnavailable, readErr, kerrs.String("op", "readdir"))
+          		}
+          		//: one pass over the directory; the lock is held throughout, which is
+          		//: why sweeping is the caller's decision and not a background loop.
+          		removed = f.sweepEntries(entries)
+          		//: a sweep never fails on one bad record, and an empty pass changed
+          		//: nothing that needs flushing.
+          		if removed == 0 {
+          			//: nothing unlinked.
+          			return nil
+          		}
+          		//: ONE flush for the whole pass rather than one per record: the lock
+          		//: is held throughout, and a device round trip per removal under it
+          		//: would stall every other operation for no stronger guarantee.
+          		return f.flushLocked("sync-dir-sweep")
+          	})
+        to: f.withLock
+      - return: removed, lockErr
+  - of: (*fileStore).sweepEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStore).sweepEntries
+        kind: self
+      - id: f.win.clk.Now
+        kind: value
+      - id: recordDigest
+        kind: internal
+      - id: f.readLocked
+        kind: internal
+    steps:
+      - bind: now
+        eval: f.win.clk.Now()
+        to: f.win.clk.Now
+      - bind: removed
+        eval: "0"
+      - loop:
+          do:
+            - bind: digest, ok
+              eval: recordDigest(entry)
+              to: recordDigest
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - bind: rec, readErr
+              eval: f.readLocked(digest)
+              to: f.readLocked
+            - opt:
+                do:
+                  - continue: true
+                when: readErr == nil && f.win.live(rec, now)
+            - opt:
+                do:
+                  - op: ++
+                    set: removed
+                when: f.unlinkLocked(digest) == nil
+          key: _
+          range: entries
+          value: entry
+      - return: removed
+  - of: recordDigest
+    participants:
+      - id: caller
+        kind: actor
+      - id: recordDigest
+        kind: self
+      - id: entry.Name
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: entry.IsDir()
+      - bind: name
+        eval: entry.Name()
+        to: entry.Name
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: filepath.Ext(name) != recordSuffix
+      - set: digest
+        to: strings
+        value: strings.TrimSuffix(name, recordSuffix)
+      - return: digest, isDigest(digest)
+  - of: plantable
+    steps:
+      - opt:
+          do:
+            - return: false, ""
+          when: container&worldWritable == 0
+      - return: true, "container=" + container.Perm().String()
+  - of: NewMemoryStore
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMemoryStore
+        kind: self
+      - id: validateWindow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, validationErr
+          init:
+            bind: validationErr
+            eval: validateWindow(cfg.IdleTimeout, cfg.AbsoluteTimeout)
+            to: validateWindow
+          when: validationErr != nil
+      - return: |-
+          &memoryStore{
+          		records: make(map[string]record, initialRecords),
+          		win:     cfg.window(),
+          		source:  rand.Reader,
+          	}, nil
+  - of: (*memoryStore).New
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).New
+        kind: self
+      - id: mintID
+        kind: internal
+      - id: m.win.clk.Now
+        kind: value
+      - id: m.win.mint
+        kind: internal
+      - id: m.win.build
+        kind: internal
+    steps:
+      - bind: id, mintErr
+        eval: mintID(m.source)
+        to: mintID
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, mintErr
+          when: mintErr != nil
+      - bind: now
+        eval: m.win.clk.Now()
+        to: m.win.clk.Now
+      - bind: rec
+        eval: m.win.mint(id.Digest(), "", now)
+        to: m.win.mint
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, wrapAs(coresession.IdentifierCollision, nil)
+          init:
+            bind: _, taken
+            eval: m.records[rec.digest]
+          when: taken
+      - set: m.records[rec.digest]
+        value: rec
+      - return: m.win.build(id, rec)
+        to: m.win.build
+  - of: (*memoryStore).Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Load
+        kind: self
+      - id: m.win.clk.Now
+        kind: value
+      - id: m.liveLocked
+        kind: internal
+      - id: m.win.slide
+        kind: internal
+      - id: m.win.build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, coresession.InvalidID
+          when: id.IsZero()
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.win.clk.Now()
+        to: m.win.clk.Now
+      - bind: rec, liveErr
+        eval: m.liveLocked(id, now)
+        to: m.liveLocked
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, liveErr
+          when: liveErr != nil
+      - set: rec
+        to: m.win.slide
+        value: m.win.slide(rec, now)
+      - set: m.records[rec.digest]
+        value: rec
+      - return: m.win.build(id, rec)
+        to: m.win.build
+  - of: (*memoryStore).liveLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).liveLocked
+        kind: self
+      - id: id.Digest
+        kind: value
+    steps:
+      - bind: digest
+        eval: id.Digest()
+        to: id.Digest
+      - bind: rec, found
+        eval: m.records[digest]
+      - opt:
+          do:
+            - return: record{}, wrapAs(coresession.NotFound, nil)
+          when: "!found || !digestsEqual(rec.digest, digest)"
+      - opt:
+          do:
+            - eval: delete(m.records, digest)
+            - return: record{}, wrapAs(coresession.Expired, nil)
+          when: "!m.win.live(rec, now)"
+      - return: rec, nil
+  - of: (*memoryStore).Save
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Save
+        kind: self
+      - id: session.Data
+        kind: value
+      - id: boundPayload
+        kind: internal
+      - id: m.win.clk.Now
+        kind: value
+      - id: m.liveLocked
+        kind: internal
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coresession.InvalidID
+          when: session.ID().IsZero()
+      - bind: data
+        eval: session.Data()
+        to: session.Data
+      - opt:
+          do:
+            - return: boundErr
+          init:
+            bind: boundErr
+            eval: boundPayload(data)
+            to: boundPayload
+          when: boundErr != nil
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.win.clk.Now()
+        to: m.win.clk.Now
+      - bind: rec, liveErr
+        eval: m.liveLocked(session.ID(), now)
+        to: m.liveLocked
+      - opt:
+          do:
+            - return: liveErr
+          when: liveErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coresession.FixationRefused, nil)
+              to: wrapAs
+          when: session.Subject() != rec.subject
+      - set: rec.data
+        value: data
+      - set: m.records[rec.digest]
+        value: rec
+      - return: nil
+  - of: (*memoryStore).Regenerate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Regenerate
+        kind: self
+      - id: boundSubject
+        kind: internal
+      - id: mintID
+        kind: internal
+      - id: m.win.clk.Now
+        kind: value
+      - id: m.liveLocked
+        kind: internal
+      - id: next.Digest
+        kind: value
+      - id: m.win.rotate
+        kind: internal
+      - id: m.win.build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, coresession.InvalidID
+          when: current.IsZero()
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, boundErr
+          init:
+            bind: boundErr
+            eval: boundSubject(subject)
+            to: boundSubject
+          when: boundErr != nil
+      - bind: next, mintErr
+        eval: mintID(m.source)
+        to: mintID
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, mintErr
+          when: mintErr != nil
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.win.clk.Now()
+        to: m.win.clk.Now
+      - bind: rec, liveErr
+        eval: m.liveLocked(current, now)
+        to: m.liveLocked
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, liveErr
+          when: liveErr != nil
+      - bind: nextDigest
+        eval: next.Digest()
+        to: next.Digest
+      - opt:
+          do:
+            - return: coresession.SessionValue{}, wrapAs(coresession.IdentifierCollision, nil)
+          init:
+            bind: _, taken
+            eval: m.records[nextDigest]
+          when: taken
+      - bind: rotated
+        eval: m.win.rotate(rec, nextDigest, subject, now)
+        to: m.win.rotate
+      - eval: delete(m.records, rec.digest)
+      - set: m.records[nextDigest]
+        value: rotated
+      - return: m.win.build(next, rotated)
+        to: m.win.build
+  - of: (*memoryStore).Destroy
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: id.IsZero()
+      - lock:
+          mutex: m.mu
+      - eval: delete(m.records, id.Digest())
+      - return: nil
+  - of: (*memoryStore).Sweep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Sweep
+        kind: self
+      - id: m.win.clk.Now
+        kind: value
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.win.clk.Now()
+        to: m.win.clk.Now
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: m.win.live(rec, now)
+            - eval: delete(m.records, digest)
+            - op: ++
+              set: removed
+          key: digest
+          range: m.records
+          value: rec
+      - return: removed, nil
+  - of: mintID
+    participants:
+      - id: caller
+        kind: actor
+      - id: mintID
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: coresession
+        kind: package
+    steps:
+      - var:
+          name: buf
+          type: "[coresession.IDLen]byte"
+      - opt:
+          do:
+            - return: coresession.ID{}, wrapAs(coresession.EntropyFailed, readErr)
+          init:
+            bind: _, readErr
+            eval: io.ReadFull(source, buf[:])
+            to: io
+          when: readErr != nil
+      - return: coresession.NewID(buf[:])
+        to: coresession
+  - of: NewSealer
+    steps:
+      - opt:
+          do:
+            - return: nil, wrapAs(coresession.InvalidConfig, nil, kerrs.String("field", "Key"))
+          when: len(key.Bytes()) != corecrypto.KeyLen
+      - opt:
+          do:
+            - return: nil, wrapAs(coresession.InvalidPurpose, nil)
+          when: purpose == ""
+      - return: "sealer{key: key, aad: []byte(cookieAAD + purpose)}, nil"
+  - of: sealer.Seal
+    participants:
+      - id: caller
+        kind: actor
+      - id: sealer.Seal
+        kind: self
+      - id: corecrypto
+        kind: package
+      - id: sealedEncoding.EncodeToString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"\", coresession.InvalidID"
+          when: id.IsZero()
+      - bind: box, sealErr
+        eval: corecrypto.Seal(sealAlgorithm, s.key, []byte(id.Reveal()), s.aad)
+        to: corecrypto
+      - opt:
+          do:
+            - return: "\"\", wrapAs(coresession.SealInvalid, sealErr)"
+          when: sealErr != nil
+      - return: sealedEncoding.EncodeToString(box), nil
+        to: sealedEncoding.EncodeToString
+  - of: sealer.Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: sealer.Open
+        kind: self
+      - id: sealedEncoding.DecodeString
+        kind: value
+      - id: corecrypto
+        kind: package
+      - id: coresession
+        kind: package
+    steps:
+      - bind: box, decodeErr
+        eval: sealedEncoding.DecodeString(sealed)
+        to: sealedEncoding.DecodeString
+      - opt:
+          do:
+            - return: coresession.ID{}, coresession.SealInvalid
+          when: decodeErr != nil
+      - bind: plain, openErr
+        eval: corecrypto.Open(s.key, box, s.aad)
+        to: corecrypto
+      - opt:
+          do:
+            - return: coresession.ID{}, coresession.SealInvalid
+          when: openErr != nil
+      - bind: parsed, parseErr
+        eval: coresession.ParseID(string(plain))
+        to: coresession
+      - opt:
+          do:
+            - return: coresession.ID{}, coresession.SealInvalid
+          when: parseErr != nil
+      - return: parsed, nil
+  - of: wrapAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAs
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(sentinel, kerrs.WrapParams{}, fields...)
+              to: kerrs
+          when: cause == nil
+      - return: |-
+          kerrs.Wrap(sentinel, kerrs.WrapParams{},
+          		append(fields, kerrs.String("cause", cause.Error()))...)
+        to: kerrs
+  - of: window.slide
+    participants:
+      - id: caller
+        kind: actor
+      - id: window.slide
+        kind: self
+      - id: rec.absoluteExpiry.Add
+        kind: value
+    steps:
+      - set: rec.lastSeen
+        value: now
+      - opt:
+          do:
+            - set: rec.lastSeen
+              to: rec.absoluteExpiry.Add
+              value: rec.absoluteExpiry.Add(-w.idle)
+          when: rec.lastSeen.Add(w.idle).After(rec.absoluteExpiry)
+      - return: rec
+  - of: window.deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: window.deadline
+        kind: self
+      - id: rec.lastSeen.Add
+        kind: value
+    steps:
+      - bind: idleAt
+        eval: rec.lastSeen.Add(w.idle)
+        to: rec.lastSeen.Add
+      - opt:
+          do:
+            - return: rec.absoluteExpiry
+          when: idleAt.After(rec.absoluteExpiry)
+      - return: idleAt
+  - of: window.live
+    participants:
+      - id: caller
+        kind: actor
+      - id: window.live
+        kind: self
+      - id: now.Before
+        kind: value
+    steps:
+      - return: now.Before(w.deadline(rec))
+        to: now.Before
+  - of: window.mint
+    steps:
+      - return: |-
+          record{
+          		digest:         digest,
+          		subject:        subject,
+          		createdAt:      now,
+          		lastSeen:       now,
+          		absoluteExpiry: now.Add(w.absolute),
+          		data:           nil,
+          	}
+  - of: window.build
+    participants:
+      - id: caller
+        kind: actor
+      - id: window.build
+        kind: self
+      - id: coresession
+        kind: package
+    steps:
+      - return: |-
+          coresession.NewSessionValue(coresession.StateValue{
+          		ID:             id,
+          		Subject:        rec.subject,
+          		CreatedAt:      rec.createdAt,
+          		LastSeen:       rec.lastSeen,
+          		AbsoluteExpiry: rec.absoluteExpiry,
+          		IdleExpiry:     rec.lastSeen.Add(w.idle),
+          		Data:           rec.data,
+          	})
+        to: coresession
+  - of: window.rotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: window.rotate
+        kind: self
+      - id: w.mint
+        kind: internal
+      - id: w.slide
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: fresh
+              eval: w.mint(nextDigest, subject, now)
+              to: w.mint
+            - set: fresh.data
+              value: rec.data
+            - return: fresh
+          when: subject != rec.subject
+      - set: rec.digest
+        value: nextDigest
+      - return: w.slide(rec, now)
+        to: w.slide

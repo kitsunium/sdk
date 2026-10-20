@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: normalizeLinks
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(links) == 0
+      - bind: kept
+        eval: make([]coretrace.LinkValue, 0, len(links))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: kept
+                    value: append(kept, link.Normalized())
+                when: link.IsValid()
+          key: _
+          range: links
+          value: link
+      - opt:
+          do:
+            - return: nil
+          when: len(kept) == 0
+      - return: kept

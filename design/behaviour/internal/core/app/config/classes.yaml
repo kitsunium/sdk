@@ -1,0 +1,100 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The layer names a traced load reports. They are strings, not an enum, on
+      purpose: a Source that is none of these names its own kind through
+      [Describer], and a closed set would force it to lie.
+    grouped: true
+    items:
+      - doc: LayerDefault is the schema's default layer, merged under every source.
+        name: LayerDefault
+        type: string
+        value: "\"default\""
+      - doc: LayerFile is a file source; its detail is the file's path.
+        name: LayerFile
+        type: string
+        value: "\"file\""
+      - doc: |-
+          LayerEnv is the environment source; its detail is the VARIABLE that set
+          the key, such as "APP_DATA_DIR".
+        name: LayerEnv
+        type: string
+        value: "\"env\""
+      - doc: |-
+          LayerSource is a source that does not describe itself; its detail is
+          its position in the sources a load was given, counting from 0.
+        name: LayerSource
+        type: string
+        value: "\"source\""
+    name: LayerDefault
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - LayerDefault
+      - OriginValue
+    name: origin.go
+  - decls:
+      - DeclaredValue
+    name: schema.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/config
+  name: config
+  purpose: Package config — range 0.2.10.* (ADR 0028 core/app/config block).
+types:
+  - fields:
+      - doc: Key is the operator's key in the dotted grammar — "database.dsn".
+        name: Key
+        type: string
+      - doc: |-
+          Layer names the kind of layer that supplied the final value: one of the
+          Layer* constants, or the kind a [Describer] reports. It is EMPTY when the
+          key is absent from the merged layers — no layer supplied it, or a later
+          layer erased it by replacing one of its tables with a scalar or a null —
+          and the field then holds its Go zero value.
+        name: Layer
+        type: string
+      - doc: |-
+          Detail is what an operator acts on: the variable that set the key, the
+          file that holds it. Empty when the layer has nothing more to say.
+        name: Detail
+        type: string
+      - doc: |-
+          Secret reports that the key's field holds a core/security/secret.Value. The
+          origin never carries a value either way; Secret is what tells a
+          rendering that the value, if it shows one, must be masked.
+        name: Secret
+        type: bool
+    kind: struct
+    name: OriginValue
+  - fields:
+      - doc: |-
+          Key is the operator's key, in the dotted grammar
+          core/app/validation.JoinField produces — "database.max_conns", never
+          "MaxConns". A segment is one level of nesting in the merged map, so the
+          key an author declares here, the key an operator writes in a TOML table,
+          and the path a violation reports are the SAME string. That is the whole
+          reason the grammar is shared rather than reinvented: a message naming
+          something the operator never typed cannot be acted on.
+
+          A key with an empty segment, a leading or trailing separator, or no
+          counterpart in the target type is refused at construction — a default
+          nothing reads is worse than no default, because it looks configured.
+        name: Key
+        type: string
+      - doc: |-
+          Value is the typed Go value the key takes when it is absent. It travels
+          the loader's ordinary path — marshalled to JSON with every other layer
+          and decoded by the same round trip — so a default cannot be typed by
+          rules a Source's value is not. A value the round trip cannot carry is
+          refused at construction rather than at the first load that needs it.
+
+          It is never echoed into an error: a default may be a placeholder
+          credential, and a refusal names the key and the clause instead.
+        name: Value
+        type: any
+    kind: struct
+    name: DeclaredValue

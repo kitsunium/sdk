@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/tlv
+  name: tlv
+  purpose: Package tlv declares the error codes and the sentinels of the TLV codec, internal/service/data/codec/tlv — range 0.3.22.* (ADR 0006 service/data/codec/tlv block).
+types: []

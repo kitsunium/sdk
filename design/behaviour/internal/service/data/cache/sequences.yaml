@@ -1,0 +1,836 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewChain
+        kind: self
+      - id: newTier
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, kerrs.Wrap(corecache.CacheChainMisconfigured, kerrs.WrapParams{},
+                			kerrs.Int("tiers", len(stores)),
+                			kerrs.String("problem", "fewer than two tiers"))
+          when: len(stores) < minChainTiers
+      - bind: tiers
+        eval: make([]tier[V], 0, len(stores))
+      - loop:
+          do:
+            - bind: built, tierErr
+              eval: newTier(position, store)
+              to: newTier
+            - opt:
+                do:
+                  - return: nil, tierErr
+                when: tierErr != nil
+            - set: tiers
+              value: append(tiers, built)
+          key: position
+          range: stores
+          value: store
+      - return: "&chainStore[V]{tiers: tiers, onPromoteError: cfg.OnPromoteError}, nil"
+  - of: newTier
+    steps:
+      - opt:
+          do:
+            - return: tier[V]{}, chainRefusal(position, "nil tier")
+          when: store == nil
+      - bind: fetcher, ok
+        eval: store.(corecache.EntryFetcher[V])
+      - opt:
+          do:
+            - return: tier[V]{}, chainRefusal(position, "does not implement EntryFetcher")
+          when: "!ok"
+      - bind: tagger, ok
+        eval: store.(corecache.Tagger)
+      - opt:
+          do:
+            - return: tier[V]{}, chainRefusal(position, "does not implement Tagger")
+          when: "!ok"
+      - return: "tier[V]{store: store, entry: fetcher, tags: tagger}, nil"
+  - of: chainRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: chainRefusal
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corecache.CacheChainMisconfigured, kerrs.WrapParams{},
+          		kerrs.Int("position", position),
+          		kerrs.String("problem", problem))
+        to: kerrs
+  - of: (*chainStore).Fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).Fetch
+        kind: self
+      - id: c.FetchEntry
+        kind: internal
+    steps:
+      - bind: entry, ok, err
+        eval: c.FetchEntry(ctx, key)
+        to: c.FetchEntry
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, false, err
+          when: err != nil || !ok
+      - return: entry.Value, true, nil
+  - of: (*chainStore).FetchEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).FetchEntry
+        kind: self
+      - id: level.entry.FetchEntry
+        kind: value
+      - id: c.promote
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: stored, ok, fetchErr
+              eval: level.entry.FetchEntry(ctx, key)
+              to: level.entry.FetchEntry
+            - opt:
+                do:
+                  - return: corecache.EntryValue[V]{}, false, tierFailure(position, "fetch", key, fetchErr)
+                when: fetchErr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - eval: c.promote(ctx, key, stored, position)
+              to: c.promote
+            - return: stored, true, nil
+          key: position
+          range: c.tiers
+          value: level
+      - return: corecache.EntryValue[V]{}, false, nil
+  - of: (*chainStore).promote
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).promote
+        kind: self
+      - id: level.store.Set
+        kind: value
+      - id: c.reportPromoteError
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: c.reportPromoteError(key, tierFailure(position, "promote", key, err))
+                    to: c.reportPromoteError
+                init:
+                  bind: err
+                  eval: level.store.Set(ctx, key, entry)
+                  to: level.store.Set
+                when: err != nil
+          key: position
+          range: slices.Backward(c.tiers[:found])
+          value: level
+  - of: (*chainStore).reportPromoteError
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.onPromoteError == nil
+      - eval: c.onPromoteError(key, err)
+  - of: (*chainStore).Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).Set
+        kind: self
+      - id: level.store.Set
+        kind: value
+      - id: tierFailure
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: tierFailure(position, "set", key, err)
+                    to: tierFailure
+                init:
+                  bind: err
+                  eval: level.store.Set(ctx, key, entry)
+                  to: level.store.Set
+                when: err != nil
+          key: position
+          range: slices.Backward(c.tiers)
+          value: level
+      - return: nil
+  - of: (*chainStore).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).Delete
+        kind: self
+      - id: level.store.Delete
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - var:
+          name: failures
+          type: "[]error"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, tierFailure(position, "delete", key, err))
+                init:
+                  bind: err
+                  eval: level.store.Delete(ctx, key)
+                  to: level.store.Delete
+                when: err != nil
+          key: position
+          range: slices.Backward(c.tiers)
+          value: level
+      - return: errors.Join(failures...)
+        to: errors
+  - of: (*chainStore).InvalidateTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).InvalidateTag
+        kind: self
+      - id: level.tags.InvalidateTag
+        kind: value
+    steps:
+      - var:
+          name: failures
+          type: "[]error"
+      - bind: total
+        eval: "0"
+      - loop:
+          do:
+            - bind: dropped, invalidateErr
+              eval: level.tags.InvalidateTag(ctx, tag)
+              to: level.tags.InvalidateTag
+            - op: +=
+              set: total
+              value: dropped
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, tierFailure(position, "invalidate", tag, invalidateErr))
+                when: invalidateErr != nil
+          key: position
+          range: slices.Backward(c.tiers)
+          value: level
+      - return: total, errors.Join(failures...)
+  - of: (*chainStore).Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).Load
+        kind: self
+      - id: c.Fetch
+        kind: internal
+      - id: c.group.Do
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: hit, nil
+          init:
+            bind: hit, ok, fetchErr
+            eval: c.Fetch(ctx, key)
+            to: c.Fetch
+          when: fetchErr == nil && ok
+      - bind: filled, _, groupErr
+        eval: |-
+          c.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
+          		//: exactly one goroutine per key reaches here.
+          		return c.fillOnce(callCtx, key, fill)
+          	})
+        to: c.group.Do
+      - return: filled, groupErr
+  - of: (*chainStore).fillOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).fillOnce
+        kind: self
+      - id: c.Fetch
+        kind: internal
+      - id: c.Set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: hit, nil
+          init:
+            bind: hit, ok, fetchErr
+            eval: c.Fetch(ctx, key)
+            to: c.Fetch
+          when: fetchErr == nil && ok
+      - bind: entry, fillErr
+        eval: fill(ctx)
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, fillFailure(key, fillErr)
+          when: fillErr != nil
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, setErr
+          init:
+            bind: setErr
+            eval: c.Set(ctx, key, entry)
+            to: c.Set
+          when: setErr != nil
+      - return: entry.Value, nil
+  - of: tierFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: tierFailure
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: fields
+        eval: |-
+          []kerrs.FieldValue{
+          		kerrs.Int("position", position),
+          		kerrs.String("operation", operation),
+          		kerrs.String("key", key),
+          		kerrs.String("cause", cause.Error()),
+          	}
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecache.CacheTierFailed, kerrs.WrapParams{},
+                			append(fields, kerrs.String("cause_code", typedErr.Code().String()))...)
+              to: kerrs
+          init:
+            bind: typedErr, typed
+            eval: errors.AsType[*kerrs.Error](cause)
+          when: typed
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:    corecache.CacheTierFailed.Code(),
+          		Reason:  corecache.CacheTierFailed.Reason(),
+          		Public:  corecache.CacheTierFailed.Public(),
+          		Private: corecache.CacheTierFailed.Private(),
+          	}, fields...)
+        to: kerrs
+  - of: MemoryConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: MemoryConfig.validate
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecache.CacheMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "MaxEntries"),
+                			kerrs.Int("value", c.MaxEntries))
+              to: kerrs
+          when: c.MaxEntries <= 0
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecache.CacheMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "DefaultTTL"),
+                			kerrs.String("value", c.DefaultTTL.String()))
+              to: kerrs
+          when: c.DefaultTTL < 0
+      - return: nil
+  - of: MemoryConfig.clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: NewMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMemory
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: kcache
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, cfgErr
+          init:
+            bind: cfgErr
+            eval: cfg.validate()
+            to: cfg.validate
+          when: cfgErr != nil
+      - bind: built
+        eval: |-
+          &memoryStore[V]{
+          		tags:       newTagIndex(),
+          		clk:        cfg.clockOrSystem(),
+          		defaultTTL: cfg.DefaultTTL,
+          	}
+      - set: built.lru
+        to: kcache
+        value: |-
+          kcache.NewCache(kcache.Config[string, record[V]]{
+          		MaxEntries: cfg.MaxEntries,
+          		Clock:      built.clk,
+          		OnEvict:    built.onEvict,
+          	})
+      - return: built, nil
+  - of: (*memoryStore).onEvict
+    steps:
+      - set: s.evicted
+        value: append(s.evicted, key)
+  - of: (*memoryStore).drainEvicted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).drainEvicted
+        kind: self
+      - id: s.tags.remove
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(s.evicted) == 0
+      - loop:
+          do:
+            - eval: s.tags.remove(key)
+              to: s.tags.remove
+          key: _
+          range: s.evicted
+          value: key
+      - set: s.evicted
+        value: s.evicted[:0]
+  - of: (*memoryStore).Fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Fetch
+        kind: self
+      - id: s.fetchRecord
+        kind: internal
+    steps:
+      - bind: rec, ok
+        eval: s.fetchRecord(key)
+        to: s.fetchRecord
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, false, nil
+          when: "!ok"
+      - return: rec.value, true, nil
+  - of: (*memoryStore).FetchEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).FetchEntry
+        kind: self
+      - id: s.fetchRecord
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: rec, ok
+        eval: s.fetchRecord(key)
+        to: s.fetchRecord
+      - opt:
+          do:
+            - return: corecache.EntryValue[V]{}, false, nil
+          when: "!ok"
+      - bind: tags
+        eval: slices.Clone(rec.tags)
+        to: slices
+      - return: "corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(rec), Tags: tags}, true, nil"
+  - of: (*memoryStore).remaining
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).remaining
+        kind: self
+      - id: rec.expireAt.Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: corecache.NoExpiry
+          when: rec.expireAt.IsZero()
+      - bind: left
+        eval: rec.expireAt.Sub(s.clk.Now())
+        to: rec.expireAt.Sub
+      - opt:
+          do:
+            - return: time.Nanosecond
+          when: left <= 0
+      - return: left
+  - of: (*memoryStore).fetchRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).fetchRecord
+        kind: self
+      - id: s.lru.Fetch
+        kind: value
+      - id: s.drainEvicted
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - bind: stored, ok
+        eval: s.lru.Fetch(key)
+        to: s.lru.Fetch
+      - eval: s.drainEvicted()
+        to: s.drainEvicted
+      - return: stored, ok
+  - of: (*memoryStore).Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Set
+        kind: self
+      - id: validateEntry
+        kind: internal
+      - id: primitiveTTL
+        kind: internal
+      - id: s.clk.Now().Add
+        kind: value
+      - id: s.tags.add
+        kind: internal
+      - id: s.lru.SetTTL
+        kind: value
+      - id: s.drainEvicted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refusal
+          init:
+            bind: refusal
+            eval: validateEntry(key, entry)
+            to: validateEntry
+          when: refusal != nil
+      - bind: ttl
+        eval: primitiveTTL(entry.TTL, s.defaultTTL)
+        to: primitiveTTL
+      - lock:
+          mutex: s.mu
+      - var:
+          name: expireAt
+          type: time.Time
+      - opt:
+          do:
+            - set: expireAt
+              to: s.clk.Now().Add
+              value: s.clk.Now().Add(ttl)
+          when: ttl > 0
+      - bind: owned
+        eval: s.tags.add(key, entry.Tags)
+        to: s.tags.add
+      - eval: "s.lru.SetTTL(key, record[V]{value: entry.Value, expireAt: expireAt, tags: owned}, ttl)"
+        to: s.lru.SetTTL
+      - eval: s.drainEvicted()
+        to: s.drainEvicted
+      - return: nil
+  - of: (*memoryStore).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Delete
+        kind: self
+      - id: s.lru.Delete
+        kind: value
+      - id: s.tags.remove
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - eval: s.lru.Delete(key)
+        to: s.lru.Delete
+      - eval: s.tags.remove(key)
+        to: s.tags.remove
+      - return: nil
+  - of: (*memoryStore).InvalidateTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).InvalidateTag
+        kind: self
+      - id: s.tags.keysFor
+        kind: internal
+      - id: s.lru.Delete
+        kind: value
+      - id: s.tags.remove
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, kerrs.Wrap(corecache.CacheEntryRejected, kerrs.WrapParams{},
+                			kerrs.String("part", "tag"), kerrs.String("problem", "empty"))
+          when: tag == ""
+      - lock:
+          mutex: s.mu
+      - bind: keys
+        eval: s.tags.keysFor(tag)
+        to: s.tags.keysFor
+      - loop:
+          do:
+            - eval: s.lru.Delete(key)
+              to: s.lru.Delete
+            - eval: s.tags.remove(key)
+              to: s.tags.remove
+          key: _
+          range: keys
+          value: key
+      - return: len(keys), nil
+  - of: (*memoryStore).Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Load
+        kind: self
+      - id: s.Fetch
+        kind: internal
+      - id: s.group.Do
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: hit, nil
+          init:
+            bind: hit, ok, fetchErr
+            eval: s.Fetch(ctx, key)
+            to: s.Fetch
+          when: fetchErr == nil && ok
+      - bind: filled, _, groupErr
+        eval: |-
+          s.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
+          		//: exactly one goroutine per key reaches here.
+          		return s.fillOnce(callCtx, key, fill)
+          	})
+        to: s.group.Do
+      - return: filled, groupErr
+  - of: (*memoryStore).fillOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).fillOnce
+        kind: self
+      - id: s.Fetch
+        kind: internal
+      - id: s.Set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: hit, nil
+          init:
+            bind: hit, ok, fetchErr
+            eval: s.Fetch(ctx, key)
+            to: s.Fetch
+          when: fetchErr == nil && ok
+      - bind: entry, fillErr
+        eval: fill(ctx)
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, fillFailure(key, fillErr)
+          when: fillErr != nil
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, setErr
+          init:
+            bind: setErr
+            eval: s.Set(ctx, key, entry)
+            to: s.Set
+          when: setErr != nil
+      - return: entry.Value, nil
+  - of: validateEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateEntry
+        kind: self
+      - id: rejected
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rejected("key", "empty", "")
+              to: rejected
+          when: key == ""
+      - opt:
+          do:
+            - return: rejected("tag", "empty", key)
+              to: rejected
+          when: slices.Contains(entry.Tags, "")
+      - opt:
+          do:
+            - return: rejected("ttl", entry.TTL.String(), key)
+              to: rejected
+          when: entry.TTL < 0 && entry.TTL != corecache.NoExpiry
+      - return: nil
+  - of: primitiveTTL
+    steps:
+      - switch:
+          cases:
+            - case: corecache.NoExpiry
+              do:
+                - return: "0"
+            - case: "0"
+              do:
+                - return: storeDefault
+            - default: true
+              do:
+                - return: ttl
+          "on": ttl
+  - of: rejected
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejected
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: fields
+        eval: |-
+          []kerrs.FieldValue{
+          		kerrs.String("part", part),
+          		kerrs.String("problem", problem),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, kerrs.String("key", key))
+          when: key != ""
+      - return: kerrs.Wrap(corecache.CacheEntryRejected, kerrs.WrapParams{}, fields...)
+        to: kerrs
+  - of: fillFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: fillFailure
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: cause
+          init:
+            bind: _, typed
+            eval: kerrs.CodeOf(cause)
+            to: kerrs
+          when: typed
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:    corecache.CacheFillFailed.Code(),
+          		Reason:  corecache.CacheFillFailed.Reason(),
+          		Public:  corecache.CacheFillFailed.Public(),
+          		Private: corecache.CacheFillFailed.Private(),
+          	}, kerrs.String("key", key), kerrs.String("cause", cause.Error()))
+        to: kerrs
+  - of: newTagIndex
+    steps:
+      - return: |-
+          &tagIndex{
+          		byKey: make(map[string][]string, initialIndexCapacity),
+          		byTag: make(map[string]map[string]struct{}, initialIndexCapacity),
+          	}
+  - of: (*tagIndex).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tagIndex).add
+        kind: self
+      - id: t.remove
+        kind: internal
+    steps:
+      - eval: t.remove(key)
+        to: t.remove
+      - opt:
+          do:
+            - return: nil
+          when: len(tags) == 0
+      - bind: owned
+        eval: make([]string, 0, len(tags))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, already
+                  eval: t.byTag[tag][key]
+                when: already
+            - opt:
+                do:
+                  - set: t.byTag[tag]
+                    value: make(map[string]struct{}, initialIndexCapacity)
+                when: t.byTag[tag] == nil
+            - set: t.byTag[tag][key]
+              value: struct{}{}
+            - set: owned
+              value: append(owned, tag)
+          key: _
+          range: tags
+          value: tag
+      - set: t.byKey[key]
+        value: owned
+      - return: owned
+  - of: (*tagIndex).keysFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tagIndex).keysFor
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: bucket
+        eval: t.byTag[tag]
+      - opt:
+          do:
+            - return: nil
+          when: len(bucket) == 0
+      - return: slices.Collect(maps.Keys(bucket))
+        to: slices

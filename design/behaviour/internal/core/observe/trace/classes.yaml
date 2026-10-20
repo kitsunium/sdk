@@ -1,0 +1,823 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      ExceptionEventName and the three attribute keys around it are the OpenTelemetry
+      semantic convention for recording an error on a span.
+
+      They are constants here rather than strings at a call site because the whole
+      value of a convention is that two producers spell it identically: a backend
+      renders an event named exactly "exception" as an error, and renders
+      "Exception" as an event nobody will ever look at.
+    grouped: true
+    items:
+      - doc: ExceptionEventName is the reserved event name for a recorded error.
+        name: ExceptionEventName
+        type: string
+        value: "\"exception\""
+      - doc: ExceptionTypeKey names the error's type.
+        name: ExceptionTypeKey
+        type: string
+        value: "\"exception.type\""
+      - doc: ExceptionMessageKey names the error's message.
+        name: ExceptionMessageKey
+        type: string
+        value: "\"exception.message\""
+      - doc: |-
+          ExceptionStacktraceKey names the error's stack trace. This SDK never
+          fills it: a Go error carries no stack, and inventing one from the
+          recording site would name the wrong goroutine.
+        name: ExceptionStacktraceKey
+        type: string
+        value: "\"exception.stacktrace\""
+    name: ExceptionEventName
+  - doc: |-
+      TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
+      opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
+      They are not tunable — a 16-byte trace-id is the format, not a default.
+    grouped: true
+    items:
+      - doc: TraceIDLen is the trace identifier's length in bytes.
+        name: TraceIDLen
+        type: int
+        value: "16"
+      - doc: SpanIDLen is the span identifier's length in bytes.
+        name: SpanIDLen
+        type: int
+        value: "8"
+      - doc: TraceIDHexLen is the trace identifier's length in lowercase hex.
+        name: TraceIDHexLen
+        type: int
+        value: TraceIDLen * 2
+      - doc: SpanIDHexLen is the span identifier's length in lowercase hex.
+        name: SpanIDHexLen
+        type: int
+        value: SpanIDLen * 2
+    name: TraceIDLen
+  - doc: |-
+      FlagSampled is the sampled bit: the least significant one. When set, the
+      caller "may have recorded trace data" (§3.2.2.5.1), which is what makes the
+      sampling decision a property of the TRACE rather than of each span.
+    items:
+      - name: FlagSampled
+        type: TraceFlags
+        value: "0x01"
+    name: FlagSampled
+  - doc: |-
+      DefaultScopeName names this SDK's TRACE package as the instrumenting library
+      when a caller declares no scope of their own.
+
+      It is a separate constant from metrics' DefaultScopeName, and the difference is
+      not cosmetic: an InstrumentationScope names the library that produced THIS
+      signal, so stamping a span batch with `…/pkg/v1/observe/metrics` would tell a backend
+      that the metrics package emitted spans. Sharing the value would have been the
+      one place where sharing the model stopped being reuse and started being a
+      wrong answer — which is exactly the line ADR 0051 §Decision 2 draws, and why
+      internal/core/observe/otel takes the default as a parameter rather than owning one.
+    items:
+      - name: DefaultScopeName
+        type: string
+        value: "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\""
+    name: DefaultScopeName
+  - doc: |-
+      The five kinds, in the schema's own declaration order: iota reproduces
+      SPAN_KIND_UNSPECIFIED = 0 through SPAN_KIND_CONSUMER = 5 exactly, which is
+      what the OTLP encoder emits as the enum's integer.
+    grouped: true
+    items:
+      - doc: |-
+          SpanKindUnspecified is SPAN_KIND_UNSPECIFIED (0). It is the zero value,
+          and the schema's own comment says an implementation should set INTERNAL
+          instead — so it CLAMPS rather than travels (ADR 0031 §clamp): a span
+          created with no stated kind is doing work inside this process, which is
+          what INTERNAL means. Nothing this SDK emits carries it.
+        name: SpanKindUnspecified
+        type: SpanKind
+        value: iota
+      - doc: |-
+          SpanKindInternal is SPAN_KIND_INTERNAL (1): work inside one process,
+          with no remote counterpart.
+        name: SpanKindInternal
+      - doc: |-
+          SpanKindServer is SPAN_KIND_SERVER (2): handling an inbound synchronous
+          request. Its parent is normally a remote CLIENT span.
+        name: SpanKindServer
+      - doc: |-
+          SpanKindClient is SPAN_KIND_CLIENT (3): making an outbound synchronous
+          request and waiting for it.
+        name: SpanKindClient
+      - doc: |-
+          SpanKindProducer is SPAN_KIND_PRODUCER (4): enqueuing a message whose
+          handling happens later, and elsewhere.
+        name: SpanKindProducer
+      - doc: |-
+          SpanKindConsumer is SPAN_KIND_CONSUMER (5): handling a message that was
+          enqueued earlier. Its parent finished long before it started, which is
+          why it is not simply a SERVER span.
+        name: SpanKindConsumer
+    name: SpanKindUnspecified
+  - doc: |-
+      The three limits the W3C tracestate grammar fixes. They are the GRAMMAR's own
+      bounds, not ceilings this SDK invented, which is why there is no knob for any
+      of them (ADR 0031 §refuse: an SDK-chosen ceiling here would be arbitrary, and
+      the specification already supplies a non-arbitrary one).
+    grouped: true
+    items:
+      - doc: |-
+          MaxTraceStateMembers is the list cap: `list = list-member 0*31( OWS ","
+          OWS list-member )` is 32 members, no more.
+        name: MaxTraceStateMembers
+        type: int
+        value: "32"
+      - doc: |-
+          MaxTraceStateKeyLen is the longest legal key: `simple-key = lcalpha
+          0*255(...)` is 1 + 255 characters.
+        name: MaxTraceStateKeyLen
+        type: int
+        value: "256"
+      - doc: |-
+          MaxTraceStateValueLen is the longest legal value: `value = 0*255(chr)
+          nblk-chr` is 255 + 1 characters.
+        name: MaxTraceStateValueLen
+        type: int
+        value: "256"
+    name: MaxTraceStateMembers
+  - doc: |-
+      The two sub-key limits of the multi-tenant form `tenant-id "@" system-id`:
+      `tenant-id` is 1 + 240 characters and `system-id` is 1 + 13.
+    grouped: true
+    items:
+      - name: maxTenantIDLen
+        type: int
+        value: "241"
+      - name: maxSystemIDLen
+        type: int
+        value: "14"
+    name: maxTenantIDLen
+  - doc: |-
+      The list punctuation, named so the rendering and the key grammar read as the
+      grammar does. They are strings rather than bytes because every use site
+      joins or cuts with them, and a byte would be converted at each one. The
+      header's parser, internal/service/observe/trace, names its own: reading the
+      header is the engine's mechanism (ADR 0160 §4).
+    grouped: true
+    items:
+      - name: traceStateListSep
+        type: string
+        value: "\",\""
+      - name: traceStatePairSep
+        type: string
+        value: "\"=\""
+      - name: traceStateTenant
+        type: string
+        value: "\"@\""
+    name: traceStateListSep
+  - doc: |-
+      The bounds of `chr` — printable ASCII, %x20 through %x7E — plus the two
+      punctuation marks it excludes, as bytes. The grammar states them as
+      hexadecimal ranges, so they are named rather than inlined.
+    grouped: true
+    items:
+      - name: printableASCIILow
+        type: byte
+        value: "0x20"
+      - name: printableASCIIHigh
+        type: byte
+        value: "0x7E"
+      - name: traceStateListByte
+        type: byte
+        value: "','"
+      - name: traceStatePairByte
+        type: byte
+        value: "'='"
+    name: printableASCIILow
+  - doc: |-
+      The three codes, in the schema's own declaration order: iota reproduces
+      STATUS_CODE_UNSET = 0 through STATUS_CODE_ERROR = 2 exactly, which is what the
+      OTLP encoder emits as the enum's integer.
+    grouped: true
+    items:
+      - doc: |-
+          StatusUnset is STATUS_CODE_UNSET (0), the default and the overwhelmingly
+          common value. It means "no explicit judgement was recorded" — NOT "it
+          worked". A backend applies its own heuristics (an HTTP 5xx, a timeout);
+          an SDK claiming OK on the caller's behalf would suppress exactly those.
+        name: StatusUnset
+        type: StatusCode
+        value: iota
+      - doc: |-
+          StatusOK is STATUS_CODE_OK (1): the developer explicitly asserted
+          success, which the specification says should override any backend
+          heuristic. It is therefore a claim, never set by this SDK on its own.
+        name: StatusOK
+      - doc: "StatusError is STATUS_CODE_ERROR (2): the operation failed."
+        name: StatusError
+    name: StatusUnset
+files:
+  - decls:
+      - ValidateAttrs
+      - SortAttrs
+      - NormalizeResource
+    name: attrs.go
+  - decls:
+      - contextKeyType
+      - spanContextKey
+      - ContextWithSpanContext
+      - contextWithValue
+      - SpanContextFromContext
+    name: context.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - ExceptionEventName
+      - EventValue
+      - EventValue.Normalized
+    name: event_value.go
+  - decls:
+      - ExporterName
+      - ExporterName.String
+      - registry
+      - RegisterExporter
+      - LookupExporter
+      - AvailableExporters
+      - Export
+    name: exporter.go
+  - decls:
+      - TraceIDLen
+      - TraceID
+      - SpanID
+      - TraceFlags
+      - FlagSampled
+      - TraceID.IsValid
+      - TraceID.String
+      - ParseTraceID
+      - SpanID.IsValid
+      - SpanID.String
+      - ParseSpanID
+      - TraceFlags.IsSampled
+      - TraceFlags.WithSampled
+      - TraceFlags.Sanitized
+      - isLowerHex
+      - isNotLowerHexDigit
+    name: identifier.go
+  - decls:
+      - LinkValue
+      - LinkValue.Normalized
+      - LinkValue.IsValid
+      - SpanParams
+    name: link_value.go
+  - decls:
+      - Sampler
+      - SpanSink
+    name: sampler.go
+  - decls:
+      - SamplingParams
+    name: sampling_params.go
+  - decls:
+      - DefaultScopeName
+      - NormalizeScope
+    name: scope.go
+  - decls:
+      - SpanContextValue
+      - SpanContextValue.IsValid
+      - SpanContextValue.IsSampled
+      - SpanContextValue.WithState
+    name: span_context.go
+  - decls:
+      - SpanKind
+      - SpanKindUnspecified
+      - SpanKind.Resolved
+      - SpanKind.String
+    name: span_kind.go
+  - decls:
+      - SpanValue
+      - SpanValue.Duration
+      - SpanValue.IsRoot
+    name: span_value.go
+  - decls:
+      - SpansValue
+      - SpansValue.IsEmpty
+    name: spans_value.go
+  - decls:
+      - StateBuilder
+      - NewStateBuilder
+      - (*StateBuilder).Add
+      - (*StateBuilder).State
+    name: state_builder.go
+  - decls:
+      - MaxTraceStateMembers
+      - maxTenantIDLen
+      - traceStateListSep
+      - printableASCIILow
+      - StateValue
+      - StateValue.Len
+      - StateValue.Get
+      - StateValue.Insert
+      - StateValue.Delete
+      - StateValue.String
+      - keyMatcher
+      - isValidTraceStateKey
+      - isTraceStateSegment
+      - allTraceStateKeyChars
+      - isValidMemberValue
+      - isTraceStateKeyChar
+      - isMemberValueChar
+      - isLowerAlpha
+      - isDigit
+    name: state_value.go
+  - decls:
+      - StatusCode
+      - StatusUnset
+      - StatusValue
+      - StatusValue.Resolved
+      - StatusValue.IsUnset
+      - StatusCode.String
+    name: status_value.go
+  - decls:
+      - traceStateEntry
+    name: trace_state_entry.go
+functions:
+  - name: ValidateAttrs
+    params: sorted []coreotel.AttrValue
+  - name: SortAttrs
+    params: attrs []coreotel.AttrValue
+    results: "[]coreotel.AttrValue"
+  - name: NormalizeResource
+    params: resource coreotel.ResourceValue
+    results: coreotel.ResourceValue
+  - name: ContextWithSpanContext
+    params: parent context.Context, context SpanContextValue
+    results: context.Context
+  - doc: |-
+      contextWithValue is the single WithValue call site, kept apart so the shadowed
+      parameter name above never reaches context.WithValue.
+    name: contextWithValue
+    params: parent context.Context, value SpanContextValue
+    results: context.Context
+  - name: SpanContextFromContext
+    params: ctx context.Context
+    results: SpanContextValue
+  - name: RegisterExporter
+    params: e SpanExporter
+    results: SpanExporter
+  - name: LookupExporter
+    params: name ExporterName
+    results: e SpanExporter, ok bool
+  - name: AvailableExporters
+    results: "[]ExporterName"
+  - name: Export
+    params: name ExporterName, spans SpansValue
+    results: error
+  - name: ParseTraceID
+    params: text string
+    results: id TraceID, err error
+  - name: ParseSpanID
+    params: text string
+    results: id SpanID, err error
+  - doc: |-
+      isLowerHex reports whether text is drawn entirely from [0-9a-f].
+
+      hex.DecodeString accepts uppercase, and the traceparent grammar does not
+      (32HEXDIGLC / 16HEXDIGLC), so the alphabet is checked here rather than left to
+      the decoder.
+    name: isLowerHex
+    params: text string
+    results: bool
+  - doc: isNotLowerHexDigit reports whether c falls outside [0-9a-f].
+    name: isNotLowerHexDigit
+    params: c byte
+    results: bool
+  - name: NormalizeScope
+    params: scope coreotel.ScopeValue
+    results: coreotel.ScopeValue
+  - name: NewStateBuilder
+    params: size int
+    results: StateBuilder
+  - doc: |-
+      keyMatcher returns a predicate matching an entry by key. It is a closure over
+      one string, built on the cold paths only.
+    name: keyMatcher
+    params: key string
+    results: func(traceStateEntry) bool
+  - doc: |-
+      isValidTraceStateKey reports whether key matches `simple-key` or
+      `multi-tenant-key`.
+
+      	simple-key       = lcalpha 0*255( lcalpha / DIGIT / "_" / "-" / "*" / "/" )
+      	multi-tenant-key = tenant-id "@" system-id
+      	tenant-id        = ( lcalpha / DIGIT ) 0*240( ... )
+      	system-id        = lcalpha 0*13( ... )
+
+      The two forms differ in their first character — a tenant-id may start with a
+      digit, a simple-key may not — which is why they are not one check with a
+      longer length.
+    name: isValidTraceStateKey
+    params: key string
+    results: bool
+  - doc: |-
+      isTraceStateSegment reports whether segment is 1..limit characters drawn from
+      the key alphabet, opening with a lowercase letter — or, when digitLead, with a
+      lowercase letter or a digit.
+    name: isTraceStateSegment
+    params: segment string, limit int, digitLead bool
+    results: bool
+  - doc: |-
+      allTraceStateKeyChars reports whether every byte of tail is drawn from the key
+      alphabet `lcalpha / DIGIT / "_" / "-" / "*" / "/"`.
+    name: allTraceStateKeyChars
+    params: tail string
+    results: bool
+  - doc: |-
+      isValidMemberValue reports whether value matches
+      `value = 0*255(chr) nblk-chr`, i.e. 1..256 printable ASCII characters,
+      excluding ',' and '=', whose LAST character is not a space.
+
+      The trailing-space rule is the one that gets missed: it exists so that
+      stripping OWS around a list member cannot change the value.
+    name: isValidMemberValue
+    params: value string
+    results: bool
+  - doc: |-
+      isTraceStateKeyChar reports whether c is drawn from the key alphabet
+      `lcalpha / DIGIT / "_" / "-" / "*" / "/"`.
+    name: isTraceStateKeyChar
+    params: c byte
+    results: bool
+  - doc: |-
+      isMemberValueChar reports whether c is drawn from
+      `chr = %x20 / %x21-2B / %x2D-3C / %x3E-7E` — printable ASCII minus ',' (0x2C)
+      and '=' (0x3D).
+    name: isMemberValueChar
+    params: c byte
+    results: bool
+  - doc: isLowerAlpha reports whether c is `lcalpha = %x61-7A`.
+    name: isLowerAlpha
+    params: c byte
+    results: bool
+  - doc: isDigit reports whether c is an ASCII digit.
+    name: isDigit
+    params: c byte
+    results: bool
+imports:
+  context: context
+  coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  slices: slices
+  strings: strings
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/trace
+  name: trace
+  purpose: "Package trace — this signal's half of the shared attribute model (internal/core/observe/otel): the refusal an unusable set earns HERE, and the Resource a Tracer publishes."
+types:
+  - doc: |-
+      contextKeyType is the unexported key type for the context value. Unexported so
+      nothing outside this package can write the slot, which is what keeps
+      SpanContextFromContext's answer trustworthy: the only writer is
+      ContextWithSpanContext, which takes a typed value.
+    kind: struct
+    name: contextKeyType
+  - fields:
+      - doc: |-
+          Time is when it happened. An unset instant encodes as 0, which is what
+          the schema means by an unknown timestamp.
+        name: Time
+        type: time.Time
+      - doc: Name is the event's low-cardinality label.
+        name: Name
+        type: string
+      - doc: Attrs are the event's typed dimensions, sorted by Key.
+        name: Attrs
+        type: "[]coreotel.AttrValue"
+    kind: struct
+    methods:
+      - name: Normalized
+        recv: e EventValue
+        results: EventValue
+    name: EventValue
+  - kind: named
+    methods:
+      - name: String
+        recv: n ExporterName
+        results: string
+    name: ExporterName
+    underlying: string
+  - kind: named
+    methods:
+      - name: IsValid
+        recv: t TraceID
+        results: bool
+      - name: String
+        recv: t TraceID
+        results: string
+    name: TraceID
+    underlying: "[TraceIDLen]byte"
+  - kind: named
+    methods:
+      - name: IsValid
+        recv: s SpanID
+        results: bool
+      - name: String
+        recv: s SpanID
+        results: string
+    name: SpanID
+    underlying: "[SpanIDLen]byte"
+  - kind: named
+    methods:
+      - name: IsSampled
+        recv: f TraceFlags
+        results: bool
+      - name: WithSampled
+        params: sampled bool
+        recv: f TraceFlags
+        results: TraceFlags
+      - name: Sanitized
+        recv: f TraceFlags
+        results: TraceFlags
+    name: TraceFlags
+    underlying: byte
+  - fields:
+      - doc: |-
+          Context identifies the linked span. A link whose context is invalid is
+          dropped rather than emitted — it names nothing.
+        name: Context
+        type: SpanContextValue
+      - doc: Attrs describe the relationship, sorted by Key.
+        name: Attrs
+        type: "[]coreotel.AttrValue"
+    kind: struct
+    methods:
+      - name: Normalized
+        recv: l LinkValue
+        results: LinkValue
+      - name: IsValid
+        recv: l LinkValue
+        results: bool
+    name: LinkValue
+  - fields:
+      - doc: |-
+          Kind is the span's relationship to its neighbours. The zero value
+          resolves to SpanKindInternal (SpanKind.Resolved).
+        name: Kind
+        type: SpanKind
+      - doc: |-
+          Attrs are the dimensions known at Start. They are the ONLY ones a
+          Sampler sees, so anything the sampling decision depends on belongs here
+          rather than in a later SetAttrs.
+        name: Attrs
+        type: "[]coreotel.AttrValue"
+      - doc: Links point at causally related spans in other traces.
+        name: Links
+        type: "[]LinkValue"
+      - doc: |-
+          StartTime overrides the span's start instant. The zero value means
+          "now", which is what every caller but a replaying one wants — and it is
+          a CLAMP rather than a refusal because "now" is a description of what the
+          tracer does, not a value chosen on the caller's behalf (ADR 0031).
+        name: StartTime
+        type: time.Time
+    kind: struct
+    name: SpanParams
+  - kind: named
+    name: Sampler
+    underlying: func(params SamplingParams) bool
+  - kind: named
+    name: SpanSink
+    underlying: func(span SpanValue)
+  - fields:
+      - doc: |-
+          Parent is the context this span descends from, or the invalid zero
+          value when this is a root.
+        name: Parent
+        type: SpanContextValue
+      - doc: TraceID is the trace the new span belongs to.
+        name: TraceID
+        type: TraceID
+      - doc: Name is the span's operation name.
+        name: Name
+        type: string
+      - doc: Kind is the span's relationship to its neighbours.
+        name: Kind
+        type: SpanKind
+      - doc: |-
+          Attrs are the attributes supplied at Start, sorted by Key. Attributes
+          added AFTER Start are invisible here — the decision has already been
+          taken by then, which is the price of taking it once.
+        name: Attrs
+        type: "[]coreotel.AttrValue"
+      - doc: Links are the links supplied at Start.
+        name: Links
+        type: "[]LinkValue"
+    kind: struct
+    name: SamplingParams
+  - fields:
+      - doc: TraceID identifies the whole trace. Shared by every span in it.
+        name: TraceID
+        type: TraceID
+      - doc: SpanID identifies this span within the trace.
+        name: SpanID
+        type: SpanID
+      - doc: |-
+          Flags is the traceparent flag byte, kept EXACTLY as received. Undefined
+          bits are masked at format time (TraceFlags.Sanitized), never on receipt.
+        name: Flags
+        type: TraceFlags
+      - doc: |-
+          State is the tracestate list travelling beside the traceparent. It is
+          propagated verbatim; this SDK adds no entry of its own.
+        name: State
+        type: StateValue
+      - doc: |-
+          Remote reports whether this context was EXTRACTED from a carrier rather
+          than created in this process. OTLP carries the fact as a span flag, and
+          a backend needs it to tell "my caller" from "my own parent span".
+        name: Remote
+        type: bool
+    kind: struct
+    methods:
+      - name: IsValid
+        recv: c SpanContextValue
+        results: bool
+      - name: IsSampled
+        recv: c SpanContextValue
+        results: bool
+      - name: WithState
+        params: state StateValue
+        recv: c SpanContextValue
+        results: SpanContextValue
+    name: SpanContextValue
+  - kind: named
+    methods:
+      - name: Resolved
+        recv: k SpanKind
+        results: SpanKind
+      - name: String
+        recv: k SpanKind
+        results: string
+    name: SpanKind
+    underlying: int32
+  - fields:
+      - doc: "Context identifies this span: trace-id, span-id, flags, tracestate."
+        name: Context
+        type: SpanContextValue
+      - doc: |-
+          Parent identifies the span this one descends from. The zero value means
+          this is a root span.
+        name: Parent
+        type: SpanContextValue
+      - doc: Name is the low-cardinality operation label a backend groups on.
+        name: Name
+        type: string
+      - doc: |-
+          Kind is the span's relationship to its neighbours, already resolved —
+          never SpanKindUnspecified on a span a Tracer produced.
+        name: Kind
+        type: SpanKind
+      - doc: StartTime opens the interval the span covers.
+        name: StartTime
+        type: time.Time
+      - doc: |-
+          EndTime closes it. A span whose EndTime is unset never ended, and no
+          exporter in this SDK will ship one.
+        name: EndTime
+        type: time.Time
+      - doc: Attrs are the span's typed dimensions, sorted by Key.
+        name: Attrs
+        type: "[]coreotel.AttrValue"
+      - doc: |-
+          Events are timestamped points inside the interval, in the order they
+          were recorded.
+        name: Events
+        type: "[]EventValue"
+      - doc: Links point at causally related spans in other traces.
+        name: Links
+        type: "[]LinkValue"
+      - doc: Status is the recorded outcome, already resolved.
+        name: Status
+        type: StatusValue
+    kind: struct
+    methods:
+      - name: Duration
+        recv: s SpanValue
+        results: time.Duration
+      - name: IsRoot
+        recv: s SpanValue
+        results: bool
+    name: SpanValue
+  - fields:
+      - doc: Resource identifies the producer, carried once for the whole payload.
+        name: Resource
+        type: coreotel.ResourceValue
+      - doc: |-
+          Scope identifies the instrumentation, carried once for the whole
+          payload.
+        name: Scope
+        type: coreotel.ScopeValue
+      - doc: |-
+          Spans are the finished spans, in the order they ended. That order is
+          stable and is what makes an exporter's output diffable; it is NOT
+          causal — a parent ends after its children.
+        name: Spans
+        type: "[]SpanValue"
+    kind: struct
+    methods:
+      - name: IsEmpty
+        recv: s SpansValue
+        results: bool
+    name: SpansValue
+  - fields:
+      - doc: entries is the list so far, leftmost first.
+        name: entries
+        type: "[]traceStateEntry"
+    kind: struct
+    methods:
+      - name: Add
+        params: key, value string
+        recv: b *StateBuilder
+        results: bool
+      - name: State
+        recv: b *StateBuilder
+        results: StateValue
+    name: StateBuilder
+  - fields:
+      - doc: entries is the ordered list, leftmost first. nil is the empty list.
+        name: entries
+        type: "[]traceStateEntry"
+    kind: struct
+    methods:
+      - name: Len
+        recv: s StateValue
+        results: int
+      - name: Get
+        params: key string
+        recv: s StateValue
+        results: value string, ok bool
+      - name: Insert
+        params: key, value string
+        recv: s StateValue
+        results: state StateValue, err error
+      - name: Delete
+        params: key string
+        recv: s StateValue
+        results: StateValue
+      - name: String
+        recv: s StateValue
+        results: string
+    name: StateValue
+  - kind: named
+    methods:
+      - name: String
+        recv: c StatusCode
+        results: string
+    name: StatusCode
+    underlying: int32
+  - fields:
+      - doc: Code is the verdict.
+        name: Code
+        type: StatusCode
+      - doc: |-
+          Message describes the failure. It is dropped unless Code is
+          StatusError, and it is the ONE free-text field a span carries — so it
+          must not be given a value the operator cannot see safely. It is not an
+          errs Public: a span message is read by whoever reads the trace.
+        name: Message
+        type: string
+    kind: struct
+    methods:
+      - name: Resolved
+        recv: s StatusValue
+        results: StatusValue
+      - name: IsUnset
+        recv: s StatusValue
+        results: bool
+    name: StatusValue
+  - doc: |-
+      traceStateEntry is one `key=value` list member. It is unexported because the
+      only ways to obtain one are Insert and StateBuilder.Add, both of which
+      validate — a struct literal would let an unspellable entry into a header.
+    fields:
+      - doc: key is the vendor identifier, already validated against the grammar.
+        name: key
+        type: string
+      - doc: value is the vendor's opaque state, already validated.
+        name: value
+        type: string
+    kind: struct
+    name: traceStateEntry
+vars:
+  - doc: spanContextKey is the singleton key. A struct{} key allocates nothing.
+    items:
+      - name: spanContextKey
+        type: contextKeyType
+    name: spanContextKey
+  - doc: |-
+      registry maps each ExporterName to its SpanExporter — a read-mostly,
+      copy-on-write table (kernel/plugin.Registry), the same mechanism the other
+      signal's exporter registry runs on.
+    items:
+      - name: registry
+        type: plugin.Registry[ExporterName, SpanExporter]
+    name: registry

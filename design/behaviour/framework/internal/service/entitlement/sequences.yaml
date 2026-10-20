@@ -1,0 +1,3829 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: anchorList
+    participants:
+      - id: caller
+        kind: actor
+      - id: anchorList
+        kind: self
+      - id: log
+        kind: stdlib
+    steps:
+      - bind: kept
+        eval: anchors
+      - opt:
+          do:
+            - eval: "log.Printf(\"entitlement: %d trust anchors declared, keeping the first %d\", len(kept), maxAnchors)"
+              to: log
+            - set: kept
+              value: kept[:maxAnchors]
+          when: len(kept) > maxAnchors
+      - bind: owned
+        eval: make([][]byte, 0, len(kept))
+      - loop:
+          do:
+            - set: owned
+              value: append(owned, bytes.Clone(anchor))
+          key: _
+          range: kept
+          value: anchor
+      - return: owned
+  - of: parseBundleAnyAnchor
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseBundleAnyAnchor
+        kind: self
+      - id: ParseBundle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnsigned,
+                			errs.String("condition", "no trust anchor was linked into this build, so no signature can be valid"))
+          when: len(anchors) == 0
+      - var:
+          name: lastErr
+          type: error
+      - loop:
+          do:
+            - bind: candidate, parseErr
+              eval: ParseBundle(raw, anchor, now)
+              to: ParseBundle
+            - opt:
+                do:
+                  - return: candidate, nil
+                when: parseErr == nil
+            - opt:
+                do:
+                  - return: nil, parseErr
+                when: "!errors.Is(parseErr, coreent.ErrRosterUnsigned)"
+            - set: lastErr
+              value: parseErr
+          key: _
+          range: anchors
+          value: anchor
+      - return: nil, lastErr
+  - of: bundleMarkAnyAnchor
+    participants:
+      - id: caller
+        kind: actor
+      - id: bundleMarkAnyAnchor
+        kind: self
+      - id: bundleMark
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: mark
+                init:
+                  bind: mark
+                  eval: bundleMark(raw, anchor)
+                  to: bundleMark
+                when: mark.present
+          key: _
+          range: anchors
+          value: anchor
+      - return: markRecord{}
+  - of: ParseBundle
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseBundle
+        kind: self
+      - id: decodeBundle
+        kind: internal
+      - id: ParseRoster
+        kind: internal
+    steps:
+      - bind: payload, signature, decodeErr
+        eval: decodeBundle(raw)
+        to: decodeBundle
+      - opt:
+          do:
+            - return: nil, decodeErr
+          when: decodeErr != nil
+      - return: ParseRoster(payload, signature, vendor, now)
+        to: ParseRoster
+  - of: authenticateBundle
+    participants:
+      - id: caller
+        kind: actor
+      - id: authenticateBundle
+        kind: self
+      - id: decodeBundle
+        kind: internal
+      - id: authenticateRoster
+        kind: internal
+    steps:
+      - bind: decodedPayload, signature, decodeErr
+        eval: decodeBundle(raw)
+        to: decodeBundle
+      - opt:
+          do:
+            - return: nil, nil, decodeErr
+          when: decodeErr != nil
+      - bind: authenticated, authErr
+        eval: authenticateRoster(decodedPayload, signature, vendor)
+        to: authenticateRoster
+      - opt:
+          do:
+            - return: nil, nil, authErr
+          when: authErr != nil
+      - return: authenticated, decodedPayload, nil
+  - of: decodeBundle
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeBundle
+        kind: self
+      - id: checkNoDuplicateNames
+        kind: internal
+      - id: json
+        kind: stdlib
+      - id: base64.StdEncoding.DecodeString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "decode_bundle"),
+                			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+                			errs.String("member", member))
+          init:
+            bind: member, duplicate
+            eval: checkNoDuplicateNames(raw)
+            to: checkNoDuplicateNames
+          when: duplicate
+      - var:
+          name: bundle
+          type: BundleValue
+      - opt:
+          do:
+            - return: |-
+                nil, nil, classify(coreent.ErrRosterUnreachable, unmarshalErr,
+                			errs.String("stage", "decode_bundle"))
+          init:
+            bind: unmarshalErr
+            eval: json.Unmarshal(raw, &bundle)
+            to: json
+          when: unmarshalErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "decode_bundle"),
+                			errs.String("condition", "neither half present"))
+          when: bundle.Payload == "" || bundle.Signature == ""
+      - bind: decodedPayload, payloadErr
+        eval: base64.StdEncoding.DecodeString(bundle.Payload)
+        to: base64.StdEncoding.DecodeString
+      - opt:
+          do:
+            - return: |-
+                nil, nil, classify(coreent.ErrRosterUnreachable, payloadErr,
+                			errs.String("stage", "decode_payload"))
+          when: payloadErr != nil
+      - bind: decodedSignature, signatureErr
+        eval: base64.StdEncoding.DecodeString(bundle.Signature)
+        to: base64.StdEncoding.DecodeString
+      - opt:
+          do:
+            - return: |-
+                nil, nil, classify(coreent.ErrRosterUnreachable, signatureErr,
+                			errs.String("stage", "decode_signature"))
+          when: signatureErr != nil
+      - return: decodedPayload, decodedSignature, nil
+  - of: (*ProductValue).DefaultCacheDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ProductValue).DefaultCacheDir
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: root, err
+        eval: os.UserCacheDir()
+        to: os
+      - opt:
+          do:
+            - return: "\"\""
+          when: err != nil
+      - return: filepath.Join(root, p.cacheDir())
+        to: filepath
+  - of: (*Service).WithCache
+    steps:
+      - set: s.cacheDir
+        value: dir
+      - return: s
+  - of: cachedBundlePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: cachedBundlePath
+        kind: self
+      - id: filepath
+        kind: stdlib
+    steps:
+      - return: filepath.Join(dir, cachedBundleName)
+        to: filepath
+  - of: judgeMark
+    steps:
+      - opt:
+          do:
+            - return: "markDecision{install: true}"
+          when: "!held.present"
+      - opt:
+          do:
+            - return: markDecision{}
+          when: "!offered.present"
+      - opt:
+          do:
+            - return: "markDecision{install: true}"
+          when: held.issued.Before(offered.issued)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "markDecision{install: true}"
+                when: held.payload == offered.payload
+            - return: |-
+                markDecision{refusal: refuse(coreent.ErrRosterStale,
+                			errs.String("stage", markCompareStage),
+                			errs.String("condition", "a different document signed at the same instant as one this machine has already accepted"),
+                			errs.String("mark", held.issued.UTC().Format(time.RFC3339)))}
+          when: held.issued.Equal(offered.issued)
+      - return: |-
+          markDecision{refusal: refuse(coreent.ErrRosterStale,
+          		errs.String("stage", markCompareStage),
+          		errs.String("condition", "superseded by a newer signed decision this machine has already accepted"),
+          		errs.String("issued_at", offered.issued.UTC().Format(time.RFC3339)),
+          		errs.String("mark", held.issued.UTC().Format(time.RFC3339)))}
+  - of: (*Service).rememberRoster
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).rememberRoster
+        kind: self
+      - id: bundleMarkAnyAnchor
+        kind: internal
+      - id: s.raiseMarkFloor
+        kind: internal
+      - id: s.holdCacheForWrite
+        kind: internal
+      - id: judgeAgainstFloor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.cacheDir == ""
+      - bind: offered
+        eval: bundleMarkAnyAnchor(raw, s.anchors)
+        to: bundleMarkAnyAnchor
+      - var:
+          name: floor
+          type: markRecord
+      - opt:
+          do:
+            - set: floor
+              to: s.raiseMarkFloor
+              value: s.raiseMarkFloor(offered)
+          when: offered.present
+      - var:
+          name: verdict
+          type: markDecision
+      - eval: |-
+          s.holdCacheForWrite(func() {
+          		//: The mark is re-read HERE, inside the exclusion, so that what it
+          		//: compares against is what the rename below replaces.
+          		verdict = judgeMark(offered, s.markWhileHeld())
+          		//: Older, unprovable, or a different statement at the same instant:
+          		//: nothing to install, and in two of the three something to report.
+          		if !verdict.install {
+          			//: Keep what is already there.
+          			return
+          		}
+          		//: Best-effort: a cache we cannot write costs the offline fallback
+          		//: and nothing else, so it must never turn a successful verification
+          		//: into a refusal. Say so once rather than fail, because the
+          		//: alternative — silence — turns "offline does not work here" into a
+          		//: mystery on the day it is discovered, which is the day the network
+          		//: is already down.
+          		if err := writeCachedBundle(s.cacheDir, raw); err != nil {
+          			//: The public sentence names no path by design, and this line is
+          			//: a log an operator owns rather than a wire — so diagnose puts
+          			//: the step, the directory and what the filesystem said back
+          			//: underneath it. Without that the line would say only that
+          			//: something could not be written.
+          			log.Printf("cannot cache the roster (%v: %s); this machine will need the network on every start", err, diagnose(err))
+          		}
+          	})
+        to: s.holdCacheForWrite
+      - opt:
+          do:
+            - set: verdict.refusal
+              to: judgeAgainstFloor
+              value: judgeAgainstFloor(offered, floor)
+          when: verdict.refusal == nil
+      - return: verdict.refusal
+  - of: writeCachedBundle
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeCachedBundle
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: classify
+        kind: internal
+      - id: stageBundle
+        kind: internal
+      - id: cachedBundlePath
+        kind: internal
+      - id: removeBestEffort
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                classify(CacheUnwritable, mkErr,
+                			errs.String("step", "mkdir"),
+                			errs.String("dir", dir))
+              to: classify
+          init:
+            bind: mkErr
+            eval: os.MkdirAll(dir, cacheDirMode)
+            to: os
+          when: mkErr != nil
+      - bind: staged, stageErr
+        eval: stageBundle(dir, raw)
+        to: stageBundle
+      - opt:
+          do:
+            - return: stageErr
+          when: stageErr != nil
+      - bind: installed
+        eval: cachedBundlePath(dir)
+        to: cachedBundlePath
+      - opt:
+          do:
+            - eval: removeBestEffort(staged)
+              to: removeBestEffort
+            - return: |-
+                classify(CacheUnwritable, renameErr,
+                			errs.String("step", "rename"),
+                			errs.String("path", installed))
+              to: classify
+          init:
+            bind: renameErr
+            eval: os.Rename(staged, installed)
+            to: os
+          when: renameErr != nil
+      - return: nil
+  - of: stageBundle
+    participants:
+      - id: caller
+        kind: actor
+      - id: stageBundle
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: file.Name
+        kind: value
+      - id: file.Write
+        kind: value
+      - id: removeBestEffort
+        kind: internal
+    steps:
+      - bind: file, createErr
+        eval: os.CreateTemp(dir, cachedBundleName+".*.tmp")
+        to: os
+      - opt:
+          do:
+            - return: |-
+                "", classify(CacheUnwritable, createErr,
+                			errs.String("step", "create_temp"),
+                			errs.String("dir", dir))
+          when: createErr != nil
+      - defer: |-
+          func() {
+          		closeErr := file.Close()
+          		//: Nothing to add when the caller is already failing.
+          		if closeErr == nil || err != nil {
+          			//: Leave the existing outcome alone.
+          			return
+          		}
+          		removeBestEffort(file.Name())
+          		path, err = "", classify(CacheUnwritable, closeErr,
+          			errs.String("step", "close"),
+          			errs.String("path", file.Name()))
+          	}()
+      - bind: staged
+        eval: file.Name()
+        to: file.Name
+      - opt:
+          do:
+            - eval: removeBestEffort(staged)
+              to: removeBestEffort
+            - return: |-
+                "", classify(CacheUnwritable, writeErr,
+                			errs.String("step", "write"),
+                			errs.String("path", staged))
+          init:
+            bind: _, writeErr
+            eval: file.Write(raw)
+            to: file.Write
+          when: writeErr != nil
+      - return: staged, nil
+  - of: removeBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: removeBestEffort
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: "log.Printf(\"remove %s: %v\", path, err)"
+              to: log
+          init:
+            bind: err
+            eval: os.Remove(path)
+            to: os
+          when: err != nil && !errors.Is(err, fs.ErrNotExist)
+  - of: (*Service).cachedRoster
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).cachedRoster
+        kind: self
+      - id: cachedBundlePath
+        kind: internal
+      - id: s.holdCacheForRead
+        kind: internal
+      - id: parseBundleAnyAnchor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "read_cache"),
+                			errs.String("condition", "no cache directory configured, so there is nowhere to look"))
+          when: s.cacheDir == ""
+      - bind: path
+        eval: cachedBundlePath(s.cacheDir)
+        to: cachedBundlePath
+      - var:
+          name: raw
+          type: "[]byte"
+      - var:
+          name: readErr
+          type: error
+      - eval: s.holdCacheForRead(func() { raw, readErr = readCappedFile(path) })
+        to: s.holdCacheForRead
+      - opt:
+          do:
+            - return: nil, readErr
+          when: readErr != nil
+      - return: parseBundleAnyAnchor(raw, s.anchors, now)
+        to: parseBundleAnyAnchor
+  - of: readCappedFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: readCappedFile
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: readBounded
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "read_cache"),
+                			errs.String("path", path),
+                			errs.String("condition", "not a regular file, so opening it could block forever"))
+          when: "!regularFile(path)"
+      - bind: file, openErr
+        eval: os.Open(path)
+        to: os
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrRosterUnreachable, openErr,
+                			errs.String("stage", "read_cache"),
+                			errs.String("path", path))
+          when: openErr != nil
+      - defer: |-
+          func() {
+          		//: Best-effort: a descriptor we cannot release is worth a line, never
+          		//: a refused licence.
+          		if closeErr := file.Close(); closeErr != nil {
+          			log.Printf("close %s: %v", path, closeErr)
+          		}
+          	}()
+      - return: readBounded(file, path)
+        to: readBounded
+  - of: (*Service).signedHighWaterMark
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).signedHighWaterMark
+        kind: self
+      - id: s.holdCacheForRead
+        kind: internal
+      - id: s.markFloorNow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}
+          when: s.cacheDir == ""
+      - var:
+          name: mark
+          type: markRecord
+      - eval: s.holdCacheForRead(func() { mark = s.markWhileHeld() })
+        to: s.holdCacheForRead
+      - opt:
+          do:
+            - return: floor.issued
+          init:
+            bind: floor
+            eval: s.markFloorNow()
+            to: s.markFloorNow
+          when: floor.present && mark.issued.Before(floor.issued)
+      - return: mark.issued
+  - of: (*Service).raiseMarkFloor
+    steps:
+      - lock:
+          mutex: s.markFloorMu
+      - bind: previous
+        eval: s.markFloor
+      - opt:
+          do:
+            - set: s.markFloor
+              value: offered
+          when: "!s.markFloor.present || s.markFloor.issued.Before(offered.issued)"
+      - return: previous
+  - of: (*Service).markFloorNow
+    steps:
+      - lock:
+          mutex: s.markFloorMu
+      - return: s.markFloor
+  - of: judgeAgainstFloor
+    participants:
+      - id: caller
+        kind: actor
+      - id: judgeAgainstFloor
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!floor.present || !offered.present"
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrRosterStale,
+                			errs.String("stage", markCompareStage),
+                			errs.String("condition", "superseded by a newer signed decision this process has already authenticated"),
+                			errs.String("issued_at", offered.issued.UTC().Format(time.RFC3339)),
+                			errs.String("mark", floor.issued.UTC().Format(time.RFC3339)))
+              to: refuse
+          when: offered.issued.Before(floor.issued)
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrRosterStale,
+                			errs.String("stage", markCompareStage),
+                			errs.String("condition", "a different document signed at the same instant as one this process has already authenticated"),
+                			errs.String("mark", floor.issued.UTC().Format(time.RFC3339)))
+              to: refuse
+          when: offered.issued.Equal(floor.issued) && offered.payload != floor.payload
+      - return: nil
+  - of: rosterMark
+    steps:
+      - opt:
+          do:
+            - return: markRecord{}
+          when: |-
+            roster == nil ||
+            		roster.IssuedAt.IsZero() ||
+            		roster.ExpiresAt.Before(roster.IssuedAt) ||
+            		roster.ExpiresAt.Sub(roster.IssuedAt) > coreent.RosterLifetime
+      - return: "markRecord{issued: roster.IssuedAt, payload: payloadDigest(payload), present: true}"
+  - of: bundleMark
+    participants:
+      - id: caller
+        kind: actor
+      - id: bundleMark
+        kind: self
+      - id: authenticateBundle
+        kind: internal
+      - id: rosterMark
+        kind: internal
+    steps:
+      - bind: roster, payload, authErr
+        eval: authenticateBundle(raw, vendor)
+        to: authenticateBundle
+      - opt:
+          do:
+            - return: markRecord{}
+          when: authErr != nil
+      - return: rosterMark(roster, payload)
+        to: rosterMark
+  - of: (*Service).markWhileHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).markWhileHeld
+        kind: self
+      - id: readCappedFile
+        kind: internal
+      - id: bundleMarkAnyAnchor
+        kind: internal
+    steps:
+      - bind: raw, readErr
+        eval: readCappedFile(cachedBundlePath(s.cacheDir))
+        to: readCappedFile
+      - opt:
+          do:
+            - return: markRecord{}
+          when: readErr != nil
+      - return: bundleMarkAnyAnchor(raw, s.anchors)
+        to: bundleMarkAnyAnchor
+  - of: (*Service).checkClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).checkClock
+        kind: self
+      - id: s.signedHighWaterMark
+        kind: internal
+      - id: refuse
+        kind: internal
+    steps:
+      - bind: mark
+        eval: s.signedHighWaterMark()
+        to: s.signedHighWaterMark
+      - opt:
+          do:
+            - return: nil
+          when: mark.IsZero() || !now.Before(mark)
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrClockRegressed,
+                			errs.String("condition", "the newest signed instant this machine holds is further ahead of the local clock than a roster's own lifetime, so the cached bundle is what cannot be right"),
+                			errs.String("clock", now.UTC().Format(time.RFC3339)),
+                			errs.String("mark", mark.UTC().Format(time.RFC3339)),
+                			errs.String("ceiling", markCeiling.String()))
+              to: refuse
+          when: mark.Sub(now) > markCeiling
+      - return: |-
+          refuse(coreent.ErrClockRegressed,
+          		errs.String("condition", "the local clock reads earlier than the newest signed instant this machine has authenticated"),
+          		errs.String("clock", now.UTC().Format(time.RFC3339)),
+          		errs.String("mark", mark.UTC().Format(time.RFC3339)))
+        to: refuse
+  - of: (*Service).checkClockAndTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).checkClockAndTime
+        kind: self
+      - id: s.checkClock
+        kind: internal
+      - id: s.checkNetworkTime
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ratchetErr
+          init:
+            bind: ratchetErr
+            eval: s.checkClock(now)
+            to: s.checkClock
+          when: ratchetErr != nil
+      - return: s.checkNetworkTime(now)
+        to: s.checkNetworkTime
+  - of: (*Service).cacheGuard
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).cacheGuard
+        kind: self
+      - id: lock
+        kind: package
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.cacheDir == ""
+      - lock:
+          mutex: s.cacheLockMu
+      - opt:
+          do:
+            - return: s.cacheLock
+          when: s.cacheLockFor == s.cacheDir
+      - set: s.cacheLockFor
+        value: s.cacheDir
+      - set: s.cacheLock
+        value: nil
+      - bind: locker, lockErr
+        eval: "lock.NewFileLocker(lock.FileConfig{Dir: s.cacheDir, Poll: cacheLockPoll})"
+        to: lock
+      - opt:
+          do:
+            - eval: log.Printf("cannot guard the roster cache at %s (%v); concurrent refreshes on this machine are not serialised", s.cacheDir, lockErr)
+              to: log
+            - return: nil
+          when: lockErr != nil
+      - set: s.cacheLock
+        value: locker
+      - return: s.cacheLock
+  - of: (*Service).underCacheLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).underCacheLock
+        kind: self
+      - id: s.cacheGuard
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: locker.Acquire
+        kind: value
+    steps:
+      - bind: locker
+        eval: s.cacheGuard()
+        to: s.cacheGuard
+      - opt:
+          do:
+            - eval: fn()
+            - return: true, nil
+          when: locker == nil
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), cacheLockBudget)
+        to: context
+      - defer: cancel()
+      - bind: lease, acquireErr
+        eval: locker.Acquire(ctx, cacheLockName)
+        to: locker.Acquire
+      - opt:
+          do:
+            - return: false, acquireErr
+          when: acquireErr != nil
+      - defer: |-
+          func() {
+          		//: Best-effort: a lease we cannot release is released by the kernel
+          		//: when this process ends, so it is worth a line and never a refusal.
+          		if releaseErr := lease.Release(context.Background()); releaseErr != nil {
+          			log.Printf("releasing the roster cache lock at %s: %v", s.cacheDir, releaseErr)
+          		}
+          	}()
+      - eval: fn()
+      - return: true, nil
+  - of: (*Service).holdCacheForWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).holdCacheForWrite
+        kind: self
+      - id: s.underCacheLock
+        kind: internal
+      - id: log
+        kind: stdlib
+    steps:
+      - bind: ran, why
+        eval: s.underCacheLock(fn)
+        to: s.underCacheLock
+      - opt:
+          do:
+            - return: ""
+          when: ran
+      - eval: "log.Printf(\"roster cache at %s: the guard could not be taken (%v); this refresh was skipped and the next verification caches whatever it fetches\", s.cacheDir, why)"
+        to: log
+  - of: (*Service).holdCacheForRead
+    steps:
+      - eval: fn()
+  - of: InCI
+    steps:
+      - return: os.Getenv(actionsTokenURLEnv) != "" && os.Getenv(actionsTokenBearerEnv) != ""
+  - of: checkTokenURL
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkTokenURL
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: parsed.Hostname
+        kind: value
+    steps:
+      - bind: parsed, parseErr
+        eval: url.Parse(raw)
+        to: url
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_token_url"),
+                			errs.String("condition", "the runner named a url that does not parse"))
+          when: parseErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_token_url"),
+                			errs.String("condition", "the scheme would put the credential on the wire in clear"),
+                			errs.String("scheme", parsed.Scheme))
+          when: parsed.Scheme != "https"
+      - bind: host
+        eval: parsed.Hostname()
+        to: parsed.Hostname
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_token_url"),
+                			errs.String("condition", "the host is not GitHub's token endpoint"),
+                			errs.String("host", host))
+          when: |-
+            host != strings.TrimPrefix(actionsTokenHostSuffix, ".") &&
+            		!strings.HasSuffix(host, actionsTokenHostSuffix)
+      - return: parsed, nil
+  - of: RequestActionsToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: RequestActionsToken
+        kind: self
+      - id: checkTokenURL
+        kind: internal
+      - id: endpoint.Query
+        kind: value
+      - id: query.Set
+        kind: value
+      - id: query.Encode
+        kind: value
+      - id: fetchToken
+        kind: internal
+    steps:
+      - bind: rawURL, bearer
+        eval: os.Getenv(actionsTokenURLEnv), os.Getenv(actionsTokenBearerEnv)
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "mint_token"),
+                			errs.String("condition", "neither runner token variable is set"))
+          when: rawURL == "" || bearer == ""
+      - bind: endpoint, urlErr
+        eval: checkTokenURL(rawURL)
+        to: checkTokenURL
+      - opt:
+          do:
+            - return: "\"\", urlErr"
+          when: urlErr != nil
+      - bind: query
+        eval: endpoint.Query()
+        to: endpoint.Query
+      - eval: query.Set("audience", audience)
+        to: query.Set
+      - set: endpoint.RawQuery
+        to: query.Encode
+        value: query.Encode()
+      - bind: raw, fetchErr
+        eval: fetchToken(get, endpoint.String(), bearer)
+        to: fetchToken
+      - opt:
+          do:
+            - return: "\"\", fetchErr"
+          when: fetchErr != nil
+      - return: raw, nil
+  - of: tokenResponseBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: tokenResponseBody
+        kind: self
+      - id: closeBestEffort
+        kind: internal
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "mint_token"),
+                			errs.String("condition", "no BearerFetch was supplied"))
+          when: get == nil
+      - bind: resp, getErr
+        eval: get(endpoint, bearer)
+      - opt:
+          do:
+            - return: |-
+                nil, classifyForeign(coreent.ErrCIUnverifiable, getErr,
+                			errs.String("stage", "mint_token"))
+          when: getErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "mint_token"),
+                			errs.String("condition", "the transport returned neither a response nor an error"))
+          when: resp == nil || resp.Body == nil
+      - defer: closeBestEffort(resp.Body, endpoint)
+        to: closeBestEffort
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "mint_token"),
+                			errs.String("condition", "the mint endpoint refused"),
+                			errs.Int("status", resp.StatusCode))
+          when: resp.StatusCode != http.StatusOK
+      - bind: read, readErr
+        eval: io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes+1))
+        to: io
+      - opt:
+          do:
+            - return: |-
+                nil, classifyForeign(coreent.ErrCIUnverifiable, readErr,
+                			errs.String("stage", "read_token_response"))
+          when: readErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "read_token_response"),
+                			errs.String("condition", "body at or past the cap"),
+                			errs.Int64("limit_bytes", maxTokenResponseBytes),
+                			errs.Int("got_bytes", len(read)))
+          when: int64(len(read)) > maxTokenResponseBytes
+      - return: read, nil
+  - of: fetchToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: fetchToken
+        kind: self
+      - id: tokenResponseBody
+        kind: internal
+      - id: strictUnmarshal
+        kind: internal
+    steps:
+      - bind: body, bodyErr
+        eval: tokenResponseBody(get, endpoint, bearer)
+        to: tokenResponseBody
+      - opt:
+          do:
+            - return: "\"\", bodyErr"
+          when: bodyErr != nil
+      - bind: minted, decodeErr
+        eval: strictUnmarshal[actionsTokenResponse](body, "token response")
+        to: strictUnmarshal
+      - opt:
+          do:
+            - return: "\"\", decodeErr"
+          when: decodeErr != nil
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "mint_token"),
+                			errs.String("condition", "a well-formed response carrying no token"))
+          when: minted.Value == ""
+      - return: minted.Value, nil
+  - of: DefaultBearerFetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: DefaultBearerFetch
+        kind: self
+      - id: http
+        kind: stdlib
+      - id: req.Header.Set
+        kind: value
+      - id: client.Do
+        kind: value
+    steps:
+      - bind: client
+        eval: |-
+          &http.Client{
+          		Timeout: fetchTimeout,
+          		CheckRedirect: func(*http.Request, []*http.Request) error {
+          			//: Refuse rather than follow: the destination was never checked.
+          			return refuse(coreent.ErrCIUnverifiable,
+          				errs.String("stage", "mint_token"),
+          				errs.String("condition", "the token endpoint redirected and the destination was never checked"))
+          		},
+          	}
+      - bind: req, reqErr
+        eval: http.NewRequest(http.MethodGet, url, nil)
+        to: http
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrCIUnverifiable, reqErr,
+                			errs.String("stage", "build_token_request"))
+          when: reqErr != nil
+      - eval: req.Header.Set("Authorization", "Bearer "+bearer)
+        to: req.Header.Set
+      - return: client.Do(req)
+        to: client.Do
+  - of: VerifyCI
+    participants:
+      - id: caller
+        kind: actor
+      - id: VerifyCI
+        kind: self
+      - id: RequestActionsToken
+        kind: internal
+      - id: VerifyActionsToken
+        kind: internal
+      - id: roster.CIEntitlementFor
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "verify_ci"),
+                			errs.String("condition", "neither runner token variable is set"))
+          when: "!InCI()"
+      - bind: raw, tokenErr
+        eval: RequestActionsToken(get, audience)
+        to: RequestActionsToken
+      - opt:
+          do:
+            - return: nil, tokenErr
+          when: tokenErr != nil
+      - bind: verified, verifyErr
+        eval: VerifyActionsToken(raw, keys, audience, now)
+        to: VerifyActionsToken
+      - opt:
+          do:
+            - return: nil, verifyErr
+          when: verifyErr != nil
+      - opt:
+          do:
+            - return: nil, entitlementErr
+          init:
+            bind: _, entitlementErr
+            eval: roster.CIEntitlementFor(verified.RepositoryOwnerID, now)
+            to: roster.CIEntitlementFor
+          when: entitlementErr != nil
+      - return: verified, nil
+  - of: (*Service).ciSeat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).ciSeat
+        kind: self
+      - id: s.publishedJWKS
+        kind: internal
+      - id: VerifyCI
+        kind: internal
+      - id: roster.CIEntitlementFor
+        kind: value
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                coreent.GrantValue{}, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "ci_seat"),
+                			errs.String("condition", "neither runner token variable is set"))
+          when: "!InCI()"
+      - opt:
+          do:
+            - return: |-
+                coreent.GrantValue{}, refuse(coreent.ErrCINotEntitled,
+                			errs.String("stage", "ci_seat"),
+                			errs.String("condition", "the roster carries no CI block at all"))
+          when: len(roster.CIAccounts) == 0
+      - bind: keys, keysErr
+        eval: s.publishedJWKS()
+        to: s.publishedJWKS
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, keysErr
+          when: keysErr != nil
+      - bind: claims, verifyErr
+        eval: VerifyCI(s.bearerFetch, keys, roster, s.product.audience(), now)
+        to: VerifyCI
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, verifyErr
+          when: verifyErr != nil
+      - bind: entitlement, entitlementErr
+        eval: roster.CIEntitlementFor(claims.RepositoryOwnerID, now)
+        to: roster.CIEntitlementFor
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, entitlementErr
+          when: entitlementErr != nil
+      - bind: tokenExpiry
+        eval: time.Unix(claims.ExpiresAt, 0)
+        to: time
+      - opt:
+          do:
+            - return: |-
+                coreent.GrantValue{}, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "ci_seat"),
+                			errs.String("condition", "the Actions token expired before this verification, so any grant built on it would be expired the instant it was returned"),
+                			errs.String("token_exp", tokenExpiry.UTC().Format(time.RFC3339)),
+                			errs.String("now", now.UTC().Format(time.RFC3339)))
+          when: "!tokenExpiry.After(now)"
+      - return: |-
+          coreent.GrantValue{
+          		Subject:    "ci:" + claims.Repository,
+          		VerifiedAt: now,
+          		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt, tokenExpiry),
+          	}, nil
+  - of: (*Service).publishedJWKS
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).publishedJWKS
+        kind: self
+      - id: s.fetch
+        kind: internal
+      - id: ParseJWKS
+        kind: internal
+    steps:
+      - bind: raw, fetchErr
+        eval: s.fetch(ActionsJWKSURL)
+        to: s.fetch
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "fetch_jwks"),
+                			errs.String("cause", particulars(fetchErr)))
+          when: fetchErr != nil
+      - return: ParseJWKS(raw)
+        to: ParseJWKS
+  - of: ciRefusalIsFinal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: roster == nil
+      - return: InCI() && !roster.CIRelaxed
+  - of: ciContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: ciContext
+        kind: self
+      - id: particulars
+        kind: internal
+      - id: annotate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: deviceErr
+          when: ciErr == nil || !InCI()
+      - bind: seat
+        eval: "[]errs.FieldValue{errs.String(\"ci_refusal\", ciErr.Error())}"
+      - opt:
+          do:
+            - set: seat
+              value: append(seat, errs.String("ci_detail", detail))
+          init:
+            bind: detail
+            eval: particulars(ciErr)
+            to: particulars
+          when: detail != ""
+      - return: annotate(deviceErr, seat...)
+        to: annotate
+  - of: verifiedBy
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifiedBy
+        kind: self
+      - id: sign
+        kind: package
+    steps:
+      - bind: verified, verifyErr
+        eval: sign.Verify(sign.Ed25519, key, message, signature)
+        to: sign
+      - return: verifyErr == nil && verified
+  - of: digestOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: digestOf
+        kind: self
+      - id: hash
+        kind: package
+    steps:
+      - bind: sum, sumErr
+        eval: hash.Sum(algorithm, data)
+        to: hash
+      - opt:
+          do:
+            - panic: "\"entitlement: \" + string(algorithm) + \" is not registered: \" + sumErr.Error()"
+          when: sumErr != nil
+      - return: sum
+  - of: payloadDigest
+    steps:
+      - var:
+          name: digest
+          type: "[sha256Size]byte"
+      - eval: copy(digest[:], digestOf(hash.SHA256, payload))
+      - return: digest
+  - of: sha512Prefix
+    steps:
+      - return: digestOf(hash.SHA512, data)[:size]
+  - of: checkNoDuplicateNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkNoDuplicateNames
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: decoder.Token
+        kind: value
+      - id: admitToken
+        kind: internal
+    steps:
+      - bind: decoder
+        eval: json.NewDecoder(bytes.NewReader(data))
+        to: json
+      - var:
+          name: stack
+          type: "[]*nameFrame"
+      - loop:
+          do:
+            - bind: token, tokenErr
+              eval: decoder.Token()
+              to: decoder.Token
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: tokenErr != nil
+            - bind: name, seen, next
+              eval: admitToken(stack, token)
+              to: admitToken
+            - opt:
+                do:
+                  - return: name, true
+                when: seen
+            - set: stack
+              value: next
+          forever: true
+  - of: admitToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: admitToken
+        kind: self
+      - id: topFrame
+        kind: internal
+      - id: valueClosed
+        kind: internal
+    steps:
+      - bind: delim, isDelim
+        eval: token.(json.Delim)
+      - opt:
+          do:
+            - return: "\"\", false, applyDelim(stack, delim)"
+          when: isDelim
+      - bind: name, isName
+        eval: token.(string)
+      - bind: top
+        eval: topFrame(stack)
+        to: topFrame
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: name, true, stack
+                init:
+                  bind: _, repeated
+                  eval: top.names[name]
+                when: repeated
+            - set: top.names[name]
+              value: struct{}{}
+            - set: top.expectKey
+              value: "false"
+            - return: "\"\", false, stack"
+          when: isName && top != nil && top.object && top.expectKey
+      - eval: valueClosed(top)
+        to: valueClosed
+      - return: "\"\", false, stack"
+  - of: applyDelim
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyDelim
+        kind: self
+      - id: valueClosed
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "'{'"
+              do:
+                - return: "append(stack, &nameFrame{names: map[string]struct{}{}, object: true, expectKey: true})"
+            - case: "'['"
+              do:
+                - return: append(stack, &nameFrame{})
+            - default: true
+              do:
+                - opt:
+                    do:
+                      - return: stack
+                    when: len(stack) == 0
+                - set: stack
+                  value: stack[:len(stack)-1]
+                - eval: valueClosed(topFrame(stack))
+                  to: valueClosed
+                - return: stack
+          "on": delim
+  - of: topFrame
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(stack) == 0
+      - return: stack[len(stack)-1]
+  - of: valueClosed
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: frame == nil || !frame.object
+      - set: frame.expectKey
+        value: "true"
+  - of: decodeJWKS
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeJWKS
+        kind: self
+      - id: checkNoDuplicateNames
+        kind: internal
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                decoded, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_jwks"),
+                			errs.String("condition", "document larger than the cap"),
+                			errs.Int("limit_bytes", maxJWKSBytes),
+                			errs.Int("got_bytes", len(raw)))
+          when: len(raw) > maxJWKSBytes
+      - opt:
+          do:
+            - return: |-
+                decoded, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_jwks"),
+                			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+                			errs.String("member", member))
+          init:
+            bind: member, duplicate
+            eval: checkNoDuplicateNames(raw)
+            to: checkNoDuplicateNames
+          when: duplicate
+      - opt:
+          do:
+            - return: |-
+                decoded, classify(coreent.ErrCIUnverifiable, unmarshalErr,
+                			errs.String("stage", "decode_jwks"))
+          init:
+            bind: unmarshalErr
+            eval: json.Unmarshal(raw, &decoded)
+            to: json
+          when: unmarshalErr != nil
+      - opt:
+          do:
+            - return: |-
+                decoded, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_jwks"),
+                			errs.String("condition", "more entries than any real key set"),
+                			errs.Int("limit_keys", maxJWKSKeys),
+                			errs.Int("got_keys", len(decoded.Keys)))
+          when: len(decoded.Keys) > maxJWKSKeys
+      - return: decoded, nil
+  - of: ParseJWKS
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseJWKS
+        kind: self
+      - id: decodeJWKS
+        kind: internal
+      - id: rsaKeyFromJWK
+        kind: internal
+    steps:
+      - bind: decoded, decodeErr
+        eval: decodeJWKS(raw)
+        to: decodeJWKS
+      - opt:
+          do:
+            - return: nil, decodeErr
+          when: decodeErr != nil
+      - bind: built
+        eval: make(map[string]*rsa.PublicKey, len(decoded.Keys))
+      - bind: seen
+        eval: make(map[string]bool, len(decoded.Keys))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: entry.KeyID == ""
+            - opt:
+                do:
+                  - return: |-
+                      nil, refuse(coreent.ErrCIUnverifiable,
+                      				errs.String("stage", "build_keys"),
+                      				errs.String("condition", "one kid declared twice"),
+                      				errs.String("kid", entry.KeyID))
+                when: seen[entry.KeyID]
+            - set: seen[entry.KeyID]
+              value: "true"
+            - bind: key, keyErr
+              eval: rsaKeyFromJWK(&entry)
+              to: rsaKeyFromJWK
+            - opt:
+                do:
+                  - continue: true
+                when: keyErr != nil
+            - set: built[entry.KeyID]
+              value: key
+          key: _
+          range: decoded.Keys
+          value: entry
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "build_keys"),
+                			errs.String("condition", "no usable RS256 key in the set"),
+                			errs.Int("got_keys", len(decoded.Keys)))
+          when: len(built) == 0
+      - return: built, nil
+  - of: (*audienceClaim).UnmarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*audienceClaim).UnmarshalJSON
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_audience"),
+                			errs.String("condition", "the claim is null rather than absent or a string"))
+              to: refuse
+          when: string(data) == "null"
+      - var:
+          name: single
+          type: string
+      - opt:
+          do:
+            - set: "*a"
+              value: audienceClaim{single}
+            - return: nil
+          init:
+            bind: err
+            eval: json.Unmarshal(data, &single)
+            to: json
+          when: err == nil
+      - var:
+          name: many
+          type: "[]string"
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_audience"),
+                			errs.String("condition", "neither of the two shapes the JWT spec allows"))
+              to: refuse
+          init:
+            bind: err
+            eval: json.Unmarshal(data, &many)
+            to: json
+          when: err != nil
+      - set: "*a"
+        value: many
+      - return: nil
+  - of: (*audienceClaim).contains
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*audienceClaim).contains
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(*a, want)
+        to: slices
+  - of: jwtSegments
+    participants:
+      - id: caller
+        kind: actor
+      - id: jwtSegments
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: base64.RawURLEncoding.DecodeString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                "", nil, nil, nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "split_token"),
+                			errs.String("condition", "token at or past the cap"),
+                			errs.Int("limit_bytes", maxTokenBytes),
+                			errs.Int("got_bytes", len(raw)))
+          when: len(raw) > maxTokenBytes
+      - bind: parts
+        eval: strings.Split(raw, ".")
+        to: strings
+      - opt:
+          do:
+            - return: |-
+                "", nil, nil, nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "split_token"),
+                			errs.String("condition", "not three non-empty segments"))
+          when: |-
+            len(parts) != jwtParts || parts[headerSegment] == "" ||
+            		parts[payloadSegment] == "" || parts[signatureSegment] == ""
+      - bind: decoded
+        eval: make([][]byte, jwtParts)
+      - loop:
+          do:
+            - bind: segment, decodeErr
+              eval: base64.RawURLEncoding.DecodeString(part)
+              to: base64.RawURLEncoding.DecodeString
+            - opt:
+                do:
+                  - return: |-
+                      "", nil, nil, nil, classify(coreent.ErrCIUnverifiable, decodeErr,
+                      				errs.String("stage", "split_token"),
+                      				errs.Int("segment", i))
+                when: decodeErr != nil
+            - set: decoded[i]
+              value: segment
+          key: i
+          range: parts
+          value: part
+      - return: parts[headerSegment] + "." + parts[payloadSegment], decoded[headerSegment], decoded[payloadSegment], decoded[signatureSegment], nil
+  - of: strictUnmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: strictUnmarshal
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: checkNoDuplicateNames
+        kind: internal
+      - id: json
+        kind: stdlib
+      - id: decoder.Decode
+        kind: value
+      - id: decoder.Token
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                decoded, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_"+what),
+                			errs.String("condition", "not a JSON object"))
+          init:
+            bind: trimmed
+            eval: bytes.TrimSpace(data)
+            to: bytes
+          when: len(trimmed) == 0 || trimmed[0] != '{'
+      - opt:
+          do:
+            - return: |-
+                decoded, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_"+what),
+                			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+                			errs.String("member", member))
+          init:
+            bind: member, duplicate
+            eval: checkNoDuplicateNames(data)
+            to: checkNoDuplicateNames
+          when: duplicate
+      - bind: decoder
+        eval: json.NewDecoder(bytes.NewReader(data))
+        to: json
+      - opt:
+          do:
+            - return: |-
+                decoded, classify(coreent.ErrCIUnverifiable, decodeErr,
+                			errs.String("stage", "decode_"+what))
+          init:
+            bind: decodeErr
+            eval: decoder.Decode(&decoded)
+            to: decoder.Decode
+          when: decodeErr != nil
+      - opt:
+          do:
+            - return: |-
+                decoded, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_"+what),
+                			errs.String("condition", "a second document follows the first"))
+          init:
+            bind: _, eofErr
+            eval: decoder.Token()
+            to: decoder.Token
+          when: "!errors.Is(eofErr, io.EOF)"
+      - return: decoded, nil
+  - of: checkHeaderShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkHeaderShape
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_header"),
+                			errs.String("condition", "an algorithm this verifier will not accept"),
+                			errs.String("alg", header.Algorithm))
+              to: refuse
+          when: header.Algorithm != "RS256"
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_header"),
+                			errs.String("condition", "typed as something other than a JWT"),
+                			errs.String("typ", header.Type))
+              to: refuse
+          when: header.Type != "" && !strings.EqualFold(header.Type, "JWT")
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_header"),
+                			errs.String("condition", "extensions declared critical that this verifier does not implement"),
+                			errs.String("crit", strings.Join(header.Critical, ",")))
+              to: refuse
+          when: len(header.Critical) != 0
+      - return: nil
+  - of: checkHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkHeader
+        kind: self
+      - id: strictUnmarshal
+        kind: internal
+      - id: checkHeaderShape
+        kind: internal
+    steps:
+      - bind: header, decodeErr
+        eval: strictUnmarshal[jwtHeader](raw, "token header")
+        to: strictUnmarshal
+      - opt:
+          do:
+            - return: "\"\", decodeErr"
+          when: decodeErr != nil
+      - opt:
+          do:
+            - return: "\"\", shapeErr"
+          init:
+            bind: shapeErr
+            eval: checkHeaderShape(&header)
+            to: checkHeaderShape
+          when: shapeErr != nil
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_header"),
+                			errs.String("condition", "the token nominates its own key source"))
+          when: header.JWKSetURL != "" || header.X509URL != ""
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_header"),
+                			errs.String("condition", "no kid, so no key to select"))
+          when: header.KeyID == ""
+      - return: header.KeyID, nil
+  - of: verifySignature
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifySignature
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: sha256
+        kind: stdlib
+      - id: rsa
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "verify_signature"),
+                			errs.String("condition", "signature length does not match the key"),
+                			errs.Int("got_bytes", len(signature)),
+                			errs.Int("want_bytes", key.Size()))
+              to: refuse
+          when: len(signature) != key.Size()
+      - bind: digest
+        eval: sha256.Sum256([]byte(signingInput))
+        to: sha256
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "verify_signature"),
+                			errs.String("condition", "forged, tampered with, or signed by another key"))
+              to: refuse
+          init:
+            bind: err
+            eval: rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature)
+            to: rsa
+          when: err != nil
+      - return: nil
+  - of: checkTokenWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkTokenWindow
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_window"),
+                			errs.String("condition", "expires before it was issued"))
+              to: refuse
+          when: expires.Before(issued)
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_window"),
+                			errs.String("condition", "a window wider than Actions ever issues"),
+                			errs.String("limit", maxTokenLifetime.String()),
+                			errs.String("window", expires.Sub(issued).String()))
+              to: refuse
+          when: expires.Sub(issued) > maxTokenLifetime
+      - return: nil
+  - of: checkTiming
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkTiming
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: checkTokenWindow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_timing"),
+                			errs.String("condition", "the token does not bound itself"))
+              to: refuse
+          when: claims.ExpiresAt == 0 || claims.IssuedAt == 0
+      - bind: expires
+        eval: time.Unix(claims.ExpiresAt, 0)
+        to: time
+      - bind: issued
+        eval: time.Unix(claims.IssuedAt, 0)
+        to: time
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_timing"),
+                			errs.String("condition", "past its expiry, allowance included"),
+                			errs.String("expires_at", expires.UTC().Format(time.RFC3339)))
+              to: refuse
+          when: now.After(expires.Add(clockSkew))
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_timing"),
+                			errs.String("condition", "issued in the future, allowance included"),
+                			errs.String("issued_at", issued.UTC().Format(time.RFC3339)))
+              to: refuse
+          when: issued.After(now.Add(clockSkew))
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_timing"),
+                			errs.String("condition", "not-before is still ahead, allowance included"),
+                			errs.String("not_before", time.Unix(claims.NotBefore, 0).UTC().Format(time.RFC3339)))
+              to: refuse
+          when: claims.NotBefore != 0 && time.Unix(claims.NotBefore, 0).After(now.Add(clockSkew))
+      - return: checkTokenWindow(issued, expires)
+        to: checkTokenWindow
+  - of: checkClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkClaims
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: checkTiming
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_claims"),
+                			errs.String("condition", "another identity provider entirely"),
+                			errs.String("issuer", claims.Issuer),
+                			errs.String("want_issuer", ActionsIssuer))
+              to: refuse
+          when: claims.Issuer != ActionsIssuer
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_claims"),
+                			errs.String("condition", "the caller named no audience, which would match a token carrying none"))
+              to: refuse
+          when: audience == ""
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_claims"),
+                			errs.String("condition", "minted for another service"),
+                			errs.String("want_audience", audience))
+              to: refuse
+          when: "!claims.Audience.contains(audience)"
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_claims"),
+                			errs.String("condition", "no subject, which is not the shape Actions produces"))
+              to: refuse
+          when: claims.Subject == ""
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "check_claims"),
+                			errs.String("condition", "no immutable owner id to match an entitlement against"))
+              to: refuse
+          when: claims.RepositoryOwnerID == ""
+      - return: checkTiming(claims, now)
+        to: checkTiming
+  - of: VerifyActionsToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: VerifyActionsToken
+        kind: self
+      - id: jwtSegments
+        kind: internal
+      - id: checkHeader
+        kind: internal
+      - id: usableRSAKey
+        kind: internal
+      - id: verifySignature
+        kind: internal
+      - id: strictUnmarshal
+        kind: internal
+      - id: checkClaims
+        kind: internal
+    steps:
+      - bind: signingInput, header, payload, signature, splitErr
+        eval: jwtSegments(raw)
+        to: jwtSegments
+      - opt:
+          do:
+            - return: nil, splitErr
+          when: splitErr != nil
+      - bind: kid, headerErr
+        eval: checkHeader(header)
+        to: checkHeader
+      - opt:
+          do:
+            - return: nil, headerErr
+          when: headerErr != nil
+      - bind: key, known
+        eval: keys[kid]
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnknownKey,
+                			errs.String("stage", "select_key"),
+                			errs.String("condition", "the key set publishes no entry with this kid"),
+                			errs.String("kid", kid))
+          when: "!known"
+      - opt:
+          do:
+            - return: nil, keyErr
+          init:
+            bind: keyErr
+            eval: usableRSAKey(key, kid)
+            to: usableRSAKey
+          when: keyErr != nil
+      - opt:
+          do:
+            - return: nil, sigErr
+          init:
+            bind: sigErr
+            eval: verifySignature(signingInput, signature, key)
+            to: verifySignature
+          when: sigErr != nil
+      - bind: decoded, decodeErr
+        eval: strictUnmarshal[ActionsClaimsValue](payload, "token payload")
+        to: strictUnmarshal
+      - opt:
+          do:
+            - return: nil, decodeErr
+          when: decodeErr != nil
+      - opt:
+          do:
+            - return: nil, claimErr
+          init:
+            bind: claimErr
+            eval: checkClaims(&decoded, audience, now)
+            to: checkClaims
+          when: claimErr != nil
+      - return: "&decoded, nil"
+  - of: jwkNumbers
+    participants:
+      - id: caller
+        kind: actor
+      - id: jwkNumbers
+        kind: self
+      - id: base64.RawURLEncoding.DecodeString
+        kind: value
+    steps:
+      - bind: modulus, modErr
+        eval: base64.RawURLEncoding.DecodeString(entry.Modulus)
+        to: base64.RawURLEncoding.DecodeString
+      - opt:
+          do:
+            - return: |-
+                nil, nil, classify(coreent.ErrCIUnverifiable, modErr,
+                			errs.String("stage", "decode_key"),
+                			errs.String("part", "modulus"),
+                			errs.String("kid", entry.KeyID))
+          when: modErr != nil
+      - bind: exponent, expErr
+        eval: base64.RawURLEncoding.DecodeString(entry.Exponent)
+        to: base64.RawURLEncoding.DecodeString
+      - opt:
+          do:
+            - return: |-
+                nil, nil, classify(coreent.ErrCIUnverifiable, expErr,
+                			errs.String("stage", "decode_key"),
+                			errs.String("part", "exponent"),
+                			errs.String("kid", entry.KeyID))
+          when: expErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_key"),
+                			errs.String("condition", "a value with a leading zero byte has two spellings"),
+                			errs.String("kid", entry.KeyID))
+          when: len(modulus) == 0 || modulus[0] == 0 || len(exponent) == 0 || exponent[0] == 0
+      - return: modulus, exponent, nil
+  - of: jwkExponent
+    participants:
+      - id: caller
+        kind: actor
+      - id: jwkExponent
+        kind: self
+      - id: new(big.Int).SetBytes
+        kind: value
+    steps:
+      - bind: value
+        eval: new(big.Int).SetBytes(raw)
+        to: new(big.Int).SetBytes
+      - opt:
+          do:
+            - return: |-
+                0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "decode_key"),
+                			errs.String("condition", "an exponent outside the range RSA allows"),
+                			errs.String("kid", kid))
+          when: |-
+            !value.IsInt64() || value.Int64() < minRSAExponent ||
+            		value.Int64() > maxRSAExponent || value.Int64()%evenDivisor == 0
+      - return: int(value.Int64()), nil
+  - of: signsRS256
+    steps:
+      - return: |-
+          entry.KeyType == "RSA" &&
+          		(entry.Use == "" || entry.Use == "sig") &&
+          		(entry.Algorithm == "" || entry.Algorithm == "RS256")
+  - of: rsaKeyFromJWK
+    participants:
+      - id: caller
+        kind: actor
+      - id: rsaKeyFromJWK
+        kind: self
+      - id: jwkNumbers
+        kind: internal
+      - id: jwkExponent
+        kind: internal
+      - id: built.N.BitLen
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "build_key"),
+                			errs.String("condition", "not published as an RS256 signing key"),
+                			errs.String("kid", entry.KeyID))
+          when: "!signsRS256(entry)"
+      - bind: modulus, exponentBytes, numbersErr
+        eval: jwkNumbers(entry)
+        to: jwkNumbers
+      - opt:
+          do:
+            - return: nil, numbersErr
+          when: numbersErr != nil
+      - bind: exponent, expErr
+        eval: jwkExponent(exponentBytes, entry.KeyID)
+        to: jwkExponent
+      - opt:
+          do:
+            - return: nil, expErr
+          when: expErr != nil
+      - bind: built
+        eval: "&rsa.PublicKey{N: new(big.Int).SetBytes(modulus), E: exponent}"
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "build_key"),
+                			errs.String("condition", "a modulus outside the sizes a real signing key has"),
+                			errs.String("kid", entry.KeyID),
+                			errs.Int("bits", bits))
+          init:
+            bind: bits
+            eval: built.N.BitLen()
+            to: built.N.BitLen
+          when: bits < minRSAModulusBits || bits > maxRSAModulusBits
+      - return: built, nil
+  - of: usableRSAKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: usableRSAKey
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnknownKey,
+                			errs.String("stage", "select_key"),
+                			errs.String("condition", "the selected entry yielded no usable key"),
+                			errs.String("kid", kid))
+              to: refuse
+          when: key == nil || key.N == nil
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "select_key"),
+                			errs.String("condition", "the selected key is outside the sizes a real signing key has"),
+                			errs.String("kid", kid),
+                			errs.Int("bits", key.N.BitLen()))
+              to: refuse
+          when: key.N.BitLen() < minRSAModulusBits
+      - return: nil
+  - of: (*ProductValue).Label
+    steps:
+      - opt:
+          do:
+            - return: "\"entitlement\""
+          when: p == nil || p.Name == ""
+      - return: p.Name
+  - of: (*ProductValue).PublishedOrigins
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: p == nil
+      - return: p.Origins
+  - of: (*ProductValue).cacheDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ProductValue).cacheDir
+        kind: self
+      - id: p.Label
+        kind: internal
+    steps:
+      - return: p.Label()
+        to: p.Label
+  - of: (*ProductValue).audience
+    steps:
+      - opt:
+          do:
+            - return: "\"kitsunium-sdk-entitlement\""
+          when: p == nil || p.CIAudience == ""
+      - return: p.CIAudience
+  - of: (*ProductValue).Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ProductValue).Validate
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: newOriginScan
+        kind: internal
+      - id: seen.admit
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("no product was supplied")
+              to: misconfigured
+          when: p == nil
+      - bind: seen
+        eval: newOriginScan(len(p.Origins))
+        to: newOriginScan
+      - loop:
+          do:
+            - eval: seen.admit(origin)
+              to: seen.admit
+          key: _
+          range: p.Origins
+          value: origin
+      - opt:
+          do:
+            - set: seen.problems
+              value: |-
+                append(seen.problems,
+                			misconfigured("origins span fewer than two distinct hosts, so one outage takes them all down"))
+          when: len(seen.hosts) < minRedundantHosts
+      - return: errors.Join(seen.problems...)
+        to: errors
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coreent.CodeProductInvalid,
+          		Reason:  "PRODUCT_INVALID",
+          		Public:  "the entitlement product is misconfigured",
+          		Private: "framework/internal/service/entitlement: " + detail,
+          	})
+        to: errs
+  - of: newOriginScan
+    steps:
+      - return: |-
+          &originScan{
+          		names: make(map[string]bool, n),
+          		urls:  make(map[string]string, n),
+          		hosts: make(map[string]bool, n),
+          	}
+  - of: (*originScan).admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*originScan).admit
+        kind: self
+      - id: hostOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: s.problems
+              value: append(s.problems, misconfigured("an origin has an empty Name or BundleURL"))
+            - return: ""
+          when: origin.Name == "" || origin.BundleURL == ""
+      - opt:
+          do:
+            - set: s.problems
+              value: "append(s.problems, misconfigured(\"origin name used twice: \"+origin.Name))"
+          when: s.names[origin.Name]
+      - set: s.names[origin.Name]
+        value: "true"
+      - opt:
+          do:
+            - set: s.problems
+              value: |-
+                append(s.problems,
+                			misconfigured("origins "+other+" and "+origin.Name+" publish at the same URL"))
+          init:
+            bind: other, dup
+            eval: s.urls[origin.BundleURL]
+          when: dup
+      - set: s.urls[origin.BundleURL]
+        value: origin.Name
+      - bind: host
+        eval: hostOf(origin.BundleURL)
+        to: hostOf
+      - opt:
+          do:
+            - set: s.problems
+              value: |-
+                append(s.problems,
+                			misconfigured("origin "+origin.Name+" names no fetchable http(s) host"))
+            - return: ""
+          when: host == unusableHost
+      - set: s.hosts[host]
+        value: "true"
+  - of: hostOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: hostOf
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parsed, err
+        eval: url.Parse(bundleURL)
+        to: url
+      - opt:
+          do:
+            - return: unusableHost
+          when: err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http")
+      - return: strings.ToLower(parsed.Hostname())
+        to: strings
+  - of: ParseRoster
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseRoster
+        kind: self
+      - id: authenticateRoster
+        kind: internal
+    steps:
+      - bind: authenticated, authErr
+        eval: authenticateRoster(raw, sig, vendor)
+        to: authenticateRoster
+      - opt:
+          do:
+            - return: nil, authErr
+          when: authErr != nil
+      - bind: decoded
+        eval: "*authenticated"
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterStale,
+                			errs.String("condition", "window wider than the agreed lifetime"),
+                			errs.String("lifetime", coreent.RosterLifetime.String()),
+                			errs.String("window", decoded.ExpiresAt.Sub(decoded.IssuedAt).String()))
+          when: decoded.ExpiresAt.Sub(decoded.IssuedAt) > coreent.RosterLifetime
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterStale,
+                			errs.String("condition", "issued in the future"),
+                			errs.String("issued_at", decoded.IssuedAt.UTC().Format(time.RFC3339)))
+          when: now.Before(decoded.IssuedAt)
+      - opt:
+          do:
+            - return: nil, coreent.ErrRosterStale
+          when: now.After(decoded.ExpiresAt)
+      - return: "&decoded, nil"
+  - of: authenticateRoster
+    participants:
+      - id: caller
+        kind: actor
+      - id: authenticateRoster
+        kind: self
+      - id: checkNoDuplicateNames
+        kind: internal
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnsigned,
+                			errs.String("condition", "the linked vendor key is not an ed25519 public key"),
+                			errs.Int("key_bytes", len(vendor)))
+          when: len(vendor) != ed25519.PublicKeySize
+      - opt:
+          do:
+            - return: nil, coreent.ErrRosterUnsigned
+          when: "!verifiedBy(vendor, raw, sig)"
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "decode_roster_payload"),
+                			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+                			errs.String("member", member))
+          init:
+            bind: member, duplicate
+            eval: checkNoDuplicateNames(raw)
+            to: checkNoDuplicateNames
+          when: duplicate
+      - var:
+          name: decoded
+          type: coreent.RosterValue
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrRosterUnreachable, unmarshalErr,
+                			errs.String("stage", "decode_roster_payload"))
+          init:
+            bind: unmarshalErr
+            eval: json.Unmarshal(raw, &decoded)
+            to: json
+          when: unmarshalErr != nil
+      - return: "&decoded, nil"
+  - of: QueryRoughtime
+    participants:
+      - id: caller
+        kind: actor
+      - id: QueryRoughtime
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: roughtimeExchange
+        kind: internal
+      - id: verifyRoughtimeResponse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                time.Time{}, 0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_query"),
+                			errs.String("condition", "the pinned long-term key is not an ed25519 public key"),
+                			errs.String("server", server.Name))
+          when: len(server.PublicKey) != ed25519.PublicKeySize
+      - var:
+          name: nonce
+          type: "[roughtimeNonceSize]byte"
+      - opt:
+          do:
+            - return: |-
+                time.Time{}, 0, classify(coreent.ErrCIUnverifiable, randErr,
+                			errs.String("stage", "roughtime_nonce"),
+                			errs.String("server", server.Name))
+          init:
+            bind: _, randErr
+            eval: rand.Read(nonce[:])
+            to: rand
+          when: randErr != nil
+      - bind: raw, exchangeErr
+        eval: roughtimeExchange(server.Address, buildRoughtimeRequest(nonce[:]))
+        to: roughtimeExchange
+      - opt:
+          do:
+            - return: time.Time{}, 0, exchangeErr
+          when: exchangeErr != nil
+      - return: verifyRoughtimeResponse(raw, nonce[:], server.PublicKey)
+        to: verifyRoughtimeResponse
+  - of: buildRoughtimeRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildRoughtimeRequest
+        kind: self
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+      - id: bytes
+        kind: stdlib
+      - id: encodeRoughtimeMessage
+        kind: internal
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - var:
+          name: version
+          type: "[roughtimeTagSize]byte"
+      - eval: binary.LittleEndian.PutUint32(version[:], roughtimeVersion)
+        to: binary.LittleEndian.PutUint32
+      - bind: fields
+        eval: |-
+          []roughtimeField{
+          		{tag: roughtimeTag("VER"), value: version[:]},
+          		{tag: roughtimeTag("NONC"), value: nonce},
+          		{tag: roughtimeTag("ZZZZ"), value: nil},
+          	}
+      - bind: overhead
+        eval: len(roughtimeFrameMagic) + roughtimeTagSize + len(encodeRoughtimeMessage(fields))
+      - set: fields[2].value
+        to: bytes
+        value: bytes.Repeat([]byte{0}, max(roughtimeMinRequest-overhead, 0))
+      - bind: message
+        eval: encodeRoughtimeMessage(fields)
+        to: encodeRoughtimeMessage
+      - bind: packet
+        eval: make([]byte, 0, len(roughtimeFrameMagic)+roughtimeTagSize+len(message))
+      - set: packet
+        value: append(packet, roughtimeFrameMagic...)
+      - set: packet
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(packet, uint32(len(message)))
+      - return: append(packet, message...)
+  - of: roughtimeExchange
+    participants:
+      - id: caller
+        kind: actor
+      - id: roughtimeExchange
+        kind: self
+      - id: net
+        kind: stdlib
+      - id: conn.SetDeadline
+        kind: value
+      - id: conn.Write
+        kind: value
+      - id: conn.Read
+        kind: value
+    steps:
+      - bind: conn, dialErr
+        eval: net.Dial("udp", address)
+        to: net
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrCIUnverifiable, dialErr,
+                			errs.String("stage", "roughtime_dial"),
+                			errs.String("address", address))
+          when: dialErr != nil
+      - defer: |-
+          func() {
+          		//: Best-effort: a socket we cannot release is worth a line, never a
+          		//: refused licence.
+          		if closeErr := conn.Close(); closeErr != nil {
+          			log.Printf("close %s: %v", address, closeErr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrCIUnverifiable, deadlineErr,
+                			errs.String("stage", "roughtime_deadline"),
+                			errs.String("address", address))
+          init:
+            bind: deadlineErr
+            eval: conn.SetDeadline(time.Now().Add(roughtimeTimeout))
+            to: conn.SetDeadline
+          when: deadlineErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrCIUnverifiable, writeErr,
+                			errs.String("stage", "roughtime_request"),
+                			errs.String("address", address))
+          init:
+            bind: _, writeErr
+            eval: conn.Write(request)
+            to: conn.Write
+          when: writeErr != nil
+      - bind: buffer
+        eval: make([]byte, roughtimeMaxResponse)
+      - bind: read, readErr
+        eval: conn.Read(buffer)
+        to: conn.Read
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreent.ErrCIUnverifiable, readErr,
+                			errs.String("stage", "roughtime_response"),
+                			errs.String("address", address))
+          when: readErr != nil
+      - return: buffer[:read], nil
+  - of: (*Service).checkNetworkTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).checkNetworkTime
+        kind: self
+      - id: QueryRoughtime
+        kind: internal
+      - id: now.Sub(midpoint).Abs
+        kind: value
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(s.timeServers) == 0
+      - loop:
+          do:
+            - bind: midpoint, radius, queryErr
+              eval: QueryRoughtime(server)
+              to: QueryRoughtime
+            - opt:
+                do:
+                  - continue: true
+                when: queryErr != nil
+            - opt:
+                do:
+                  - return: |-
+                      refuse(coreent.ErrClockRegressed,
+                      				errs.String("condition", "the local clock disagrees with signed network time"),
+                      				errs.String("clock", now.UTC().Format(time.RFC3339)),
+                      				errs.String("attested", midpoint.UTC().Format(time.RFC3339)),
+                      				errs.String("server", server.Name),
+                      				errs.String("skew", skew.String()),
+                      				errs.String("tolerance", (maxClockSkew+radius).String()))
+                    to: refuse
+                init:
+                  bind: skew
+                  eval: now.Sub(midpoint).Abs()
+                  to: now.Sub(midpoint).Abs
+                when: skew > maxClockSkew+radius
+            - return: nil
+          key: _
+          range: s.timeServers
+          value: server
+      - return: nil
+  - of: verifyRoughtimeResponse
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifyRoughtimeResponse
+        kind: self
+      - id: unframeRoughtime
+        kind: internal
+      - id: decodeRoughtimeMessage
+        kind: internal
+      - id: verifyRoughtimeCert
+        kind: internal
+      - id: checkRoughtimeSignature
+        kind: internal
+      - id: readRoughtimeSrep
+        kind: internal
+      - id: checkRoughtimeBinding
+        kind: internal
+      - id: time.UnixMicro(int64(stated.midpoint)).UTC
+        kind: value
+    steps:
+      - bind: message, frameErr
+        eval: unframeRoughtime(packet)
+        to: unframeRoughtime
+      - opt:
+          do:
+            - return: time.Time{}, 0, frameErr
+          when: frameErr != nil
+      - bind: fields, decodeErr
+        eval: decodeRoughtimeMessage(message)
+        to: decodeRoughtimeMessage
+      - opt:
+          do:
+            - return: time.Time{}, 0, decodeErr
+          when: decodeErr != nil
+      - bind: delegated, deleErr
+        eval: verifyRoughtimeCert(fields[roughtimeTag("CERT")], longTerm)
+        to: verifyRoughtimeCert
+      - opt:
+          do:
+            - return: time.Time{}, 0, deleErr
+          when: deleErr != nil
+      - bind: srep
+        eval: fields[roughtimeTag("SREP")]
+      - opt:
+          do:
+            - return: time.Time{}, 0, annotate(sigErr, errs.String("document", "roughtime response"))
+          init:
+            bind: sigErr
+            eval: checkRoughtimeSignature(delegated.key, roughtimeResponseContext, srep, fields[roughtimeTag("SIG")])
+            to: checkRoughtimeSignature
+          when: sigErr != nil
+      - bind: stated, statedErr
+        eval: readRoughtimeSrep(srep)
+        to: readRoughtimeSrep
+      - opt:
+          do:
+            - return: time.Time{}, 0, statedErr
+          when: statedErr != nil
+      - opt:
+          do:
+            - return: time.Time{}, 0, boundErr
+          init:
+            bind: boundErr
+            eval: checkRoughtimeBinding(stated, delegated, fields, nonce)
+            to: checkRoughtimeBinding
+          when: boundErr != nil
+      - return: time.UnixMicro(int64(stated.midpoint)).UTC(), time.Duration(stated.radius) * time.Microsecond, nil
+        to: time.UnixMicro(int64(stated.midpoint)).UTC
+  - of: checkRoughtimeBinding
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkRoughtimeBinding
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: verifyRoughtimeMerkle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_binding"),
+                			errs.String("condition", "the midpoint falls outside the window its delegation covers"))
+              to: refuse
+          when: stated.midpoint < delegated.notBefore || stated.midpoint > delegated.notAfter
+      - return: verifyRoughtimeMerkle(fields, nonce, stated.root)
+        to: verifyRoughtimeMerkle
+  - of: unframeRoughtime
+    participants:
+      - id: caller
+        kind: actor
+      - id: unframeRoughtime
+        kind: self
+      - id: roughtimeUint32
+        kind: internal
+    steps:
+      - bind: header
+        eval: len(roughtimeFrameMagic) + roughtimeTagSize
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_unframe"),
+                			errs.String("condition", "too short to carry a frame, or the wrong magic"))
+          when: len(packet) < header || string(packet[:len(roughtimeFrameMagic)]) != roughtimeFrameMagic
+      - bind: stated, statedErr
+        eval: roughtimeUint32(packet[len(roughtimeFrameMagic):], "frame length")
+        to: roughtimeUint32
+      - opt:
+          do:
+            - return: nil, statedErr
+          when: statedErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_unframe"),
+                			errs.String("condition", "the frame claims more bytes than arrived"),
+                			errs.Int("claimed_bytes", int(stated)),
+                			errs.Int("got_bytes", len(packet)-header))
+          when: int(stated) > len(packet)-header
+      - return: "packet[header : header+int(stated)], nil"
+  - of: verifyRoughtimeCert
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifyRoughtimeCert
+        kind: self
+      - id: decodeRoughtimeMessage
+        kind: internal
+      - id: checkRoughtimeSignature
+        kind: internal
+      - id: roughtimeUint64
+        kind: internal
+    steps:
+      - bind: fields, decodeErr
+        eval: decodeRoughtimeMessage(cert)
+        to: decodeRoughtimeMessage
+      - opt:
+          do:
+            - return: roughtimeDelegation{}, annotate(decodeErr, errs.String("document", "roughtime certificate"))
+          when: decodeErr != nil
+      - bind: dele
+        eval: fields[roughtimeTag("DELE")]
+      - opt:
+          do:
+            - return: roughtimeDelegation{}, annotate(sigErr, errs.String("document", "roughtime delegation"))
+          init:
+            bind: sigErr
+            eval: checkRoughtimeSignature(longTerm, roughtimeDelegationContext, dele, fields[roughtimeTag("SIG")])
+            to: checkRoughtimeSignature
+          when: sigErr != nil
+      - bind: inner, innerErr
+        eval: decodeRoughtimeMessage(dele)
+        to: decodeRoughtimeMessage
+      - opt:
+          do:
+            - return: roughtimeDelegation{}, annotate(innerErr, errs.String("document", "roughtime delegation body"))
+          when: innerErr != nil
+      - bind: key
+        eval: inner[roughtimeTag("PUBK")]
+      - opt:
+          do:
+            - return: |-
+                roughtimeDelegation{}, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_delegation"),
+                			errs.String("condition", "the delegated key is not an ed25519 public key"),
+                			errs.Int("got_bytes", len(key)))
+          when: len(key) != ed25519.PublicKeySize
+      - bind: notBefore, beforeErr
+        eval: roughtimeUint64(inner[roughtimeTag("MINT")], "MINT")
+        to: roughtimeUint64
+      - bind: notAfter, afterErr
+        eval: roughtimeUint64(inner[roughtimeTag("MAXT")], "MAXT")
+        to: roughtimeUint64
+      - opt:
+          do:
+            - return: |-
+                roughtimeDelegation{}, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_delegation"),
+                			errs.String("condition", "MINT or MAXT could not be read, so the window bounds nothing"))
+          when: beforeErr != nil || afterErr != nil
+      - return: "roughtimeDelegation{key: ed25519.PublicKey(key), notBefore: notBefore, notAfter: notAfter}, nil"
+  - of: checkRoughtimeSignature
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkRoughtimeSignature
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_signature"),
+                			errs.String("condition", "not an ed25519 signature"),
+                			errs.Int("got_bytes", len(signature)),
+                			errs.Int("want_bytes", ed25519.SignatureSize))
+              to: refuse
+          when: len(signature) != ed25519.SignatureSize
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_signature"),
+                			errs.String("condition", "the context-prefixed signature does not verify"),
+                			errs.String("context", context))
+              to: refuse
+          when: "!verifiedBy(key, append([]byte(context), signed...), signature)"
+      - return: nil
+  - of: readRoughtimeSrep
+    participants:
+      - id: caller
+        kind: actor
+      - id: readRoughtimeSrep
+        kind: self
+      - id: decodeRoughtimeMessage
+        kind: internal
+      - id: roughtimeUint64
+        kind: internal
+      - id: roughtimeUint32
+        kind: internal
+    steps:
+      - bind: fields, decodeErr
+        eval: decodeRoughtimeMessage(srep)
+        to: decodeRoughtimeMessage
+      - opt:
+          do:
+            - return: roughtimeStatement{}, annotate(decodeErr, errs.String("document", "roughtime signed response"))
+          when: decodeErr != nil
+      - bind: midpoint, midErr
+        eval: roughtimeUint64(fields[roughtimeTag("MIDP")], "MIDP")
+        to: roughtimeUint64
+      - opt:
+          do:
+            - return: roughtimeStatement{}, midErr
+          when: midErr != nil
+      - bind: radius, radiusErr
+        eval: roughtimeUint32(fields[roughtimeTag("RADI")], "RADI")
+        to: roughtimeUint32
+      - opt:
+          do:
+            - return: roughtimeStatement{}, radiusErr
+          when: radiusErr != nil
+      - bind: root
+        eval: fields[roughtimeTag("ROOT")]
+      - opt:
+          do:
+            - return: |-
+                roughtimeStatement{}, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_srep"),
+                			errs.String("condition", "a root of the wrong width commits to nothing checkable"),
+                			errs.Int("got_bytes", len(root)),
+                			errs.Int("want_bytes", roughtimeHashSize))
+          when: len(root) != roughtimeHashSize
+      - return: "roughtimeStatement{midpoint: midpoint, radius: radius, root: root}, nil"
+  - of: verifyRoughtimeMerkle
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifyRoughtimeMerkle
+        kind: self
+      - id: roughtimeUint32
+        kind: internal
+      - id: refuse
+        kind: internal
+      - id: hashRoughtimeLeaf
+        kind: internal
+      - id: hashRoughtimeNode
+        kind: internal
+    steps:
+      - bind: index, indexErr
+        eval: roughtimeUint32(fields[roughtimeTag("INDX")], "INDX")
+        to: roughtimeUint32
+      - opt:
+          do:
+            - return: indexErr
+          when: indexErr != nil
+      - bind: path
+        eval: fields[roughtimeTag("PATH")]
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_merkle"),
+                			errs.String("condition", "not a whole number of nodes, or deeper than any real batch"),
+                			errs.Int("got_bytes", len(path)))
+              to: refuse
+          when: len(path)%roughtimeHashSize != 0 || len(path)/roughtimeHashSize > roughtimeMaxPathDepth
+      - bind: hash
+        eval: hashRoughtimeLeaf(nonce)
+        to: hashRoughtimeLeaf
+      - loop:
+          cond: offset < len(path)
+          do:
+            - bind: sibling
+              eval: "path[offset : offset+roughtimeHashSize]"
+            - alt:
+                - do:
+                    - set: hash
+                      to: hashRoughtimeNode
+                      value: hashRoughtimeNode(sibling, hash)
+                  when: index&1 == 1
+                - do:
+                    - set: hash
+                      to: hashRoughtimeNode
+                      value: hashRoughtimeNode(hash, sibling)
+                  else: true
+            - op: ">>="
+              set: index
+              value: "1"
+          init: offset := 0
+          post: offset += roughtimeHashSize
+      - opt:
+          do:
+            - return: |-
+                refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_merkle"),
+                			errs.String("condition", "this nonce is not in the tree the response committed to"))
+              to: refuse
+          when: "!bytes.Equal(hash, root)"
+      - return: nil
+  - of: hashRoughtimeLeaf
+    participants:
+      - id: caller
+        kind: actor
+      - id: hashRoughtimeLeaf
+        kind: self
+      - id: sha512Prefix
+        kind: internal
+    steps:
+      - return: sha512Prefix(append([]byte{roughtimeLeafPrefix}, nonce...), roughtimeHashSize)
+        to: sha512Prefix
+  - of: hashRoughtimeNode
+    participants:
+      - id: caller
+        kind: actor
+      - id: hashRoughtimeNode
+        kind: self
+      - id: sha512Prefix
+        kind: internal
+    steps:
+      - bind: joined
+        eval: make([]byte, 0, 1+len(left)+len(right))
+      - set: joined
+        value: append(append(append(joined, roughtimeNodePrefix), left...), right...)
+      - return: sha512Prefix(joined, roughtimeHashSize)
+        to: sha512Prefix
+  - of: roughtimeTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: roughtimeTag
+        kind: self
+      - id: binary.LittleEndian.Uint32
+        kind: value
+    steps:
+      - var:
+          name: raw
+          type: "[roughtimeTagSize]byte"
+      - eval: copy(raw[:], name)
+      - return: binary.LittleEndian.Uint32(raw[:])
+        to: binary.LittleEndian.Uint32
+  - of: decodeRoughtimeMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRoughtimeMessage
+        kind: self
+      - id: roughtimeHeaderSize
+        kind: internal
+      - id: roughtimeValueBounds
+        kind: internal
+      - id: binary.LittleEndian.Uint32
+        kind: value
+    steps:
+      - bind: count, header, countErr
+        eval: roughtimeHeaderSize(raw)
+        to: roughtimeHeaderSize
+      - opt:
+          do:
+            - return: nil, countErr
+          when: countErr != nil
+      - bind: values
+        eval: raw[header:]
+      - bind: decoded
+        eval: make(map[uint32][]byte, count)
+      - loop:
+          do:
+            - bind: start, end, boundsErr
+              eval: roughtimeValueBounds(raw, count, index, len(values))
+              to: roughtimeValueBounds
+            - opt:
+                do:
+                  - return: nil, boundsErr
+                when: boundsErr != nil
+            - bind: tagAt
+              eval: roughtimeTagSize*count - roughtimeTagSize + roughtimeTagSize*index
+            - bind: tag
+              eval: binary.LittleEndian.Uint32(raw[roughtimeTagSize+tagAt:])
+              to: binary.LittleEndian.Uint32
+            - set: decoded[tag]
+              value: values[start:end]
+          key: index
+          range: count
+      - return: decoded, nil
+  - of: roughtimeHeaderSize
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, 0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_decode"),
+                			errs.String("condition", "shorter than the tag count it must begin with"))
+          when: len(raw) < roughtimeTagSize
+      - set: count
+        value: int(binary.LittleEndian.Uint32(raw[:roughtimeTagSize]))
+      - opt:
+          do:
+            - return: |-
+                0, 0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_decode"),
+                			errs.String("condition", "a tag count no real message carries"),
+                			errs.Int("declared_tags", count),
+                			errs.Int("limit_tags", roughtimeMaxTags))
+          when: count <= 0 || count > roughtimeMaxTags
+      - set: header
+        value: roughtimeTagSize + roughtimeTagSize*(count-1) + roughtimeTagSize*count
+      - opt:
+          do:
+            - return: |-
+                0, 0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_decode"),
+                			errs.String("condition", "the declared header does not fit in what arrived"),
+                			errs.Int("want_bytes", header),
+                			errs.Int("got_bytes", len(raw)))
+          when: len(raw) < header
+      - return: count, header, nil
+  - of: roughtimeValueBounds
+    steps:
+      - set: start
+        value: "0"
+      - opt:
+          do:
+            - set: start
+              value: int(binary.LittleEndian.Uint32(raw[roughtimeTagSize*index:]))
+          when: index > 0
+      - set: end
+        value: valuesLen
+      - opt:
+          do:
+            - set: end
+              value: int(binary.LittleEndian.Uint32(raw[roughtimeTagSize*(index+1):]))
+          when: index+1 < count
+      - opt:
+          do:
+            - return: |-
+                0, 0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_decode"),
+                			errs.String("condition", "an offset pair that does not fit the value area"),
+                			errs.Int("start", start),
+                			errs.Int("end", end),
+                			errs.Int("values_bytes", valuesLen))
+          when: start < 0 || end < start || end > valuesLen
+      - return: start, end, nil
+  - of: encodeRoughtimeMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeRoughtimeMessage
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - bind: count
+        eval: len(fields)
+      - bind: out
+        eval: binary.LittleEndian.AppendUint32(nil, uint32(count))
+        to: binary.LittleEndian.AppendUint32
+      - bind: offset
+        eval: uint32(0)
+      - loop:
+          do:
+            - op: +=
+              set: offset
+              value: uint32(len(field.value))
+            - set: out
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(out, offset)
+          key: _
+          range: fields[:max(count-1, 0)]
+          value: field
+      - loop:
+          do:
+            - set: out
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(out, field.tag)
+          key: _
+          range: fields
+          value: field
+      - loop:
+          do:
+            - set: out
+              value: append(out, field.value...)
+          key: _
+          range: fields
+          value: field
+      - return: out
+  - of: roughtimeUint64
+    participants:
+      - id: caller
+        kind: actor
+      - id: roughtimeUint64
+        kind: self
+      - id: binary.LittleEndian.Uint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_decode"),
+                			errs.String("condition", "a field too short to hold the number it claims to be"),
+                			errs.String("field", what),
+                			errs.Int("got_bytes", len(value)),
+                			errs.Int("want_bytes", 8))
+          when: len(value) < 8
+      - return: binary.LittleEndian.Uint64(value[:8]), nil
+        to: binary.LittleEndian.Uint64
+  - of: roughtimeUint32
+    participants:
+      - id: caller
+        kind: actor
+      - id: roughtimeUint32
+        kind: self
+      - id: binary.LittleEndian.Uint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, refuse(coreent.ErrCIUnverifiable,
+                			errs.String("stage", "roughtime_decode"),
+                			errs.String("condition", "a field too short to hold the number it claims to be"),
+                			errs.String("field", what),
+                			errs.Int("got_bytes", len(value)),
+                			errs.Int("want_bytes", roughtimeTagSize))
+          when: len(value) < roughtimeTagSize
+      - return: binary.LittleEndian.Uint32(value[:roughtimeTagSize]), nil
+        to: binary.LittleEndian.Uint32
+  - of: (*Service).WithTimeServers
+    steps:
+      - set: s.timeServers
+        value: servers
+      - return: s
+  - of: (*Service).WithBearerFetch
+    steps:
+      - set: s.bearerFetch
+        value: fetch
+      - return: s
+  - of: (*Service).WithOrigins
+    steps:
+      - set: s.origins
+        value: origins
+      - return: s
+  - of: (*Service).WithVersion
+    steps:
+      - set: s.version
+        value: version
+      - return: s
+  - of: (*Service).WithAnchors
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).WithAnchors
+        kind: self
+      - id: anchorList
+        kind: internal
+    steps:
+      - set: s.anchors
+        to: anchorList
+        value: anchorList(anchors)
+      - return: s
+  - of: NewService
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewService
+        kind: self
+      - id: NewServiceWithAnchors
+        kind: internal
+    steps:
+      - return: NewServiceWithAnchors(identity, [][]byte{vendor}, product)
+        to: NewServiceWithAnchors
+  - of: NewServiceWithAnchors
+    steps:
+      - return: |-
+          &Service{
+          		// A net/http client over http.DefaultTransport, and deliberately not
+          		// pkg/v1/net/client, which ADR 0158 §2 names: the guarded transport sets
+          		// no Proxy, so a roster fetch through it ignores HTTP(S)_PROXY and
+          		// NO_PROXY — measured, it dialled the origin directly where this one
+          		// went through the proxy — and a licence check that cannot leave a
+          		// network through its proxy refuses every customer behind one.
+          		client:      &http.Client{Timeout: fetchTimeout},
+          		identity:    identity,
+          		anchors:     anchorList(anchors),
+          		product:     product,
+          		origins:     product.PublishedOrigins(),
+          		bearerFetch: DefaultBearerFetch,
+          		cacheDir:    product.DefaultCacheDir(),
+          		timeServers: RoughtimeServers,
+          	}
+  - of: NewServiceWithGetter
+    steps:
+      - return: "&Service{client: client, identity: identity, anchors: anchorList([][]byte{vendor}), product: product, origins: product.PublishedOrigins(), bearerFetch: DefaultBearerFetch}"
+  - of: NewServiceWithOrigins
+    steps:
+      - return: "&Service{client: client, identity: identity, anchors: anchorList([][]byte{vendor}), origins: origins, bearerFetch: DefaultBearerFetch}"
+  - of: (*Service).Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).Verify
+        kind: self
+      - id: s.identity.Discover
+        kind: value
+      - id: s.checkClockAndTime
+        kind: internal
+      - id: s.currentRoster
+        kind: internal
+      - id: s.authorise
+        kind: internal
+    steps:
+      - bind: subject, discoverErr
+        eval: s.identity.Discover()
+        to: s.identity.Discover
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, discoverErr
+          when: discoverErr != nil && !InCI()
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, clockErr
+          init:
+            bind: clockErr
+            eval: s.checkClockAndTime(now)
+            to: s.checkClockAndTime
+          when: clockErr != nil
+      - bind: roster, offline, rosterErr
+        eval: s.currentRoster(now)
+        to: s.currentRoster
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, rosterErr
+          when: rosterErr != nil
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, UpdateRefusal(s.version, roster.RequiredVersion)
+          when: RequiresUpdate(s.version, roster.RequiredVersion)
+      - bind: authorised, authErr
+        eval: s.authorise(roster, subject, discoverErr, now)
+        to: s.authorise
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, authErr
+          when: authErr != nil
+      - set: authorised.Offline
+        value: offline
+      - return: authorised, nil
+  - of: (*Service).authorise
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).authorise
+        kind: self
+      - id: s.ciSeat
+        kind: internal
+      - id: s.matchSubject
+        kind: internal
+    steps:
+      - bind: ciGrant, ciErr
+        eval: s.ciSeat(roster, now)
+        to: s.ciSeat
+      - opt:
+          do:
+            - return: ciGrant, nil
+          when: ciErr == nil
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, ciErr
+          when: ciRefusalIsFinal(roster)
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, ciContext(discoverErr, ciErr)
+          when: discoverErr != nil
+      - bind: matched, matchErr
+        eval: s.matchSubject(roster, subject, now)
+        to: s.matchSubject
+      - opt:
+          do:
+            - return: coreent.GrantValue{}, ciContext(matchErr, ciErr)
+          when: matchErr != nil
+      - return: |-
+          coreent.GrantValue{
+          		Subject:    subject,
+          		VerifiedAt: now,
+          		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, matched.ExpiresAt),
+          	}, nil
+  - of: (*Service).currentRoster
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).currentRoster
+        kind: self
+      - id: s.rosterFrom
+        kind: internal
+      - id: annotate
+        kind: internal
+      - id: s.cachedRoster
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, false, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("condition", "no publication point was configured, so nothing was ever fetched"))
+          when: len(s.origins) == 0
+      - var:
+          name: lastErr
+          type: error
+      - loop:
+          do:
+            - bind: candidate, originErr
+              eval: s.rosterFrom(origin, now)
+              to: s.rosterFrom
+            - opt:
+                do:
+                  - return: candidate, false, nil
+                when: originErr == nil
+            - set: lastErr
+              to: annotate
+              value: annotate(originErr, errs.String("origin", origin.Name))
+          key: _
+          range: s.origins
+          value: origin
+      - opt:
+          do:
+            - return: cached, true, nil
+          init:
+            bind: cached, cacheErr
+            eval: s.cachedRoster(now)
+            to: s.cachedRoster
+          when: cacheErr == nil
+      - return: nil, false, lastErr
+  - of: (*Service).rosterFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).rosterFrom
+        kind: self
+      - id: s.fetch
+        kind: internal
+      - id: parseBundleAnyAnchor
+        kind: internal
+      - id: s.rememberRoster
+        kind: internal
+    steps:
+      - bind: raw, fetchErr
+        eval: s.fetch(origin.BundleURL)
+        to: s.fetch
+      - opt:
+          do:
+            - return: nil, fetchErr
+          when: fetchErr != nil
+      - bind: parsed, parseErr
+        eval: parseBundleAnyAnchor(raw, s.anchors, now)
+        to: parseBundleAnyAnchor
+      - opt:
+          do:
+            - return: nil, parseErr
+          when: parseErr != nil
+      - opt:
+          do:
+            - return: nil, markErr
+          init:
+            bind: markErr
+            eval: s.rememberRoster(raw)
+            to: s.rememberRoster
+          when: markErr != nil
+      - return: parsed, nil
+  - of: (*Service).matchSubject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).matchSubject
+        kind: self
+      - id: roster.SubjectFor
+        kind: value
+      - id: s.identity.Fingerprint
+        kind: value
+      - id: s.prove
+        kind: internal
+    steps:
+      - bind: want, lookupErr
+        eval: roster.SubjectFor(subject)
+        to: roster.SubjectFor
+      - opt:
+          do:
+            - return: coreent.SubjectValue{}, lookupErr
+          when: lookupErr != nil
+      - opt:
+          do:
+            - return: |-
+                coreent.SubjectValue{}, refuse(coreent.ErrLicenseExpired,
+                			errs.String("subject", subject),
+                			errs.String("expired_at", want.ExpiresAt.UTC().Format(time.RFC3339)))
+          when: "!want.ExpiresAt.IsZero() && now.After(want.ExpiresAt)"
+      - bind: got, printErr
+        eval: s.identity.Fingerprint(subject)
+        to: s.identity.Fingerprint
+      - opt:
+          do:
+            - return: coreent.SubjectValue{}, printErr
+          when: printErr != nil
+      - opt:
+          do:
+            - return: |-
+                coreent.SubjectValue{}, refuse(coreent.ErrKeyMismatch,
+                			errs.String("subject", subject),
+                			errs.String("condition", "the local fingerprint differs from the one the roster publishes"))
+          when: got != want.Fingerprint
+      - opt:
+          do:
+            - return: coreent.SubjectValue{}, proveErr
+          init:
+            bind: proveErr
+            eval: s.prove(subject, want.Fingerprint)
+            to: s.prove
+          when: proveErr != nil
+      - return: want, nil
+  - of: (*Service).prove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).prove
+        kind: self
+      - id: bound.ProvePossessionFor
+        kind: value
+      - id: s.identity.ProvePossession
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: bound.ProvePossessionFor(subject, authorised)
+              to: bound.ProvePossessionFor
+          init:
+            bind: bound, ok
+            eval: s.identity.(coreent.BoundProver)
+          when: ok
+      - return: s.identity.ProvePossession(subject)
+        to: s.identity.ProvePossession
+  - of: regularFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: regularFile
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: info, statErr
+        eval: os.Stat(path)
+        to: os
+      - return: statErr == nil && info.Mode().IsRegular()
+  - of: closeBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeBestEffort
+        kind: self
+      - id: c.Close
+        kind: value
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: "log.Printf(\"close %s: %v\", what, cerr)"
+              to: log
+          init:
+            bind: cerr
+            eval: c.Close()
+            to: c.Close
+          when: cerr != nil
+  - of: (*Service).fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).fetch
+        kind: self
+      - id: s.client.Get
+        kind: internal
+      - id: closeBestEffort
+        kind: internal
+      - id: readBounded
+        kind: internal
+    steps:
+      - bind: resp, getErr
+        eval: s.client.Get(url)
+        to: s.client.Get
+      - opt:
+          do:
+            - return: |-
+                nil, classifyForeign(coreent.ErrRosterUnreachable, getErr,
+                			errs.String("stage", "fetch"),
+                			errs.String("url", url))
+          when: getErr != nil
+      - defer: closeBestEffort(resp.Body, url)
+        to: closeBestEffort
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "fetch"),
+                			errs.String("url", url),
+                			errs.Int("status", resp.StatusCode))
+          when: resp.StatusCode != http.StatusOK
+      - return: readBounded(resp.Body, url)
+        to: readBounded
+  - of: readBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: readBounded
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: data, readErr
+        eval: io.ReadAll(io.LimitReader(r, maxArtefactBytes+1))
+        to: io
+      - opt:
+          do:
+            - return: |-
+                nil, classifyForeign(coreent.ErrRosterUnreachable, readErr,
+                			errs.String("stage", "read"),
+                			errs.String("source", what))
+          when: readErr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreent.ErrRosterUnreachable,
+                			errs.String("stage", "read"),
+                			errs.String("source", what),
+                			errs.String("condition", "artefact at or past the cap"),
+                			errs.Int64("limit_bytes", maxArtefactBytes),
+                			errs.Int("got_bytes", len(data)))
+          when: int64(len(data)) > maxArtefactBytes
+      - return: data, nil
+  - of: RequiresUpdate
+    participants:
+      - id: caller
+        kind: actor
+      - id: RequiresUpdate
+        kind: self
+      - id: normaliseTag
+        kind: internal
+    steps:
+      - bind: floorTag
+        eval: normaliseTag(floor)
+        to: normaliseTag
+      - opt:
+          do:
+            - return: "false"
+          when: "!semver.IsValid(floorTag)"
+      - bind: currentTag
+        eval: normaliseTag(current)
+        to: normaliseTag
+      - opt:
+          do:
+            - return: "true"
+          when: "!semver.IsValid(currentTag)"
+      - return: semver.Compare(currentTag, floorTag) < 0
+  - of: normaliseTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: normaliseTag
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: trimmed
+        eval: strings.TrimSpace(version)
+        to: strings
+      - opt:
+          do:
+            - return: "\"v\" + trimmed"
+          when: trimmed != "" && !strings.HasPrefix(trimmed, "v")
+      - return: trimmed
+  - of: (*UpdateRequiredError).Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UpdateRequiredError).Error
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: fmt.Sprintf("this build is %s, the published minimum is %s", e.Current, e.Required)
+        to: fmt
+  - of: (*UpdateRequiredError).Unwrap
+    steps:
+      - return: coreent.ErrUpdateRequired
+  - of: UpdateRefusal
+    steps:
+      - return: "&UpdateRequiredError{Current: current, Required: floor}"
+  - of: refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuse
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+        to: errs
+  - of: classify
+    participants:
+      - id: caller
+        kind: actor
+      - id: classify
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(cause, errs.WrapParams{}, fields...)
+              to: errs
+          when: sentinel == nil
+      - bind: code, _
+        eval: errs.CodeOf(sentinel)
+        to: errs
+      - bind: reason, _
+        eval: errs.ReasonOf(sentinel)
+        to: errs
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     code,
+          		Reason:   reason,
+          		Public:   errs.PublicOf(sentinel),
+          		Private:  errs.PrivateOf(sentinel),
+          		ExitCode: errs.ExitCodeOf(sentinel),
+          	}, fields...)
+        to: errs
+  - of: foreignError.Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: foreignError.Error
+        kind: self
+      - id: f.cause.Error
+        kind: value
+    steps:
+      - return: f.cause.Error()
+        to: f.cause.Error
+  - of: foreignError.Is
+    participants:
+      - id: caller
+        kind: actor
+      - id: foreignError.Is
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: errors.Is(f.cause, target)
+        to: errors
+  - of: classifyForeign
+    participants:
+      - id: caller
+        kind: actor
+      - id: classifyForeign
+        kind: self
+      - id: classify
+        kind: internal
+    steps:
+      - bind: inner, typed
+        eval: errors.AsType[*errs.Error](cause)
+      - opt:
+          do:
+            - return: classify(sentinel, cause, fields...)
+              to: classify
+          when: "!typed || inner == nil"
+      - return: "classify(sentinel, foreignError{cause: cause}, fields...)"
+        to: classify
+  - of: annotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: annotate
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - bind: inner, typed
+        eval: errors.AsType[*errs.Error](err)
+      - opt:
+          do:
+            - return: err
+          when: "!typed || inner == nil"
+      - return: errs.Wrap(err, errs.WrapParams{}, fields...)
+        to: errs
+  - of: diagnose
+    participants:
+      - id: caller
+        kind: actor
+      - id: diagnose
+        kind: self
+      - id: errs
+        kind: package
+      - id: particulars
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: parts
+          type: "[]string"
+      - opt:
+          do:
+            - set: parts
+              value: append(parts, private)
+          init:
+            bind: private
+            eval: errs.PrivateOf(err)
+            to: errs
+          when: private != ""
+      - opt:
+          do:
+            - set: parts
+              value: append(parts, detail)
+          init:
+            bind: detail
+            eval: particulars(err)
+            to: particulars
+          when: detail != ""
+      - return: strings.Join(parts, fieldSeparator)
+        to: strings
+  - of: particulars
+    participants:
+      - id: caller
+        kind: actor
+      - id: particulars
+        kind: self
+      - id: foreignCause
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: parts
+          type: "[]string"
+      - loop:
+          do:
+            - set: parts
+              value: append(parts, field.Key()+"="+field.StringValue())
+          key: _
+          range: errs.FieldsOf(err)
+          value: field
+      - opt:
+          do:
+            - set: parts
+              value: append(parts, "cause="+cause)
+          init:
+            bind: cause
+            eval: foreignCause(err)
+            to: foreignCause
+          when: cause != ""
+      - return: strings.Join(parts, fieldSeparator)
+        to: strings
+  - of: foreignCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: foreignCause
+        kind: self
+      - id: current.Error
+        kind: value
+    steps:
+      - var:
+          name: cause
+          type: string
+      - loop:
+          cond: current != nil
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, ours
+                  eval: current.(*errs.Error)
+                when: ours
+            - set: cause
+              to: current.Error
+              value: current.Error()
+            - break: true
+          init: current := err
+          post: current = errors.Unwrap(current)
+      - return: cause

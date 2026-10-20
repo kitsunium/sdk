@@ -1,0 +1,63 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: equalFoldASCII
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) != len(lower)
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - op: +=
+                    set: c
+                    value: "'a' - 'A'"
+                when: "'A' <= c && c <= 'Z'"
+            - opt:
+                do:
+                  - return: "false"
+                when: c != lower[i]
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: fitExponent
+    steps:
+      - loop:
+          cond: exponent > decimalMaxExponent
+          do:
+            - opt:
+                do:
+                  - return: nil, 0, false
+                when: len(digits) >= decimalMaxDigits
+            - set: digits
+              value: append(digits, '0')
+            - op: "--"
+              set: exponent
+      - loop:
+          cond: exponent < decimalMinExponent
+          do:
+            - opt:
+                do:
+                  - return: nil, 0, false
+                when: digits[len(digits)-1] != '0'
+            - set: digits
+              value: digits[:len(digits)-1]
+            - op: ++
+              set: exponent
+      - return: digits, exponent, true
+  - of: needsFolding
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: c >= utf8.RuneSelf || ('A' <= c && c <= 'Z')
+          key: _
+          range: key
+          value: c
+      - return: "false"

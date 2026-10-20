@@ -1,0 +1,512 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AddressValue.String
+    steps:
+      - return: a.Network + "://" + a.Addr
+  - of: ConnHandlerFunc.ServeConn
+    steps:
+      - return: f(ctx, c)
+  - of: WithDrainSignal
+    participants:
+      - id: caller
+        kind: actor
+      - id: WithDrainSignal
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - return: context.WithValue(ctx, drainSignalKey{}, draining)
+        to: context
+  - of: DrainSignal
+    steps:
+      - bind: draining, carried
+        eval: ctx.Value(drainSignalKey{}).(<-chan struct{})
+      - opt:
+          do:
+            - return: nil
+          when: "!carried"
+      - return: draining
+  - of: DurationValue.Duration
+    participants:
+      - id: caller
+        kind: actor
+      - id: DurationValue.Duration
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Duration(d)
+        to: time
+  - of: DurationValue.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: DurationValue.String
+        kind: self
+      - id: time.Duration(d).String
+        kind: value
+    steps:
+      - return: time.Duration(d).String()
+        to: time.Duration(d).String
+  - of: DurationValue.MarshalJSON
+    steps:
+      - return: "[]byte(`\"` + time.Duration(d).String() + `\"`), nil"
+  - of: (*DurationValue).UnmarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*DurationValue).UnmarshalJSON
+        kind: self
+      - id: d.parseString
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: wrapAs
+        kind: internal
+    steps:
+      - bind: token
+        eval: string(data)
+      - opt:
+          do:
+            - return: "d.parseString(token[1 : len(token)-1])"
+              to: d.parseString
+          when: len(data) >= minQuotedLen && data[0] == '"' && data[len(data)-1] == '"'
+      - bind: nanos, perr
+        eval: strconv.ParseInt(token, decimalBase, bitSize64)
+        to: strconv
+      - opt:
+          do:
+            - return: wrapAs(InvalidDuration, perr, errs.String("value", token))
+              to: wrapAs
+          when: perr != nil
+      - set: "*d"
+        value: DurationValue(nanos)
+      - return: nil
+  - of: (*DurationValue).parseString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*DurationValue).parseString
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: "*d"
+              value: "0"
+            - return: nil
+          when: token == ""
+      - bind: parsed, perr
+        eval: time.ParseDuration(token)
+        to: time
+      - opt:
+          do:
+            - return: wrapAs(InvalidDuration, perr, errs.String("value", token))
+              to: wrapAs
+          when: perr != nil
+      - set: "*d"
+        value: DurationValue(parsed)
+      - return: nil
+  - of: IdentityValue.String
+    steps:
+      - return: "\"<redacted>\""
+  - of: IdentityValue.GoString
+    steps:
+      - return: "\"<redacted>\""
+  - of: IdentityValue.IsZero
+    steps:
+      - return: i.minVersion == 0 && len(i.certs) == 0 && i.roots == nil && i.clientCAs == nil
+  - of: IdentityValue.ClientConfig
+    steps:
+      - return: |-
+          &tls.Config{
+          		Certificates: slices.Clone(i.certs),
+          		RootCAs:      i.clonedRoots(),
+          		ServerName:   i.serverName,
+          		MinVersion:   i.resolvedMinVersion(),
+          		NextProtos:   slices.Clone(i.nextProtos),
+          	}
+  - of: IdentityValue.ServerConfig
+    steps:
+      - bind: built
+        eval: |-
+          &tls.Config{
+          		Certificates: slices.Clone(i.certs),
+          		ClientCAs:    i.clonedClientCAs(),
+          		MinVersion:   i.resolvedMinVersion(),
+          		NextProtos:   slices.Clone(i.nextProtos),
+          	}
+      - opt:
+          do:
+            - set: built.ClientAuth
+              value: tls.RequireAndVerifyClientCert
+          when: i.requireClientCert
+      - return: built
+  - of: IdentityValue.clonedRoots
+    participants:
+      - id: caller
+        kind: actor
+      - id: IdentityValue.clonedRoots
+        kind: self
+      - id: i.roots.Clone
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: i.roots == nil
+      - return: i.roots.Clone()
+        to: i.roots.Clone
+  - of: IdentityValue.clonedClientCAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: IdentityValue.clonedClientCAs
+        kind: self
+      - id: i.clientCAs.Clone
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: i.clientCAs == nil
+      - return: i.clientCAs.Clone()
+        to: i.clientCAs.Clone
+  - of: IdentityValue.resolvedMinVersion
+    steps:
+      - opt:
+          do:
+            - return: defaultMinVersion
+          when: i.minVersion == 0
+      - return: i.minVersion
+  - of: NewIdentityValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewIdentityValue
+        kind: self
+      - id: parseKeyPair
+        kind: internal
+      - id: parsePool
+        kind: internal
+      - id: resolveMinVersion
+        kind: internal
+    steps:
+      - bind: certs, err
+        eval: parseKeyPair(p.CertPEM, p.KeyPEM)
+        to: parseKeyPair
+      - opt:
+          do:
+            - return: IdentityValue{}, err
+          when: err != nil
+      - bind: roots, err
+        eval: parsePool(p.RootsPEM, "roots")
+        to: parsePool
+      - opt:
+          do:
+            - return: IdentityValue{}, err
+          when: err != nil
+      - bind: clientCAs, err
+        eval: parsePool(p.ClientCAPEM, "client_ca")
+        to: parsePool
+      - opt:
+          do:
+            - return: IdentityValue{}, err
+          when: err != nil
+      - bind: minVersion, err
+        eval: resolveMinVersion(p.MinVersion)
+        to: resolveMinVersion
+      - opt:
+          do:
+            - return: IdentityValue{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                IdentityValue{}, wrapAs(TLSMaterialInvalid, nil,
+                			errs.String("field", "client_ca"),
+                			errs.String("why", "mutual TLS requires a client CA bundle"))
+          when: p.RequireClientCert && clientCAs == nil
+      - return: |-
+          IdentityValue{
+          		certs:             certs,
+          		roots:             roots,
+          		clientCAs:         clientCAs,
+          		serverName:        p.ServerName,
+          		minVersion:        minVersion,
+          		nextProtos:        slices.Clone(p.NextProtos),
+          		requireClientCert: p.RequireClientCert,
+          	}, nil
+  - of: parseKeyPair
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseKeyPair
+        kind: self
+      - id: tls
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(certPEM) == 0 && len(keyPEM) == 0
+      - opt:
+          do:
+            - return: |-
+                nil, wrapAs(TLSMaterialInvalid, nil,
+                			errs.String("field", "cert_key_pair"),
+                			errs.String("why", "certificate and key must be supplied together"))
+          when: len(certPEM) == 0 || len(keyPEM) == 0
+      - bind: pair, perr
+        eval: tls.X509KeyPair(certPEM, keyPEM)
+        to: tls
+      - opt:
+          do:
+            - return: |-
+                nil, wrapAs(TLSMaterialInvalid, nil,
+                			errs.String("field", "cert_key_pair"),
+                			errs.String("why", "the certificate and key could not be parsed or do not match"))
+          when: perr != nil
+      - return: "[]tls.Certificate{pair}, nil"
+  - of: parsePool
+    participants:
+      - id: caller
+        kind: actor
+      - id: parsePool
+        kind: self
+      - id: x509
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(bundlePEM) == 0
+      - bind: built
+        eval: x509.NewCertPool()
+        to: x509
+      - opt:
+          do:
+            - return: |-
+                nil, wrapAs(TLSMaterialInvalid, nil,
+                			errs.String("field", field),
+                			errs.String("why", "the PEM bundle contained no usable certificate"))
+          when: "!built.AppendCertsFromPEM(bundlePEM)"
+      - return: built, nil
+  - of: resolveMinVersion
+    steps:
+      - opt:
+          do:
+            - return: defaultMinVersion, nil
+          when: v == 0
+      - opt:
+          do:
+            - return: |-
+                0, wrapAs(TLSMaterialInvalid, nil,
+                			errs.String("field", "min_version"),
+                			errs.String("why", "TLS versions below 1.2 are refused"))
+          when: v < minAcceptedVersion
+      - return: v, nil
+  - of: PacketHandlerFunc.ServePacket
+    steps:
+      - return: f(ctx, p)
+  - of: Phase.String
+    steps:
+      - switch:
+          cases:
+            - case: PhaseNew
+              do:
+                - return: "\"new\""
+            - case: PhaseStarting
+              do:
+                - return: "\"starting\""
+            - case: PhaseServing
+              do:
+                - return: "\"serving\""
+            - case: PhaseDraining
+              do:
+                - return: "\"draining\""
+            - case: PhaseStopped
+              do:
+                - return: "\"stopped\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": p
+  - of: PolicyFunc.Allow
+    steps:
+      - return: f(req)
+  - of: SSEEventValue.IsZero
+    steps:
+      - return: e.ID == "" && e.Name == "" && e.Data == "" && e.Retry == 0
+  - of: SSEEventValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: SSEEventValue.Validate
+        kind: self
+      - id: errs
+        kind: package
+      - id: validateSSELine
+        kind: internal
+      - id: validateSSERetry
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("why", "the event carries no field at all"))
+              to: errs
+          when: e.IsZero()
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateSSELine("id", e.ID)
+            to: validateSSELine
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateSSELine("event", e.Name)
+            to: validateSSELine
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("field", "event"),
+                			errs.String("why", "an event name without data dispatches nothing"))
+              to: errs
+          when: e.Name != "" && e.Data == ""
+      - return: validateSSERetry(e.Retry.Duration())
+        to: validateSSERetry
+  - of: validateSSELine
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSSELine
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("field", field),
+                			errs.String("why", "the value carries a line terminator, which this field cannot express"))
+              to: errs
+          when: value != "" && (strings.IndexByte(value, '\n') >= 0 || strings.IndexByte(value, '\r') >= 0)
+      - return: nil
+  - of: validateSSERetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSSERetry
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("field", "retry"),
+                			errs.String("why", "the reconnection delay is negative"))
+              to: errs
+          when: retry < 0
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("field", "retry"),
+                			errs.Int64("nanoseconds", int64(retry)),
+                			errs.String("why", "the wire field is an integer millisecond count"))
+              to: errs
+          when: retry > 0 && retry < SSEMinRetry
+      - return: nil
+  - of: WSCloseCode.Sendable
+    steps:
+      - opt:
+          do:
+            - return: c != wsCloseUndefined && c != WSCloseNoStatus && c != WSCloseAbnormal
+          when: c >= wsCloseProtocolLow && c <= wsCloseRegisteredHigh
+      - return: c >= wsCloseLibraryLow && c <= wsClosePrivateHigh
+  - of: WSCloseCode.Echoable
+    steps:
+      - opt:
+          do:
+            - return: WSCloseNormal
+          when: "!c.Sendable()"
+      - return: c
+  - of: WSMessageValue.OpCode
+    steps:
+      - opt:
+          do:
+            - return: WSBinary
+          when: m.Binary
+      - return: WSText
+  - of: WSOpCode.IsControl
+    steps:
+      - return: byte(o)&wsControlBit != 0
+  - of: WSOpCode.Defined
+    steps:
+      - switch:
+          cases:
+            - case: WSContinuation, WSText, WSBinary, WSClose, WSPing, WSPong
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": o
+  - of: WSOpCode.String
+    steps:
+      - switch:
+          cases:
+            - case: WSContinuation
+              do:
+                - return: "\"continuation\""
+            - case: WSText
+              do:
+                - return: "\"text\""
+            - case: WSBinary
+              do:
+                - return: "\"binary\""
+            - case: WSClose
+              do:
+                - return: "\"close\""
+            - case: WSPing
+              do:
+                - return: "\"ping\""
+            - case: WSPong
+              do:
+                - return: "\"pong\""
+            - default: true
+              do:
+                - return: "\"reserved\""
+          "on": o
+  - of: wrapAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAs
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+              to: errs
+          when: cause == nil
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, append(fields, errs.String("cause", cause.Error()))...)
+        to: errs

@@ -1,0 +1,682 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      callerSkipDepth is the number of stack frames to skip when capturing the
+      program counter from runtime.Callers: the runtime.Callers frame itself plus
+      the loggerImpl.Log frame, so the captured PC points to the application
+      caller rather than the logger plumbing.
+    items:
+      - name: callerSkipDepth
+        type: int
+        value: "2"
+    name: callerSkipDepth
+  - doc: |-
+      initialAttrCap is the starting capacity reserved for an event's attribute
+      slice; chosen to comfortably hold the median log call's attrs without a
+      re-allocation while keeping idle pool memory bounded.
+    items:
+      - name: initialAttrCap
+        type: int
+        value: "8"
+    name: initialAttrCap
+  - doc: |-
+      SourceFieldKey is the attribute key under which the resolved caller location
+      is emitted. Encoders render it like any other string attribute, so both the
+      text and JSON encoders honour it without modification.
+    items:
+      - name: SourceFieldKey
+        type: string
+        value: "\"source\""
+    name: SourceFieldKey
+  - doc: |-
+      timestampLayout is the RFC3339-with-milliseconds format used to render the
+      RecordEvent.Time field into the textual output.
+    items:
+      - name: timestampLayout
+        type: string
+        value: "\"2006-01-02T15:04:05.000Z07:00\""
+    name: timestampLayout
+  - doc: decimalBase is the radix passed to strconv.Append* for human-readable ints.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: |-
+      floatPrec is the -1 sentinel that asks strconv to emit the shortest
+      round-trippable representation for a float64.
+    items:
+      - name: floatPrec
+        type: int
+        value: "-1"
+    name: floatPrec
+  - doc: floatBitSize tells strconv.AppendFloat we are formatting a 64-bit float.
+    items:
+      - name: floatBitSize
+        type: int
+        value: "64"
+    name: floatBitSize
+  - doc: |-
+      floatFormat is the byte verb ('g') selecting strconv's exponent-or-decimal
+      mode for float64 rendering.
+    items:
+      - name: floatFormat
+        type: byte
+        value: "'g'"
+    name: floatFormat
+  - doc: |-
+      groupSeparator is the rune inserted between successive group names AND
+      between a group prefix and an attribute key in textual output ("a.b.k=v").
+    items:
+      - name: groupSeparator
+        type: byte
+        value: "'.'"
+    name: groupSeparator
+files:
+  - decls:
+      - Builder
+      - chainBuilder
+      - (*chainBuilder).Str
+      - (*chainBuilder).Int
+      - (*chainBuilder).Int64
+      - (*chainBuilder).Uint64
+      - (*chainBuilder).Bool
+      - (*chainBuilder).Float64
+      - (*chainBuilder).Duration
+      - (*chainBuilder).Time
+      - (*chainBuilder).Any
+      - (*chainBuilder).Send
+    name: builder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - genericHandler
+      - NewHandler
+      - (*genericHandler).Enabled
+      - (*genericHandler).Handle
+      - (*genericHandler).WithAttrs
+      - (*genericHandler).WithGroup
+      - mergeAttrs
+    name: handler.go
+  - decls:
+      - callerSkipDepth
+      - loggerImpl
+      - New
+      - NewWithTraceContext
+      - (*loggerImpl).traceContext
+      - (*loggerImpl).Enabled
+      - (*loggerImpl).Log
+      - (*loggerImpl).With
+      - Build
+      - LogAttrs
+      - swallowHandlerError
+      - (*loggerImpl).Build
+      - (*loggerImpl).LogAttrs
+      - (*loggerImpl).WithGroup
+    name: logger.go
+  - decls:
+      - onceCloser
+      - (*onceCloser).Close
+      - Owning
+      - (*loggerImpl).Close
+    name: owning.go
+  - decls:
+      - initialAttrCap
+      - recordPool
+      - newChainBuilder
+    name: pool.go
+  - decls:
+      - SourceFieldKey
+      - sourceHandler
+      - newSourceHandler
+      - (*sourceHandler).Enabled
+      - (*sourceHandler).Handle
+      - (*sourceHandler).WithAttrs
+      - (*sourceHandler).WithGroup
+      - withSource
+      - resolveFrame
+      - renderFrame
+      - WithCaller
+    name: source.go
+  - decls:
+      - timestampLayout
+      - decimalBase
+      - floatPrec
+      - floatBitSize
+      - floatFormat
+      - groupSeparator
+      - TextHandler
+      - NewTextHandler
+      - (*TextHandler).Enabled
+      - (*TextHandler).WithAttrs
+      - (*TextHandler).WithGroup
+      - (*TextHandler).Handle
+      - (*TextHandler).renderLine
+      - (*TextHandler).writeLine
+      - appendTraceContext
+      - appendAttrWithGroups
+      - appendValueOnly
+      - appendAttr
+    name: text_handler.go
+functions:
+  - name: NewHandler
+    params: enc encoder.Encoder, sink corelogger.Sink, min level.Level
+    results: h corelogger.Handler, err error
+  - doc: |-
+      mergeAttrs returns a fresh slice combining parent and child attributes
+      in order (parent first). Extracted so WithAttrs and Handle share a
+      single allocation contract.
+    name: mergeAttrs
+    params: parent, child []corelogger.AttrValue
+    results: "[]corelogger.AttrValue"
+  - name: New
+    params: h corelogger.Handler
+    results: lg corelogger.Logger, err error
+  - name: NewWithTraceContext
+    params: h corelogger.Handler, src corelogger.TraceContextSource
+    results: lg corelogger.Logger, err error
+  - name: Build
+    params: lg corelogger.Logger, lv level.Level
+    results: Builder
+  - name: LogAttrs
+    params: ctx context.Context, lg corelogger.Logger, lv level.Level, msg string, attrs []corelogger.AttrValue
+  - doc: |-
+      swallowHandlerError is the documented sink for Handler.Handle errors. The
+      Logger contract MUST NOT propagate sink failures to the call site (a
+      failing log should never crash the caller's business logic), so every
+      Log / LogAttrs / Send path routes the handler's error through this
+      helper. Future commits may swap this for a configurable OnError callback;
+      for now the helper exists so the discard intent is explicit at the call
+      site and so a future hook has one canonical interception point.
+    name: swallowHandlerError
+    params: err error
+  - name: Owning
+    params: lg corelogger.Logger, owned io.Closer
+    results: corelogger.Logger
+  - doc: |-
+      newChainBuilder returns a fresh *chainBuilder with a pre-allocated attrs
+      slice.
+    name: newChainBuilder
+    results: "*chainBuilder"
+  - doc: |-
+      newSourceHandler wraps next so every handled RecordEvent gains a resolved
+      "source" attribute. A nil next is rejected with HandlerNil so callers cannot
+      build a dead decorator. The skip offset is clamped to a non-negative value.
+    name: newSourceHandler
+    params: next corelogger.Handler, skip int
+    results: h corelogger.Handler, err error
+  - doc: |-
+      withSource resolves pc into a "source" attribute and appends it to attrs. An
+      unresolvable program counter leaves attrs untouched so a missing frame never
+      injects an empty annotation into the record.
+    name: withSource
+    params: attrs []corelogger.AttrValue, pc uintptr
+    results: "[]corelogger.AttrValue"
+  - doc: |-
+      resolveFrame maps a single program counter to its runtime.Frame. The second
+      result is false when the runtime cannot map pc to a frame.
+    name: resolveFrame
+    params: pc uintptr
+    results: frame runtime.Frame, ok bool
+  - doc: renderFrame formats frame as the canonical "file:line:function" string.
+    name: renderFrame
+    params: frame runtime.Frame
+    results: string
+  - name: WithCaller
+    params: lg corelogger.Logger, skip int
+    results: corelogger.Logger
+  - name: NewTextHandler
+    params: w io.Writer, min level.Level
+    results: h *TextHandler, err error
+  - doc: |-
+      appendTraceContext writes the two top-level correlation fields
+      "trace_id=<32 hex> span_id=<16 hex>" into dst, and writes NOTHING when tc is
+      the invalid zero value. It mirrors the identically-named helper in
+      service/observe/logger/encoder byte for byte so the legacy TextHandler and the
+      composed text encoder produce the same line (ADR 0062).
+    name: appendTraceContext
+    params: dst []byte, r corelogger.RecordEvent
+    results: "[]byte"
+  - doc: |-
+      appendAttrWithGroups prepends the active group prefix stack ("g1.g2.…")
+      to the attribute key before delegating the value-rendering to appendAttr.
+    name: appendAttrWithGroups
+    params: dst []byte, groups []string, a corelogger.AttrValue
+    results: "[]byte"
+  - doc: |-
+      appendValueOnly renders only the value part of an AttrValue; shared by the
+      grouped and ungrouped paths so the encoding contract has a single source.
+    name: appendValueOnly
+    params: dst []byte, a corelogger.AttrValue
+    results: "[]byte"
+  - doc: appendAttr serialises a single AttrValue onto dst in "key=value" form.
+    name: appendAttr
+    params: dst []byte, a corelogger.AttrValue
+    results: "[]byte"
+imports:
+  buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  encoder: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  runtime: runtime
+  slices: slices
+  strconv: strconv
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger
+  name: logger
+  purpose: Package logger — declares the chainable Builder API — the low-allocation hot path for callers that care about per-call cost.
+types:
+  - kind: named
+    name: Builder
+    underlying: |-
+      interface {
+      	// Str appends a string attribute.
+      	Str(key, val string) Builder
+      	// Int appends an int attribute (widened to int64 internally).
+      	Int(key string, val int) Builder
+      	// Int64 appends an int64 attribute.
+      	Int64(key string, val int64) Builder
+      	// Uint64 appends a uint64 attribute.
+      	Uint64(key string, val uint64) Builder
+      	// Bool appends a boolean attribute.
+      	Bool(key string, val bool) Builder
+      	// Float64 appends a float64 attribute.
+      	Float64(key string, val float64) Builder
+      	// Duration appends a time.Duration attribute.
+      	Duration(key string, val time.Duration) Builder
+      	// Time appends a time.Time attribute.
+      	Time(key string, val time.Time) Builder
+      	// Any appends an opaque attribute; handlers degrade unrecognised types to "?".
+      	Any(key string, val any) Builder
+      	// Send terminates the chain by emitting the accumulated record.
+      	Send(ctx context.Context, msg string)
+      }
+  - doc: |-
+      chainBuilder is the default Builder implementation, recycled across Log
+      calls via recordPool. Recycling removes the builder + scratchpad from the
+      allocation profile; the handler's per-Send attrs clone keeps the
+      steady-state cost at one heap allocation per emit.
+    fields:
+      - doc: |-
+          owner is the loggerImpl that produced this builder; used to forward
+          the eventual Log call once the chain terminates.
+        name: owner
+        type: "*loggerImpl"
+      - doc: |-
+          lv is the level chosen at Build time; the chain's terminal Send call
+          forwards it onto the underlying handler.
+        name: lv
+        type: level.Level
+      - doc: |-
+          attrs is the accumulated attribute slice; pre-sized at construction
+          so the steady-state cost of Str/Int/etc. is zero allocations.
+        name: attrs
+        type: "[]corelogger.AttrValue"
+    kind: struct
+    methods:
+      - doc: |-
+          Str appends a string attribute and returns the receiver for chaining.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Str
+        params: key, val string
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Int appends an int attribute and returns the receiver for chaining.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Int
+        params: key string, val int
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Int64 appends an int64 attribute.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Int64
+        params: key string, val int64
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Uint64 appends a uint64 attribute.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Uint64
+        params: key string, val uint64
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Bool appends a boolean attribute.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Bool
+        params: key string, val bool
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Float64 appends a float64 attribute.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Float64
+        params: key string, val float64
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Duration appends a time.Duration attribute.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Duration
+        params: key string, val time.Duration
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Time appends a time.Time attribute.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Time
+        params: key string, val time.Time
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Any appends an opaque attribute. Use the typed helpers when possible.
+          IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+          concrete type is intentionally hidden so callers depend on the contract.
+        name: Any
+        params: key string, val any
+        recv: b *chainBuilder
+        results: Builder
+      - doc: |-
+          Send terminates the chain by emitting a RecordEvent through the owning
+          Logger and returns the builder to the recycler. Callers MUST NOT use
+          the builder after Send returns.
+        name: Send
+        params: ctx context.Context, msg string
+        recv: b *chainBuilder
+    name: chainBuilder
+  - doc: |-
+      genericHandler is the default corelogger.Handler implementation. It runs
+      records through the configured Encoder and forwards the resulting bytes
+      to the configured Sink.
+    fields:
+      - doc: enc renders RecordEvent payloads into bytes.
+        name: enc
+        type: encoder.Encoder
+      - doc: sink delivers the encoder's bytes to the underlying transport.
+        name: sink
+        type: corelogger.Sink
+      - doc: attrs are prepended to every RecordEvent (handler-bound With*).
+        name: attrs
+        type: "[]corelogger.AttrValue"
+      - doc: groups is the active group prefix stack accumulated via WithGroup.
+        name: groups
+        type: "[]string"
+      - doc: min is the minimum level the handler emits; records below are dropped.
+        name: min
+        type: level.Level
+      - doc: |-
+          clk sources the timestamp when RecordEvent.Time is the zero value. The
+          handler owns the Time fill so the encoded line and any downstream sink
+          share one coherent instant (V25).
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          Enabled reports whether the handler would emit a record at r.Level, taking
+          context cancellation into account.
+        name: Enabled
+        params: ctx context.Context, r corelogger.RecordEvent
+        recv: h *genericHandler
+        results: bool
+      - doc: |-
+          Handle encodes r through the configured encoder and forwards the bytes to
+          the configured sink. Borrows a scratch buffer from kernel/concur/buffer so the
+          ENCODING step itself does not allocate; the record's attrs clone is a
+          separate cost (one slice per emit — see pkg/v1/observe/logger/BENCH.md).
+        name: Handle
+        params: ctx context.Context, r corelogger.RecordEvent
+        recv: h *genericHandler
+        results: error
+      - doc: |-
+          WithAttrs returns a derived genericHandler with the supplied attributes
+          prepended onto every subsequent RecordEvent.
+        name: WithAttrs
+        params: attrs []corelogger.AttrValue
+        recv: h *genericHandler
+        results: corelogger.Handler
+      - doc: |-
+          WithGroup returns a derived genericHandler with the supplied group name
+          appended onto the active group prefix stack.
+        name: WithGroup
+        params: name string
+        recv: h *genericHandler
+        results: corelogger.Handler
+    name: genericHandler
+  - doc: |-
+      loggerImpl is the default core.Logger wrapper over a core.Handler. It
+      performs no buffering of its own — every Log call delegates to the Handler.
+    fields:
+      - doc: h is the underlying Handler that receives every emitted RecordEvent.
+        name: h
+        type: corelogger.Handler
+      - doc: |-
+          trace reads the span identity off the caller's context so every record
+          can carry it. Nil means "this Logger does no trace correlation" — the
+          state a Logger built by New is in, since this layer deliberately does
+          not know which propagation the application uses (ADR 0062).
+        name: trace
+        type: corelogger.TraceContextSource
+      - doc: |-
+          owned is what this Logger releases on Close: the writers a constructor
+          opened FOR it, which nobody else holds (see Owning). Nil for every
+          Logger over a sink its caller owns, and for every Logger derived with
+          With or WithGroup — they share the writers and own none of them.
+        name: owned
+        type: "*onceCloser"
+    kind: struct
+    methods:
+      - doc: |-
+          traceContext reads the span identity for ctx, or the invalid zero value when
+          this Logger carries no source. Kept as a method so the three emission paths
+          share one nil check and one call site.
+        name: traceContext
+        params: ctx context.Context
+        recv: l *loggerImpl
+        results: corelogger.TraceContextValue
+      - doc: |-
+          Enabled delegates to the underlying Handler using a zero RecordEvent whose
+          Level field is lv, so callers can gate expensive attribute construction.
+        name: Enabled
+        params: ctx context.Context, lv level.Level
+        recv: l *loggerImpl
+        results: bool
+      - doc: |-
+          Log builds a RecordEvent at level lv and hands it to the Handler. Records
+          below the Handler's threshold are dropped before any formatting happens.
+        name: Log
+        params: ctx context.Context, lv level.Level, msg string, attrs ...corelogger.AttrValue
+        recv: l *loggerImpl
+      - doc: With returns a derived Logger whose emitted records carry the given attrs.
+        name: With
+        params: attrs ...corelogger.AttrValue
+        recv: l *loggerImpl
+        results: corelogger.Logger
+      - doc: |-
+          Build returns a chainable Builder bound to this Logger at the supplied
+          level. The Builder is recycled through a sync.Pool, so the steady-state
+          per-call cost is one heap allocation per emit once the pool is warm —
+          the handler clones the accumulated attrs on Send and that clone escapes.
+          IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
+          the fluent API surface rather than the recycled concrete type.
+        name: Build
+        params: lv level.Level
+        recv: l *loggerImpl
+        results: Builder
+      - doc: |-
+          LogAttrs is the slice-overload of Log that avoids the variadic slice
+          allocation imposed by Log(... AttrValue). Pre-built attribute slices
+          (typically from a caller-managed pool) flow through this entry point
+          without the per-call boxing cost.
+        name: LogAttrs
+        params: ctx context.Context, lv level.Level, msg string, attrs []corelogger.AttrValue
+        recv: l *loggerImpl
+      - doc: |-
+          WithGroup returns a derived Logger whose subsequent attributes are
+          namespaced under the given group name. An empty name adds no group: the
+          receiver comes back unchanged, unless it owns writers (see Owning) — then
+          it is an equivalent Logger that owns none, as every derived Logger is.
+        name: WithGroup
+        params: name string
+        recv: l *loggerImpl
+        results: corelogger.Logger
+      - doc: |-
+          Close releases the writers this Logger owns — once, whatever the number of
+          calls — and reports the first release's outcome.
+
+          A Logger that owns nothing returns nil: every Logger derived with With or
+          WithGroup — WithGroup("") included — shares its parent's writers and owns
+          none of them, so closing a child can never pull the files out from under its
+          parent or its siblings.
+          Records logged after the owner's Close are dropped, as a failing write
+          always is (the Logger contract never surfaces one).
+        name: Close
+        recv: l *loggerImpl
+        results: error
+    name: loggerImpl
+  - doc: |-
+      onceCloser releases what it wraps exactly once, and answers every later
+      Close with the first answer: a second Close of a file-backed writer is the
+      kernel's "file already closed", which is not news to anyone.
+    fields:
+      - doc: once guards the single release.
+        name: once
+        type: sync.Once
+      - doc: target is what is released.
+        name: target
+        type: io.Closer
+      - doc: err is the first Close's answer, repeated to every later caller.
+        name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: Close releases the target on the first call and repeats its answer after.
+        name: Close
+        recv: o *onceCloser
+        results: error
+    name: onceCloser
+  - doc: |-
+      sourceHandler is a corelogger.Handler decorator that resolves the captured
+      program counter into a "source" attribute and prepends it to each record
+      before delegating to the wrapped Handler. A zero PC (no caller information)
+      is passed through untouched so the annotation never appears empty.
+    fields:
+      - doc: next is the wrapped Handler that performs the real format + transport.
+        name: next
+        type: corelogger.Handler
+      - doc: |-
+          skip is the extra stack-frame offset reserved for wrapper layers; it is
+          retained for symmetry with the front-end capture and future re-capture
+          paths. Resolution today reads the already-captured RecordEvent.PC.
+        name: skip
+        type: int
+    kind: struct
+    methods:
+      - doc: Enabled delegates the level decision to the wrapped Handler unchanged.
+        name: Enabled
+        params: ctx context.Context, r corelogger.RecordEvent
+        recv: h *sourceHandler
+        results: bool
+      - doc: |-
+          Handle resolves r.PC into a "source" attribute, prepends it to the record's
+          attributes, and delegates to the wrapped Handler.
+        name: Handle
+        params: ctx context.Context, r corelogger.RecordEvent
+        recv: h *sourceHandler
+        results: error
+      - doc: |-
+          WithAttrs threads the bound attrs through the wrapped Handler and rewraps the
+          derived Handler so the source annotation survives With-derived loggers.
+        name: WithAttrs
+        params: attrs []corelogger.AttrValue
+        recv: h *sourceHandler
+        results: corelogger.Handler
+      - doc: |-
+          WithGroup threads the group name through the wrapped Handler and rewraps the
+          derived Handler so the source annotation survives grouped loggers.
+        name: WithGroup
+        params: name string
+        recv: h *sourceHandler
+        results: corelogger.Handler
+    name: sourceHandler
+  - fields:
+      - doc: w is the backing sink; writes are serialised through mu.
+        name: w
+        type: io.Writer
+      - doc: mu serialises Write calls so concurrent goroutines emit atomic lines.
+        name: mu
+        type: sync.Mutex
+      - doc: attrs are prepended to every RecordEvent emitted through this handler.
+        name: attrs
+        type: "[]corelogger.AttrValue"
+      - doc: |-
+          groups carries the active group prefix stack (outermost first); each
+          emitted attribute key is rendered as "g1.g2.….key" in the line.
+        name: groups
+        type: "[]string"
+      - doc: min is the minimum level the handler emits; records below are dropped.
+        name: min
+        type: level.Level
+      - doc: clk sources the timestamp when RecordEvent.Time is the zero value.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - name: Enabled
+        params: ctx context.Context, r corelogger.RecordEvent
+        recv: h *TextHandler
+        results: bool
+      - name: WithAttrs
+        params: attrs []corelogger.AttrValue
+        recv: h *TextHandler
+        results: corelogger.Handler
+      - name: WithGroup
+        params: name string
+        recv: h *TextHandler
+        results: corelogger.Handler
+      - name: Handle
+        params: ctx context.Context, r corelogger.RecordEvent
+        recv: h *TextHandler
+        results: error
+      - doc: |-
+          renderLine formats a RecordEvent into the provided byte buffer. Extracted
+          from Handle to keep both functions below the KTN line-count ceiling.
+        name: renderLine
+        params: b []byte, r corelogger.RecordEvent
+        recv: h *TextHandler
+        results: "[]byte"
+      - doc: writeLine serialises the mutex-guarded write and wraps any writer error.
+        name: writeLine
+        params: line []byte
+        recv: h *TextHandler
+        results: error
+    name: TextHandler
+vars:
+  - doc: |-
+      recordPool recycles *chainBuilder values across Log calls. The factory
+      returns a fresh chainBuilder with a pre-allocated attrs slice, so Build()
+      itself allocates nothing in steady state — the one allocation per emit
+      comes later, when the handler clones the attrs on Send.
+    items:
+      - name: recordPool
+        value: recycler.NewPool[*chainBuilder](newChainBuilder)
+    name: recordPool

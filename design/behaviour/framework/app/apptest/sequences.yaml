@@ -1,0 +1,145 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewDisk
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDisk
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.TempDir
+        kind: value
+      - id: vfs
+        kind: package
+      - id: closer.Close
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: t.Skipf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - bind: dir
+        eval: t.TempDir()
+        to: t.TempDir
+      - bind: fsys, err
+        eval: vfs.NewOS(dir)
+        to: vfs
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: "t.Fatalf(\"the data directory's probe cannot be closed: %v\", closeErr)"
+                    to: t.Fatalf
+                init:
+                  bind: closeErr
+                  eval: closer.Close()
+                  to: closer.Close
+                when: closeErr != nil
+          init:
+            bind: closer, ok
+            eval: fsys.(io.Closer)
+          when: ok
+      - opt:
+          do:
+            - eval: "t.Skipf(\"%s keeps no data directory: the SDK's disk file system is Linux's, macOS's and the BSDs'\", runtime.GOOS)"
+              to: t.Skipf
+          when: errors.Is(err, proc.UnsupportedPlatform)
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the data directory cannot be opened: %v\", err)"
+              to: t.Fatalf
+          when: err != nil
+      - return: "&Disk{AppOption: app.DataDir(dir), Dir: dir}"
+  - of: (*Disk).Holding
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Disk).Holding
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: os
+        kind: stdlib
+      - id: t.Fatalf
+        kind: value
+      - id: fs
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - bind: root, err
+        eval: os.OpenRoot(d.Dir)
+        to: os
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the data directory cannot be opened: %v\", err)"
+              to: t.Fatalf
+          when: err != nil
+      - defer: |-
+          func() {
+          		if closeErr := root.Close(); closeErr != nil {
+          			t.Errorf("the data directory cannot be closed: %v", closeErr)
+          		}
+          	}()
+      - bind: scan
+        eval: "&scanner{fsys: root.FS()}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: scan.needles
+                    value: append(scan.needles, []byte(w))
+                when: w != ""
+          key: _
+          range: words
+          value: w
+      - set: err
+        to: fs
+        value: fs.WalkDir(scan.fsys, ".", scan.visit)
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the data directory cannot be read: %v\", err)"
+              to: t.Fatalf
+          when: err != nil
+      - eval: slices.Sort(scan.found)
+        to: slices
+      - return: scan.found
+  - of: (*scanner).visit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).visit
+        kind: self
+      - id: fs
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: walkErr != nil
+              do:
+                - return: walkErr
+            - case: entry.IsDir() && name == secretsDir
+              do:
+                - return: fs.SkipDir
+            - case: entry.IsDir()
+              do:
+                - return: nil
+      - bind: raw, err
+        eval: fs.ReadFile(s.fsys, name)
+        to: fs
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - set: s.found
+              value: append(s.found, path.Clean(name))
+          when: slices.ContainsFunc(s.needles, func(needle []byte) bool { return bytes.Contains(raw, needle) })
+      - return: nil

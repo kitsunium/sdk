@@ -1,0 +1,263 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewBatcher
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewBatcher
+        kind: self
+      - id: b.loop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: cfg.OnError
+              value:
+                closure:
+                  params: error
+                  steps: null
+          when: cfg.OnError == nil
+      - opt:
+          do:
+            - set: cfg.Clock
+              value: clock.System
+          when: cfg.Clock == nil
+      - bind: b
+        eval: |-
+          &Batcher[T]{
+          		deliver: deliver,
+          		cfg:     cfg,
+          		stop:    make(chan struct{}),
+          		done:    make(chan struct{}),
+          	}
+      - opt:
+          do:
+            - set: b.ticking
+              value: "true"
+            - go: b.loop(cfg.FlushEvery)
+              to: b.loop
+          when: cfg.FlushEvery > 0
+      - return: b
+  - of: (*Batcher).Add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).Add
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.weigh
+        kind: internal
+      - id: b.full
+        kind: internal
+      - id: b.flushOnce
+        kind: internal
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - opt:
+          do:
+            - eval: b.mu.Unlock()
+              to: b.mu.Unlock
+            - return: BatcherClosed
+          when: b.closed
+      - set: b.buf
+        value: append(b.buf, item)
+      - op: +=
+        set: b.weight
+        to: b.weigh
+        value: b.weigh(item)
+      - bind: full
+        eval: b.full()
+        to: b.full
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
+            - return: b.flushOnce(ctx)
+              to: b.flushOnce
+          when: full
+      - return: nil
+  - of: (*Batcher).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).Flush
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.flushOnce
+        kind: internal
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - bind: closed
+        eval: b.closed
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
+            - return: BatcherClosed
+          when: closed
+      - return: b.flushOnce(ctx)
+        to: b.flushOnce
+  - of: (*Batcher).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).Close
+        kind: self
+      - id: b.stopOnce.Do
+        kind: value
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.deliverBatch
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: b.stopOnce.Do(func() { close(b.stop) })
+              to: b.stopOnce.Do
+            - eval: <-b.done
+          when: b.ticking
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - set: b.closed
+        value: "true"
+      - bind: batch
+        eval: b.buf
+      - set: b.buf
+        value: nil
+      - set: b.weight
+        value: "0"
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
+            - return: nil
+          when: len(batch) == 0
+      - return: b.deliverBatch(ctx, batch)
+        to: b.deliverBatch
+  - of: (*Batcher).flushOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).flushOnce
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.deliverBatch
+        kind: internal
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - opt:
+          do:
+            - eval: b.mu.Unlock()
+              to: b.mu.Unlock
+            - return: nil
+          when: len(b.buf) == 0
+      - bind: batch
+        eval: b.buf
+      - set: b.buf
+        value: nil
+      - set: b.weight
+        value: "0"
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - return: b.deliverBatch(ctx, batch)
+        to: b.deliverBatch
+  - of: (*Batcher).deliverBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).deliverBatch
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - lock:
+          mutex: b.deliverMu
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(derr, errs.WrapParams{
+                			Code:    CodeBatcherDeliverFailed,
+                			Reason:  "BATCHER_DELIVER_FAILED",
+                			Public:  "Batcher delivery failed",
+                			Private: "internal/kernel/concur/batcher: the deliver closure returned an error",
+                		})
+              to: errs
+          init:
+            bind: derr
+            eval: b.deliver(ctx, batch)
+          when: derr != nil
+      - return: nil
+  - of: (*Batcher).loop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).loop
+        kind: self
+      - id: b.doneOnce.Do
+        kind: value
+      - id: b.cfg.Clock.NewTicker
+        kind: value
+      - id: t.Stop
+        kind: value
+      - id: t.C
+        kind: value
+      - id: b.flushOnce
+        kind: internal
+    steps:
+      - defer: b.doneOnce.Do(func() { close(b.done) })
+        to: b.doneOnce.Do
+      - bind: t
+        eval: b.cfg.Clock.NewTicker(every)
+        to: b.cfg.Clock.NewTicker
+      - defer: t.Stop()
+        to: t.Stop
+      - bind: ticks
+        eval: t.C()
+        to: t.C
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ticks
+                    do:
+                      - opt:
+                          do:
+                            - eval: b.cfg.OnError(ferr)
+                          init:
+                            bind: ferr
+                            eval: b.flushOnce(context.Background())
+                            to: b.flushOnce
+                          when: ferr != nil
+                  - comm: <-b.stop
+                    do:
+                      - return: ""
+          forever: true
+  - of: (*Batcher).weigh
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: b.cfg.WeightOf == nil
+      - return: b.cfg.WeightOf(item)
+  - of: (*Batcher).full
+    steps:
+      - bind: countCap
+        eval: b.cfg.MaxItems > 0 && len(b.buf) >= b.cfg.MaxItems
+      - bind: weightCap
+        eval: b.cfg.WeightOf != nil && b.cfg.MaxWeight > 0 && b.weight >= b.cfg.MaxWeight
+      - return: countCap || weightCap

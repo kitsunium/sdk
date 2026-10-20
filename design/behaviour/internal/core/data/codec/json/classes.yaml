@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/json
+  name: json
+  purpose: Package json declares the error codes and the sentinels of the JSON codec, internal/service/data/codec/json — range 0.3.2.* (ADR 0005 service/data/codec/json block).
+types: []

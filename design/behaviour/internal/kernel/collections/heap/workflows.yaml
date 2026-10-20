@@ -1,0 +1,49 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Heap).up
+    steps:
+      - loop:
+          cond: child > 0
+          do:
+            - bind: parent
+              eval: (child - 1) / branching
+            - opt:
+                do:
+                  - return: ""
+                when: h.cmp(h.items[child], h.items[parent]) >= 0
+            - set: h.items[child], h.items[parent]
+              value: h.items[parent], h.items[child]
+            - set: child
+              value: parent
+  - of: (*Heap).down
+    steps:
+      - bind: count
+        eval: len(h.items)
+      - loop:
+          do:
+            - bind: left
+              eval: branching*parent + 1
+            - opt:
+                do:
+                  - return: ""
+                when: left >= count
+            - bind: first
+              eval: left
+            - opt:
+                do:
+                  - set: first
+                    value: right
+                init:
+                  bind: right
+                  eval: left + 1
+                when: right < count && h.cmp(h.items[right], h.items[left]) < 0
+            - opt:
+                do:
+                  - return: ""
+                when: h.cmp(h.items[first], h.items[parent]) >= 0
+            - set: h.items[parent], h.items[first]
+              value: h.items[first], h.items[parent]
+            - set: parent
+              value: first
+          forever: true

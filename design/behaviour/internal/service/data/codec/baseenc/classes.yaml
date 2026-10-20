@@ -1,0 +1,858 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      base45Alphabet is the RFC 9285 §3 table: indices 0..44 map to these
+      runes. All printable ASCII, QR-code "alphanumeric mode" safe.
+    items:
+      - name: base45Alphabet
+        type: string
+        value: "\"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:\""
+    name: base45Alphabet
+  - grouped: true
+    items:
+      - doc: base45Radix is the alphabet size; a byte pair encodes into base 45³.
+        name: base45Radix
+        type: int
+        value: "45"
+      - doc: base45RadixSq is base45Radix² — the place value of the third digit.
+        name: base45RadixSq
+        type: int
+        value: base45Radix * base45Radix
+      - doc: base45GroupChars is the encoded char count for one input byte-pair.
+        name: base45GroupChars
+        type: int
+        value: "3"
+      - doc: base45TailChars is the encoded char count for a trailing single byte.
+        name: base45TailChars
+        type: int
+        value: "2"
+      - doc: base45PairBytes is the input byte count per encoded 3-char group.
+        name: base45PairBytes
+        type: int
+        value: "2"
+      - doc: base45HighShift is the bit shift isolating the high byte of a pair.
+        name: base45HighShift
+        type: int
+        value: "8"
+      - doc: base45TableSize is the reverse-lookup table span — every byte value.
+        name: base45TableSize
+        type: int
+        value: "256"
+      - doc: base45NotMember marks a byte absent from the alphabet in the table.
+        name: base45NotMember
+        type: int
+        value: "-1"
+      - doc: |-
+          base45MaxPair is the largest value a 3-char group may decode to: a
+          byte pair is 0..0xFFFF, so any triple above this is malformed input.
+        name: base45MaxPair
+        type: int
+        value: "0xFFFF"
+      - doc: |-
+          base45MaxSingle is the largest value a trailing 2-char group may
+          decode to: a single byte is 0..0xFF.
+        name: base45MaxSingle
+        type: int
+        value: "0xFF"
+    name: base45Radix
+  - doc: |-
+      base58Alphabet is the Bitcoin Base58 alphabet (the ASCII alphanumerics
+      minus the visually ambiguous 0, O, I and l).
+    items:
+      - name: base58Alphabet
+        type: string
+        value: "\"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz\""
+    name: base58Alphabet
+  - grouped: true
+    items:
+      - doc: base58Radix is the Base58 alphabet size.
+        name: base58Radix
+        type: int
+        value: "58"
+      - doc: |-
+          maxConvBytes caps the RAW (pre-encode) input of the O(n²) base-conversion
+          variants (Base58/Base62) at 4 KiB. base-conversion is quadratic, so even a
+          few KiB bounds the work to the low-millisecond range; bulk data belongs in
+          a block codec (base64). Enforced on the raw bytes at Marshal/Append.
+        name: maxConvBytes
+        type: int
+        value: 4 * 1024
+      - doc: |-
+          maxConvEncodedBytes caps the ENCODED text at Unmarshal. Base58/Base62
+          EXPAND raw→encoded by ~1.37× (log(256)/log(58|62)), so a maxConvBytes raw
+          input encodes to ~5.5 KiB; capping the encoded side at the raw cap would
+          make a freshly-Marshalled value un-Unmarshalable. 2× covers the expansion
+          with margin while still bounding the quadratic decode work.
+        name: maxConvEncodedBytes
+        type: int
+        value: 2 * maxConvBytes
+    name: base58Radix
+  - doc: |-
+      base62Alphabet is the conventional Base62 alphabet: digits, then uppercase,
+      then lowercase ASCII letters.
+    items:
+      - name: base62Alphabet
+        type: string
+        value: "\"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\""
+    name: base62Alphabet
+  - doc: base62Radix is the Base62 alphabet size.
+    items:
+      - name: base62Radix
+        type: int
+        value: "62"
+    name: base62Radix
+  - doc: byteBase is the radix of the input/output byte stream (one byte = base 256).
+    items:
+      - name: byteBase
+        type: int
+        value: "256"
+    name: byteBase
+  - doc: |-
+      maxBaseEncBytes caps Unmarshal input at 10 MiB; bigger inputs surface
+      CodeBaseEncSizeExceeded so memory-exhaustion attacks via huge base-N
+      payloads (CWE-400) cannot reach the stdlib decoder.
+    items:
+      - name: maxBaseEncBytes
+        type: int
+        value: 10 * 1024 * 1024
+    name: maxBaseEncBytes
+  - doc: |-
+      hexUpperAlphabet is the uppercase hex alphabet. The stdlib keeps its
+      lowercase twin unexported, and base16 is defined on this one (RFC 4648
+      §8), so the four lines that use it are the whole reason base16 does not
+      post-process hex.Encode's output.
+    items:
+      - name: hexUpperAlphabet
+        type: string
+        value: "\"0123456789ABCDEF\""
+    name: hexUpperAlphabet
+  - grouped: true
+    items:
+      - doc: hexDigitsPerByte is how many output characters one input byte produces.
+        name: hexDigitsPerByte
+        type: int
+        value: "2"
+      - doc: hexNibbleBits is the shift that isolates a byte's high nibble.
+        name: hexNibbleBits
+        type: int
+        value: "4"
+      - doc: hexNibbleMask isolates a byte's low nibble.
+        name: hexNibbleMask
+        value: byte(0x0F)
+    name: hexDigitsPerByte
+  - grouped: true
+    items:
+      - doc: variantBase64 is the RFC 4648 standard base64 alphabet with padding.
+        name: variantBase64
+        type: variant
+        value: iota
+      - doc: variantBase64URL is the RFC 4648 URL-safe base64 alphabet with padding.
+        name: variantBase64URL
+      - doc: variantBase32 is the RFC 4648 standard base32 alphabet with padding.
+        name: variantBase32
+      - doc: variantBase16 is uppercase hexadecimal (RFC 4648).
+        name: variantBase16
+      - doc: |-
+          variantHex is lowercase hexadecimal — distinct codec from base16 to let
+          callers pick the alphabet via Format.
+        name: variantHex
+      - doc: variantASCII85 is Adobe's Ascii85 encoding.
+        name: variantASCII85
+      - doc: |-
+          variantBase45 is RFC 9285 Base45 (QR-code alphanumeric safe). No stdlib
+          backing — see base45.go for the transform.
+        name: variantBase45
+      - doc: |-
+          variantBase58 is Bitcoin Base58 — a base-conversion (O(n²)) encoding for
+          short identifiers; see base58.go / base_convert.go.
+        name: variantBase58
+      - doc: variantBase62 is Base62 (0-9A-Za-z) — base-conversion (O(n²)), like base58.
+        name: variantBase62
+    name: variantBase64
+files:
+  - decls:
+      - base45Alphabet
+      - base45Radix
+      - base45Reverse
+      - buildBase45Reverse
+      - encodeBase45
+      - decodeBase45
+      - base45Triple
+      - base45Pair
+    name: base45.go
+  - decls:
+      - base58Alphabet
+      - base58Radix
+      - base58Reverse
+    name: base58.go
+  - decls:
+      - base62Alphabet
+      - base62Radix
+      - base62Reverse
+    name: base62.go
+  - decls:
+      - byteBase
+      - buildReverseTable
+      - divmodInPlace
+      - trimLeadingZeros
+      - mulAddWindow
+      - encodeBaseN
+      - assembleBaseN
+      - decodeBaseN
+      - assembleDecoded
+    name: base_convert.go
+  - decls:
+      - bufferingWriter
+      - (*bufferingWriter).Write
+      - (*bufferingWriter).Close
+    name: buffering_writer.go
+  - decls:
+      - maxBaseEncBytes
+      - hexUpperAlphabet
+      - hexDigitsPerByte
+      - variantBase64
+      - variant
+      - Base64
+      - isBaseConversion
+      - (*baseencCodec).convAlphabet
+      - (*baseencCodec).convRadix
+      - (*baseencCodec).convReverse
+      - baseencCodec
+      - (*baseencCodec).Name
+      - (*baseencCodec).MIMETypes
+      - (*baseencCodec).Extensions
+      - (*baseencCodec).Marshal
+      - marshalJSONPooled
+      - (*baseencCodec).Unmarshal
+      - (*baseencCodec).Append
+      - (*baseencCodec).NewEncoder
+      - (*baseencCodec).NewDecoder
+      - (*baseencCodec).encodeBytes
+      - (*baseencCodec).decodeBytes
+      - wrapMalformed
+      - encodeHex
+      - encodeHexUpperInto
+      - appendEncodeBase16Upper
+      - appendEncodeASCII85
+      - (*baseencCodec).appendEncode
+      - (*baseencCodec).streamWriter
+      - (*baseencCodec).streamReader
+      - convSizeExceeded
+      - wrapDecode
+      - decodeASCII85
+    name: codec.go
+  - decls:
+      - decodeAllReader
+      - streamDecodeLimit
+      - (*decodeAllReader).Read
+    name: decode_all_reader.go
+  - decls:
+      - baseencDecoder
+      - (*baseencDecoder).Decode
+      - (*baseencDecoder).More
+      - (*baseencDecoder).codec
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - baseencEncoder
+      - (*baseencEncoder).Encode
+      - (*baseencEncoder).Close
+    name: encoder.go
+  - decls:
+      - nopWriteCloser
+      - nopWriteCloser.Close
+    name: helpers.go
+  - decls:
+      - variantSpec
+      - variantSpecs
+      - (*baseencCodec).spec
+    name: spec.go
+functions:
+  - doc: |-
+      buildBase45Reverse returns the reverse-lookup table for the Base45
+      alphabet; non-member bytes map to base45NotMember.
+    name: buildBase45Reverse
+    results: "[base45TableSize]int"
+  - doc: |-
+      encodeBase45 returns the RFC 9285 encoding of raw. Two input bytes become
+      three output chars (little-endian base-45 of the 16-bit pair); a trailing
+      odd byte becomes two chars.
+    name: encodeBase45
+    params: raw []byte
+    results: "[]byte"
+  - doc: |-
+      decodeBase45 reverses encodeBase45. ok is false when the input length
+      class is illegal (len%3 == 1), a char is outside the alphabet, or a
+      group's value exceeds the byte(s) it must represent.
+    name: decodeBase45
+    params: s []byte
+    results: raw []byte, ok bool
+  - doc: |-
+      base45Triple decodes three alphabet chars into their combined value, or
+      reports ok=false when any char is outside the alphabet.
+    name: base45Triple
+    params: c0, c1, c2 byte
+    results: n int, ok bool
+  - doc: |-
+      base45Pair decodes two alphabet chars into their combined value, or
+      reports ok=false when either char is outside the alphabet.
+    name: base45Pair
+    params: c0, c1 byte
+    results: n int, ok bool
+  - doc: |-
+      buildReverseTable returns the byte→index reverse-lookup for alphabet;
+      bytes absent from alphabet map to base45NotMember (the shared sentinel).
+      Shared by Base58/Base62 (and structurally identical to Base45's table).
+    name: buildReverseTable
+    params: alphabet string
+    results: "[base45TableSize]int"
+  - doc: |-
+      divmodInPlace divides the big-endian magnitude buf by radix in place and
+      returns the remainder. buf keeps its length (leading zeros appear); the
+      caller trims them between divisions.
+    name: divmodInPlace
+    params: buf []byte, radix int
+    results: int
+  - doc: trimLeadingZeros returns b without its leading zero bytes.
+    name: trimLeadingZeros
+    params: b []byte
+    results: "[]byte"
+  - doc: |-
+      mulAddWindow computes mag[start:] = mag[start:]*radix + add over the
+      big-endian magnitude held in the TAIL of mag, and returns the new start
+      index. A multiply that overflows the live window extends it leftwards
+      into mag's reserved prefix instead of allocating a wider slice.
+
+      The window can never run past index 0: an n-digit base-radix number is
+      strictly below 256^n for every radix below 256, so len(s) bytes always
+      hold the magnitude of an len(s)-digit input — which is exactly how
+      decodeBaseN sizes mag.
+
+      Growing by moving start rather than by prepending is what makes the
+      decode path allocate once per call instead of once per new
+      most-significant byte; a memory profile attributed 97.85 % of the
+      package's allocated objects to the prepend this replaced. See BENCH.md.
+    name: mulAddWindow
+    params: mag []byte, start, radix, add int
+    results: int
+  - doc: |-
+      encodeBaseN encodes raw as a big-endian base-conversion over alphabet
+      (radix == len(alphabet)). Leading zero bytes become leading alphabet[0]
+      chars. O(len(raw)²) — caller must cap input at maxConvBytes.
+    name: encodeBaseN
+    params: raw []byte, alphabet string, radix int
+    results: "[]byte"
+  - doc: |-
+      assembleBaseN builds the final encoding: zeros copies of zeroChar followed
+      by digits reversed (digits arrive least-significant first).
+    name: assembleBaseN
+    params: zeroChar byte, zeros int, digits []byte
+    results: "[]byte"
+  - doc: |-
+      decodeBaseN reverses encodeBaseN for alphabet/radix. ok is false when a
+      char is outside the alphabet. Leading zero-chars restore leading zero
+      bytes. O(len(s)²) — caller must cap input at maxConvBytes.
+    name: decodeBaseN
+    params: s []byte, reverse *[base45TableSize]int, radix int
+    results: raw []byte, ok bool
+  - doc: assembleDecoded prepends zeros zero-bytes to buf (the decoded magnitude).
+    name: assembleDecoded
+    params: zeros int, buf []byte
+    results: "[]byte"
+  - doc: |-
+      isBaseConversion reports whether v is one of the O(n²) base-conversion
+      variants (Base58/Base62), which carry the tighter maxConvBytes input cap.
+    name: isBaseConversion
+    params: v variant
+    results: bool
+  - doc: |-
+      marshalJSONPooled encodes v via a pooled stdjson.Encoder + *bytes.Buffer
+      and returns (jsonBytes, buf, err). jsonBytes aliases buf's backing array,
+      so callers MUST call scratch.ReleaseBuffer(buf) exactly once after consuming
+      jsonBytes — which invalidates it. Returning the buffer rather than a
+      release closure keeps the Marshal/Append hot path free of a per-call
+      closure heap escape (the closure captured buf and so always escaped).
+    name: marshalJSONPooled
+    params: v any
+    results: jsonBytes []byte, buf *bytes.Buffer, err error
+  - doc: |-
+      wrapMalformed adapts a (bytes, ok) base-conversion decode result to the
+      shared decode sentinel: ok=false becomes CodeBaseEncDecodeFailed.
+    name: wrapMalformed
+    params: out []byte, ok bool
+    results: decoded []byte, err error
+  - doc: |-
+      encodeHex emits the hex encoding of raw as a fresh slice. Each variant
+      writes its own alphabet in ONE pass: hex delegates to the stdlib's
+      lowercase encoder, base16 emits uppercase directly. Single allocation
+      either way, and — unlike the case-fixing passes this replaced — a single
+      walk of the output too. Split out of encodeBytes to keep that dispatch
+      under the cyclo + LOC budget.
+    name: encodeHex
+    params: v variant, raw []byte
+    results: "[]byte"
+  - doc: |-
+      encodeHexUpperInto writes the UPPERCASE hex encoding of raw into dst, which
+      must be exactly hex.EncodedLen(len(raw)) long.
+
+      It exists because the stdlib ships no uppercase hex encoder, and the two
+      obvious ways to get one both walk the output a SECOND time: `hex.Encode`
+      then `bytes.ToUpper` (which also allocates again), or `hex.Encode` then an
+      in-place case pass. Emitting from an uppercase table makes the second pass
+      disappear entirely rather than making it cheaper. Measured at 1 KiB: the
+      branchy case pass cost 5 907 ns end to end, a branchless one 3 921 ns, and
+      this single pass 1 921 ns — see BENCH.md §"base16 is not hex".
+    name: encodeHexUpperInto
+    params: dst, raw []byte
+  - doc: |-
+      appendEncodeBase16Upper appends the uppercase-hex encoding of raw onto dst.
+      Split out of appendEncode to keep the dispatch function under the cyclo
+      budget and to give the per-byte upper-case loop a dedicated home.
+    name: appendEncodeBase16Upper
+    params: dst, raw []byte
+    results: "[]byte"
+  - doc: |-
+      appendEncodeASCII85 appends the ascii85 encoding of raw onto dst.
+      Split out of appendEncode because ascii85 has no stdlib AppendEncode
+      helper — the encode-then-append shape is unique to this variant.
+    name: appendEncodeASCII85
+    params: dst, raw []byte
+    results: "[]byte"
+  - doc: |-
+      convSizeExceeded builds the size-cap error for the O(n²) base-conversion
+      variants; where names the call site for the Private field.
+    name: convSizeExceeded
+    params: where string
+    results: error
+  - doc: wrapDecode adapts a (bytes, error) pair to the base-N decode sentinel.
+    name: wrapDecode
+    params: out []byte, derr error
+    results: decoded []byte, err error
+  - doc: decodeASCII85 drains an ascii85-encoded byte slice into a fresh buffer.
+    name: decodeASCII85
+    params: data []byte
+    results: decoded []byte, err error
+  - doc: |-
+      streamDecodeLimit is the maximum encoded bytes decodeAllReader will buffer
+      before refusing the input: the same caps the non-streaming Unmarshal applies,
+      so a hostile stream cannot bypass them via NewDecoder. Base-conversion
+      variants use the (expansion-aware) encoded cap; block variants the 10 MiB cap.
+    name: streamDecodeLimit
+    params: v variant
+    results: int
+imports:
+  ascii85: encoding/ascii85
+  base32: encoding/base32
+  base64: encoding/base64
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corebaseenc: github.com/kitsunium/sdk/internal/core/data/codec/baseenc
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  io: io
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  stdjson: encoding/json
+  strconv: strconv
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/baseenc
+  name: baseenc
+  purpose: Package baseenc — Base45 (RFC 9285) alphabet codec.
+types:
+  - doc: |-
+      bufferingWriter accumulates writes until Close then runs the codec's
+      encodeBytes path against the buffered payload. Used by variants whose
+      stdlib has no streaming encoder (base16 uppercase) — encoding the whole
+      payload at Close keeps the byte-stream legal without resorting to a
+      per-byte upper-case shim that would corrupt the partial groups stdlib
+      hex.Encoder emits.
+    fields:
+      - name: dst
+        type: io.Writer
+      - name: codec
+        type: "*baseencCodec"
+      - name: buf
+        type: bytes.Buffer
+    kind: struct
+    methods:
+      - doc: Write appends p to the internal buffer; encoding happens at Close.
+        name: Write
+        params: p []byte
+        recv: b *bufferingWriter
+        results: n int, err error
+      - doc: |-
+          Close encodes the buffered payload and flushes to the wrapped writer.
+          A short write (n < len(encoded)) is surfaced as io.ErrShortWrite wrapped
+          with the variant's marshal-failed sentinel so callers see a precise
+          "encoded payload was partially written" diagnostic instead of a silent
+          truncation.
+        name: Close
+        recv: b *bufferingWriter
+        results: error
+    name: bufferingWriter
+  - doc: |-
+      variant enumerates the supported base-N variants. The values are an
+      internal implementation detail — consumers address codecs by registered
+      Name (the public Format), never by variant identity.
+    kind: named
+    name: variant
+    underlying: int
+  - doc: |-
+      baseencCodec is the concrete codec.Codec implementation; one instance
+      per variant. Stateless — safe for concurrent use.
+    fields:
+      - name: variant
+        type: variant
+    kind: struct
+    methods:
+      - doc: convAlphabet returns the base-conversion alphabet for a Base58/Base62 codec.
+        name: convAlphabet
+        recv: c *baseencCodec
+        results: string
+      - doc: convRadix returns the base-conversion radix for a Base58/Base62 codec.
+        name: convRadix
+        recv: c *baseencCodec
+        results: int
+      - doc: convReverse returns the base-conversion reverse table for a Base58/Base62 codec.
+        name: convReverse
+        recv: c *baseencCodec
+        results: "*[base45TableSize]int"
+      - doc: Name returns the canonical Format identifier for the variant.
+        name: Name
+        recv: c *baseencCodec
+        results: string
+      - doc: MIMETypes returns a defensive copy of the variant's MIME alias list.
+        name: MIMETypes
+        recv: c *baseencCodec
+        results: "[]string"
+      - doc: Extensions returns a defensive copy of the variant's file extension list.
+        name: Extensions
+        recv: c *baseencCodec
+        results: "[]string"
+      - doc: |-
+          Marshal serialises v via encoding/json, then base-N encodes the JSON
+          bytes. Even for v of type []byte the JSON layer runs — encoding/json's
+          []byte→base64-string convention applies inside the JSON payload before
+          the outer base-N step wraps it.
+        name: Marshal
+        params: v any
+        recv: c *baseencCodec
+        results: encoded []byte, err error
+      - doc: Unmarshal base-N decodes data, then parses the resulting JSON into v.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: c *baseencCodec
+        results: error
+      - doc: |-
+          Append encodes v via JSON then base-N appends the result onto dst.
+          Implements the optional codec.Appender interface. The JSON step
+          allocates intermediate bytes by necessity (encoding/json.Marshal does
+          not expose an Append-style API), but the base-N step uses
+          AppendEncode where the stdlib offers it so dst grows in place.
+        name: Append
+        params: dst []byte, v any
+        recv: c *baseencCodec
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder returns a streaming Encoder for the variant. The encoder
+          serialises each value through encoding/json then wraps the bytes in a
+          stdlib base-N stream sink. Implements codec.StreamingCodec.
+        name: NewEncoder
+        params: w io.Writer
+        recv: c *baseencCodec
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder returns a streaming Decoder for the variant. The decoder
+          reads the entire base-N stream, decodes it, then drives a json.Decoder
+          over the recovered bytes. Implements codec.StreamingCodec.
+        name: NewDecoder
+        params: r io.Reader
+        recv: c *baseencCodec
+        results: codec.Decoder
+      - doc: encodeBytes applies the variant's base-N alphabet to raw.
+        name: encodeBytes
+        params: raw []byte
+        recv: c *baseencCodec
+        results: "[]byte"
+      - doc: |-
+          decodeBytes reverses encodeBytes for the variant. Returns a wrapped
+          error when the stdlib decoder rejects the input. Routes through
+          AppendDecode (Go 1.22+) on a []byte source so the full input copy
+          the legacy `string(data)` chain induced is eliminated — saves 1 alloc
+          and len(data) bytes per Unmarshal call on every base-N variant.
+        name: decodeBytes
+        params: data []byte
+        recv: c *baseencCodec
+        results: decoded []byte, err error
+      - doc: |-
+          appendEncode appends the base-N encoding of raw onto dst, using the
+          stdlib AppendEncode helpers where available and a fresh-buffer fallback
+          for ascii85 which lacks the helper.
+        name: appendEncode
+        params: dst, raw []byte
+        recv: c *baseencCodec
+        results: "[]byte"
+      - doc: |-
+          streamWriter returns a base-N WriteCloser for the variant, wrapping w.
+          Encoders for hex/ascii85 return their own io.WriteCloser; base32/64
+          expose NewEncoder. base16 (uppercase) does not have a streaming form,
+          so we fall back to a buffered encoder via the encodeBytes path.
+        name: streamWriter
+        params: w io.Writer
+        recv: c *baseencCodec
+        results: io.WriteCloser
+      - doc: streamReader returns a base-N io.Reader for the variant, wrapping r.
+        name: streamReader
+        params: r io.Reader
+        recv: c *baseencCodec
+        results: io.Reader
+      - doc: |-
+          spec returns the variantSpec for c.variant. Bounds are guaranteed by
+          the var initialisers — Register only stores in-range variants.
+        name: spec
+        recv: c *baseencCodec
+        results: "*variantSpec"
+    name: baseencCodec
+  - doc: |-
+      decodeAllReader adapts a non-streamable base-N variant to io.Reader: on
+      the first Read it drains the whole source, runs the variant's decodeBytes
+      transform, and serves the decoded payload from an in-memory reader.
+      Decode errors surface on that first Read. Used by Base45, which has no
+      incremental stdlib decoder.
+    fields:
+      - name: src
+        type: io.Reader
+      - name: dec
+        type: "*bytes.Reader"
+      - name: v
+        type: variant
+      - name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: Read drains+decodes on first call, then serves the decoded bytes.
+        name: Read
+        params: p []byte
+        recv: r *decodeAllReader
+        results: n int, err error
+    name: decodeAllReader
+  - doc: |-
+      baseencDecoder wraps a base-N io.Reader as a codec.Decoder.
+      The stdlib json.Decoder consumes the recovered bytes directly, so the
+      inner pipeline is base-N reader → json.Decoder → caller's target.
+    fields:
+      - name: src
+        type: io.Reader
+      - name: jsonDec
+        type: "*stdjson.Decoder"
+      - name: v
+        type: variant
+    kind: struct
+    methods:
+      - doc: Decode reads the next JSON value from the base-N → JSON pipeline.
+        name: Decode
+        params: v any
+        recv: d *baseencDecoder
+        results: error
+      - doc: More reports whether another JSON value remains in the stream.
+        name: More
+        recv: d *baseencDecoder
+        results: bool
+      - doc: |-
+          codec returns a stub baseencCodec carrying the variant. The stub gives
+          the decoder access to streamReader without holding a back-pointer to
+          the registered singleton (which would couple the lifetime artificially).
+        name: codec
+        recv: d *baseencDecoder
+        results: "*baseencCodec"
+    name: baseencDecoder
+  - doc: |-
+      baseencEncoder wraps a base-N io.WriteCloser as a codec.Encoder.
+      JSON serialisation is performed via a stdlib json.Encoder pointed at
+      the base-N writer so the JSON output flows through the encoding stream
+      without an intermediate buffer.
+    fields:
+      - name: base
+        type: io.WriteCloser
+      - name: jsonEnc
+        type: "*stdjson.Encoder"
+    kind: struct
+    methods:
+      - doc: Encode serialises v as JSON and feeds the bytes through the base-N writer.
+        name: Encode
+        params: v any
+        recv: e *baseencEncoder
+        results: error
+      - doc: |-
+          Close flushes the underlying base-N writer so any padding tail bytes
+          are emitted before the caller assumes the stream is complete.
+        name: Close
+        recv: e *baseencEncoder
+        results: error
+    name: baseencEncoder
+  - doc: |-
+      nopWriteCloser turns an io.Writer into an io.WriteCloser with a no-op Close.
+      Used by variants whose stdlib stream encoder is a plain io.Writer
+      (hex.NewEncoder) so the codec.Encoder interface can call Close uniformly.
+    fields:
+      - name: ""
+        role: embedded
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Close satisfies io.WriteCloser without releasing the wrapped writer.
+        name: Close
+        recv: nopWriteCloser
+        results: error
+    name: nopWriteCloser
+  - doc: |-
+      variantSpec is the per-variant table row that drives Name / MIMETypes /
+      Extensions. Hoisted into a package-level array so each method call is a
+      pointer dereference rather than a string allocation.
+    fields:
+      - name: name
+        type: string
+      - name: mimeTypes
+        type: "[]string"
+      - name: extensions
+        type: "[]string"
+    kind: struct
+    name: variantSpec
+vars:
+  - doc: |-
+      base45Reverse maps an ASCII byte to its alphabet index, or base45NotMember
+      when the byte is not a member of the Base45 alphabet. Built once at load.
+    items:
+      - name: base45Reverse
+        value: buildBase45Reverse()
+    name: base45Reverse
+  - doc: |-
+      base58Reverse maps an ASCII byte to its Base58 index, or base45NotMember
+      when the byte is absent from the alphabet.
+    items:
+      - name: base58Reverse
+        value: buildReverseTable(base58Alphabet)
+    name: base58Reverse
+  - doc: |-
+      base62Reverse maps an ASCII byte to its Base62 index, or base45NotMember
+      when the byte is absent from the alphabet.
+    items:
+      - name: base62Reverse
+        value: buildReverseTable(base62Alphabet)
+    name: base62Reverse
+  - doc: |-
+      Singletons — registered with the core/data/codec registry at package load.
+      Binding each registration result to a typed package-level var keeps us
+      clear of init() and lets downstream callers refer to a specific variant.
+    grouped: true
+    items:
+      - doc: Base64 is the RFC 4648 standard base64 codec.
+        name: Base64
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase64})"
+      - doc: Base64URL is the RFC 4648 URL-safe base64 codec.
+        name: Base64URL
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase64URL})"
+      - doc: Base32 is the RFC 4648 standard base32 codec.
+        name: Base32
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase32})"
+      - doc: Base16 is the uppercase hex codec.
+        name: Base16
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase16})"
+      - doc: Hex is the lowercase hex codec.
+        name: Hex
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantHex})"
+      - doc: ASCII85 is the Adobe Ascii85 codec.
+        name: ASCII85
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantASCII85})"
+      - doc: Base45 is the RFC 9285 Base45 codec (QR-code alphanumeric safe).
+        name: Base45
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase45})"
+      - doc: Base58 is the Bitcoin Base58 codec (base-conversion; short inputs only).
+        name: Base58
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase58})"
+      - doc: Base62 is the Base62 codec (base-conversion; short inputs only).
+        name: Base62
+        type: codec.Codec
+        value: "codec.Register(&baseencCodec{variant: variantBase62})"
+    name: Base64
+  - doc: |-
+      variantSpecs is the source-of-truth table. Index equals the variant
+      constant value; new variants append at the end so existing slots never
+      shift (matches the iota stability rule already documented for the
+      legacy pkg/v1/data/codec/baseenc Encoding enum).
+    items:
+      - name: variantSpecs
+        value: |-
+          [...]variantSpec{
+          	//: variantBase64 — standard base64.
+          	{
+          		name:       "base64",
+          		mimeTypes:  []string{"application/base64", "text/base64"},
+          		extensions: []string{".b64", ".base64"},
+          	},
+          	//: variantBase64URL — URL-safe base64. Only the distinct "application/base64url"
+          	//: media type is registered: the former "application/base64;url=true" alias
+          	//: differed from base64's "application/base64" by a parameter alone, which
+          	//: LookupMIME strips before indexing — so it was unreachable at lookup AND
+          	//: collided with base64 once registration normalises params symmetrically
+          	//: (issue #36). base64url stays routable by name and the .b64url extension.
+          	{
+          		name:       "base64url",
+          		mimeTypes:  []string{"application/base64url"},
+          		extensions: []string{".b64url"},
+          	},
+          	//: variantBase32 — standard base32.
+          	{
+          		name:       "base32",
+          		mimeTypes:  []string{"application/base32"},
+          		extensions: []string{".b32"},
+          	},
+          	//: variantBase16 — uppercase hex.
+          	{
+          		name:       "base16",
+          		mimeTypes:  []string{"application/base16"},
+          		extensions: []string{".b16"},
+          	},
+          	//: variantHex — lowercase hex.
+          	{
+          		name:       "hex",
+          		mimeTypes:  []string{"application/hex"},
+          		extensions: []string{".hex"},
+          	},
+          	//: variantASCII85 — Adobe Ascii85.
+          	{
+          		name:       "ascii85",
+          		mimeTypes:  []string{"application/ascii85"},
+          		extensions: []string{".a85"},
+          	},
+          	//: variantBase45 — RFC 9285 Base45 (QR-code alphanumeric safe).
+          	{
+          		name:       "base45",
+          		mimeTypes:  []string{"application/base45"},
+          		extensions: []string{".b45"},
+          	},
+          	//: variantBase58 — Bitcoin Base58 (base-conversion, short inputs).
+          	{
+          		name:       "base58",
+          		mimeTypes:  []string{"application/base58"},
+          		extensions: []string{".b58"},
+          	},
+          	//: variantBase62 — Base62 (base-conversion, short inputs).
+          	{
+          		name:       "base62",
+          		mimeTypes:  []string{"application/base62"},
+          		extensions: []string{".b62"},
+          	},
+          }
+    name: variantSpecs

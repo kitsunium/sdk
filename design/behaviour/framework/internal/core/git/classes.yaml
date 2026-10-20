@@ -1,0 +1,86 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - ChangedSet
+      - ResolutionValue
+      - (*ResolutionValue).Degraded
+    name: git.go
+  - decls:
+      - LineRangeValue
+      - LineRangeValue.Contains
+    name: line_range.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/core/git
+  name: git
+  purpose: Package git — the error-code range owned by this domain (ADR 0005 §Registry).
+types:
+  - kind: named
+    name: ChangedSet
+    underlying: |-
+      interface {
+      	// ContainsLine reports whether line on absFile falls inside a changed hunk.
+      	// Lines are 1-based and the bounds are inclusive.
+      	ContainsLine(absFile string, line int) bool
+      	// ContainsFile reports whether absFile appears anywhere in the diff,
+      	// including as the old side of a rename or a deletion.
+      	ContainsFile(absFile string) bool
+      	// ContainsDir reports whether absDir directly encloses any touched file.
+      	// It is not recursive: a parent of a touched directory is not itself
+      	// touched.
+      	ContainsDir(absDir string) bool
+      	// IsEmpty reports whether nothing at all was touched — a clean branch, or
+      	// one whose every change the caller's own filter excluded.
+      	IsEmpty() bool
+      }
+  - fields:
+      - doc: Set is what the branch changed, or nil when FullFallback is true.
+        name: Set
+        type: ChangedSet
+      - doc: |-
+          BaseRef is the default-branch ref the comparison used, e.g. "origin/main".
+          Empty when degraded.
+        name: BaseRef
+        type: string
+      - doc: |-
+          BaseSHA is the merge-base commit between BaseRef and HEAD. Empty when
+          degraded.
+        name: BaseSHA
+        type: string
+      - doc: HeadSHA is the commit HEAD resolved to. Empty when degraded.
+        name: HeadSHA
+        type: string
+      - doc: |-
+          FullFallback reports that no trustworthy changed set could be computed and
+          the caller must fall back to considering everything in scope.
+        name: FullFallback
+        type: bool
+      - doc: |-
+          Reason is the human-readable cause of the fallback, meant to be surfaced
+          rather than swallowed. Empty when not degraded.
+        name: Reason
+        type: string
+    kind: struct
+    methods:
+      - name: Degraded
+        recv: r *ResolutionValue
+        results: bool
+    name: ResolutionValue
+  - fields:
+      - doc: Start is the first changed line, inclusive and 1-based.
+        name: Start
+        type: int
+      - doc: End is the last changed line, inclusive.
+        name: End
+        type: int
+    kind: struct
+    methods:
+      - name: Contains
+        params: line int
+        recv: r LineRangeValue
+        results: bool
+    name: LineRangeValue

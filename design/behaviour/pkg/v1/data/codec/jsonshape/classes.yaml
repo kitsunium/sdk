@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape
+  name: jsonshape
+  purpose: "Package jsonshape describes how values of a Go type look on the wire under encoding/json — the JSON kind each value takes, the members an object has and under which names, which may be missing and which may be null — for a reader to show: an API's documentation, a developer console, a schema generator (ADR 0133)."
+types: []

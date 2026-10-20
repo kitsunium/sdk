@@ -1,0 +1,79 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: collapseSingle
+    steps:
+      - bind: out
+        eval: make(map[string]string, len(values))
+      - bind: offender, offenderCount
+        eval: "\"\", 0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: offender, offenderCount
+                          value: key, len(vals)
+                      when: offenderCount == 0 || key < offender
+                  - continue: true
+                when: len(vals) > 1
+            - opt:
+                do:
+                  - continue: true
+                when: len(vals) == 0
+            - set: out[key]
+              value: vals[0]
+          key: key
+          range: values
+          value: vals
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    coreform.CodeFormMultiValue,
+                			Reason:  "MULTI_VALUE",
+                			Public:  "form key carries multiple values",
+                			Private: "service/data/codec/form.Unmarshal: map[string]string target cannot hold a repeated key",
+                		}, errs.String("key", offender), errs.Int("count", offenderCount))
+          when: offenderCount > 0
+      - return: out, nil
+  - of: escapedLen
+    steps:
+      - bind: total
+        eval: len(s)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: s[i] == ' ' || isUnreservedQueryByte(s[i])
+            - op: +=
+              set: total
+              value: escapedByteWidth - 1
+          key: i
+          range: len(s)
+      - return: total
+  - of: appendQueryEscape
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, '+')
+                  - continue: true
+                when: c == ' '
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, c)
+                  - continue: true
+                when: isUnreservedQueryByte(c)
+            - set: dst
+              value: append(dst, '%', upperhex[c>>nibbleShift], upperhex[c&nibbleMask])
+          key: i
+          range: len(s)
+      - return: dst

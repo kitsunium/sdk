@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/bson
+  name: bson
+  purpose: Package bson declares the error codes and the sentinels of the BSON codec, internal/service/data/codec/bson — range 0.3.36.* (ADR 0021 service/data/codec/bson block).
+types: []

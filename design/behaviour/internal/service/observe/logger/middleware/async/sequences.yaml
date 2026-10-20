@@ -1,0 +1,463 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: mustNewRing
+        kind: internal
+      - id: worker
+        kind: package
+    steps:
+      - bind: size
+        eval: cfg.BufferSize
+      - opt:
+          do:
+            - set: size
+              value: defaultBufferSize
+          when: size <= 0
+      - bind: queue
+        eval: mustNewRing(size)
+        to: mustNewRing
+      - bind: callback
+        eval: cfg.OnDrop
+      - opt:
+          do:
+            - set: callback
+              value: noopOnDrop
+          when: callback == nil
+      - bind: errCallback
+        eval: cfg.OnError
+      - opt:
+          do:
+            - set: errCallback
+              value: noopOnError
+          when: errCallback == nil
+      - bind: pool
+        eval: recycler.NewPool[*recordEntry](newRecordEntry)
+      - bind: out
+        eval: |-
+          &asyncSink{
+          		downstream:  downstream,
+          		queue:       queue,
+          		pool:        pool,
+          		policy:      cfg.Policy,
+          		onDrop:      callback,
+          		onError:     errCallback,
+          		flushSignal: make(chan struct{}, 1),
+          		stop:        make(chan struct{}),
+          		done:        make(chan struct{}),
+          	}
+      - set: out.daemon
+        to: worker
+        value: |-
+          worker.Start(func(_ <-chan struct{}) {
+          		//: run the drainer; drain() closes out.done on exit (doneOnce-guarded)
+          		//: and the daemon closes its own join channel — Close joins the latter.
+          		out.drain()
+          	})
+      - return: out
+  - of: mustNewRing
+    steps:
+      - bind: queue, err
+        eval: ring.New[*recordEntry](size)
+      - opt:
+          do:
+            - panic: "\"internal/service/observe/logger/middleware/async: ring.New failed despite positive size: \" + err.Error()"
+          when: err != nil
+      - return: queue
+  - of: noopOnError
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: noopOnDrop
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: missed < 0
+  - of: (*asyncSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).Write
+        kind: self
+      - id: s.pool.Get
+        kind: value
+      - id: s.queue.TryWrite
+        kind: value
+      - id: s.handleFull
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    coreasync.CodeAsyncCtxCancelled,
+                			Reason:  "ASYNC_CTX_CANCELLED",
+                			Public:  "Async sink write aborted due to cancellation",
+                			Private: "service/observe/logger/middleware/async.Write saw a cancelled context",
+                		}, errs.Int("level", int(rec.Level)))
+          when: ctx != nil && ctx.Err() != nil
+      - lock:
+          mutex: s.ringMu
+      - opt:
+          do:
+            - return: 0, coreasync.Stopped
+          when: isClosed(s.stop)
+      - bind: ent
+        eval: s.pool.Get()
+        to: s.pool.Get
+      - set: ent.rec
+        value: rec
+      - set: ent.data
+        value: append(ent.data[:0], payload...)
+      - opt:
+          do:
+            - return: s.handleFull(ent)
+              to: s.handleFull
+          init:
+            bind: werr
+            eval: s.queue.TryWrite(ent)
+            to: s.queue.TryWrite
+          when: werr != nil
+      - return: len(payload), nil
+  - of: (*asyncSink).handleFull
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).handleFull
+        kind: self
+      - id: s.queue.TryRead
+        kind: value
+      - id: s.pool.Put
+        kind: value
+      - id: swallowRingError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: dropped, derr
+              eval: s.queue.TryRead()
+              to: s.queue.TryRead
+            - opt:
+                do:
+                  - eval: s.onDrop(1)
+                  - eval: s.pool.Put(dropped)
+                    to: s.pool.Put
+                when: derr == nil
+            - eval: swallowRingError(s.queue.TryWrite(ent))
+              to: swallowRingError
+            - return: len(ent.data), nil
+          when: s.policy == DropOldest
+      - eval: s.onDrop(1)
+      - eval: s.pool.Put(ent)
+        to: s.pool.Put
+      - return: 0, coreasync.BufferFull
+  - of: (*asyncSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).Flush
+        kind: self
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.queue.Len
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
+      - id: s.downstream.Flush
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - eval: s.ringMu.Lock()
+              to: s.ringMu.Lock
+            - bind: remaining
+              eval: s.queue.Len()
+              to: s.queue.Len
+            - bind: inFlight
+              eval: s.inFlight
+            - eval: s.ringMu.Unlock()
+              to: s.ringMu.Unlock
+            - opt:
+                do:
+                  - return: s.downstream.Flush(ctx)
+                    to: s.downstream.Flush
+                when: remaining == 0 && inFlight == 0
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(ctx.Err(), errs.WrapParams{
+                      				Code:    coreasync.CodeAsyncCtxCancelled,
+                      				Reason:  "ASYNC_CTX_CANCELLED",
+                      				Public:  "Async sink flush aborted due to cancellation",
+                      				Private: "service/observe/logger/middleware/async.Flush saw a cancelled context",
+                      			})
+                    to: errs
+                when: ctx != nil && ctx.Err() != nil
+            - opt:
+                do:
+                  - return: coreasync.Stopped
+                when: "!s.waitForDrainerProgress(ctx)"
+          forever: true
+  - of: (*asyncSink).waitForDrainerProgress
+    steps:
+      - opt:
+          do:
+            - bind: _, sigOK
+              eval: <-s.flushSignal
+            - return: sigOK
+          when: ctx == nil
+      - select:
+          cases:
+            - comm: _, sigOK := <-s.flushSignal
+              do:
+                - return: sigOK
+            - comm: <-ctx.Done()
+              do:
+                - return: "true"
+  - of: (*asyncSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).Close
+        kind: self
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.stopOnce.Do
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
+      - id: s.joinDrainer
+        kind: internal
+      - id: s.downstream.Close
+        kind: value
+    steps:
+      - eval: s.ringMu.Lock()
+        to: s.ringMu.Lock
+      - eval: |-
+          s.stopOnce.Do(func() {
+          		//: signal the drainer to exit; drainRemaining empties the queue first.
+          		close(s.stop)
+          	})
+        to: s.stopOnce.Do
+      - eval: s.ringMu.Unlock()
+        to: s.ringMu.Unlock
+      - eval: s.joinDrainer()
+        to: s.joinDrainer
+      - return: s.downstream.Close()
+        to: s.downstream.Close
+  - of: (*asyncSink).joinDrainer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).joinDrainer
+        kind: self
+      - id: s.daemon.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: s.daemon.Stop()
+              to: s.daemon.Stop
+            - return: ""
+          when: s.daemon != nil
+      - eval: <-s.done
+  - of: (*asyncSink).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).drain
+        kind: self
+      - id: s.doneOnce.Do
+        kind: value
+      - id: s.drainLoop
+        kind: internal
+    steps:
+      - defer: |-
+          s.doneOnce.Do(func() {
+          		//: signal the test-path Close that the drainer has fully exited.
+          		close(s.done)
+          	})
+        to: s.doneOnce.Do
+      - eval: s.drainLoop(s.stop)
+        to: s.drainLoop
+  - of: (*asyncSink).drainLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).drainLoop
+        kind: self
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.queue.TryRead
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
+      - id: s.forward
+        kind: internal
+      - id: s.drainRemaining
+        kind: internal
+      - id: yieldOnce
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: s.ringMu.Lock()
+              to: s.ringMu.Lock
+            - bind: ent, err
+              eval: s.queue.TryRead()
+              to: s.queue.TryRead
+            - opt:
+                do:
+                  - op: ++
+                    set: s.inFlight
+                when: err == nil
+            - eval: s.ringMu.Unlock()
+              to: s.ringMu.Unlock
+            - opt:
+                do:
+                  - eval: s.forward(ent)
+                    to: s.forward
+                  - continue: true
+                when: err == nil
+            - select:
+                cases:
+                  - comm: <-stop
+                    do:
+                      - eval: s.drainRemaining()
+                        to: s.drainRemaining
+                      - return: ""
+                  - default: true
+                    do:
+                      - eval: yieldOnce()
+                        to: yieldOnce
+          forever: true
+  - of: (*asyncSink).forward
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).forward
+        kind: self
+      - id: s.downstream.Write
+        kind: value
+      - id: s.forwardDownstreamError
+        kind: internal
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
+      - id: s.pool.Put
+        kind: value
+    steps:
+      - bind: n, err
+        eval: s.downstream.Write(asyncCtx(), ent.rec, ent.data)
+        to: s.downstream.Write
+      - eval: s.forwardDownstreamError(n, err)
+        to: s.forwardDownstreamError
+      - eval: s.ringMu.Lock()
+        to: s.ringMu.Lock
+      - op: "--"
+        set: s.inFlight
+      - eval: s.ringMu.Unlock()
+        to: s.ringMu.Unlock
+      - select:
+          cases:
+            - comm: s.flushSignal <- struct{}{}
+            - default: true
+      - set: ent.rec
+        value: corelogger.RecordEvent{}
+      - alt:
+          - do:
+              - set: ent.data
+                value: nil
+            when: cap(ent.data) > maxSaneCap
+          - do:
+              - set: ent.data
+                value: ent.data[:0]
+            else: true
+      - eval: s.pool.Put(ent)
+        to: s.pool.Put
+  - of: (*asyncSink).drainRemaining
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).drainRemaining
+        kind: self
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.queue.TryRead
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
+      - id: s.forward
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: s.ringMu.Lock()
+              to: s.ringMu.Lock
+            - bind: ent, err
+              eval: s.queue.TryRead()
+              to: s.queue.TryRead
+            - opt:
+                do:
+                  - op: ++
+                    set: s.inFlight
+                when: err == nil
+            - eval: s.ringMu.Unlock()
+              to: s.ringMu.Unlock
+            - opt:
+                do:
+                  - return: ""
+                when: err != nil
+            - eval: s.forward(ent)
+              to: s.forward
+          forever: true
+  - of: newRecordEntry
+    steps:
+      - return: "&recordEntry{}"
+  - of: yieldOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: yieldOnce
+        kind: self
+      - id: runtime
+        kind: stdlib
+    steps:
+      - eval: runtime.Gosched()
+        to: runtime
+  - of: isClosed
+    steps:
+      - select:
+          cases:
+            - comm: <-ch
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+  - forward: context.Background
+    of: asyncCtx
+  - of: (*asyncSink).forwardDownstreamError
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: bytes < 0 || err == nil
+      - eval: s.onError(err)
+  - of: swallowRingError
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil

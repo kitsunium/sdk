@@ -1,0 +1,213 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - castagnoli
+      - crc32cHasher
+      - crc32cHasher.Algorithm
+      - crc32cHasher.New
+    name: crc32c_hasher.go
+  - decls:
+      - DigestWriter
+      - NewDigestWriter
+      - (*DigestWriter).Write
+      - (*DigestWriter).Sum
+      - (*DigestWriter).SumHex
+    name: digest_writer.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - fnvHasher
+      - _
+      - fnvHasher.Algorithm
+      - fnvHasher.New
+    name: fnv_hasher.go
+  - decls:
+      - sha256Hasher
+      - _#2
+      - sha256Hasher.Algorithm
+      - sha256Hasher.New
+    name: sha256_hasher.go
+  - decls:
+      - sha3Hasher
+      - _#3
+      - sha3Hasher.Algorithm
+      - sha3Hasher.New
+    name: sha3_hasher.go
+  - decls:
+      - sha512Hasher
+      - _#4
+      - sha512Hasher.Algorithm
+      - sha512Hasher.New
+    name: sha512_hasher.go
+  - decls:
+      - VerifyingReader
+      - NewVerifyingReader
+      - (*VerifyingReader).Read
+      - (*VerifyingReader).verify
+    name: verifying_reader.go
+functions:
+  - name: NewDigestWriter
+    params: a corecrypto.Algorithm, dst io.Writer
+    results: writer *DigestWriter, err error
+  - name: NewVerifyingReader
+    params: a corecrypto.Algorithm, src io.Reader, wantHex string
+    results: reader *VerifyingReader, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  crc32: hash/crc32
+  fnv: hash/fnv
+  hash: hash
+  hex: encoding/hex
+  io: io
+  sha256: crypto/sha256
+  sha3: crypto/sha3
+  sha512: crypto/sha512
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
+  name: stdhash
+  purpose: Package stdhash — CRC-32C (Castagnoli) scheme registration (see stdhash.go).
+types:
+  - doc: |-
+      crc32cHasher is CRC-32C (Castagnoli) — a fast NON-cryptographic checksum for
+      cache keys and corruption detection, NOT a secure digest.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical key "crc32c".
+        name: Algorithm
+        recv: crc32cHasher
+        results: corecrypto.Algorithm
+      - doc: New returns a fresh CRC-32C hash over the shared Castagnoli table (4-byte sum).
+        name: New
+        recv: crc32cHasher
+        results: hash.Hash
+    name: crc32cHasher
+  - fields:
+      - doc: dst receives every byte unchanged; the digest never alters the stream.
+        name: dst
+        type: io.Writer
+      - doc: hsh is the running hash updated in lockstep with dst.
+        name: hsh
+        type: hash.Hash
+    kind: struct
+    methods:
+      - name: Write
+        params: p []byte
+        recv: w *DigestWriter
+        results: n int, err error
+      - name: Sum
+        recv: w *DigestWriter
+        results: "[]byte"
+      - name: SumHex
+        recv: w *DigestWriter
+        results: string
+    name: DigestWriter
+  - doc: |-
+      fnvHasher is FNV-1a 64-bit — a fast NON-cryptographic fingerprint for
+      in-memory dedup/sharding keys, NOT a secure digest.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical key "fnv1a-64".
+        name: Algorithm
+        recv: fnvHasher
+        results: corecrypto.Algorithm
+      - doc: New returns a fresh FNV-1a 64-bit hash (8-byte sum).
+        name: New
+        recv: fnvHasher
+        results: hash.Hash
+    name: fnvHasher
+  - doc: sha256Hasher is SHA-256 — a secure 256-bit digest for content addressing.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical key "sha256".
+        name: Algorithm
+        recv: sha256Hasher
+        results: corecrypto.Algorithm
+      - doc: New returns a fresh SHA-256 hash (32-byte digest).
+        name: New
+        recv: sha256Hasher
+        results: hash.Hash
+    name: sha256Hasher
+  - doc: sha3Hasher is SHA3-256 — the Keccak-family 256-bit cryptographic digest.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical key "sha3-256".
+        name: Algorithm
+        recv: sha3Hasher
+        results: corecrypto.Algorithm
+      - doc: New returns a fresh SHA3-256 hash (32-byte digest).
+        name: New
+        recv: sha3Hasher
+        results: hash.Hash
+    name: sha3Hasher
+  - doc: sha512Hasher is SHA-512 — a secure 512-bit digest.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical key "sha512".
+        name: Algorithm
+        recv: sha512Hasher
+        results: corecrypto.Algorithm
+      - doc: New returns a fresh SHA-512 hash (64-byte digest).
+        name: New
+        recv: sha512Hasher
+        results: hash.Hash
+    name: sha512Hasher
+  - fields:
+      - doc: src is the wrapped source; its EOF is the trigger for verification.
+        name: src
+        type: io.Reader
+      - doc: hsh is the running hash advanced in lockstep with every Read.
+        name: hsh
+        type: hash.Hash
+      - doc: wantHex is the expected canonical lowercase hex digest.
+        name: wantHex
+        type: string
+    kind: struct
+    methods:
+      - name: Read
+        params: p []byte
+        recv: r *VerifyingReader
+        results: n int, err error
+      - doc: |-
+          verify compares the computed digest to the expected hex, returning
+          DigestMismatch on divergence and io.EOF on a match.
+        name: verify
+        recv: r *VerifyingReader
+        results: error
+    name: VerifyingReader
+vars:
+  - grouped: true
+    items:
+      - doc: |-
+          castagnoli is the CRC-32C polynomial table, built at the first
+          crc32cHasher.New() call and shared by every later one (the table is
+          read-only after construction). Built at import, it cost every program
+          linking the SDK 0.2 ms at start, whether it ever hashed or not.
+        name: castagnoli
+        value: sync.OnceValue(func() *crc32.Table { return crc32.MakeTable(crc32.Castagnoli) })
+      - doc: Self-register CRC-32C at package import (no init(); package-level var).
+        name: _
+        value: corecrypto.RegisterHasher(crc32cHasher{})
+    name: castagnoli
+  - doc: Self-register FNV-1a 64-bit at package import (no init(); package-level var).
+    items:
+      - name: _
+        value: corecrypto.RegisterHasher(fnvHasher{})
+    name: _
+  - doc: Self-register SHA-256 at package import (no init(); package-level var).
+    items:
+      - name: _
+        value: corecrypto.RegisterHasher(sha256Hasher{})
+    name: _#2
+  - doc: Self-register SHA3-256 at package import (no init(); package-level var).
+    items:
+      - name: _
+        value: corecrypto.RegisterHasher(sha3Hasher{})
+    name: _#3
+  - doc: Self-register SHA-512 at package import (no init(); package-level var).
+    items:
+      - name: _
+        value: corecrypto.RegisterHasher(sha512Hasher{})
+    name: _#4

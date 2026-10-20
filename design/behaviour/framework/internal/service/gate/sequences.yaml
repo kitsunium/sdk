@@ -1,0 +1,66 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Decide
+    participants:
+      - id: caller
+        kind: actor
+      - id: Decide
+        kind: self
+      - id: floorDecision
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "coregate.DecisionValue{Outcome: coregate.OutcomeRefuse}"
+          when: policy == nil
+      - opt:
+          do:
+            - return: "coregate.DecisionValue{Outcome: coregate.OutcomeAllow, Exempt: true}"
+          when: policy.Exempt(path)
+      - opt:
+          do:
+            - return: "coregate.DecisionValue{Outcome: coregate.OutcomeRefuse}"
+          when: verify == nil
+      - bind: verifyErr
+        eval: verify()
+      - opt:
+          do:
+            - return: "coregate.DecisionValue{Outcome: coregate.OutcomeAllow}"
+          when: verifyErr == nil
+      - opt:
+          do:
+            - return: floorDecision(policy, verifyErr)
+              to: floorDecision
+          when: errors.Is(verifyErr, coreent.ErrUpdateRequired)
+      - return: "coregate.DecisionValue{Outcome: coregate.OutcomeRefuse, Cause: verifyErr}"
+  - of: floorDecision
+    steps:
+      - bind: decision
+        eval: "coregate.DecisionValue{Cause: cause, FloorUnmet: true}"
+      - opt:
+          do:
+            - set: decision.Outcome
+              value: coregate.OutcomeRefuse
+            - return: decision
+          when: policy == nil
+      - switch:
+          cases:
+            - case: coregate.UpdateApply
+              do:
+                - set: decision.Outcome
+                  value: coregate.OutcomeUpgrade
+            - case: coregate.UpdateWarn
+              do:
+                - set: decision.Outcome
+                  value: coregate.OutcomeAllow
+            - case: coregate.UpdateRefuse
+              do:
+                - set: decision.Outcome
+                  value: coregate.OutcomeRefuse
+            - default: true
+              do:
+                - set: decision.Outcome
+                  value: coregate.OutcomeRefuse
+          "on": policy.OnUpdateRequired
+      - return: decision

@@ -1,0 +1,113 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Scheme.String
+    steps:
+      - return: string(s)
+  - of: Scheme.Known
+    participants:
+      - id: caller
+        kind: actor
+      - id: Scheme.Known
+        kind: self
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - bind: _, found
+        eval: Lookup(s)
+        to: Lookup
+      - return: found
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: Lookup
+        kind: internal
+      - id: generator.New
+        kind: internal
+    steps:
+      - bind: generator, ok
+        eval: Lookup(scheme)
+        to: Lookup
+      - opt:
+          do:
+            - return: "\"\", UnknownScheme"
+          when: "!ok"
+      - return: generator.New()
+        to: generator.New
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: plugin
+        kind: package
+      - id: publishGenerator
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "DuplicateRegistration.Error() + \": \" + why"
+          init:
+            bind: why
+            eval: plugin.Unusable(g)
+            to: plugin
+          when: why != ""
+      - opt:
+          do:
+            - panic: err.Error()
+          init:
+            bind: err
+            eval: publishGenerator(g.Scheme(), g)
+            to: publishGenerator
+          when: err != nil
+      - return: g
+  - of: publishGenerator
+    participants:
+      - id: caller
+        kind: actor
+      - id: publishGenerator
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(DuplicateRegistration, errs.WrapParams{}, errs.String("scheme", "<empty>"))
+              to: errs
+          when: name == ""
+      - opt:
+          do:
+            - return: nil
+          when: "!registry.Publish(name, g)"
+      - return: errs.Wrap(DuplicateRegistration, errs.WrapParams{}, errs.String("scheme", string(name)))
+        to: errs
+  - of: Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lookup
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - return: registry.Lookup(name)
+        to: registry.Lookup
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: registry.Names
+        kind: value
+    steps:
+      - return: registry.Names()
+        to: registry.Names

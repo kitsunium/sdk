@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/i18n
+  name: i18n
+  purpose: "Package i18n is the public facade for the SDK's message-translation domain: a catalogue of translated messages, CLDR plural forms that are right in Polish and Arabic and not only in English, and Accept-Language negotiation that never fails a request."
+types: []

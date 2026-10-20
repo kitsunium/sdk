@@ -1,0 +1,1060 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: Parse
+        kind: self
+      - id: ParseInLocation
+        kind: internal
+    steps:
+      - return: ParseInLocation(expr, time.UTC)
+        to: ParseInLocation
+  - of: ParseInLocation
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseInLocation
+        kind: self
+      - id: splitExpression
+        kind: internal
+      - id: buildSchedule
+        kind: internal
+      - id: compiled.next
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectLocation()
+          when: loc == nil
+      - bind: fields, err
+        eval: splitExpression(expr)
+        to: splitExpression
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: compiled, err
+        eval: buildSchedule(fields, loc)
+        to: buildSchedule
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, rejectUnreachable(expr)
+          init:
+            bind: _, ok
+            eval: compiled.next(time.Date(probeYear, time.January, 1, 0, 0, 0, 0, loc))
+            to: compiled.next
+          when: "!ok"
+      - return: compiled.next, nil
+  - of: splitExpression
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitExpression
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: expandMacro
+        kind: internal
+    steps:
+      - bind: text
+        eval: strings.TrimSpace(expr)
+        to: strings
+      - opt:
+          do:
+            - return: nil, rejectExpression("expression is empty", expr, "")
+          when: text == ""
+      - opt:
+          do:
+            - bind: expanded, err
+              eval: expandMacro(text)
+              to: expandMacro
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: text
+              value: expanded
+          when: strings.HasPrefix(text, "@")
+      - bind: split
+        eval: strings.Fields(text)
+        to: strings
+      - opt:
+          do:
+            - return: nil, rejectFieldCount(text, len(split))
+          when: len(split) != cronFieldCount
+      - return: split, nil
+  - of: expandMacro
+    participants:
+      - id: caller
+        kind: actor
+      - id: expandMacro
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: lowered
+        eval: strings.ToLower(text)
+        to: strings
+      - switch:
+          cases:
+            - case: "\"@yearly\", \"@annually\""
+              do:
+                - return: "\"0 0 1 1 *\", nil"
+            - case: "\"@monthly\""
+              do:
+                - return: "\"0 0 1 * *\", nil"
+            - case: "\"@weekly\""
+              do:
+                - return: "\"0 0 * * 0\", nil"
+            - case: "\"@daily\", \"@midnight\""
+              do:
+                - return: "\"0 0 * * *\", nil"
+            - case: "\"@hourly\""
+              do:
+                - return: "\"0 * * * *\", nil"
+            - default: true
+              do:
+                - return: "\"\", refuseMacro(name, text)"
+          init:
+            bind: name, _, _
+            eval: strings.Cut(lowered, " ")
+            to: strings
+          "on": lowered
+  - of: refuseMacro
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseMacro
+        kind: self
+      - id: rejectSyntax
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"@every\""
+              do:
+                - return: rejectSyntax("@every is not cron syntax; use Every(d) for a fixed interval", text)
+                  to: rejectSyntax
+            - case: "\"@reboot\""
+              do:
+                - return: rejectSyntax("@reboot has no meaning in a library; run the job yourself before Run", text)
+                  to: rejectSyntax
+            - default: true
+              do:
+                - return: |-
+                    rejectSyntax(
+                    			"unknown macro; accepted: @yearly @annually @monthly @weekly @daily @midnight @hourly", text)
+                  to: rejectSyntax
+          "on": name
+  - of: rejectFieldCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectFieldCount
+        kind: self
+      - id: rejectSyntax
+        kind: internal
+      - id: rejectExpression
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                rejectSyntax("six-field (seconds) and seven-field (year) expressions "+
+                			"are not accepted; this parser is five-field POSIX cron", text)
+              to: rejectSyntax
+          when: got == secondsDialectFields || got == yearDialectFields
+      - return: |-
+          rejectExpression("expected 5 fields (minute hour day-of-month month day-of-week)",
+          		text, "got "+strconv.Itoa(got))
+        to: rejectExpression
+  - of: buildSchedule
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildSchedule
+        kind: self
+      - id: fieldSpecs[i].parse
+        kind: internal
+    steps:
+      - var:
+          name: sets
+          type: "[cronFieldCount][]bool"
+      - loop:
+          do:
+            - bind: set, parseErr
+              eval: fieldSpecs[i].parse(fields[i])
+              to: fieldSpecs[i].parse
+            - opt:
+                do:
+                  - return: nil, parseErr
+                when: parseErr != nil
+            - set: sets[i]
+              value: set
+          key: i
+          range: fieldSpecs
+      - return: |-
+          &cronSchedule{
+          		minutes:       sets[minuteField],
+          		hours:         sets[hourField],
+          		days:          sets[domField],
+          		months:        sets[monthField],
+          		weekdays:      sets[dowField],
+          		domRestricted: fields[domField] != "*",
+          		dowRestricted: fields[dowField] != "*",
+          		loc:           loc,
+          	}, nil
+  - of: (*cronSchedule).next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*cronSchedule).next
+        kind: self
+      - id: newCursor(after.In(c.loc)).nextMinute
+        kind: internal
+      - id: cur.nextMonth
+        kind: internal
+      - id: cur.nextDay
+        kind: internal
+      - id: cur.nextHour
+        kind: internal
+      - id: cur.nextMinute
+        kind: internal
+      - id: cur.materialise
+        kind: internal
+    steps:
+      - bind: cur
+        eval: newCursor(after.In(c.loc)).nextMinute()
+        to: newCursor(after.In(c.loc)).nextMinute
+      - bind: limit
+        eval: cur.year() + horizonYears
+      - loop:
+          cond: cur.year() <= limit
+          do:
+            - switch:
+                cases:
+                  - case: "!c.months[cur.month()]"
+                    do:
+                      - set: cur
+                        to: cur.nextMonth
+                        value: cur.nextMonth()
+                  - case: "!c.matchesDay(cur)"
+                    do:
+                      - set: cur
+                        to: cur.nextDay
+                        value: cur.nextDay()
+                  - case: "!c.hours[cur.hour()]"
+                    do:
+                      - set: cur
+                        to: cur.nextHour
+                        value: cur.nextHour()
+                  - case: "!c.minutes[cur.minute()]"
+                    do:
+                      - set: cur
+                        to: cur.nextMinute
+                        value: cur.nextMinute()
+                  - default: true
+                    do:
+                      - bind: got, exists
+                        eval: cur.materialise(c.loc)
+                        to: cur.materialise
+                      - opt:
+                          do:
+                            - return: got, true
+                          when: exists && got.After(after)
+                      - set: cur
+                        to: cur.nextMinute
+                        value: cur.nextMinute()
+      - return: time.Time{}, false
+  - of: (*cronSchedule).matchesDay
+    steps:
+      - bind: dom
+        eval: c.days[cur.day()]
+      - bind: dow
+        eval: c.weekdays[cur.weekday()]
+      - opt:
+          do:
+            - return: dom || dow
+          when: c.domRestricted && c.dowRestricted
+      - return: dom && dow
+  - of: newCursor
+    steps:
+      - return: "cursor{t: time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)}"
+  - of: cursor.year
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.year
+        kind: self
+      - id: c.t.Year
+        kind: value
+    steps:
+      - return: c.t.Year()
+        to: c.t.Year
+  - of: cursor.month
+    steps:
+      - return: int(c.t.Month())
+  - of: cursor.day
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.day
+        kind: self
+      - id: c.t.Day
+        kind: value
+    steps:
+      - return: c.t.Day()
+        to: c.t.Day
+  - of: cursor.hour
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.hour
+        kind: self
+      - id: c.t.Hour
+        kind: value
+    steps:
+      - return: c.t.Hour()
+        to: c.t.Hour
+  - of: cursor.minute
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.minute
+        kind: self
+      - id: c.t.Minute
+        kind: value
+    steps:
+      - return: c.t.Minute()
+        to: c.t.Minute
+  - of: cursor.weekday
+    steps:
+      - return: int(c.t.Weekday())
+  - of: cursor.nextMinute
+    steps:
+      - return: "cursor{t: c.t.Add(time.Minute)}"
+  - of: cursor.nextHour
+    steps:
+      - return: "cursor{t: time.Date(c.year(), c.t.Month(), c.day(), c.hour()+1, 0, 0, 0, time.UTC)}"
+  - of: cursor.nextDay
+    steps:
+      - return: "cursor{t: time.Date(c.year(), c.t.Month(), c.day()+1, 0, 0, 0, 0, time.UTC)}"
+  - of: cursor.nextMonth
+    steps:
+      - return: "cursor{t: time.Date(c.year(), c.t.Month()+1, 1, 0, 0, 0, 0, time.UTC)}"
+  - of: cursor.materialise
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.materialise
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: c.earliest
+        kind: internal
+    steps:
+      - bind: got
+        eval: time.Date(c.year(), c.t.Month(), c.day(), c.hour(), c.minute(), 0, 0, loc)
+        to: time
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: "!c.readsAs(got)"
+      - return: c.earliest(got), true
+        to: c.earliest
+  - of: cursor.readsAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.readsAs
+        kind: self
+      - id: t.Date
+        kind: value
+      - id: t.Clock
+        kind: value
+    steps:
+      - bind: year, month, day
+        eval: t.Date()
+        to: t.Date
+      - bind: hour, minute, _
+        eval: t.Clock()
+        to: t.Clock
+      - return: |-
+          year == c.year() && month == c.t.Month() && day == c.day() &&
+          		hour == c.hour() && minute == c.minute()
+  - of: cursor.earliest
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursor.earliest
+        kind: self
+      - id: got.ZoneBounds
+        kind: value
+      - id: got.Zone
+        kind: value
+      - id: start.Add(-time.Nanosecond).Zone
+        kind: value
+      - id: got.Add
+        kind: value
+    steps:
+      - bind: start, _
+        eval: got.ZoneBounds()
+        to: got.ZoneBounds
+      - opt:
+          do:
+            - return: got
+          when: start.IsZero()
+      - bind: _, offset
+        eval: got.Zone()
+        to: got.Zone
+      - bind: _, previous
+        eval: start.Add(-time.Nanosecond).Zone()
+        to: start.Add(-time.Nanosecond).Zone
+      - opt:
+          do:
+            - return: got
+          when: previous <= offset
+      - bind: earlier
+        eval: got.Add(-time.Duration(previous-offset) * time.Second)
+        to: got.Add
+      - opt:
+          do:
+            - return: earlier
+          when: c.readsAs(earlier)
+      - return: got
+  - of: newEntry
+    steps:
+      - return: |-
+          &entry{
+          		name:         value.Name,
+          		schedule:     value.Schedule,
+          		job:          value.Job,
+          		allowOverlap: value.AllowOverlap,
+          	}
+  - of: (*entry).arm
+    steps:
+      - bind: next, ok
+        eval: e.schedule(now)
+      - set: e.armed
+        value: ok && next.After(now)
+      - set: e.next
+        value: next
+  - of: Every
+    steps:
+      - opt:
+          do:
+            - return: nil, rejectInterval(period)
+          when: period <= 0
+      - return: |-
+          func(after time.Time) (time.Time, bool) {
+          		//: strictly after `after`, because period > 0 — the contract the
+          		//: engine's missed-deadline loop relies on to terminate.
+          		return after.Add(period), true
+          	}, nil
+  - of: (*fieldSpec).parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldSpec).parse
+        kind: self
+      - id: fs.bounds
+        kind: internal
+    steps:
+      - set: set
+        value: make([]bool, fs.maxValue+1)
+      - loop:
+          do:
+            - bind: lo, hi, step, boundsErr
+              eval: fs.bounds(item)
+              to: fs.bounds
+            - opt:
+                do:
+                  - return: nil, boundsErr
+                when: boundsErr != nil
+            - loop:
+                do:
+                  - set: set[value]
+                    value: "true"
+                  - opt:
+                      do:
+                        - break: true
+                      when: step > hi-value
+                init: value := lo
+                post: value += step
+          key: item
+          range: strings.SplitSeq(field, ",")
+      - return: set, nil
+  - of: (*fieldSpec).bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldSpec).bounds
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: fs.step
+        kind: internal
+      - id: fs.span
+        kind: internal
+    steps:
+      - bind: spec, stepText, hasStep
+        eval: strings.Cut(item, "/")
+        to: strings
+      - set: step
+        value: "1"
+      - opt:
+          do:
+            - set: step, err
+              to: fs.step
+              value: fs.step(stepText, item)
+            - opt:
+                do:
+                  - return: 0, 0, 0, err
+                when: err != nil
+            - opt:
+                do:
+                  - return: |-
+                      0, 0, 0, rejectSyntax(
+                      				"a step needs '*' or an explicit a-b range on its left", item)
+                when: spec != "*" && !strings.Contains(spec, "-")
+          when: hasStep
+      - opt:
+          do:
+            - return: fs.minValue, fs.maxValue, step, nil
+          when: spec == "*"
+      - return: fs.span(spec, item, step)
+        to: fs.span
+  - of: (*fieldSpec).span
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldSpec).span
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: fs.value
+        kind: internal
+    steps:
+      - bind: loText, hiText, isRange
+        eval: strings.Cut(spec, "-")
+        to: strings
+      - set: lo, err
+        to: fs.value
+        value: fs.value(loText, item)
+      - opt:
+          do:
+            - return: 0, 0, 0, err
+          when: err != nil
+      - opt:
+          do:
+            - return: lo, lo, step, nil
+          when: "!isRange"
+      - set: hi, err
+        to: fs.value
+        value: fs.value(hiText, item)
+      - opt:
+          do:
+            - return: 0, 0, 0, err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                0, 0, 0, rejectExpression(
+                			"range end is before its start; write two comma-separated spans instead",
+                			item, fs.label)
+          when: hi < lo
+      - return: lo, hi, step, nil
+  - of: (*fieldSpec).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldSpec).value
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, rejectExpression("missing value", item, fs.label)
+          when: token == ""
+      - opt:
+          do:
+            - return: fs.minValue + index, nil
+          init:
+            bind: index
+            eval: slices.Index(fs.names, strings.ToUpper(token))
+            to: slices
+          when: index >= 0
+      - bind: value, convErr
+        eval: strconv.Atoi(token)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, fs.rejectToken(token, item)
+          when: convErr != nil
+      - opt:
+          do:
+            - return: |-
+                0, rejectExpression("value out of range for "+fs.label+" ("+
+                			rangeText(fs.minValue, fs.maxValue)+")"+fs.hintSuffix(), item, fs.label)
+          when: value < fs.minValue || value > fs.maxValue
+      - return: value, nil
+  - of: (*fieldSpec).rejectToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldSpec).rejectToken
+        kind: self
+      - id: rejectSyntax
+        kind: internal
+      - id: rejectExpression
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "rejectSyntax(\"Quartz operators L, W, # and ? are not accepted\", item)"
+              to: rejectSyntax
+          when: strings.ContainsAny(strings.ToUpper(token), quartzOperators)
+      - return: rejectExpression("not a number or a known name for "+fs.label, item, fs.label)
+        to: rejectExpression
+  - of: (*fieldSpec).hintSuffix
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: fs.hint == ""
+      - return: "\" — \" + fs.hint"
+  - of: (*fieldSpec).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldSpec).step
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: stride, convErr
+        eval: strconv.Atoi(text)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, rejectExpression("step must be a positive number", item, fs.label)
+          when: convErr != nil || stride <= 0
+      - return: stride, nil
+  - of: rejectExpression
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectExpression
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coresched.InvalidExpression, kerrs.WrapParams{},
+          		kerrs.String("detail", detail), kerrs.String("item", clip(item)),
+          		kerrs.String("context", extra))
+        to: kerrs
+  - of: rejectSyntax
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectSyntax
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coresched.UnsupportedSyntax, kerrs.WrapParams{},
+          		kerrs.String("detail", detail), kerrs.String("item", clip(item)))
+        to: kerrs
+  - of: rejectUnreachable
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectUnreachable
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coresched.UnreachableSchedule, kerrs.WrapParams{},
+          		kerrs.String("expression", clip(expr)),
+          		kerrs.Int("horizon_years", horizonYears))
+        to: kerrs
+  - of: rejectLocation
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectLocation
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.Wrap(coresched.InvalidLocation, kerrs.WrapParams{})
+        to: kerrs
+  - of: rejectInterval
+    participants:
+      - id: caller
+        kind: actor
+      - id: rejectInterval
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coresched.InvalidInterval, kerrs.WrapParams{},
+          		kerrs.String("period", period.String()))
+        to: kerrs
+  - of: clip
+    steps:
+      - bind: runes
+        eval: "[]rune(text)"
+      - opt:
+          do:
+            - return: text
+          when: len(runes) <= maxEchoRunes
+      - return: string(runes[:maxEchoRunes]) + "…"
+  - of: rangeText
+    steps:
+      - return: strconv.Itoa(minValue) + "-" + strconv.Itoa(maxValue)
+  - of: (*scheduler).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).Run
+        kind: self
+      - id: s.begin
+        kind: internal
+      - id: s.finish
+        kind: internal
+      - id: wg.Wait
+        kind: value
+      - id: s.clk.Now
+        kind: value
+      - id: e.arm
+        kind: internal
+      - id: s.loop
+        kind: internal
+    steps:
+      - bind: entries, err
+        eval: s.begin()
+        to: s.begin
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: s.finish()
+        to: s.finish
+      - var:
+          name: wg
+          type: sync.WaitGroup
+      - defer: wg.Wait()
+        to: wg.Wait
+      - bind: now
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - loop:
+          do:
+            - eval: e.arm(now)
+              to: e.arm
+          key: _
+          range: entries
+          value: e
+      - return: s.loop(ctx, entries, &wg)
+        to: s.loop
+  - of: (*scheduler).loop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).loop
+        kind: self
+      - id: earliest
+        kind: internal
+      - id: s.idle
+        kind: internal
+      - id: s.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: timer.C
+        kind: value
+      - id: s.fire
+        kind: internal
+      - id: timer.Reset
+        kind: value
+    steps:
+      - bind: due, ok
+        eval: earliest(entries)
+        to: earliest
+      - opt:
+          do:
+            - return: s.idle(ctx)
+              to: s.idle
+          when: "!ok"
+      - bind: timer
+        eval: s.clk.NewTimer(due.Sub(s.clk.Now()))
+        to: s.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: fires
+        eval: timer.C()
+        to: timer.C
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: nil
+                  - comm: <-fires
+                    do:
+                      - eval: s.fire(ctx, entries, wg, s.clk.Now())
+                        to: s.fire
+            - set: due, ok
+              to: earliest
+              value: earliest(entries)
+            - opt:
+                do:
+                  - return: s.idle(ctx)
+                    to: s.idle
+                when: "!ok"
+            - eval: timer.Reset(due.Sub(s.clk.Now()))
+              to: timer.Reset
+          forever: true
+  - of: (*scheduler).idle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).idle
+        kind: self
+      - id: ctx.Done
+        kind: value
+    steps:
+      - eval: <-ctx.Done()
+        to: ctx.Done
+      - return: nil
+  - of: (*scheduler).fire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).fire
+        kind: self
+      - id: e.due
+        kind: internal
+      - id: s.emit
+        kind: internal
+      - id: e.busy.Store
+        kind: value
+      - id: wg.Add
+        kind: value
+      - id: s.run
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: scheduled, missed, ok
+              eval: e.due(now)
+              to: e.due
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - eval: |-
+                      s.emit(coresched.ResultValue{
+                      				Name: e.name, Scheduled: scheduled, Missed: missed, Skipped: true,
+                      			})
+                    to: s.emit
+                  - continue: true
+                when: "!e.allowOverlap && e.busy.Load()"
+            - eval: e.busy.Store(true)
+              to: e.busy.Store
+            - eval: wg.Add(1)
+              to: wg.Add
+            - go: s.run(ctx, wg, e, scheduled, missed)
+              to: s.run
+          key: _
+          range: entries
+          value: e
+  - of: (*scheduler).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).run
+        kind: self
+      - id: wg.Done
+        kind: value
+      - id: s.clk.Now
+        kind: value
+      - id: invoke
+        kind: internal
+      - id: e.busy.Store
+        kind: value
+      - id: s.emit
+        kind: internal
+    steps:
+      - defer: wg.Done()
+        to: wg.Done
+      - bind: started
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - bind: jobErr
+        eval: invoke(ctx, e)
+        to: invoke
+      - bind: result
+        eval: |-
+          coresched.ResultValue{
+          		Name:      e.name,
+          		Scheduled: scheduled,
+          		Started:   started,
+          		Finished:  s.clk.Now(),
+          		Missed:    missed,
+          		Err:       jobErr,
+          	}
+      - eval: e.busy.Store(false)
+        to: e.busy.Store
+      - eval: s.emit(result)
+        to: s.emit
+  - of: invoke
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: leave err as the job returned it.
+          			return
+          		}
+          		//: the recovered value travels as a FIELD, never as the wrap origin,
+          		//: so a panic carrying an *errs.Error cannot hijack JOB_PANICKED.
+          		err = kerrs.Wrap(coresched.JobPanicked, kerrs.WrapParams{},
+          			kerrs.String("job", e.name), kerrs.String("panic", fmt.Sprint(value)),
+          			kerrs.String("stack", string(debug.Stack())))
+          	}()
+      - return: e.job(ctx)
+  - of: New
+    steps:
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "&scheduler{clk: clk, onResult: cfg.OnResult, names: map[string]bool{}}"
+  - of: (*scheduler).Add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).Add
+        kind: self
+      - id: validateEntry
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateEntry(value)
+            to: validateEntry
+          when: err != nil
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresched.SchedulerRunning, kerrs.WrapParams{},
+                			kerrs.String("job", value.Name))
+              to: kerrs
+          when: s.running
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresched.DuplicateJob, kerrs.WrapParams{},
+                			kerrs.String("job", value.Name))
+              to: kerrs
+          when: s.names[value.Name]
+      - set: s.names[value.Name]
+        value: "true"
+      - set: s.entries
+        value: append(s.entries, newEntry(value))
+      - return: nil
+  - of: validateEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateEntry
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresched.InvalidEntry, kerrs.WrapParams{},
+                			kerrs.String("missing", "Name"))
+              to: kerrs
+          when: value.Name == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresched.InvalidEntry, kerrs.WrapParams{},
+                			kerrs.String("missing", "Schedule"), kerrs.String("job", value.Name))
+              to: kerrs
+          when: value.Schedule == nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresched.InvalidEntry, kerrs.WrapParams{},
+                			kerrs.String("missing", "Job"), kerrs.String("job", value.Name))
+              to: kerrs
+          when: value.Job == nil
+      - return: nil
+  - of: (*scheduler).begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).begin
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: nil, kerrs.Wrap(coresched.SchedulerRunning, kerrs.WrapParams{})
+          when: s.running
+      - set: s.running
+        value: "true"
+      - return: slices.Clone(s.entries), nil
+        to: slices
+  - of: (*scheduler).finish
+    steps:
+      - lock:
+          mutex: s.mu
+      - set: s.running
+        value: "false"
+  - of: (*scheduler).emit
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.onResult == nil
+      - lock:
+          mutex: s.hookMu
+      - eval: s.onResult(result)

@@ -1,0 +1,62 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*PolicyValue).lockouts
+    steps:
+      - var:
+          name: faults
+          type: "[]string"
+      - opt:
+          do:
+            - set: faults
+              value: |-
+                append(faults,
+                			"OnUpdateRequired is unset: neither refusing nor upgrading is a guess this "+
+                				"package may make on a vendor's behalf")
+          when: "!p.OnUpdateRequired.Valid()"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: faults
+                    value: |-
+                      append(faults,
+                      				"recovery path "+quote(recovery)+" is not exempt: an operator whose "+
+                      					"entitlement was refused could not run the command that repairs it")
+                when: "!p.Exempt(strings.Split(recovery, pathSeparator))"
+          key: _
+          range: p.RecoveryPaths
+          value: recovery
+      - opt:
+          do:
+            - set: faults
+              value: |-
+                append(faults,
+                			"no command is exempt: every invocation would require an entitlement, "+
+                				"including the ones that repair it")
+          when: len(p.ExemptExact) == 0 && len(p.ExemptSubtree) == 0
+      - return: faults
+  - of: unmatchable
+    steps:
+      - var:
+          name: faults
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: path == ""
+            - opt:
+                do:
+                  - set: faults
+                    value: |-
+                      append(faults,
+                      				field+" entry "+quote(path)+" carries stray whitespace, so no command path "+
+                      					"can equal it: the exemption it was written for never applies and the "+
+                      					"command stays gated")
+                when: strayWhitespace(path)
+          key: _
+          range: paths
+          value: path
+      - return: faults

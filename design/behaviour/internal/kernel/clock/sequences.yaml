@@ -1,0 +1,560 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*ManualClock).NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).NewTimer
+        kind: self
+      - id: m.newTimer
+        kind: internal
+    steps:
+      - return: m.newTimer(d)
+        to: m.newTimer
+  - of: (*ManualClock).Sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).Sleep
+        kind: self
+      - id: m.sleep
+        kind: internal
+    steps:
+      - eval: m.sleep(d)
+        to: m.sleep
+  - of: NewManualClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewManualClock
+        kind: self
+      - id: newManualClock
+        kind: internal
+    steps:
+      - return: newManualClock(start)
+        to: newManualClock
+  - of: newManualClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: newManualClock
+        kind: self
+      - id: sync
+        kind: stdlib
+    steps:
+      - bind: mc
+        eval: "&ManualClock{now: start}"
+      - set: mc.cond
+        to: sync
+        value: sync.NewCond(&mc.mu)
+      - return: mc
+  - of: (*ManualClock).Now
+    steps:
+      - lock:
+          mutex: m.mu
+          read: true
+      - return: m.now
+  - of: (*ManualClock).Since
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).Since
+        kind: self
+      - id: m.now.Sub
+        kind: value
+    steps:
+      - lock:
+          mutex: m.mu
+          read: true
+      - return: m.now.Sub(t)
+        to: m.now.Sub
+  - of: (*ManualClock).After
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).After
+        kind: self
+      - id: m.NewTimer(d).C
+        kind: internal
+    steps:
+      - return: m.NewTimer(d).C()
+        to: m.NewTimer(d).C
+  - of: (*ManualClock).newTimer
+    steps:
+      - return: "&manualTimer{clk: m, w: m.register(d, 0)}"
+  - of: (*ManualClock).NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).NewTicker
+        kind: self
+      - id: requirePositivePeriod
+        kind: internal
+    steps:
+      - eval: requirePositivePeriod("NewTicker", d)
+        to: requirePositivePeriod
+      - return: "&manualTicker{clk: m, w: m.register(d, d)}"
+  - of: (*ManualClock).sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).sleep
+        kind: self
+      - id: m.After
+        kind: internal
+    steps:
+      - eval: <-m.After(d)
+        to: m.After
+  - of: (*ManualClock).Advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).Advance
+        kind: self
+      - id: m.advanceTo
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "\"clock: ManualClock.Advance requires d >= 0, got \" + d.String() + \" (use Set to move time backwards)\""
+          when: d < 0
+      - lock:
+          mutex: m.mu
+      - eval: m.advanceTo(m.now.Add(d))
+        to: m.advanceTo
+  - of: (*ManualClock).Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).Set
+        kind: self
+      - id: m.advanceTo
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - set: m.now
+              value: t
+            - return: ""
+          when: t.Before(m.now)
+      - eval: m.advanceTo(t)
+        to: m.advanceTo
+  - of: (*ManualClock).Pending
+    steps:
+      - lock:
+          mutex: m.mu
+          read: true
+      - return: len(m.waits)
+  - of: (*ManualClock).BlockUntil
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).BlockUntil
+        kind: self
+      - id: m.cond.Wait
+        kind: value
+    steps:
+      - lock:
+          mutex: m.mu
+      - loop:
+          cond: len(m.waits) < n
+          do:
+            - eval: m.cond.Wait()
+              to: m.cond.Wait
+  - of: (*ManualClock).register
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).register
+        kind: self
+      - id: m.link
+        kind: internal
+      - id: fireWait
+        kind: internal
+      - id: m.retire
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: w
+        eval: |-
+          &manualWait{
+          		ch:       make(chan time.Time, 1),
+          		deadline: m.now.Add(d),
+          		period:   period,
+          		seq:      m.seq,
+          	}
+      - op: ++
+        set: m.seq
+      - eval: m.link(w)
+        to: m.link
+      - opt:
+          do:
+            - eval: fireWait(w, m.now)
+              to: fireWait
+            - eval: m.retire(w)
+              to: m.retire
+          when: "!w.deadline.After(m.now)"
+      - return: w
+  - of: (*ManualClock).advanceTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).advanceTo
+        kind: self
+      - id: m.nextDue
+        kind: internal
+      - id: fireWait
+        kind: internal
+      - id: rearmWait
+        kind: internal
+      - id: m.retire
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: w
+              eval: m.nextDue(target)
+              to: m.nextDue
+            - opt:
+                do:
+                  - set: m.now
+                    value: target
+                  - return: ""
+                when: w == nil
+            - set: m.now
+              value: w.deadline
+            - eval: fireWait(w, w.deadline)
+              to: fireWait
+            - alt:
+                - do:
+                    - eval: rearmWait(w, target)
+                      to: rearmWait
+                  when: w.period > 0
+                - do:
+                    - eval: m.retire(w)
+                      to: m.retire
+                  else: true
+          forever: true
+  - of: (*ManualClock).link
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).link
+        kind: self
+      - id: m.cond.Broadcast
+        kind: value
+    steps:
+      - set: w.linked
+        value: "true"
+      - set: m.waits
+        value: append(m.waits, w)
+      - eval: m.cond.Broadcast()
+        to: m.cond.Broadcast
+  - of: (*ManualClock).retire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).retire
+        kind: self
+      - id: m.cond.Broadcast
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!w.linked"
+      - set: w.linked
+        value: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: m.waits
+                    value: append(m.waits[:i], m.waits[i+1:]...)
+                  - eval: m.cond.Broadcast()
+                    to: m.cond.Broadcast
+                  - return: ""
+                when: cur == w
+          key: i
+          range: m.waits
+          value: cur
+  - of: (*ManualClock).stopWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).stopWait
+        kind: self
+      - id: m.retire
+        kind: internal
+      - id: drainWait
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: was
+        eval: w.linked
+      - eval: m.retire(w)
+        to: m.retire
+      - eval: drainWait(w)
+        to: drainWait
+      - return: was
+  - of: (*ManualClock).resetWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ManualClock).resetWait
+        kind: self
+      - id: m.retire
+        kind: internal
+      - id: drainWait
+        kind: internal
+      - id: m.now.Add
+        kind: value
+      - id: m.link
+        kind: internal
+      - id: fireWait
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: was
+        eval: w.linked
+      - eval: m.retire(w)
+        to: m.retire
+      - eval: drainWait(w)
+        to: drainWait
+      - opt:
+          do:
+            - set: w.period
+              value: d
+          when: w.period > 0
+      - set: w.deadline
+        to: m.now.Add
+        value: m.now.Add(d)
+      - eval: m.link(w)
+        to: m.link
+      - opt:
+          do:
+            - eval: fireWait(w, m.now)
+              to: fireWait
+            - eval: m.retire(w)
+              to: m.retire
+          when: "!w.deadline.After(m.now)"
+      - return: was
+  - of: (*manualTicker).C
+    steps:
+      - return: t.w.ch
+  - of: (*manualTicker).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*manualTicker).Stop
+        kind: self
+      - id: t.clk.stopWait
+        kind: internal
+    steps:
+      - eval: t.clk.stopWait(t.w)
+        to: t.clk.stopWait
+  - of: (*manualTicker).Reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*manualTicker).Reset
+        kind: self
+      - id: requirePositivePeriod
+        kind: internal
+      - id: t.clk.resetWait
+        kind: internal
+    steps:
+      - eval: requirePositivePeriod("Ticker.Reset", d)
+        to: requirePositivePeriod
+      - eval: t.clk.resetWait(t.w, d)
+        to: t.clk.resetWait
+  - of: (*manualTimer).C
+    steps:
+      - return: t.w.ch
+  - of: (*manualTimer).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*manualTimer).Stop
+        kind: self
+      - id: t.clk.stopWait
+        kind: internal
+    steps:
+      - return: t.clk.stopWait(t.w)
+        to: t.clk.stopWait
+  - of: (*manualTimer).Reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*manualTimer).Reset
+        kind: self
+      - id: t.clk.resetWait
+        kind: internal
+    steps:
+      - return: t.clk.resetWait(t.w, d)
+        to: t.clk.resetWait
+  - of: rearmWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: rearmWait
+        kind: self
+      - id: target.Sub
+        kind: value
+      - id: target.Add
+        kind: value
+      - id: w.deadline.Add
+        kind: value
+    steps:
+      - bind: elapsed
+        eval: target.Sub(w.deadline)
+        to: target.Sub
+      - bind: skipped
+        eval: elapsed / w.period
+      - opt:
+          do:
+            - set: w.deadline
+              to: target.Add
+              value: target.Add(w.period)
+            - return: ""
+          when: skipped >= maxDuration/w.period
+      - set: w.deadline
+        to: w.deadline.Add
+        value: w.deadline.Add(w.period * (skipped + 1))
+  - of: fireWait
+    steps:
+      - select:
+          cases:
+            - comm: w.ch <- at
+            - default: true
+  - of: drainWait
+    steps:
+      - select:
+          cases:
+            - comm: <-w.ch
+            - default: true
+  - of: systemClock.Now
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemClock.Now
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Now()
+        to: time
+  - of: systemClock.Since
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemClock.Since
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Since(t)
+        to: time
+  - of: systemClock.After
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemClock.After
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.After(d)
+        to: time
+  - of: systemClock.NewTimer
+    steps:
+      - return: "systemTimer{tm: time.NewTimer(d)}"
+  - of: systemClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemClock.NewTicker
+        kind: self
+      - id: requirePositivePeriod
+        kind: internal
+    steps:
+      - eval: requirePositivePeriod("NewTicker", d)
+        to: requirePositivePeriod
+      - return: "systemTicker{tk: time.NewTicker(d)}"
+  - of: systemClock.Sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemClock.Sleep
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - eval: time.Sleep(d)
+        to: time
+  - of: systemTicker.C
+    steps:
+      - return: t.tk.C
+  - of: systemTicker.Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemTicker.Stop
+        kind: self
+      - id: t.tk.Stop
+        kind: value
+    steps:
+      - eval: t.tk.Stop()
+        to: t.tk.Stop
+  - of: systemTicker.Reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemTicker.Reset
+        kind: self
+      - id: requirePositivePeriod
+        kind: internal
+      - id: t.tk.Reset
+        kind: value
+    steps:
+      - eval: requirePositivePeriod("Ticker.Reset", d)
+        to: requirePositivePeriod
+      - eval: t.tk.Reset(d)
+        to: t.tk.Reset
+  - of: systemTimer.C
+    steps:
+      - return: t.tm.C
+  - of: systemTimer.Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemTimer.Stop
+        kind: self
+      - id: t.tm.Stop
+        kind: value
+    steps:
+      - return: t.tm.Stop()
+        to: t.tm.Stop
+  - of: systemTimer.Reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: systemTimer.Reset
+        kind: self
+      - id: t.tm.Reset
+        kind: value
+    steps:
+      - return: t.tm.Reset(d)
+        to: t.tm.Reset
+  - of: requirePositivePeriod
+    steps:
+      - opt:
+          do:
+            - panic: "\"clock: \" + op + \" requires a period > 0, got \" + d.String()"
+          when: d <= 0

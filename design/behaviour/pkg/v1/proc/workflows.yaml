@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: MissingCapabilities
+    steps:
+      - var:
+          name: missing
+          type: "[]Capability"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: missing
+                    value: append(missing, c)
+                when: "!Supported(c)"
+          key: _
+          range: caps
+          value: c
+      - return: missing

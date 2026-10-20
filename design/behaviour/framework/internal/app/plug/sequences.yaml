@@ -1,0 +1,68 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Refuse
+    steps:
+      - return: "&RefusalError{Kind: kind, Err: err}"
+  - of: Refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: Refused
+        kind: self
+      - id: u.Unwrap
+        kind: internal
+    steps:
+      - loop:
+          cond: err != nil
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: r, ok
+                  eval: err.(*RefusalError)
+                when: ok && r.Kind == kind
+            - typeswitch:
+                bind: u
+                cases:
+                  - do:
+                      - loop:
+                          do:
+                            - opt:
+                                do:
+                                  - return: "true"
+                                when: Refused(e, kind)
+                          key: _
+                          range: u.Unwrap()
+                          value: e
+                      - return: "false"
+                    types: interface{ Unwrap() []error }
+                  - do:
+                      - set: err
+                        to: u.Unwrap
+                        value: u.Unwrap()
+                    types: interface{ Unwrap() error }
+                  - default: true
+                    do:
+                      - return: "false"
+                "on": err
+      - return: "false"
+  - of: (*RefusalError).Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RefusalError).Error
+        kind: self
+      - id: e.Err.Error
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"app: a store's engine refused the call\""
+          when: e.Err == nil
+      - return: e.Err.Error()
+        to: e.Err.Error
+  - of: (*RefusalError).Unwrap
+    steps:
+      - return: e.Err

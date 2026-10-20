@@ -1,0 +1,680 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AppendEvent
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendEvent
+        kind: self
+      - id: e.Validate
+        kind: value
+      - id: appendField
+        kind: internal
+      - id: e.Retry.Duration
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: appendData
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst, verr
+          init:
+            bind: verr
+            eval: e.Validate()
+            to: e.Validate
+          when: verr != nil
+      - opt:
+          do:
+            - set: dst
+              to: appendField
+              value: appendField(dst, "id", e.ID)
+          when: e.ID != ""
+      - opt:
+          do:
+            - set: dst
+              to: appendField
+              value: appendField(dst, "event", e.Name)
+          when: e.Name != ""
+      - opt:
+          do:
+            - set: dst
+              value: "append(dst, \"retry: \"...)"
+            - set: dst
+              to: strconv
+              value: strconv.AppendInt(dst, int64(retry/time.Millisecond), retryBase)
+            - set: dst
+              value: append(dst, '\n')
+          init:
+            bind: retry
+            eval: e.Retry.Duration()
+            to: e.Retry.Duration
+          when: retry != 0
+      - opt:
+          do:
+            - set: dst
+              to: appendData
+              value: appendData(dst, e.Data)
+          when: e.Data != ""
+      - return: append(dst, '\n'), nil
+  - of: AppendComment
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendComment
+        kind: self
+      - id: validateComment
+        kind: internal
+      - id: appendField
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst, verr
+          init:
+            bind: verr
+            eval: validateComment(text)
+            to: validateComment
+          when: verr != nil
+      - set: dst
+        to: appendField
+        value: appendField(dst, "", text)
+      - return: append(dst, '\n'), nil
+  - of: validateComment
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateComment
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("field", "comment"),
+                			errs.String("why", "the value carries a line terminator, which this field cannot express"))
+              to: errs
+          when: text != "" && (strings.IndexByte(text, '\n') >= 0 || strings.IndexByte(text, '\r') >= 0)
+      - return: nil
+  - of: appendData
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendData
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: firstTerminator
+        kind: internal
+      - id: appendField
+        kind: internal
+      - id: advance
+        kind: internal
+    steps:
+      - bind: lf
+        eval: strings.IndexByte(data, '\n')
+        to: strings
+      - bind: cr
+        eval: strings.IndexByte(data, '\r')
+        to: strings
+      - bind: at
+        eval: "0"
+      - loop:
+          do:
+            - bind: idx
+              eval: firstTerminator(lf, cr)
+              to: firstTerminator
+            - opt:
+                do:
+                  - return: appendField(dst, "data", data[at:])
+                    to: appendField
+                when: idx < 0
+            - set: dst
+              to: appendField
+              value: appendField(dst, "data", data[at:idx])
+            - set: at
+              value: idx + terminatorWidth(data, idx)
+            - set: lf
+              to: advance
+              value: advance(data, lf, at, '\n')
+            - set: cr
+              to: advance
+              value: advance(data, cr, at, '\r')
+          forever: true
+  - of: terminatorWidth
+    steps:
+      - opt:
+          do:
+            - return: crlfWidth
+          when: data[idx] == '\r' && idx+1 < len(data) && data[idx+1] == '\n'
+      - return: "1"
+  - of: advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: advance
+        kind: self
+      - id: indexFrom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: cursor
+          when: cursor < 0 || cursor >= at
+      - return: indexFrom(data, at, b)
+        to: indexFrom
+  - of: firstTerminator
+    steps:
+      - opt:
+          do:
+            - return: cr
+          when: lf < 0
+      - opt:
+          do:
+            - return: lf
+          when: cr < 0 || lf < cr
+      - return: cr
+  - of: indexFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexFrom
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: idx
+        eval: strings.IndexByte(s[from:], b)
+        to: strings
+      - opt:
+          do:
+            - return: "-1"
+          when: idx < 0
+      - return: from + idx
+  - of: appendField
+    steps:
+      - set: dst
+        value: append(dst, name...)
+      - set: dst
+        value: append(dst, ':')
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, ' ')
+            - set: dst
+              value: append(dst, value...)
+          when: value != ""
+      - return: append(dst, '\n')
+  - of: KeepAlive
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.keepAlive
+                value: d
+              - set: c.noKeepAlive
+                value: "false"
+  - of: WithoutKeepAlive
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.noKeepAlive
+                value: "true"
+  - of: WriteTimeout
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.writeTimeout
+                value: d
+  - of: Retry
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.retry
+                value: d
+  - of: resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolve
+        kind: self
+      - id: "(corenet.SSEEventValue{Retry: corenet.DurationValue(cfg.retry)}).Validate"
+        kind: value
+    steps:
+      - var:
+          name: cfg
+          type: config
+      - loop:
+          do:
+            - eval: opt(&cfg)
+          key: _
+          range: opts
+          value: opt
+      - opt:
+          do:
+            - return: |-
+                config{}, errs.Wrap(corenet.SSEStreamMisconfigured, errs.WrapParams{},
+                			errs.String("option", "KeepAlive"),
+                			errs.Int64("nanoseconds", int64(cfg.keepAlive)),
+                			errs.String("why", "a negative interval has no meaning; use WithoutKeepAlive to disable it"))
+          when: cfg.keepAlive < 0
+      - opt:
+          do:
+            - return: |-
+                config{}, errs.Wrap(corenet.SSEStreamMisconfigured, errs.WrapParams{},
+                			errs.String("option", "WriteTimeout"),
+                			errs.Int64("nanoseconds", int64(cfg.writeTimeout)),
+                			errs.String("why", "a negative write budget has no meaning"))
+          when: cfg.writeTimeout < 0
+      - opt:
+          do:
+            - set: cfg.keepAlive
+              value: DefaultKeepAlive
+          when: cfg.keepAlive == 0
+      - opt:
+          do:
+            - set: cfg.writeTimeout
+              value: DefaultWriteTimeout
+          when: cfg.writeTimeout == 0
+      - opt:
+          do:
+            - set: cfg.clock
+              value: clock.System
+          when: cfg.clock == nil
+      - opt:
+          do:
+            - return: config{}, verr
+          init:
+            bind: verr
+            eval: "(corenet.SSEEventValue{Retry: corenet.DurationValue(cfg.retry)}).Validate()"
+            to: "(corenet.SSEEventValue{Retry: corenet.DurationValue(cfg.retry)}).Validate"
+          when: cfg.retry != 0 && verr != nil
+      - return: cfg, nil
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: setStreamHeaders
+        kind: internal
+      - id: s.rc.Flush
+        kind: value
+      - id: s.watch
+        kind: internal
+      - id: s.Send
+        kind: internal
+      - id: s.startKeepAlive
+        kind: internal
+    steps:
+      - bind: cfg, cerr
+        eval: resolve(opts)
+        to: resolve
+      - opt:
+          do:
+            - return: nil, cerr
+          when: cerr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.SSEFlushUnsupported, errs.WrapParams{},
+                			errs.String("why", "the ResponseWriter implements neither FlushError nor http.Flusher"))
+          when: "!canFlush(w)"
+      - bind: s
+        eval: |-
+          &Stream{
+          		w:            w,
+          		rc:           http.NewResponseController(w),
+          		lastEventID:  r.Header.Get(corenet.SSELastEventIDHeader),
+          		writeTimeout: cfg.writeTimeout,
+          		frame:        make([]byte, 0, initialFrameCapacity),
+          		done:         make(chan struct{}),
+          	}
+      - set: s.deadlines
+        value: s.rc.SetWriteDeadline(time.Time{}) == nil
+      - eval: setStreamHeaders(w.Header())
+        to: setStreamHeaders
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.SSEFlushUnsupported, errs.WrapParams{},
+                			errs.String("cause", ferr.Error()))
+          init:
+            bind: ferr
+            eval: s.rc.Flush()
+            to: s.rc.Flush
+          when: ferr != nil
+      - eval: s.watch(r.Context())
+        to: s.watch
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, serr
+                init:
+                  bind: serr
+                  eval: "s.Send(corenet.SSEEventValue{Retry: corenet.DurationValue(cfg.retry)})"
+                  to: s.Send
+                when: serr != nil
+          when: cfg.retry != 0
+      - eval: s.startKeepAlive(cfg)
+        to: s.startKeepAlive
+      - return: s, nil
+  - of: (*Stream).LastEventID
+    steps:
+      - return: s.lastEventID
+  - of: (*Stream).Done
+    steps:
+      - return: s.done
+  - of: (*Stream).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).Send
+        kind: self
+      - id: s.ended
+        kind: internal
+      - id: AppendEvent
+        kind: internal
+      - id: s.retain
+        kind: internal
+      - id: s.write
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.ended()
+            to: s.ended
+          when: err != nil
+      - bind: frame, err
+        eval: AppendEvent(s.frame[:0], event)
+        to: AppendEvent
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - eval: s.retain(frame)
+        to: s.retain
+      - return: s.write(frame)
+        to: s.write
+  - of: (*Stream).Comment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).Comment
+        kind: self
+      - id: s.ended
+        kind: internal
+      - id: AppendComment
+        kind: internal
+      - id: s.retain
+        kind: internal
+      - id: s.write
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.ended()
+            to: s.ended
+          when: err != nil
+      - bind: frame, err
+        eval: AppendComment(s.frame[:0], text)
+        to: AppendComment
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - eval: s.retain(frame)
+        to: s.retain
+      - return: s.write(frame)
+        to: s.write
+  - of: (*Stream).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).Close
+        kind: self
+      - id: s.end
+        kind: internal
+      - id: s.pinger.Stop
+        kind: value
+      - id: s.watcher.Stop
+        kind: value
+    steps:
+      - eval: s.end()
+        to: s.end
+      - opt:
+          do:
+            - eval: s.pinger.Stop()
+              to: s.pinger.Stop
+          when: s.pinger != nil
+      - eval: s.watcher.Stop()
+        to: s.watcher.Stop
+      - return: nil
+  - of: (*Stream).retain
+    steps:
+      - opt:
+          do:
+            - set: s.frame
+              value: make([]byte, 0, initialFrameCapacity)
+            - return: ""
+          when: cap(frame) > maxRetainedFrameCapacity && len(frame) < cap(frame)/retainUseFraction
+      - set: s.frame
+        value: frame
+  - of: (*Stream).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).write
+        kind: self
+      - id: s.rc.SetWriteDeadline
+        kind: value
+      - id: s.w.Write
+        kind: value
+      - id: s.end
+        kind: internal
+      - id: errs
+        kind: package
+      - id: s.rc.Flush
+        kind: value
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: s.deadlines
+                    value: "false"
+                init:
+                  bind: derr
+                  eval: s.rc.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+                  to: s.rc.SetWriteDeadline
+                when: derr != nil
+          when: s.deadlines
+      - opt:
+          do:
+            - eval: s.end()
+              to: s.end
+            - return: |-
+                errs.Wrap(corenet.SSEStreamClosed, errs.WrapParams{},
+                			errs.String("cause", err.Error()))
+              to: errs
+          init:
+            bind: _, err
+            eval: s.w.Write(frame)
+            to: s.w.Write
+          when: err != nil
+      - opt:
+          do:
+            - eval: s.end()
+              to: s.end
+            - return: |-
+                errs.Wrap(corenet.SSEStreamClosed, errs.WrapParams{},
+                			errs.String("cause", err.Error()))
+              to: errs
+          init:
+            bind: err
+            eval: s.rc.Flush()
+            to: s.rc.Flush
+          when: err != nil
+      - return: nil
+  - of: (*Stream).ended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).ended
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - select:
+          cases:
+            - comm: <-s.done
+              do:
+                - return: errs.Wrap(corenet.SSEStreamClosed, errs.WrapParams{})
+                  to: errs
+            - default: true
+      - return: nil
+  - of: (*Stream).end
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).end
+        kind: self
+      - id: s.endOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          s.endOnce.Do(func() {
+          		//: every observer — Send, Comment, Done, the keep-alive — sees this.
+          		close(s.done)
+          	})
+        to: s.endOnce.Do
+  - of: (*Stream).watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).watch
+        kind: self
+      - id: corenet
+        kind: package
+      - id: worker
+        kind: package
+    steps:
+      - bind: draining
+        eval: corenet.DrainSignal(ctx)
+        to: corenet
+      - set: s.watcher
+        to: worker
+        value: |-
+          worker.Start(func(stop <-chan struct{}) {
+          		select {
+          		//: Close is joining us.
+          		case <-stop:
+          		//: the stream already ended some other way.
+          		case <-s.done:
+          		//: the client went away, or net/http finished with the request.
+          		case <-ctx.Done():
+          			s.end()
+          		//: the server began draining. This is the whole reason the signal
+          		//: exists: an endless stream that ignored it would hold a graceful
+          		//: shutdown open until the drain budget expired and the socket was
+          		//: severed under it — every time, on every deploy.
+          		case <-draining:
+          			s.end()
+          		}
+          	})
+  - of: (*Stream).startKeepAlive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).startKeepAlive
+        kind: self
+      - id: worker
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: cfg.noKeepAlive
+      - set: s.pinger
+        to: worker
+        value: |-
+          worker.Every(cfg.keepAlive, func() {
+          		//: a failed keep-alive means the peer is gone — Comment has already
+          		//: ended the stream, so there is nothing left to do but stop ticking.
+          		//: end is called rather than Close: Close joins this very goroutine.
+          		if err := s.Comment(keepAliveComment); err != nil {
+          			s.end()
+          		}
+          	}, worker.WithClock(cfg.clock), worker.WithDone(s.done))
+  - of: setStreamHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: setStreamHeaders
+        kind: self
+      - id: h.Set
+        kind: value
+    steps:
+      - eval: h.Set("Content-Type", corenet.SSEContentType)
+        to: h.Set
+      - opt:
+          do:
+            - eval: h.Set("Cache-Control", "no-cache")
+              to: h.Set
+          when: h.Get("Cache-Control") == ""
+      - opt:
+          do:
+            - eval: h.Set("X-Accel-Buffering", "no")
+              to: h.Set
+          when: h.Get("X-Accel-Buffering") == ""
+  - of: canFlush
+    participants:
+      - id: caller
+        kind: actor
+      - id: canFlush
+        kind: self
+      - id: unwrapped.Unwrap
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - typeswitch:
+                bind: unwrapped
+                cases:
+                  - do:
+                      - return: "true"
+                    types: interface{ FlushError() error }, http.Flusher
+                  - do:
+                      - set: w
+                        to: unwrapped.Unwrap
+                        value: unwrapped.Unwrap()
+                    types: interface{ Unwrap() http.ResponseWriter }
+                  - default: true
+                    do:
+                      - return: "false"
+                "on": w
+          forever: true

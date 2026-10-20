@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/toml
+  name: toml
+  purpose: Package toml declares the error codes and the sentinels of the TOML codec, internal/service/data/codec/toml — range 0.3.5.* (ADR 0005 service/data/codec/toml block).
+types: []

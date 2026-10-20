@@ -1,0 +1,73 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: Open
+        kind: self
+      - id: RefuseSymlink
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, serr
+          init:
+            bind: serr
+            eval: RefuseSymlink(path, &refusals.Symlink)
+            to: RefuseSymlink
+          when: serr != nil
+      - bind: f, oerr
+        eval: os.OpenFile(path, openFlags, perm)
+        to: os
+      - opt:
+          do:
+            - return: nil, ExplainOpenFailure(path, oerr, &refusals.Open)
+          when: oerr != nil
+      - return: f, nil
+  - of: RefuseSymlink
+    participants:
+      - id: caller
+        kind: actor
+      - id: RefuseSymlink
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: info, lerr
+        eval: os.Lstat(path)
+        to: os
+      - opt:
+          do:
+            - return: nil
+          when: lerr != nil || info.Mode()&os.ModeSymlink == 0
+      - return: errs.Wrap(nil, *refusal, errs.String(pathFieldKey, path), errs.String(kindFieldKey, KindSymlink))
+        to: errs
+  - of: ExplainOpenFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: ExplainOpenFailure
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(pathFieldKey, path)}"
+      - bind: info, serr
+        eval: os.Lstat(path)
+        to: os
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.String(kindFieldKey, KindSymlink))
+          when: serr == nil && info.Mode()&os.ModeSymlink != 0
+      - return: errs.Wrap(openErr, *refusal, fields...)
+        to: errs

@@ -1,0 +1,71 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Probe.String
+    steps:
+      - switch:
+          cases:
+            - case: ProbeStartup
+              do:
+                - return: "\"startup\""
+            - case: ProbeReadiness
+              do:
+                - return: "\"readiness\""
+            - case: ProbeLiveness
+              do:
+                - return: "\"liveness\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": p
+  - of: ResultValue.Age
+    participants:
+      - id: caller
+        kind: actor
+      - id: ResultValue.Age
+        kind: self
+      - id: now.Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: r.At.IsZero()
+      - bind: age
+        eval: now.Sub(r.At)
+        to: now.Sub
+      - opt:
+          do:
+            - return: "0"
+          when: age < 0
+      - return: age
+  - of: Status.String
+    steps:
+      - switch:
+          cases:
+            - case: StatusHealthy
+              do:
+                - return: "\"healthy\""
+            - case: StatusDegraded
+              do:
+                - return: "\"degraded\""
+            - case: StatusUnhealthy
+              do:
+                - return: "\"unhealthy\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": s
+  - of: Status.Serving
+    steps:
+      - return: s == StatusDegraded || s == StatusHealthy
+  - of: Worst
+    steps:
+      - return: min(ranked(a), ranked(b))
+  - of: ranked
+    steps:
+      - opt:
+          do:
+            - return: StatusUnhealthy
+          when: s > StatusHealthy
+      - return: s

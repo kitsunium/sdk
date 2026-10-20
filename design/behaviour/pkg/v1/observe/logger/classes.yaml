@@ -1,0 +1,326 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      devVersion is the string returned by FrameworkVersion when Version was
+      not set at link time (typical for `go run` / local `go test`).
+    items:
+      - name: devVersion
+        type: string
+        value: "\"dev\""
+    name: devVersion
+  - doc: |-
+      errorAttrCap is the small pre-allocation hint for an SDK error's Attr slice —
+      code + reason + public + one trail frame covers the common case.
+    items:
+      - name: errorAttrCap
+        type: int
+        value: "4"
+    name: errorAttrCap
+  - doc: |-
+      Structured keys WithError emits, documented in one place so the producer here
+      and any downstream parser cannot drift.
+    grouped: true
+    items:
+      - doc: errorCodeKey carries the dotted-quad classification of an SDK error.
+        name: errorCodeKey
+        value: "\"error.code\""
+      - doc: errorReasonKey carries the SCREAMING_SNAKE reason of an SDK error.
+        name: errorReasonKey
+        value: "\"error.reason\""
+      - doc: errorPublicKey carries the wire-safe public message of an SDK error.
+        name: errorPublicKey
+        value: "\"error.public\""
+      - doc: errorTrailKey is the prefix for each positional wrap-trail code field.
+        name: errorTrailKey
+        value: "\"error.trail\""
+      - doc: errorMessageKey carries the flat Error() string of a non-SDK error.
+        name: errorMessageKey
+        value: "\"error.message\""
+    name: errorCodeKey
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - NewTextEncoder
+      - NewJSONEncoder
+    name: encoder.go
+  - decls:
+      - FromConfig
+      - decodeTopology
+      - resolveSinks
+      - openEntry
+      - redactWriterFailure
+      - parseLevel
+      - toLowerASCII
+    name: fromconfig.go
+  - decls:
+      - Config
+      - NewText
+      - Default
+      - DefaultMulti
+      - Debug
+      - Info
+      - Warn
+      - Error
+      - String
+      - Int
+      - Bool
+      - Float64
+      - Int64
+      - Uint64
+      - Duration
+      - Time
+      - Any
+    name: logger.go
+  - decls:
+      - SinkConfig
+      - NewWithSink
+      - NewWriterSink
+      - TextEncoder
+    name: sink.go
+  - decls:
+      - TopologyConfig
+    name: topology.go
+  - decls:
+      - TraceContextFromContext
+    name: tracecontext.go
+  - decls:
+      - devVersion
+      - Version
+      - FrameworkVersion
+    name: version.go
+  - decls:
+      - errorAttrCap
+      - errorCodeKey
+      - WithError
+      - fallbackAttrs
+      - appendReason
+      - appendOptional
+      - appendTrail
+    name: witherror.go
+  - decls:
+      - NewMulti
+    name: writer.go
+  - decls:
+      - WriterEntryConfig
+    name: writer_entry.go
+functions:
+  - name: NewTextEncoder
+    results: Encoder
+  - name: NewJSONEncoder
+    results: Encoder
+  - name: FromConfig
+    params: format Format, raw []byte
+    results: lg Logger, err error
+  - doc: |-
+      decodeTopology unmarshals raw into a Topology using the codec registered under
+      format. It stays on the core/data/codec surface (Lookup + Codec.Unmarshal) so the
+      public logger package inherits no vendor codec dependency. Every failure maps
+      to the redacted TopologyInvalid sentinel — the raw bytes are never echoed.
+    name: decodeTopology
+    params: format Format, raw []byte
+    results: topo TopologyConfig, err error
+  - doc: |-
+      resolveSinks resolves every WriterEntryConfig to a Sink and composes them via
+      Multi. A single entry needs no fan-out wrapper; any failure is redacted to
+      TopologyInvalid and aborts the whole topology.
+    name: resolveSinks
+    params: entries []WriterEntryConfig
+    results: sink Sink, err error
+  - doc: |-
+      openEntry resolves one WriterEntryConfig to a Sink. It looks the Factory up by
+      Name, type-asserts it to Decoder for the typed translation (default mapping
+      otherwise), then calls Open. Every failure is redacted to TopologyInvalid and
+      names only the writer plus the failure kind — never an option value.
+    name: openEntry
+    params: entry WriterEntryConfig
+    results: sink Sink, err error
+  - doc: |-
+      redactWriterFailure builds the redacted TopologyInvalid sentinel for a
+      per-writer failure. It carries only the writer name and a fixed reason
+      string — never a decoded credential or option value (the SECRET GATE).
+    name: redactWriterFailure
+    params: writer, reason string
+    results: error
+  - doc: |-
+      parseLevel maps a level name (case-insensitive) to a Level. An empty or
+      unrecognised name defaults to LevelInfo, matching the Config zero-value rule.
+    name: parseLevel
+    params: name string
+    results: Level
+  - doc: |-
+      toLowerASCII lowercases an ASCII level name without importing strings, keeping
+      the parse allocation-light. Non-ASCII bytes pass through unchanged — level
+      names are ASCII by contract.
+    name: toLowerASCII
+    params: s string
+    results: string
+  - name: NewText
+    params: cfg Config
+    results: lg Logger, err error
+  - name: Default
+    results: lg Logger, err error
+  - name: DefaultMulti
+    params: path string
+    results: lg Logger, err error
+  - name: Debug
+    params: ctx context.Context, lg Logger, msg string, attrs ...Attr
+  - name: Info
+    params: ctx context.Context, lg Logger, msg string, attrs ...Attr
+  - name: Warn
+    params: ctx context.Context, lg Logger, msg string, attrs ...Attr
+  - name: Error
+    params: ctx context.Context, lg Logger, msg string, attrs ...Attr
+  - name: String
+    params: key, val string
+    results: Attr
+  - name: Int
+    params: key string, val int
+    results: Attr
+  - name: Bool
+    params: key string, val bool
+    results: Attr
+  - name: Float64
+    params: key string, val float64
+    results: Attr
+  - name: Int64
+    params: key string, val int64
+    results: Attr
+  - name: Uint64
+    params: key string, val uint64
+    results: Attr
+  - name: Duration
+    params: key string, val time.Duration
+    results: Attr
+  - name: Time
+    params: key string, val time.Time
+    results: Attr
+  - name: Any
+    params: key string, val any
+    results: Attr
+  - name: NewWithSink
+    params: cfg SinkConfig
+    results: lg Logger, err error
+  - name: NewWriterSink
+    params: w io.Writer
+    results: sink Sink, err error
+  - name: TextEncoder
+    results: Encoder
+  - name: TraceContextFromContext
+    params: ctx context.Context
+    results: TraceContext
+  - name: FrameworkVersion
+    results: string
+  - name: WithError
+    params: err error
+    results: "[]Attr"
+  - doc: |-
+      fallbackAttrs renders a plain stdlib error as a single error.message Attr —
+      the only field a non-SDK error can offer.
+    name: fallbackAttrs
+    params: err error
+    results: "[]Attr"
+  - doc: |-
+      appendReason appends the SCREAMING_SNAKE reason Attr when err carries one,
+      returning the slice unchanged otherwise.
+    name: appendReason
+    params: attrs []Attr, err error
+    results: "[]Attr"
+  - doc: |-
+      appendOptional appends a string Attr under key only when value is non-empty,
+      keeping empty error metadata out of the emitted record.
+    name: appendOptional
+    params: attrs []Attr, key, value string
+    results: "[]Attr"
+  - doc: |-
+      appendTrail emits one indexed error.trail Attr per wrap-trail code, in the
+      order TrailOf reports them (newest wrap last), and returns the grown slice.
+    name: appendTrail
+    params: attrs []Attr, trail []kerrs.Code
+    results: "[]Attr"
+  - name: NewMulti
+    params: min Level, specs ...WriterSpec
+    results: lg Logger, err error
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  console: github.com/kitsunium/sdk/internal/service/observe/logger/sink/console
+  context: context
+  corecodec: github.com/kitsunium/sdk/internal/core/data/codec
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+  corewriter: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+  encoder: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  os: os
+  slices: slices
+  strconv: strconv
+  svclogger: github.com/kitsunium/sdk/internal/service/observe/logger
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/observe/logger
+  name: logger
+  purpose: Package logger — re-exports the chainable Builder API and the slice-overload LogAttrs entry point.
+types:
+  - fields:
+      - doc: |-
+          Writer is the single-destination convenience field; nil triggers
+          WriterRequired unless Writers carries at least one entry.
+        name: Writer
+        type: io.Writer
+      - doc: |-
+          Writers is the multi-destination fan-out field; non-empty wires
+          the records through logger.Multi over per-writer console sinks.
+          Nil/empty falls back to Writer.
+        name: Writers
+        type: "[]io.Writer"
+      - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
+        name: MinLevel
+        type: Level
+    kind: struct
+    name: Config
+  - fields:
+      - doc: Sink is the destination transport; nil yields SinkConfigRequired.
+        name: Sink
+        type: Sink
+      - doc: Encoder formats records into bytes; nil falls back to the text encoder.
+        name: Encoder
+        type: Encoder
+      - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
+        name: MinLevel
+        type: Level
+    kind: struct
+    name: SinkConfig
+  - fields:
+      - doc: Level is the minimum severity emitted, by name; empty defaults to info.
+        name: Level
+        type: string
+      - doc: Writers is the ordered set of named writer entries to fan records out to.
+        name: Writers
+        type: "[]WriterEntryConfig"
+    kind: struct
+    name: TopologyConfig
+  - fields:
+      - doc: Name is the registered writer key ("console" / "file" / "s3" / …).
+        name: Name
+        type: string
+      - doc: Options is the raw, codec-decoded per-writer option map.
+        name: Options
+        type: map[string]any
+    kind: struct
+    name: WriterEntryConfig
+vars:
+  - doc: |-
+      Version is overridden at build time via
+
+      	go build -ldflags "-X github.com/kitsunium/sdk/pkg/v1/observe/logger.Version=v0.1.0"
+
+      Leave it as the zero value in local dev; FrameworkVersion returns "dev".
+    items:
+      - name: Version
+        type: string
+    name: Version

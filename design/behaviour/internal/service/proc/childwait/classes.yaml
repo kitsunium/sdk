@@ -1,0 +1,165 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      anyChildPID is the pid argument that makes wait4 collect ANY child: -1, as
+      on Linux, darwin and the BSDs.
+    items:
+      - name: anyChildPID
+        type: int
+        value: "-1"
+    name: anyChildPID
+files:
+  - decls:
+      - Claim
+      - ledger
+      - book
+      - newLedger
+      - Spawn
+      - (*ledger).spawn
+      - (*ledger).track
+      - (*ledger).deliver
+      - (*ledger).handOver
+      - (*Claim).Collected
+      - (*Claim).Reclaim
+      - (*Claim).Release
+      - (*ledger).forget
+    name: childwait.go
+  - decls:
+      - StatusValue
+      - ReapAny
+      - (*ledger).reapAny
+    name: childwait_unix.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - anyChildPID
+    name: waitany_unix.go
+functions:
+  - doc: newLedger returns an empty ledger.
+    name: newLedger
+    results: "*ledger"
+  - name: Spawn
+    params: start func() (*os.Process, error)
+    results: proc *os.Process, claim *Claim, err error
+  - name: ReapAny
+    results: pid int, err error
+imports:
+  os: os
+  sync: sync
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/childwait
+  name: childwait
+  purpose: Package childwait decides who receives a child's exit status (ADR 0093).
+types:
+  - fields:
+      - doc: book is the ledger that holds this claim.
+        name: book
+        type: "*ledger"
+      - doc: pid is the claimed child's process id, and the ledger key.
+        name: pid
+        type: int
+      - doc: |-
+          collected reports that a sweep took the child and stored its status. It
+          and status are guarded by the ledger's mu.
+        name: collected
+        type: bool
+      - doc: status is the exit status the sweep collected, valid once collected.
+        name: status
+        type: StatusValue
+    kind: struct
+    methods:
+      - name: Collected
+        recv: c *Claim
+        results: status StatusValue, ok bool
+      - name: Reclaim
+        recv: c *Claim
+        results: status StatusValue, ok bool
+      - name: Release
+        recv: c *Claim
+    name: Claim
+  - doc: |-
+      ledger is the process-wide record of claimed children. There is exactly one,
+      because wait4(-1) collects the children of the whole process.
+    fields:
+      - doc: mu guards claims and every Claim's collected and status fields.
+        name: mu
+        type: sync.Mutex
+      - doc: claims maps each claimed, not yet collected child's pid to its claim.
+        name: claims
+        type: map[int]*Claim
+      - doc: |-
+          spawning is held shared from before a fork until its child is claimed. A
+          sweep holding a pid nobody claims takes it exclusively, which waits out
+          every spawn that may have forked that pid without claiming it yet.
+        name: spawning
+        type: sync.RWMutex
+      - doc: |-
+          sweeping is held from before one wait4(-1) until what it collected has
+          been handed over, so an owner whose own wait failed with ECHILD can wait
+          for the hand-off by taking it.
+        name: sweeping
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: spawn forks under the shared gate and claims the child before releasing it.
+        name: spawn
+        params: start func() (*os.Process, error)
+        recv: l *ledger
+        results: proc *os.Process, claim *Claim, err error
+      - doc: |-
+          track claims pid. A claim already held for the same pid is stale — a new
+          child can only have that pid once the old one was reaped — so it is replaced.
+        name: track
+        params: pid int
+        recv: l *ledger
+        results: "*Claim"
+      - doc: |-
+          deliver hands the status a sweep collected for pid to the claim on pid, if
+          any. The lookup happens only once every in-flight spawn has claimed its
+          child: the zombie just collected is the NEWEST process to hold pid, and if a
+          spawn forked it, that spawn's claim must be in place — replacing any older
+          claim on a recycled pid — before the lookup can say whose status this is.
+          A pid still unclaimed then was an orphan's, and its status has no owner.
+        name: deliver
+        params: pid int, status *StatusValue
+        recv: l *ledger
+      - doc: |-
+          handOver stores a copy of status on the claim for pid and retires the claim
+          from the ledger, reporting whether a claim existed. status is read, never
+          kept: the claim holds its own copy.
+        name: handOver
+        params: pid int, status *StatusValue
+        recv: l *ledger
+        results: bool
+      - doc: |-
+          forget removes c from the ledger if it is still the claim on its pid. The
+          caller holds mu. A claim a sweep already collected, or that a newer child's
+          claim replaced, is left alone.
+        name: forget
+        params: c *Claim
+        recv: l *ledger
+      - doc: |-
+          reapAny collects one child under the sweep lock and hands its status over
+          before the lock is released.
+        name: reapAny
+        recv: l *ledger
+        results: pid int, err error
+    name: ledger
+  - fields:
+      - doc: WaitStatus is the child's termination status (exit code or signal).
+        name: WaitStatus
+        type: syscall.WaitStatus
+      - doc: Rusage is the resource usage wait4 reported for the child.
+        name: Rusage
+        type: syscall.Rusage
+    kind: struct
+    name: StatusValue
+vars:
+  - doc: book is the process's single ledger.
+    items:
+      - name: book
+        value: newLedger()
+    name: book

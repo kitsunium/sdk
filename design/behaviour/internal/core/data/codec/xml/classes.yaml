@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/xml
+  name: xml
+  purpose: Package xml declares the error codes and the sentinels of the XML codec, internal/service/data/codec/xml — range 0.3.3.* (ADR 0005 service/data/codec/xml block).
+types: []

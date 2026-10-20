@@ -1,0 +1,587 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ReservesKey
+    steps:
+      - return: |-
+          key == corelogger.TraceIDKey || key == corelogger.SpanIDKey ||
+          		strings.HasPrefix(key, ReservedPrefix)
+  - of: NewJSON
+    steps:
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "&jsonEncoder{clk: clk}"
+  - of: (*jsonEncoder).Name
+    steps:
+      - return: jsonEncoderName
+  - of: (*jsonEncoder).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonEncoder).Append
+        kind: self
+      - id: e.clk.Now
+        kind: value
+      - id: appendJSONHeader
+        kind: internal
+      - id: appendJSONTraceContext
+        kind: internal
+      - id: appendJSONAttr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.Time
+              to: e.clk.Now
+              value: e.clk.Now()
+          when: r.Time.IsZero()
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: appendJSONHeader
+        value: appendJSONHeader(dst, r)
+      - set: dst
+        to: appendJSONTraceContext
+        value: appendJSONTraceContext(dst, r)
+      - loop:
+          do:
+            - set: dst
+              value: append(dst, ',')
+            - set: dst
+              to: appendJSONAttr
+              value: appendJSONAttr(dst, groups, a)
+          key: _
+          range: r.Attrs
+          value: a
+      - set: dst
+        value: append(dst, '}')
+      - return: append(dst, '\n')
+  - of: appendJSONHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONHeader
+        kind: self
+      - id: appendJSONString
+        kind: internal
+      - id: appendTimestamp
+        kind: internal
+    steps:
+      - set: dst
+        to: appendJSONString
+        value: appendJSONString(dst, "ts")
+      - set: dst
+        value: append(dst, ':')
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        to: appendTimestamp
+        value: appendTimestamp(dst, r.Time)
+      - set: dst
+        value: append(dst, '"', ',')
+      - set: dst
+        to: appendJSONString
+        value: appendJSONString(dst, "level")
+      - set: dst
+        value: append(dst, ':')
+      - set: dst
+        to: appendJSONString
+        value: appendJSONString(dst, r.Level.String())
+      - set: dst
+        value: append(dst, ',')
+      - set: dst
+        to: appendJSONString
+        value: appendJSONString(dst, "msg")
+      - set: dst
+        value: append(dst, ':')
+      - return: appendJSONString(dst, r.Message)
+        to: appendJSONString
+  - of: appendJSONTraceContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONTraceContext
+        kind: self
+      - id: appendJSONString
+        kind: internal
+      - id: tc.AppendTraceIDHex
+        kind: value
+      - id: tc.AppendSpanIDHex
+        kind: value
+    steps:
+      - bind: tc
+        eval: r.TraceContext
+      - opt:
+          do:
+            - return: dst
+          when: "!tc.IsValid()"
+      - set: dst
+        value: append(dst, ',')
+      - set: dst
+        to: appendJSONString
+        value: appendJSONString(dst, corelogger.TraceIDKey)
+      - set: dst
+        value: append(dst, ':', '"')
+      - set: dst
+        to: tc.AppendTraceIDHex
+        value: tc.AppendTraceIDHex(dst)
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        value: append(dst, ',')
+      - set: dst
+        to: appendJSONString
+        value: appendJSONString(dst, corelogger.SpanIDKey)
+      - set: dst
+        value: append(dst, ':', '"')
+      - set: dst
+        to: tc.AppendSpanIDHex
+        value: tc.AppendSpanIDHex(dst)
+      - return: append(dst, '"')
+  - of: appendJSONAttr
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONAttr
+        kind: self
+      - id: appendJSONEscaped
+        kind: internal
+      - id: appendJSONValue
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - loop:
+          do:
+            - set: dst
+              to: appendJSONEscaped
+              value: appendJSONEscaped(dst, g)
+            - set: dst
+              value: append(dst, jsonGroupSeparator)
+          key: _
+          range: groups
+          value: g
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, ReservedPrefix...)
+          when: len(groups) == 0 && ReservesKey(a.Key)
+      - set: dst
+        to: appendJSONEscaped
+        value: appendJSONEscaped(dst, a.Key)
+      - set: dst
+        value: append(dst, '"', ':')
+      - return: appendJSONValue(dst, a)
+        to: appendJSONValue
+  - of: appendJSONValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONValue
+        kind: self
+      - id: appendJSONString
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: appendJSONFloat
+        kind: internal
+      - id: appendTimestamp
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: corelogger.KindString
+              do:
+                - return: appendJSONString(dst, a.Value.String())
+                  to: appendJSONString
+            - case: corelogger.KindInt64
+              do:
+                - return: strconv.AppendInt(dst, a.Value.Int64(), jsonDecimalBase)
+                  to: strconv
+            - case: corelogger.KindUint64
+              do:
+                - return: strconv.AppendUint(dst, a.Value.Uint64(), jsonDecimalBase)
+                  to: strconv
+            - case: corelogger.KindBool
+              do:
+                - return: strconv.AppendBool(dst, a.Value.Bool())
+                  to: strconv
+            - case: corelogger.KindFloat64
+              do:
+                - return: appendJSONFloat(dst, a.Value.Float64())
+                  to: appendJSONFloat
+            - case: corelogger.KindDuration
+              do:
+                - return: appendJSONString(dst, a.Value.Duration().String())
+                  to: appendJSONString
+            - case: corelogger.KindTime
+              do:
+                - set: dst
+                  value: append(dst, '"')
+                - set: dst
+                  to: appendTimestamp
+                  value: appendTimestamp(dst, a.Value.Time())
+                - return: append(dst, '"')
+            - default: true
+              do:
+                - return: appendJSONString(dst, "?")
+                  to: appendJSONString
+          "on": a.Value.Kind()
+  - of: appendJSONFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONFloat
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: append(dst, 'n', 'u', 'l', 'l')
+          when: math.IsNaN(f) || math.IsInf(f, 0)
+      - return: strconv.AppendFloat(dst, f, jsonFloatFormat, jsonFloatPrec, jsonFloatBitSize)
+        to: strconv
+  - of: appendJSONString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONString
+        kind: self
+      - id: appendJSONEscaped
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        to: appendJSONEscaped
+        value: appendJSONEscaped(dst, s)
+      - return: append(dst, '"')
+  - of: NewText
+    steps:
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "&textEncoder{clk: clk}"
+  - of: (*textEncoder).Name
+    steps:
+      - return: textEncoderName
+  - of: (*textEncoder).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*textEncoder).Append
+        kind: self
+      - id: e.clk.Now
+        kind: value
+      - id: appendHeader
+        kind: internal
+      - id: appendTraceContext
+        kind: internal
+      - id: appendAttrWithGroups
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.Time
+              to: e.clk.Now
+              value: e.clk.Now()
+          when: r.Time.IsZero()
+      - set: dst
+        to: appendHeader
+        value: appendHeader(dst, r)
+      - set: dst
+        to: appendTraceContext
+        value: appendTraceContext(dst, r)
+      - loop:
+          do:
+            - set: dst
+              to: appendAttrWithGroups
+              value: appendAttrWithGroups(dst, groups, a)
+          key: _
+          range: r.Attrs
+          value: a
+      - return: append(dst, '\n')
+  - of: appendHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendHeader
+        kind: self
+      - id: appendTimestamp
+        kind: internal
+      - id: AppendSanitized
+        kind: internal
+    steps:
+      - set: dst
+        to: appendTimestamp
+        value: appendTimestamp(dst, r.Time)
+      - set: dst
+        value: append(dst, ' ')
+      - set: dst
+        value: append(dst, r.Level.String()...)
+      - set: dst
+        value: append(dst, ' ')
+      - return: AppendSanitized(dst, r.Message)
+        to: AppendSanitized
+  - of: appendTraceContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTraceContext
+        kind: self
+      - id: tc.AppendTraceIDHex
+        kind: value
+      - id: tc.AppendSpanIDHex
+        kind: value
+    steps:
+      - bind: tc
+        eval: r.TraceContext
+      - opt:
+          do:
+            - return: dst
+          when: "!tc.IsValid()"
+      - set: dst
+        value: append(dst, ' ')
+      - set: dst
+        value: append(dst, corelogger.TraceIDKey...)
+      - set: dst
+        value: append(dst, '=')
+      - set: dst
+        to: tc.AppendTraceIDHex
+        value: tc.AppendTraceIDHex(dst)
+      - set: dst
+        value: append(dst, ' ')
+      - set: dst
+        value: append(dst, corelogger.SpanIDKey...)
+      - set: dst
+        value: append(dst, '=')
+      - return: tc.AppendSpanIDHex(dst)
+        to: tc.AppendSpanIDHex
+  - of: appendAttrWithGroups
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAttrWithGroups
+        kind: self
+      - id: AppendSanitized
+        kind: internal
+      - id: appendValueOnly
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, ' ')
+      - loop:
+          do:
+            - set: dst
+              to: AppendSanitized
+              value: AppendSanitized(dst, g)
+            - set: dst
+              value: append(dst, groupSeparator)
+          key: _
+          range: groups
+          value: g
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, ReservedPrefix...)
+          when: len(groups) == 0 && ReservesKey(a.Key)
+      - set: dst
+        to: AppendSanitized
+        value: AppendSanitized(dst, a.Key)
+      - set: dst
+        value: append(dst, '=')
+      - return: appendValueOnly(dst, a)
+        to: appendValueOnly
+  - of: appendQuotedString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendQuotedString
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: strconv.AppendQuote(dst, s)
+              to: strconv
+          when: "!quoteSafe(s)"
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        value: append(dst, s...)
+      - return: append(dst, '"')
+  - of: appendValueOnly
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendValueOnly
+        kind: self
+      - id: appendQuotedString
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: appendTimestamp
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: corelogger.KindString
+              do:
+                - return: appendQuotedString(dst, a.Value.String())
+                  to: appendQuotedString
+            - case: corelogger.KindInt64
+              do:
+                - return: strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
+                  to: strconv
+            - case: corelogger.KindUint64
+              do:
+                - return: strconv.AppendUint(dst, a.Value.Uint64(), decimalBase)
+                  to: strconv
+            - case: corelogger.KindBool
+              do:
+                - return: strconv.AppendBool(dst, a.Value.Bool())
+                  to: strconv
+            - case: corelogger.KindFloat64
+              do:
+                - return: strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
+                  to: strconv
+            - case: corelogger.KindDuration
+              do:
+                - return: appendQuotedString(dst, a.Value.Duration().String())
+                  to: appendQuotedString
+            - case: corelogger.KindTime
+              do:
+                - return: appendTimestamp(dst, a.Value.Time())
+                  to: appendTimestamp
+            - default: true
+              do:
+                - return: append(dst, '?')
+          "on": a.Value.Kind()
+  - of: appendTimestamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTimestamp
+        kind: self
+      - id: t.Date
+        kind: value
+      - id: t.AppendFormat
+        kind: value
+      - id: t.Clock
+        kind: value
+      - id: appendYear
+        kind: internal
+      - id: appendPad2
+        kind: internal
+      - id: appendMillis
+        kind: internal
+      - id: t.Zone
+        kind: value
+      - id: appendZoneOffset
+        kind: internal
+    steps:
+      - bind: year, month, day
+        eval: t.Date()
+        to: t.Date
+      - opt:
+          do:
+            - return: t.AppendFormat(dst, timestampLayout)
+              to: t.AppendFormat
+          when: year < timestampMinYear || year > timestampMaxYear
+      - bind: hour, minute, second
+        eval: t.Clock()
+        to: t.Clock
+      - set: dst
+        to: appendYear
+        value: appendYear(dst, year)
+      - set: dst
+        value: append(dst, '-')
+      - set: dst
+        to: appendPad2
+        value: appendPad2(dst, int(month))
+      - set: dst
+        value: append(dst, '-')
+      - set: dst
+        to: appendPad2
+        value: appendPad2(dst, day)
+      - set: dst
+        value: append(dst, 'T')
+      - set: dst
+        to: appendPad2
+        value: appendPad2(dst, hour)
+      - set: dst
+        value: append(dst, ':')
+      - set: dst
+        to: appendPad2
+        value: appendPad2(dst, minute)
+      - set: dst
+        value: append(dst, ':')
+      - set: dst
+        to: appendPad2
+        value: appendPad2(dst, second)
+      - set: dst
+        value: append(dst, '.')
+      - set: dst
+        to: appendMillis
+        value: appendMillis(dst, t.Nanosecond()/nanosPerMilli)
+      - bind: _, offset
+        eval: t.Zone()
+        to: t.Zone
+      - return: appendZoneOffset(dst, offset)
+        to: appendZoneOffset
+  - of: appendYear
+    steps:
+      - return: |-
+          append(dst,
+          		asciiZero+byte(year/thousands%decimalRadix),
+          		asciiZero+byte(year/hundreds%decimalRadix),
+          		asciiZero+byte(year/decimalRadix%decimalRadix),
+          		asciiZero+byte(year%decimalRadix),
+          	)
+  - of: appendPad2
+    steps:
+      - return: append(dst, asciiZero+byte(v/decimalRadix), asciiZero+byte(v%decimalRadix))
+  - of: appendMillis
+    steps:
+      - return: |-
+          append(dst,
+          		asciiZero+byte(ms/hundreds),
+          		asciiZero+byte(ms/decimalRadix%decimalRadix),
+          		asciiZero+byte(ms%decimalRadix),
+          	)
+  - of: appendZoneOffset
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendZoneOffset
+        kind: self
+      - id: appendPad2
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: append(dst, 'Z')
+          when: offset == 0
+      - bind: sign
+        eval: byte('+')
+      - opt:
+          do:
+            - set: sign, offset
+              value: "'-', -offset"
+          when: offset < 0
+      - set: dst
+        value: append(dst, sign)
+      - set: dst
+        to: appendPad2
+        value: appendPad2(dst, offset/secondsPerHour)
+      - set: dst
+        value: append(dst, ':')
+      - return: appendPad2(dst, offset/secondsPerMinute%minutesPerHour)
+        to: appendPad2

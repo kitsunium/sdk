@@ -1,0 +1,528 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: resolveCgroupPaths
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveCgroupPaths
+        kind: self
+      - id: resolveMounts
+        kind: internal
+      - id: mountPointFiles
+        kind: internal
+      - id: parseCgroupMembership
+        kind: internal
+      - id: dedupe
+        kind: internal
+    steps:
+      - bind: v2Mounts, v1Mounts
+        eval: resolveMounts(readFile)
+        to: resolveMounts
+      - bind: content, err
+        eval: readFile(procSelfCgroup)
+      - opt:
+          do:
+            - return: mountPointFiles(v2Mounts, v1Mounts)
+              to: mountPointFiles
+          when: err != nil
+      - bind: v2Path, v1Path
+        eval: parseCgroupMembership(string(content))
+        to: parseCgroupMembership
+      - bind: candidates
+        eval: make([]string, 0, defaultCandidateCapacity)
+      - loop:
+          do:
+            - set: candidates
+              value: append(candidates, ancestorLimitFiles(mount, v2Path, cgroupV2LimitFile)...)
+          key: _
+          range: v2Mounts
+          value: mount
+      - loop:
+          do:
+            - set: candidates
+              value: append(candidates, ancestorLimitFiles(mount, v1Path, cgroupV1LimitFile)...)
+          key: _
+          range: v1Mounts
+          value: mount
+      - return: dedupe(candidates)
+        to: dedupe
+  - of: mountPointFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: mountPointFiles
+        kind: self
+      - id: dedupe
+        kind: internal
+    steps:
+      - bind: files
+        eval: make([]string, 0, len(v2Mounts)+len(v1Mounts))
+      - loop:
+          do:
+            - set: files
+              value: append(files, path.Join(mount.point, cgroupV2LimitFile))
+          key: _
+          range: v2Mounts
+          value: mount
+      - loop:
+          do:
+            - set: files
+              value: append(files, path.Join(mount.point, cgroupV1LimitFile))
+          key: _
+          range: v1Mounts
+          value: mount
+      - return: dedupe(files)
+        to: dedupe
+  - of: parseCgroupMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseCgroupMembership
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: v1MemoryPath
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: trimmed
+              eval: strings.TrimSpace(line)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: trimmed == ""
+            - opt:
+                do:
+                  - set: v2Path
+                    value: after
+                  - continue: true
+                init:
+                  bind: after, found
+                  eval: strings.CutPrefix(trimmed, v2LinePrefix)
+                  to: strings
+                when: found
+            - opt:
+                do:
+                  - set: v1Path
+                    value: memPath
+                init:
+                  bind: memPath, found
+                  eval: v1MemoryPath(trimmed)
+                  to: v1MemoryPath
+                when: found
+          key: line
+          range: strings.SplitSeq(content, "\n")
+      - return: v2Path, v1Path
+  - of: v1MemoryPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: v1MemoryPath
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.SplitN(line, ":", cgroupLineFields)
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(parts) != cgroupLineFields
+      - opt:
+          do:
+            - return: parts[cgroupPathField], true
+          when: slices.Contains(strings.Split(parts[controllersField], ","), v1MemoryController)
+      - return: "\"\", false"
+  - of: ancestorLimitFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: ancestorLimitFiles
+        kind: self
+      - id: underMountRoot
+        kind: internal
+      - id: path
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cgroupPath == ""
+      - bind: cleaned, reachable
+        eval: underMountRoot(mount.root, path.Clean(rootCgroupPath+cgroupPath))
+        to: underMountRoot
+      - opt:
+          do:
+            - return: nil
+          when: "!reachable"
+      - var:
+          name: files
+          type: "[]string"
+      - loop:
+          do:
+            - set: files
+              value: append(files, path.Join(mount.point, cleaned, limitFile))
+            - opt:
+                do:
+                  - break: true
+                when: cleaned == rootCgroupPath
+            - set: cleaned
+              to: path
+              value: path.Dir(cleaned)
+          forever: true
+      - return: files
+  - of: underMountRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: underMountRoot
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: exposed
+        eval: path.Clean(rootCgroupPath + mountRoot)
+        to: path
+      - opt:
+          do:
+            - return: cgroupPath, true
+          when: exposed == rootCgroupPath
+      - opt:
+          do:
+            - return: rootCgroupPath, true
+          when: cgroupPath == exposed
+      - opt:
+          do:
+            - return: rootCgroupPath + below, true
+          init:
+            bind: below, found
+            eval: strings.CutPrefix(cgroupPath, exposed+rootCgroupPath)
+            to: strings
+          when: found
+      - return: "\"\", false"
+  - of: resolveMounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveMounts
+        kind: self
+      - id: scanCgroupMounts
+        kind: internal
+    steps:
+      - bind: content, err
+        eval: readFile(procSelfMountinfo)
+      - opt:
+          do:
+            - set: v2, v1
+              to: scanCgroupMounts
+              value: scanCgroupMounts(string(content))
+          when: err == nil
+      - opt:
+          do:
+            - set: v2
+              value: "[]cgroupMount{{point: cgroupMountRoot, root: rootCgroupPath}}"
+          when: len(v2) == 0
+      - opt:
+          do:
+            - set: v1
+              value: "[]cgroupMount{{point: cgroupV1MemoryRoot, root: rootCgroupPath}}"
+          when: len(v1) == 0
+      - return: v2, v1
+  - of: scanCgroupMounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanCgroupMounts
+        kind: self
+      - id: parseMountinfoLine
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: mount, fstype, superOptions, ok
+              eval: parseMountinfoLine(line)
+              to: parseMountinfoLine
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - set: v2
+                    value: append(v2, mount)
+                  - continue: true
+                when: fstype == fstypeCgroupV2
+            - opt:
+                do:
+                  - set: v1
+                    value: append(v1, mount)
+                when: fstype == fstypeCgroupV1 && slices.Contains(strings.Split(superOptions, ","), v1MemoryController)
+          key: line
+          range: strings.SplitSeq(content, "\n")
+      - return: v2, v1
+  - of: parseMountinfoLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseMountinfoLine
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: prefix, suffix, found
+        eval: strings.Cut(line, mountinfoSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: cgroupMount{}, "", "", false
+          when: "!found"
+      - bind: prefixFields
+        eval: strings.Fields(prefix)
+        to: strings
+      - bind: suffixFields
+        eval: strings.Fields(suffix)
+        to: strings
+      - opt:
+          do:
+            - return: cgroupMount{}, "", "", false
+          when: len(prefixFields) <= mountpointField || len(suffixFields) < suffixFieldCount
+      - set: mount
+        value: |-
+          cgroupMount{
+          		point: unmangleMountinfoPath(prefixFields[mountpointField]),
+          		root:  unmangleMountinfoPath(prefixFields[mountRootField]),
+          	}
+      - return: mount, suffixFields[fstypeField], suffixFields[superOptionsField], true
+  - of: unmangleMountinfoPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmangleMountinfoPath
+        kind: self
+      - id: decoded.Grow
+        kind: value
+      - id: decodeMangledByte
+        kind: internal
+      - id: decoded.WriteByte
+        kind: value
+      - id: decoded.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: field
+          when: "!strings.ContainsRune(field, rune(mangleEscape))"
+      - var:
+          name: decoded
+          type: strings.Builder
+      - eval: decoded.Grow(len(field))
+        to: decoded.Grow
+      - loop:
+          cond: index < len(field)
+          do:
+            - bind: escape, width
+              eval: decodeMangledByte(field, index)
+              to: decodeMangledByte
+            - eval: decoded.WriteByte(escape)
+              to: decoded.WriteByte
+            - op: +=
+              set: index
+              value: width
+          init: index := 0
+      - return: decoded.String()
+        to: decoded.String
+  - of: decodeMangledByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeMangledByte
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: field[index], 1
+          when: field[index] != mangleEscape || index+mangleDigits >= len(field)
+      - bind: parsed, err
+        eval: strconv.ParseUint(field[index+1:index+1+mangleDigits], octalBase, escapedByteBits)
+        to: strconv
+      - opt:
+          do:
+            - return: field[index], 1
+          when: err != nil
+      - return: byte(parsed), 1 + mangleDigits
+  - of: Apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: Apply
+        kind: self
+      - id: applyFrom
+        kind: internal
+    steps:
+      - return: applyFrom(os.LookupEnv, os.ReadFile, debug.SetMemoryLimit)
+        to: applyFrom
+  - of: applyFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyFrom
+        kind: self
+      - id: readCgroupAllowance
+        kind: internal
+      - id: deriveLimit
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "coreproc.MemoryLimitValue{Source: coreproc.MemorySourceOperator}"
+          init:
+            bind: value, isSet
+            eval: lookup(goMemLimitEnv)
+          when: isSet && strings.TrimSpace(value) != ""
+      - bind: allowance, found
+        eval: readCgroupAllowance(readFile)
+        to: readCgroupAllowance
+      - opt:
+          do:
+            - return: "coreproc.MemoryLimitValue{Source: coreproc.MemorySourceUnconstrained}"
+          when: "!found"
+      - bind: derived
+        eval: deriveLimit(allowance)
+        to: deriveLimit
+      - opt:
+          do:
+            - return: |-
+                coreproc.MemoryLimitValue{
+                			Allowance: allowance,
+                			Source:    coreproc.MemorySourceBelowFloor,
+                		}
+          when: derived < minimumLimitBytes
+      - eval: setLimit(derived)
+      - return: |-
+          coreproc.MemoryLimitValue{
+          		Allowance: allowance,
+          		Limit:     derived,
+          		Source:    coreproc.MemorySourceCgroup,
+          	}
+  - of: deriveLimit
+    steps:
+      - bind: hundreds, remainder
+        eval: allowance/percentDivisor, allowance%percentDivisor
+      - return: hundreds*headroomPercent + remainder*headroomPercent/percentDivisor
+  - of: readCgroupAllowance
+    participants:
+      - id: caller
+        kind: actor
+      - id: readCgroupAllowance
+        kind: self
+      - id: readLimitFile
+        kind: internal
+    steps:
+      - bind: best
+        eval: int64(0)
+      - loop:
+          do:
+            - bind: limit, found
+              eval: readLimitFile(readFile, candidate)
+              to: readLimitFile
+            - opt:
+                do:
+                  - continue: true
+                when: "!found"
+            - opt:
+                do:
+                  - set: best
+                    value: limit
+                when: best == 0 || limit < best
+          key: _
+          range: resolveCgroupPaths(readFile)
+          value: candidate
+      - return: best, best > 0
+  - of: readLimitFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: readLimitFile
+        kind: self
+      - id: parseV1Limit
+        kind: internal
+      - id: parseV2Limit
+        kind: internal
+    steps:
+      - bind: content, err
+        eval: readFile(candidate)
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil
+      - bind: raw
+        eval: string(content)
+      - opt:
+          do:
+            - return: parseV1Limit(raw)
+              to: parseV1Limit
+          when: strings.HasSuffix(candidate, cgroupV1LimitFile)
+      - return: parseV2Limit(raw)
+        to: parseV2Limit
+  - of: parseV2Limit
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseV2Limit
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parsePositiveBytes
+        kind: internal
+    steps:
+      - bind: trimmed
+        eval: strings.TrimSpace(raw)
+        to: strings
+      - opt:
+          do:
+            - return: 0, false
+          when: trimmed == unlimitedV2
+      - return: parsePositiveBytes(trimmed)
+        to: parsePositiveBytes
+  - of: parseV1Limit
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseV1Limit
+        kind: self
+      - id: parsePositiveBytes
+        kind: internal
+    steps:
+      - bind: parsed, valid
+        eval: parsePositiveBytes(strings.TrimSpace(raw))
+        to: parsePositiveBytes
+      - opt:
+          do:
+            - return: 0, false
+          when: "!valid || parsed >= unlimitedV1Floor"
+      - return: parsed, true
+  - of: parsePositiveBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: parsePositiveBytes
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: parsed, err
+        eval: strconv.ParseInt(raw, decimalBase, int64Bits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || parsed <= 0
+      - return: parsed, true

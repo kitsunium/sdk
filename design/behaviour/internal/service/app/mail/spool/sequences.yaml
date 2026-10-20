@@ -1,0 +1,948 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*Config).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Config).validate
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: c.validateBroker
+        kind: internal
+      - id: svcmail
+        kind: package
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("Transport", "nil")
+              to: misconfigured
+          when: c.Transport == nil
+      - opt:
+          do:
+            - return: misconfigured("MaxAttempts", "not positive")
+              to: misconfigured
+          when: c.MaxAttempts <= 0
+      - opt:
+          do:
+            - return: misconfigured("MaxMessageBytes", "negative")
+              to: misconfigured
+          when: c.MaxMessageBytes < 0
+      - opt:
+          do:
+            - return: brokerErr
+          init:
+            bind: brokerErr
+            eval: c.validateBroker()
+            to: c.validateBroker
+          when: brokerErr != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      kerrs.Wrap(corespool.SpoolMisconfigured, kerrs.WrapParams{},
+                      				kerrs.String("setting", "From"), kerrs.String("problem", kerrs.PublicOf(addrErr)))
+                    to: kerrs
+                init:
+                  bind: addrErr
+                  eval: svcmail.ValidateAddress(coremail.HeaderFrom, c.From)
+                  to: svcmail
+                when: addrErr != nil
+          when: "!c.From.IsZero()"
+      - return: nil
+  - of: (*Config).validateBroker
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Config).validateBroker
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: misconfigured("Dir", "set beside Broker")
+                    to: misconfigured
+                when: c.Dir != ""
+            - opt:
+                do:
+                  - return: misconfigured("MaxMessageBytes", "set beside Broker, whose own policy bounds a mail")
+                    to: misconfigured
+                when: c.MaxMessageBytes != 0
+          when: c.Broker != nil
+      - opt:
+          do:
+            - return: nil
+          when: c.Deferrer == nil
+      - opt:
+          do:
+            - return: misconfigured("Deferrer", "set without Broker")
+              to: misconfigured
+          when: c.Broker == nil
+      - opt:
+          do:
+            - return: misconfigured("Deferrer", "not a core/data/sql Aborter")
+              to: misconfigured
+          init:
+            bind: _, aborts
+            eval: c.Deferrer.(coresql.Aborter)
+          when: "!aborts"
+      - return: nil
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corespool.SpoolMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("setting", setting), kerrs.String("problem", problem))
+        to: kerrs
+  - of: (*Spool).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).deliver
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: kerrs
+        kind: package
+      - id: s.report
+        kind: internal
+      - id: s.attempt
+        kind: internal
+      - id: s.clock.Now
+        kind: value
+      - id: s.delivered.add
+        kind: internal
+      - id: s.backoff.Delay
+        kind: value
+      - id: event.At.Add
+        kind: value
+    steps:
+      - var:
+          name: record
+          type: spooledValue
+      - opt:
+          do:
+            - return: kerrs.Wrap(corespool.MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID))
+              to: kerrs
+          init:
+            bind: decodeErr
+            eval: json.Unmarshal(delivery.Message.Payload, &record)
+            to: json
+          when: decodeErr != nil
+      - bind: attempt
+        eval: delivery.Deliveries
+      - bind: event
+        eval: "EventValue{ID: record.ID, Message: record.Message, Meta: record.Meta, QueuedAt: record.QueuedAt, Attempt: attempt}"
+      - opt:
+          do:
+            - set: event.Kind, event.At
+              value: EventDuplicate, s.clock.Now()
+            - eval: s.report(&event)
+              to: s.report
+            - return: nil
+          when: s.delivered.has(record.ID)
+      - bind: sendErr
+        eval: s.attempt(ctx, &record, attempt)
+        to: s.attempt
+      - set: event.At
+        to: s.clock.Now
+        value: s.clock.Now()
+      - opt:
+          do:
+            - eval: s.delivered.add(record.ID)
+              to: s.delivered.add
+            - set: event.Kind
+              value: EventSent
+            - eval: s.report(&event)
+              to: s.report
+            - return: nil
+          when: sendErr == nil
+      - set: event.Err
+        value: sendErr
+      - opt:
+          do:
+            - set: event.Kind
+              value: EventDeadLettered
+            - eval: s.report(&event)
+              to: s.report
+            - return: sendErr
+          when: attempt >= s.maxAttempts
+      - bind: delay
+        eval: s.backoff.Delay(attempt)
+        to: s.backoff.Delay
+      - set: event.Kind, event.Next
+        value: EventRetrying, event.At.Add(delay)
+      - opt:
+          do:
+            - eval: s.report(&event)
+              to: s.report
+            - return: nil
+          when: s.park(ctx, delivery, delay)
+      - set: event.Next
+        to: event.At.Add
+        value: event.At.Add(s.backoff.BaseDelay)
+      - eval: s.report(&event)
+        to: s.report
+      - return: sendErr
+  - of: (*Spool).attempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).attempt
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: s.clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: s.send
+        kind: internal
+    steps:
+      - bind: sendCtx, cancel
+        eval: |-
+          context.WithCancel(withAttempt(ctx, AttemptValue{
+          		QueuedAt: record.QueuedAt, Meta: record.Meta, ID: record.ID, Attempt: attempt,
+          	}))
+        to: context
+      - defer: cancel()
+      - bind: timer
+        eval: s.clock.NewTimer(s.sendTimeout)
+        to: s.clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: finished
+        eval: make(chan struct{})
+      - defer: close(finished)
+      - go: |-
+          func() {
+          		select {
+          		//: the attempt ran out of time: the transport must stop now.
+          		case <-timer.C():
+          			cancel()
+          		//: the attempt returned first.
+          		case <-finished:
+          		}
+          	}()
+      - return: s.send(sendCtx, record)
+        to: s.send
+  - of: (*Spool).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).send
+        kind: self
+      - id: s.transport.Send
+        kind: value
+    steps:
+      - defer: |-
+          func() {
+          		recovered := recover()
+          		//: the ordinary path.
+          		if recovered == nil {
+          			return
+          		}
+          		//: the value and the stack as fields, never the origin.
+          		err = kerrs.Wrap(corespool.TransportPanicked, kerrs.WrapParams{},
+          			kerrs.String("mail", record.ID), kerrs.String("panic", fmt.Sprint(recovered)),
+          			kerrs.String("stack", string(debug.Stack())))
+          	}()
+      - return: s.transport.Send(ctx, record.Message)
+        to: s.transport.Send
+  - of: (*Spool).park
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).park
+        kind: self
+      - id: extender.Extend
+        kind: value
+    steps:
+      - bind: extender, extendable
+        eval: s.broker.(corequeue.LeaseExtender)
+      - opt:
+          do:
+            - return: "false"
+          when: "!extendable"
+      - bind: _, extendErr
+        eval: extender.Extend(ctx, delivery.Lease.Receipt, delay)
+        to: extender.Extend
+      - return: extendErr == nil
+  - of: EventKind.String
+    steps:
+      - switch:
+          cases:
+            - case: EventQueued
+              do:
+                - return: "\"queued\""
+            - case: EventSent
+              do:
+                - return: "\"sent\""
+            - case: EventRetrying
+              do:
+                - return: "\"retrying\""
+            - case: EventDeadLettered
+              do:
+                - return: "\"dead-lettered\""
+            - case: EventDuplicate
+              do:
+                - return: "\"duplicate\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": k
+  - of: AttemptFrom
+    steps:
+      - set: attempt, ok
+        value: ctx.Value(attemptKey{}).(AttemptValue)
+      - return: attempt, ok
+  - of: withAttempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: withAttempt
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - return: context.WithValue(ctx, attemptKey{}, attempt)
+        to: context
+  - of: checkID
+    steps:
+      - switch:
+          cases:
+            - case: id == ""
+              do:
+                - return: "\"empty\", false"
+            - case: len(id) > MaxIDBytes
+              do:
+                - return: "\"longer than MaxIDBytes\", false"
+            - case: "!svcmail.IsDotAtom(id)"
+              do:
+                - return: "\"not an RFC 5322 dot-atom\", false"
+            - default: true
+              do:
+                - return: "\"\", true"
+  - of: newLedger
+    steps:
+      - return: "&ledger{seen: make(map[string]struct{}, size), ring: make([]string, size)}"
+  - of: (*ledger).add
+    steps:
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, known
+            eval: l.seen[id]
+          when: known
+      - opt:
+          do:
+            - eval: delete(l.seen, old)
+          init:
+            bind: old
+            eval: l.ring[l.next]
+          when: old != ""
+      - set: l.ring[l.next]
+        value: id
+      - set: l.seen[id]
+        value: struct{}{}
+      - set: l.next
+        value: (l.next + 1) % len(l.ring)
+  - of: (*ledger).has
+    steps:
+      - lock:
+          mutex: l.mu
+      - bind: _, known
+        eval: l.seen[id]
+      - return: known
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: resolve
+        kind: internal
+      - id: svcqueue
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.validate()
+            to: cfg.validate
+          when: invalid != nil
+      - bind: s
+        eval: resolve(&cfg)
+        to: resolve
+      - opt:
+          do:
+            - set: s.broker
+              value: cfg.Broker
+            - return: s, nil
+          when: cfg.Broker != nil
+      - set: s.ownsBroker
+        value: "true"
+      - bind: policy
+        eval: |-
+          corequeue.PolicyValue{
+          		VisibilityTimeout: 2 * s.sendTimeout,
+          		RetryDelay:        s.backoff.BaseDelay,
+          		MaxDeliveries:     cfg.MaxAttempts,
+          		MaxMessageBytes:   maxMessageBytes(cfg.MaxMessageBytes),
+          	}
+      - var:
+          name: brokerErr
+          type: error
+      - alt:
+          - do:
+              - set: s.broker, brokerErr
+                to: svcqueue
+                value: "svcqueue.NewMemory(svcqueue.MemoryConfig{Clock: s.clock, Policy: policy})"
+            when: cfg.Dir == ""
+          - do:
+              - set: s.broker, brokerErr
+                to: svcqueue
+                value: "svcqueue.NewFile(svcqueue.FileConfig{Clock: s.clock, Dir: cfg.Dir, Policy: policy})"
+            else: true
+      - opt:
+          do:
+            - return: nil, brokerErr
+          when: brokerErr != nil
+      - return: s, nil
+  - of: resolve
+    steps:
+      - bind: s
+        eval: |-
+          &Spool{
+          		transport: cfg.Transport, clock: cfg.Clock, observe: cfg.Observe, annotate: cfg.Annotate,
+          		newID: cfg.NewID, delivered: newLedger(DeliveredMemory), from: cfg.From, backoff: cfg.Backoff,
+          		announcing: map[string]*announcement{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
+          		poll: cfg.PollInterval, deferrer: cfg.Deferrer,
+          	}
+      - opt:
+          do:
+            - set: s.aborter, _
+              value: cfg.Deferrer.(coresql.Aborter)
+          when: cfg.Deferrer != nil
+      - opt:
+          do:
+            - set: s.clock
+              value: clock.System
+          when: s.clock == nil
+      - opt:
+          do:
+            - set: s.newID
+              value: svcid.ULID.New
+          when: s.newID == nil
+      - opt:
+          do:
+            - set: s.backoff
+              value: "kbackoff.Value{BaseDelay: DefaultRetryBase, MaxDelay: DefaultRetryMax}"
+          when: s.backoff == (kbackoff.Value{})
+      - opt:
+          do:
+            - set: s.backoff.BaseDelay
+              value: DefaultRetryBase
+          when: s.backoff.BaseDelay <= 0
+      - opt:
+          do:
+            - set: s.sendTimeout
+              value: DefaultSendTimeout
+          when: s.sendTimeout <= 0
+      - return: s
+  - of: maxMessageBytes
+    steps:
+      - opt:
+          do:
+            - return: DefaultMaxMessageBytes
+          when: configured == 0
+      - return: configured
+  - of: (*Spool).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).Send
+        kind: self
+      - id: s.mint
+        kind: internal
+      - id: s.queue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", kerrs.Wrap(corespool.SpoolClosed, kerrs.WrapParams{})"
+          when: s.isClosed()
+      - bind: id, mintErr
+        eval: s.mint()
+        to: s.mint
+      - opt:
+          do:
+            - return: "\"\", mintErr"
+          when: mintErr != nil
+      - opt:
+          do:
+            - return: "\"\", queueErr"
+          init:
+            bind: queueErr
+            eval: s.queue(ctx, id, msg)
+            to: s.queue
+          when: queueErr != nil
+      - return: id, nil
+  - of: (*Spool).SendWithID
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).SendWithID
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: checkID
+        kind: internal
+      - id: s.queue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(corespool.SpoolClosed, kerrs.WrapParams{})
+              to: kerrs
+          when: s.isClosed()
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corespool.InvalidMailID, kerrs.WrapParams{},
+                			kerrs.String("problem", problem), kerrs.Int("bytes", len(id)))
+              to: kerrs
+          init:
+            bind: problem, ok
+            eval: checkID(id)
+            to: checkID
+          when: "!ok"
+      - return: s.queue(ctx, id, msg)
+        to: s.queue
+  - of: (*Spool).mint
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).mint
+        kind: self
+      - id: checkID
+        kind: internal
+    steps:
+      - bind: id, idErr
+        eval: s.newID()
+      - opt:
+          do:
+            - return: "\"\", idErr"
+          when: idErr != nil
+      - opt:
+          do:
+            - return: "\"\", misconfigured(\"NewID\", \"returned an identifier that is \"+problem)"
+          init:
+            bind: problem, ok
+            eval: checkID(id)
+            to: checkID
+          when: "!ok"
+      - return: id, nil
+  - of: (*Spool).queue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).queue
+        kind: self
+      - id: s.stamp
+        kind: internal
+      - id: json
+        kind: stdlib
+      - id: kerrs
+        kind: package
+      - id: s.announce
+        kind: internal
+      - id: once.Do
+        kind: value
+      - id: s.publish
+        kind: internal
+      - id: s.holdAnnouncement
+        kind: internal
+      - id: s.emit
+        kind: internal
+    steps:
+      - bind: record, stampErr
+        eval: s.stamp(ctx, id, msg)
+        to: s.stamp
+      - opt:
+          do:
+            - return: stampErr
+          when: stampErr != nil
+      - bind: payload, encodeErr
+        eval: json.Marshal(record)
+        to: json
+      - opt:
+          do:
+            - return: kerrs.Wrap(corespool.MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
+              to: kerrs
+          when: encodeErr != nil
+      - var:
+          name: once
+          type: sync.Once
+      - bind: registered
+        eval: s.announce(record.ID)
+        to: s.announce
+      - bind: end
+        eval:
+          closure:
+            steps:
+              - eval: once.Do(registered)
+                to: once.Do
+      - bind: held
+        eval: "false"
+      - defer: |-
+          func() {
+          		//: a registration a transaction's outcome does not own ends here.
+          		if !held {
+          			end()
+          		}
+          	}()
+      - opt:
+          do:
+            - return: publishErr
+          init:
+            bind: publishErr
+            eval: s.publish(ctx, payload)
+            to: s.publish
+          when: publishErr != nil
+      - bind: event
+        eval: "EventValue{Kind: EventQueued, At: record.QueuedAt, QueuedAt: record.QueuedAt, ID: record.ID, Message: record.Message, Meta: record.Meta}"
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: held
+            eval: s.holdAnnouncement(ctx, &event, end)
+            op: =
+            to: s.holdAnnouncement
+          when: held
+      - eval: s.emit(&event)
+        to: s.emit
+      - return: nil
+  - of: (*Spool).holdAnnouncement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).holdAnnouncement
+        kind: self
+      - id: s.deferrer.Defer
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s.deferrer == nil || !s.aborter.OnAbort(ctx, func(context.Context) { end() })
+      - return: |-
+          s.deferrer.Defer(ctx, func() {
+          		defer end()
+          		s.emit(event)
+          	})
+        to: s.deferrer.Defer
+  - of: (*Spool).isClosed
+    steps:
+      - lock:
+          mutex: s.closing
+          read: true
+      - return: s.closed
+  - of: (*Spool).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).publish
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: s.broker.Publish
+        kind: value
+    steps:
+      - lock:
+          mutex: s.closing
+          read: true
+      - opt:
+          do:
+            - return: kerrs.Wrap(corespool.SpoolClosed, kerrs.WrapParams{})
+              to: kerrs
+          when: s.closed
+      - bind: _, publishErr
+        eval: s.broker.Publish(ctx, payload)
+        to: s.broker.Publish
+      - return: publishErr
+  - of: (*Spool).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).announce
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return:
+                closure:
+                  steps: null
+          when: s.observe == nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: entry
+        eval: s.announcing[id]
+      - opt:
+          do:
+            - set: entry
+              value: "&announcement{told: make(chan struct{})}"
+            - set: s.announcing[id]
+              value: entry
+          when: entry == nil
+      - op: ++
+        set: entry.pending
+      - bind: told
+        eval: entry.told
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - return:
+          closure:
+            steps:
+              - eval: s.mu.Lock()
+                to: s.mu.Lock
+              - op: "--"
+                set: entry.pending
+              - bind: last
+                eval: entry.pending == 0
+              - opt:
+                  do:
+                    - eval: delete(s.announcing, id)
+                  when: last
+              - eval: s.mu.Unlock()
+                to: s.mu.Unlock
+              - opt:
+                  do:
+                    - eval: close(told)
+                  when: last
+  - of: (*Spool).awaitAnnouncement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).awaitAnnouncement
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: s.mu.RUnlock
+        kind: value
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: entry
+        eval: s.announcing[id]
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - opt:
+          do:
+            - eval: <-entry.told
+          when: entry != nil
+  - of: (*Spool).stamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).stamp
+        kind: self
+      - id: s.clock.Now().UTC
+        kind: value
+      - id: svcmail
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: msg.From
+              value: s.from
+          when: msg.From.IsZero()
+      - bind: now
+        eval: s.clock.Now().UTC()
+        to: s.clock.Now().UTC
+      - opt:
+          do:
+            - set: msg.Date
+              value: now
+          when: msg.Date.IsZero()
+      - opt:
+          do:
+            - set: msg.MessageID
+              value: id + "@" + domainOf(msg.From.Addr)
+          when: msg.MessageID == "" && !msg.From.IsZero()
+      - opt:
+          do:
+            - return: spooledValue{}, validErr
+          init:
+            bind: validErr
+            eval: svcmail.Validate(msg)
+            to: svcmail
+          when: validErr != nil
+      - var:
+          name: meta
+          type: map[string]string
+      - opt:
+          do:
+            - set: meta
+              value: s.annotate(ctx)
+          when: s.annotate != nil
+      - return: "spooledValue{QueuedAt: now, Meta: meta, ID: id, Message: msg}, nil"
+  - of: domainOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: domainOf
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: domain
+          init:
+            bind: _, domain, found
+            eval: strings.CutLast(addr, "@")
+            to: strings
+          when: found
+      - return: "\"spool.invalid\""
+  - of: (*Spool).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).Run
+        kind: self
+      - id: svcqueue
+        kind: package
+    steps:
+      - return: |-
+          svcqueue.Consume(ctx, s.broker, svcqueue.ConsumerConfig{
+          		Handler:      s.deliver,
+          		Clock:        s.clock,
+          		PollInterval: s.poll,
+          		Parallelism:  1,
+          		BatchSize:    1,
+          		// A mail this spool delivered is never sent again, and every attempt
+          		// carries the same Message-ID: a redelivery after a crash is the one
+          		// duplicate left, and a receiver can recognise it.
+          		HandlerIsIdempotent: true,
+          	})
+        to: svcqueue
+  - of: (*Spool).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).DeadLetters
+        kind: self
+      - id: reader.DeadLetters
+        kind: value
+    steps:
+      - bind: reader, readable
+        eval: s.broker.(corequeue.DeadLetterReader)
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!readable"
+      - bind: dead, err
+        eval: reader.DeadLetters(ctx, maxLetters)
+        to: reader.DeadLetters
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]DeadLetterValue, len(dead))
+      - loop:
+          do:
+            - var:
+                name: record
+                type: spooledValue
+            - opt:
+                do:
+                  - set: record
+                    value: spooledValue{}
+                when: json.Unmarshal(letter.Message.Payload, &record) != nil
+            - set: out[i]
+              value: |-
+                DeadLetterValue{
+                			Meta: record.Meta, FailedAt: letter.FailedAt, QueuedAt: record.QueuedAt, ID: record.ID,
+                			QueueID: letter.Message.ID, Reason: letter.Reason, Cause: letter.Cause,
+                			Message: record.Message, Attempts: letter.Deliveries, Code: letter.Code,
+                		}
+          key: i
+          range: dead
+          value: letter
+      - return: out, nil
+  - of: (*Spool).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).Close
+        kind: self
+      - id: closer.Close
+        kind: value
+    steps:
+      - lock:
+          mutex: s.closing
+      - opt:
+          do:
+            - return: nil
+          when: s.closed
+      - set: s.closed
+        value: "true"
+      - bind: closer, closable
+        eval: s.broker.(io.Closer)
+      - opt:
+          do:
+            - return: nil
+          when: "!closable || !s.ownsBroker"
+      - return: closer.Close()
+        to: closer.Close
+  - of: (*Spool).emit
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.observe == nil
+      - lock:
+          mutex: s.observing
+      - eval: s.observe(*event)
+  - of: (*Spool).report
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).report
+        kind: self
+      - id: s.awaitAnnouncement
+        kind: internal
+      - id: s.emit
+        kind: internal
+    steps:
+      - eval: s.awaitAnnouncement(event.ID)
+        to: s.awaitAnnouncement
+      - eval: s.emit(event)
+        to: s.emit

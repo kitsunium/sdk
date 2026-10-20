@@ -1,0 +1,164 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: pbkdf2PW.Algorithm
+    steps:
+      - return: algorithm
+  - of: pbkdf2PW.Hash
+    participants:
+      - id: caller
+        kind: actor
+      - id: pbkdf2PW.Hash
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: pbkdf2
+        kind: stdlib
+      - id: encodePHC
+        kind: internal
+    steps:
+      - var:
+          name: salt
+          type: "[saltLen]byte"
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(rerr, errs.WrapParams{
+                			Code:    corecrypto.CodePasswordHashFailed,
+                			Reason:  "PASSWORD_HASH_FAILED",
+                			Public:  "Could not gather entropy for password hashing",
+                			Private: "service/crypto/password/pbkdf2pw.Hash: crypto/rand.Read failed while generating a salt",
+                		})
+          init:
+            bind: _, rerr
+            eval: rand.Read(salt[:])
+            to: rand
+          when: rerr != nil
+      - bind: digest, kerr
+        eval: pbkdf2.Key(sha256.New, string(password), salt[:], currentIters, keyLen)
+        to: pbkdf2
+      - opt:
+          do:
+            - return: "\"\", corecrypto.PasswordHashFailed"
+          when: kerr != nil
+      - return: encodePHC(salt[:], digest, currentIters), nil
+        to: encodePHC
+  - of: pbkdf2PW.Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: pbkdf2PW.Verify
+        kind: self
+      - id: decodePHC
+        kind: internal
+      - id: pbkdf2
+        kind: stdlib
+    steps:
+      - bind: iters, salt, want, decoded
+        eval: decodePHC(phc)
+        to: decodePHC
+      - opt:
+          do:
+            - return: false, corecrypto.InvalidPasswordHash
+          when: "!decoded"
+      - bind: got, kerr
+        eval: pbkdf2.Key(sha256.New, string(password), salt, iters, len(want))
+        to: pbkdf2
+      - opt:
+          do:
+            - return: false, corecrypto.InvalidPasswordHash
+          when: kerr != nil
+      - return: subtle.ConstantTimeCompare(got, want) == 1, nil
+  - of: pbkdf2PW.NeedsRehash
+    participants:
+      - id: caller
+        kind: actor
+      - id: pbkdf2PW.NeedsRehash
+        kind: self
+      - id: decodePHC
+        kind: internal
+    steps:
+      - bind: iters, _, _, decoded
+        eval: decodePHC(phc)
+        to: decodePHC
+      - opt:
+          do:
+            - return: "false"
+          when: "!decoded"
+      - return: iters < currentIters
+  - of: encodePHC
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodePHC
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: |-
+          fmt.Sprintf("$%s$i=%d$%s$%s", algorithm, iters,
+          		base64.RawStdEncoding.EncodeToString(salt),
+          		base64.RawStdEncoding.EncodeToString(digest))
+        to: fmt
+  - of: decodePHC
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodePHC
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: decodeSaltDigest
+        kind: internal
+    steps:
+      - bind: fields
+        eval: strings.Split(phc, "$")
+        to: strings
+      - opt:
+          do:
+            - return: 0, nil, nil, false
+          when: len(fields) != phcFields || fields[fieldID] != string(algorithm)
+      - bind: iterStr, found
+        eval: strings.CutPrefix(fields[fieldCost], "i=")
+        to: strings
+      - opt:
+          do:
+            - return: 0, nil, nil, false
+          when: "!found"
+      - bind: n, perr
+        eval: strconv.Atoi(iterStr)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, nil, nil, false
+          when: perr != nil || n <= 0 || n > maxIters
+      - bind: saltRaw, digRaw, decoded
+        eval: decodeSaltDigest(fields[fieldSalt], fields[fieldDigest])
+        to: decodeSaltDigest
+      - opt:
+          do:
+            - return: 0, nil, nil, false
+          when: "!decoded"
+      - return: n, saltRaw, digRaw, true
+  - of: decodeSaltDigest
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSaltDigest
+        kind: self
+      - id: base64.RawStdEncoding.DecodeString
+        kind: value
+    steps:
+      - bind: saltRaw, serr
+        eval: base64.RawStdEncoding.DecodeString(saltField)
+        to: base64.RawStdEncoding.DecodeString
+      - bind: digRaw, derr
+        eval: base64.RawStdEncoding.DecodeString(digestField)
+        to: base64.RawStdEncoding.DecodeString
+      - opt:
+          do:
+            - return: nil, nil, false
+          when: serr != nil || derr != nil || len(saltRaw) != saltLen || len(digRaw) != keyLen
+      - return: saltRaw, digRaw, true

@@ -1,0 +1,112 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewMemory
+    steps:
+      - return: "&Memory{}"
+  - of: (*Memory).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Memory).Write
+        kind: self
+      - id: deepCloneAttrs
+        kind: internal
+      - id: m.mu.Lock
+        kind: value
+      - id: m.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, ctx.Err()
+          when: ctx != nil && ctx.Err() != nil
+      - bind: snapshot
+        eval: r
+      - set: snapshot.Attrs
+        to: deepCloneAttrs
+        value: deepCloneAttrs(r.Attrs)
+      - eval: m.mu.Lock()
+        to: m.mu.Lock
+      - set: m.records
+        value: append(m.records, snapshot)
+      - op: ++
+        set: m.writes
+      - eval: m.mu.Unlock()
+        to: m.mu.Unlock
+      - return: len(p), nil
+  - of: deepCloneAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: deepCloneAttrs
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: corelogger
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: attrs == nil
+      - bind: out
+        eval: slices.Clone(attrs)
+        to: slices
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[i].Value
+                    to: corelogger
+                    value: corelogger.GroupValue(deepCloneAttrs(out[i].Value.Group())...)
+                when: out[i].Value.Kind() == corelogger.KindGroup
+          key: i
+          range: out
+      - return: out
+  - of: (*Memory).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Memory).Flush
+        kind: self
+      - id: ctx.Err
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx != nil && ctx.Err() != nil
+      - return: nil
+  - of: (*Memory).Close
+    steps:
+      - return: nil
+  - of: (*Memory).Records
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Memory).Records
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: m.mu
+          read: true
+      - return: slices.Clone(m.records)
+        to: slices
+  - of: (*Memory).Len
+    steps:
+      - lock:
+          mutex: m.mu
+          read: true
+      - return: m.writes
+  - of: (*Memory).Reset
+    steps:
+      - lock:
+          mutex: m.mu
+      - set: m.records
+        value: nil
+      - set: m.writes
+        value: "0"

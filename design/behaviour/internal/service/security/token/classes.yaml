@@ -1,0 +1,1832 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxClaimMembers is the largest member count a claims object may carry: the
+      seven registered names plus the private-claim cap the core value enforces.
+    items:
+      - name: maxClaimMembers
+        type: int
+        value: 7 + coretoken.MaxPrivateClaims
+    name: maxClaimMembers
+  - grouped: true
+    items:
+      - doc: |-
+          maxSegments is the largest dot-separated part count any format here
+          uses: PASETO with a footer. JWS compact uses three.
+        name: maxSegments
+        type: int
+        value: "4"
+      - doc: le64Width is the octet width of PASETO's LE64 length prefix.
+        name: le64Width
+        type: int
+        value: "8"
+      - doc: |-
+          le64SignMask clears the most significant bit, as PASETO's LE64 requires,
+          so the encoding stays unambiguous where integers are signed.
+        name: le64SignMask
+        type: uint64
+        value: "0x7FFF_FFFF_FFFF_FFFF"
+    name: maxSegments
+  - doc: |-
+      exitConfigFault matches sysexits EX_CONFIG (78), the exit code core/security/token's
+      KeyUnsuitable / PolicyMisconfigured / IssueFailed sentinels carry. It is
+      restated here so a stdlib cause wrapped through WrapParams — the one path
+      that cannot inherit an exit override — lands on the same number its sibling
+      sentinel would have produced.
+    items:
+      - name: exitConfigFault
+        type: int
+        value: "78"
+    name: exitConfigFault
+  - doc: |-
+      maxNumericDate bounds a JWT NumericDate, in seconds since the epoch. It is
+      roughly the year 5138 — far past any legitimate expiry, and far short of the
+      values that make time.Unix overflow into a negative instant. A bound is
+      needed because "exp": 1e300 is valid JSON, and an implementation that lets
+      it through has a token that is not expired for reasons of floating point.
+    items:
+      - name: maxNumericDate
+        type: float64
+        value: "1e11"
+    name: maxNumericDate
+  - grouped: true
+    items:
+      - doc: |-
+          firstPrintable is the lowest byte JSON may carry unescaped in a string;
+          everything below it needs the \u00XX form (RFC 8259 §7).
+        name: firstPrintable
+        type: byte
+        value: "0x20"
+      - doc: lowNibbleMask selects the low four bits of a byte.
+        name: lowNibbleMask
+        type: byte
+        value: "0x0F"
+      - doc: nibbleBits is how far to shift a byte to reach its high nibble.
+        name: nibbleBits
+        type: byte
+        value: "4"
+      - doc: |-
+          decimalDigits is the number of decimal digits, i.e. where hex letters
+          start when rendering a nibble.
+        name: decimalDigits
+        type: byte
+        value: "10"
+      - doc: |-
+          quoteOverhead is the two delimiting quotes a JSON string literal adds
+          around its content.
+        name: quoteOverhead
+        type: int
+        value: "2"
+    name: firstPrintable
+  - grouped: true
+    items:
+      - doc: |-
+          jwsSegments is the segment count of a JWS Compact Serialization:
+          header, payload, signature.
+        name: jwsSegments
+        type: int
+        value: "3"
+      - doc: headerSegment indexes the JOSE header segment.
+        name: headerSegment
+        type: int
+        value: "0"
+      - doc: payloadSegment indexes the claims segment.
+        name: payloadSegment
+        type: int
+        value: "1"
+      - doc: signatureSegment indexes the signature segment.
+        name: signatureSegment
+        type: int
+        value: "2"
+      - doc: |-
+          maxSignatureLen bounds a decoded signature. The widest algorithm here
+          produces 64 octets; the slack costs nothing and the bound is what stops
+          a megabyte "signature" from being decoded before it is rejected.
+        name: maxSignatureLen
+        type: int
+        value: "256"
+      - doc: |-
+          maxHeaderDepth bounds the JOSE header's JSON nesting. A header is a flat
+          object of scalars plus at most the "crit" array.
+        name: maxHeaderDepth
+        type: int
+        value: "4"
+      - doc: |-
+          defaultType is the "typ" an issuer stamps when the config names none
+          (RFC 7519 §5.1).
+        name: defaultType
+        type: string
+        value: "\"JWT\""
+      - doc: |-
+          algNone is the unsecured algorithm of RFC 7519 §6, matched
+          case-insensitively so "None" and "NONE" get the verdict they deserve
+          rather than the generic mismatch.
+        name: algNone
+        type: string
+        value: "\"none\""
+    name: jwsSegments
+  - grouped: true
+    items:
+      - doc: |-
+          p256CoordLen is the fixed octet width of a P-256 field element.
+          RFC 7518 §3.4 requires each half of an ES256 signature to be exactly
+          this wide, left-padded — a "compact" 31-octet R is a different number,
+          not a tidier one.
+        name: p256CoordLen
+        type: int
+        value: "32"
+      - doc: "p256SigLen is the total ES256 signature width: R||S, both fixed."
+        name: p256SigLen
+        type: int
+        value: 2 * p256CoordLen
+    name: p256CoordLen
+  - grouped: true
+    items:
+      - doc: |-
+          pasetoV4PublicHeader is the version+purpose prefix, INCLUDING the
+          trailing separator, exactly as it is fed to the pre-authentication
+          encoding. Signing the header is what stops a v4.public token from being
+          replayed as any other version or purpose.
+        name: pasetoV4PublicHeader
+        type: string
+        value: "\"v4.public.\""
+      - doc: |-
+          pasetoMinSegments is a v4.public token with no footer: "v4", "public",
+          payload.
+        name: pasetoMinSegments
+        type: int
+        value: "3"
+      - doc: pasetoMaxSegments adds the optional footer.
+        name: pasetoMaxSegments
+        type: int
+        value: "4"
+      - doc: pasetoVersionSegment indexes the version part ("v4").
+        name: pasetoVersionSegment
+        type: int
+        value: "0"
+      - doc: pasetoPurposeSegment indexes the purpose part ("public").
+        name: pasetoPurposeSegment
+        type: int
+        value: "1"
+      - doc: pasetoBodySegment indexes the payload+signature part.
+        name: pasetoBodySegment
+        type: int
+        value: "2"
+      - doc: pasetoFooterSegment indexes the optional footer part.
+        name: pasetoFooterSegment
+        type: int
+        value: "3"
+      - doc: pasetoSigLen is the Ed25519 signature width appended to the payload.
+        name: pasetoSigLen
+        type: int
+        value: ed25519.SignatureSize
+      - doc: |-
+          maxFooterLen bounds a decoded footer. A footer carries a key id or a
+          small hint; it is not a second payload. Every verifier here refuses a
+          longer one as TooLarge before looking at its signature, so both
+          constructors refuse to be CONFIGURED with one (see checkFooterLen).
+        name: maxFooterLen
+        type: int
+        value: 1 << 10
+    name: pasetoV4PublicHeader
+  - grouped: true
+    items:
+      - doc: |-
+          DefaultMaxTokenLen is the token-string bound applied when a config
+          leaves MaxTokenLen at zero. 8 KiB comfortably holds an OIDC ID token
+          with a certificate thumbprint; it does not hold an attack.
+        name: DefaultMaxTokenLen
+        type: int
+        value: 8 << 10
+      - doc: |-
+          MinTokenLen is the floor a configured MaxTokenLen may not go below. A
+          bound smaller than this would reject every real token, which is a
+          configuration mistake worth naming rather than a policy.
+        name: MinTokenLen
+        type: int
+        value: "64"
+      - doc: |-
+          MaxTokenLenCeiling is the ceiling a configured MaxTokenLen may not
+          exceed. There is no legitimate multi-megabyte bearer token, and the
+          ceiling is what keeps "configurable" from meaning "unbounded".
+        name: MaxTokenLenCeiling
+        type: int
+        value: 1 << 20
+      - doc: |-
+          DefaultMaxClaimDepth is the JSON nesting bound applied when a config
+          leaves MaxClaimDepth at zero.
+        name: DefaultMaxClaimDepth
+        type: int
+        value: "16"
+      - doc: |-
+          MaxClaimDepthCeiling is the ceiling a configured MaxClaimDepth may not
+          exceed.
+        name: MaxClaimDepthCeiling
+        type: int
+        value: "64"
+      - doc: |-
+          DefaultMaxKeyCandidates is how many keys a set verifier will try for one
+          "kid" when the config leaves MaxKeyCandidates at zero. A rotation window
+          holds two; four leaves room for a slow rollover without turning a
+          published JWK Set into a signature-verification multiplier.
+        name: DefaultMaxKeyCandidates
+        type: int
+        value: "4"
+      - doc: |-
+          MaxKeyCandidatesCeiling caps MaxKeyCandidates. Trying keys IS signature
+          verification, the expensive half of this package; a publisher who can
+          name the candidate count can name the cost.
+        name: MaxKeyCandidatesCeiling
+        type: int
+        value: "16"
+      - doc: |-
+          maxHeaderLen bounds the DECODED JOSE header. A header carries an alg, a
+          typ and a kid; anything larger is not a header this package will read.
+        name: maxHeaderLen
+        type: int
+        value: 4 << 10
+      - doc: decimalBase is the radix every integer this package renders uses.
+        name: decimalBase
+        type: int
+        value: "10"
+    name: DefaultMaxTokenLen
+  - doc: |-
+      MaxLeeway is the largest clock-skew allowance a verifier accepts.
+
+      Leeway exists because two hosts disagree about the time by seconds. A leeway
+      measured in hours is not skew tolerance, it is an expiry claim that has been
+      quietly disabled — so the constructor refuses it rather than honouring a
+      value whose effect the caller almost certainly did not intend (ADR 0031).
+    items:
+      - name: MaxLeeway
+        type: time.Duration
+        value: 5 * time.Minute
+    name: MaxLeeway
+files:
+  - decls:
+      - boundKeyValue
+    name: bound_key_value.go
+  - decls:
+      - boundsValue
+      - resolveBounds
+      - resolveBound
+    name: bounds_value.go
+  - decls:
+      - maxClaimMembers
+      - claimShape
+      - decodeClaims
+      - decodeRegistered
+      - nullRegisteredClaim
+      - decodeTimeClaims
+      - attachPrivate
+      - decodeStringClaim
+      - decodeTimeClaim
+      - encodeClaims
+      - checkClaimText
+      - putPrivate
+      - textNotUTF8
+      - putString
+      - putTime
+      - malformed
+    name: claims_codec.go
+  - decls:
+      - depthScan
+      - (*depthScan).consumeStringByte
+      - (*depthScan).consumeStructuralByte
+    name: depth_scan.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - ed25519Signing
+      - ed25519Signing.algorithm
+      - ed25519Signing.sign
+      - ed25519Verifying
+      - ed25519Verifying.algorithm
+      - ed25519Verifying.verify
+    name: ed25519.go
+  - decls:
+      - maxSegments
+      - b64
+      - segmentsValue
+      - splitCompact
+      - decodeSegment
+      - checkJSONDepth
+      - checkNoDuplicateMembers
+      - skipValue
+      - preAuthEncode
+      - appendLE64
+    name: encoding.go
+  - decls:
+      - exitConfigFault
+      - es256Signing
+      - es256Signing.algorithm
+      - es256Signing.sign
+      - es256Verifying
+      - es256Verifying.algorithm
+      - es256Verifying.verify
+    name: es256.go
+  - decls:
+      - hs256Binding
+      - hs256Binding.algorithm
+      - hs256Binding.sign
+      - hs256Binding.verify
+    name: hs256_binding.go
+  - decls:
+      - IssuerConfig
+    name: issuer_config.go
+  - decls:
+      - maxNumericDate
+      - joseShape
+      - joseShape.decodeTime
+      - joseShape.encodeTime
+      - joseShape.decodeAudience
+      - joseShape.encodeAudience
+    name: jose_shape.go
+  - decls:
+      - firstPrintable
+      - quoteJSONString
+      - quoteJSONStrings
+      - writeJSONStringByte
+      - hexDigit
+    name: jsonstring.go
+  - decls:
+      - NewVerifierFromJWK
+      - NewSetVerifier
+      - selectable
+      - indexedCount
+      - unverifiableSet
+      - setVerifier
+      - indexByKid
+      - (*setVerifier).Verify
+      - (*setVerifier).candidates
+      - bindJWK
+      - bindOctJWK
+      - bindECJWK
+      - bindOKPJWK
+      - checkJWKUsage
+      - impliedAlg
+    name: jwkbridge.go
+  - decls:
+      - jwsSegments
+      - headerValue
+      - parseJOSEHeader
+      - finishHeader
+      - policyValue.checkHeader
+      - policyValue.decodeAndValidate
+    name: jws.go
+  - decls:
+      - jwsIssuer
+      - newJWSIssuer
+      - renderJOSEHeader
+      - (*jwsIssuer).Issue
+    name: jws_issuer.go
+  - decls:
+      - jwsPartsValue
+      - policyValue.parseJWS
+      - parseHeaderSegment
+    name: jws_parts.go
+  - decls:
+      - jwsVerifier
+      - newJWSVerifier
+      - (*jwsVerifier).Verify
+    name: jws_verifier.go
+  - decls:
+      - NewHS256Issuer
+      - NewES256Issuer
+      - NewEdDSAIssuer
+      - NewHS256Verifier
+      - NewES256Verifier
+      - NewEdDSAVerifier
+    name: jwt.go
+  - decls:
+      - p256CoordLen
+      - signingKey
+      - verifyingKey
+      - keyUnsuitable
+      - bindSecret
+      - bindP256Public
+      - bindP256Private
+      - bindEd25519Public
+      - bindEd25519Private
+    name: keys.go
+  - decls:
+      - pasetoV4PublicHeader
+      - pasetoVersions
+      - NewPasetoV4Issuer
+      - NewPasetoV4Verifier
+      - checkFooterLen
+      - checkPasetoScheme
+    name: paseto.go
+  - decls:
+      - pasetoIssuer
+      - (*pasetoIssuer).Issue
+    name: paseto_issuer.go
+  - decls:
+      - PasetoIssuerConfig
+      - PasetoIssuerConfig.issuing
+    name: paseto_issuer_config.go
+  - decls:
+      - pasetoShape
+      - pasetoShape.decodeTime
+      - pasetoShape.encodeTime
+      - pasetoShape.decodeAudience
+      - pasetoShape.encodeAudience
+    name: paseto_shape.go
+  - decls:
+      - pasetoVerifier
+      - (*pasetoVerifier).Verify
+      - (*pasetoVerifier).decodeAuthenticated
+      - (*pasetoVerifier).split
+    name: paseto_verifier.go
+  - decls:
+      - PasetoVerifierConfig
+      - PasetoVerifierConfig.verifying
+    name: paseto_verifier_config.go
+  - decls:
+      - policyValue
+      - newPolicy
+      - nonUTF8VerifierKnob
+      - misconfigured
+      - resolveClock
+    name: policy.go
+  - decls:
+      - DefaultMaxTokenLen
+      - MaxLeeway
+    name: token.go
+  - decls:
+      - _
+    name: token_compliance.go
+  - decls:
+      - validateIssuerConfig
+      - nonUTF8Knob
+      - policyValue.validateClaims
+      - policyValue.checkIdentity
+      - policyValue.checkExpiry
+      - policyValue.checkLifetime
+      - stampIssuedClaims
+    name: validate.go
+  - decls:
+      - VerifierConfig
+    name: verifier_config.go
+functions:
+  - doc: |-
+      resolveBounds maps every zero bound to its default and refuses one outside
+      its documented range.
+    name: resolveBounds
+    params: cfg VerifierConfig
+    results: bounds boundsValue, err error
+  - doc: |-
+      resolveBound maps zero to fallback and refuses anything outside [low, high],
+      naming knob in the refusal.
+    name: resolveBound
+    params: configured, fallback, low, high int, knob string
+    results: value int, err error
+  - doc: |-
+      decodeClaims turns a raw claims object into a ClaimsValue under shape.
+
+      The refusals happen in cost order, cheapest first: text that is not UTF-8
+      and nesting depth (two linear scans), duplicate members (one streaming pass),
+      then member count. Only after all of them does encoding/json build anything.
+
+      UTF-8 is checked because encoding/json does not refuse invalid bytes — it
+      replaces each with U+FFFD — so without it "a\xff" and "a\xfe" from a careless
+      or hostile issuer would verify as one subject. RFC 8259 §8.1 makes JSON
+      exchanged between systems UTF-8, and RFC 8725 §3.7 asks the reader to hold
+      the writer to it.
+    name: decodeClaims
+    params: raw []byte, maxDepth int, shape claimShape
+    results: claims coretoken.ClaimsValue, err error
+  - doc: decodeRegistered reads the seven registered claims out of members.
+    name: decodeRegistered
+    params: members map[string]json.RawMessage, shape claimShape
+    results: claims coretoken.ClaimsValue, err error
+  - doc: |-
+      nullRegisteredClaim reports the first registered claim members carries as
+      JSON null, in RFC 7519 §4.1 order so the refusal is deterministic.
+    name: nullRegisteredClaim
+    params: members map[string]json.RawMessage
+    results: name string, found bool
+  - doc: decodeTimeClaims reads exp / nbf / iat under shape onto base.
+    name: decodeTimeClaims
+    params: base coretoken.ClaimsValue, members map[string]json.RawMessage, shape claimShape
+    results: claims coretoken.ClaimsValue, err error
+  - doc: |-
+      attachPrivate copies every non-registered member onto base as a raw private
+      claim, in whatever order the map yields — the core value stores them keyed,
+      and PrivateNames sorts on the way out.
+    name: attachPrivate
+    params: base coretoken.ClaimsValue, members map[string]json.RawMessage
+    results: claims coretoken.ClaimsValue, err error
+  - doc: decodeStringClaim reads a registered string claim, treating absence as "".
+    name: decodeStringClaim
+    params: members map[string]json.RawMessage, name string
+    results: value string, err error
+  - doc: |-
+      decodeTimeClaim reads a registered time claim under shape, treating absence
+      as the zero Time.
+    name: decodeTimeClaim
+    params: members map[string]json.RawMessage, name string, shape claimShape
+    results: instant time.Time, err error
+  - doc: |-
+      encodeClaims renders claims under shape. The member map marshals with sorted
+      keys, so the same claim set always produces the same bytes — which is what
+      makes an issued token reproducible in a test.
+
+      Every string it writes must be valid UTF-8, and a claim set carrying one that
+      is not is refused rather than minted: see checkClaimText for why nothing
+      further down the line would refuse it instead.
+    name: encodeClaims
+    params: claims coretoken.ClaimsValue, shape claimShape
+    results: raw []byte, err error
+  - doc: |-
+      checkClaimText refuses a claim set whose registered string claims are not
+      valid UTF-8.
+
+      JSON text is UTF-8 (RFC 8259 §8.1, RFC 8725 §3.7), and on the ISSUE path
+      nothing else would say so. quoteJSONString passes every byte at or above 0x20
+      through by design, and a reader that does not refuse the result repairs it
+      instead: encoding/json — this package's own verifier included — decodes each
+      invalid byte to U+FFFD, so a "sub" of "a\xff" and one of "a\xfe" are minted
+      as two tokens and verified as ONE subject. A strict JOSE reader elsewhere
+      rejects both. Nothing is repaired here either: which bytes the caller meant
+      is not something this package can know.
+    name: checkClaimText
+    params: claims coretoken.ClaimsValue, audience []string
+    results: error
+  - doc: |-
+      putPrivate stores every private claim as the exact bytes it arrived as,
+      refusing one whose name or bytes are not valid UTF-8.
+
+      Both halves need the check, and for opposite reasons: json.Marshal REWRITES a
+      map key that is not UTF-8 — each bad byte becomes U+FFFD, so two names the
+      caller kept apart would be minted as one — while it passes a RawMessage's
+      bytes through untouched, so a bad value would reach the wire as written.
+    name: putPrivate
+    params: members map[string]json.RawMessage, claims coretoken.ClaimsValue
+    results: error
+  - doc: |-
+      textNotUTF8 returns the IssueFailed verdict for a claim whose text JSON
+      cannot carry. claim is a fixed description — never a value, never a name the
+      caller chose.
+    name: textNotUTF8
+    params: claim string
+    results: error
+  - doc: putString stores a registered string claim unless it is empty.
+    name: putString
+    params: members map[string]json.RawMessage, name, value string
+  - doc: putTime stores a registered time claim unless it is the zero Time.
+    name: putTime
+    params: members map[string]json.RawMessage, name string, instant time.Time, shape claimShape
+  - doc: |-
+      malformed returns the Malformed verdict carrying a structural detail.
+
+      It deliberately does NOT attach the stdlib parse error as a cause, which is
+      the opposite of this repository's usual wrapping habit. The habit exists so
+      `errors.Is(err, originalCause)` keeps working — but here the "original
+      cause" was produced by parsing ATTACKER-CONTROLLED bytes, and stdlib parse
+      errors quote what they choked on: time.ParseError echoes the timestamp,
+      json.SyntaxError gives an offset into the payload, base64.CorruptInputError
+      a position in the token. Keeping any of them reachable would put token
+      content one errors.Unwrap away from every log line that walks a chain.
+
+      The second effect is that the verdict keeps the sentinel's own HTTP status
+      and exit code: Wrap's origin-wins path inherits both, while the
+      stdlib-cause path would silently fall back to 500 / EX_SOFTWARE.
+
+      detail is a fixed string chosen at the call site — never a value out of the
+      token.
+    name: malformed
+    params: detail string
+    results: error
+  - doc: |-
+      splitCompact splits tok on '.' into at most maxSegments parts.
+
+      It refuses a token longer than maxLen BEFORE scanning, so the scan itself is
+      bounded by a number the caller configured rather than one the attacker sent,
+      and it refuses a token with more than maxSegments parts the moment the extra
+      separator is seen rather than after counting them all.
+    name: splitCompact
+    params: tok string, maxLen int
+    results: seg segmentsValue, err error
+  - doc: |-
+      decodeSegment decodes one unpadded base64url segment, refusing anything
+      whose decoded form would exceed maxLen before allocating the buffer.
+    name: decodeSegment
+    params: segment string, maxLen int
+    results: raw []byte, err error
+  - doc: |-
+      checkJSONDepth refuses raw when its bracket nesting exceeds maxDepth.
+
+      It runs BEFORE encoding/json sees the bytes, because the cheapest place to
+      refuse a payload of ten thousand open brackets is a linear scan with one
+      integer of state — not a decoder that has already built ten thousand frames.
+      The scan is string-aware so a '{' inside a claim value is data, not depth.
+    name: checkJSONDepth
+    params: raw []byte, maxDepth int
+    results: error
+  - doc: |-
+      checkNoDuplicateMembers refuses a top-level JSON object that names the same
+      member twice.
+
+      encoding/json keeps the LAST occurrence and reports success, so a token with
+      two "aud" members says one thing to a Go reader and potentially another to a
+      reader written in a language that keeps the first. RFC 8725 §2.6 calls that
+      out as a substitution vector; refusing is the only reading that cannot
+      disagree with anybody.
+    name: checkNoDuplicateMembers
+    params: raw []byte
+    results: error
+  - doc: |-
+      skipValue consumes exactly one JSON value from dec without interpreting it
+      and without copying its bytes.
+
+      The obvious spelling — decoding into a json.RawMessage — COPIES the whole
+      value only for it to be discarded, and this is the duplicate-member pass, so
+      every byte copied is waste.
+
+      Both implementations are benchmarked side by side over the exact two
+      payloads one verification scans (BenchmarkDuplicateScanRealistic); the
+      copying one lives in the benchmark file and nothing in production calls it.
+      The saving is 919 ns on the header and 3 909 ns on the claims — together
+      16.8 % of one HS256 verification — plus 832 B on a single 4 KiB claim value,
+      a gap that grows with the value. See BENCH.md §12.
+
+      The OBJECT count is not the reason and must not be quoted as one: on Go
+      1.27, whose encoding/json is backed by json/v2, the copying implementation
+      allocates two FEWER objects on a claim set containing an array, because
+      json.Decoder.Token boxes every scalar it walks past while Decode takes the
+      value in one grab. pkg/v1/security/token/BENCH.md's "two allocations" predates that
+      toolchain; the time saving it also reports does reproduce.
+    name: skipValue
+    params: dec *json.Decoder
+    results: error
+  - doc: |-
+      preAuthEncode implements PASETO's PAE (pre-authentication encoding): the
+      piece count as LE64, then each piece's length as LE64 followed by the piece.
+
+      It is what makes a PASETO signature cover the version header and the footer
+      as well as the payload, and it is injective — no two different piece lists
+      encode to the same bytes — which is what stops a byte moving from the
+      payload into the footer without changing the signature.
+    name: preAuthEncode
+    params: pieces ...[]byte
+    results: "[]byte"
+  - doc: |-
+      appendLE64 appends n as eight little-endian bytes with the most significant
+      bit cleared, as PASETO's LE64 specifies.
+    name: appendLE64
+    params: dst []byte, n uint64
+    results: "[]byte"
+  - doc: |-
+      quoteJSONString renders s as a JSON string literal.
+
+      Every value it renders today comes from the SDK's own configuration or from
+      a claim this package already decoded — never straight off the wire. It
+      escapes anyway, because a string concatenated into JSON is exactly the shape
+      that stops being safe the day somebody makes one of its inputs dynamic.
+    name: quoteJSONString
+    params: s string
+    results: string
+  - doc: quoteJSONStrings renders values as a JSON array of string literals.
+    name: quoteJSONStrings
+    params: values []string
+    results: string
+  - doc: writeJSONStringByte appends one byte of string content in escaped form.
+    name: writeJSONStringByte
+    params: builder *strings.Builder, char byte
+  - doc: hexDigit renders one nibble as a lowercase hex digit.
+    name: hexDigit
+    params: nibble byte
+    results: byte
+  - name: NewVerifierFromJWK
+    params: key jwk.KeyValue, cfg VerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - name: NewSetVerifier
+    params: set jwk.Set, cfg VerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - doc: |-
+      selectable reports whether index holds at least one member a token could be
+      verified against: indexed under a kid, and bound to an algorithm this package
+      implements.
+
+      It asks only whether such a member EXISTS. An unusable member stays in the
+      index, and keeps counting against MaxKeyCandidates, whatever this returns —
+      that is indexByKid's rule, and this function only reads the index it built.
+    name: selectable
+    params: index map[string][]boundKeyValue
+    results: bool
+  - doc: indexedCount reports how many members index holds across every kid.
+    name: indexedCount
+    params: index map[string][]boundKeyValue
+    results: int
+  - doc: |-
+      unverifiableSet is the PolicyMisconfigured refusal for a JWK Set that no
+      token could ever verify against.
+
+      It is built from the sentinel's own code, reason, public message and exit
+      code — so errors.Is and errs.HasCode both still match PolicyMisconfigured —
+      rather than by wrapping the sentinel, because origin-wins would inherit the
+      sentinel's generic Private, and the one thing worth telling an operator here
+      is specific: a key published without a kid is a single key, and
+      NewVerifierFromJWK is the constructor that verifies with one.
+    name: unverifiableSet
+    params: members, withKid int
+    results: error
+  - doc: |-
+      indexByKid groups set's members by kid, deriving each member's binding once.
+
+      A member the SDK verifies nothing with is INDEXED ANYWAY, as an unusable
+      entry. Dropping it would silently widen MaxKeyCandidates: the bound counts
+      the keys published under one kid, so a set whose kid names six keys — three
+      of them P-384 — must still be refused as ambiguous rather than quietly
+      resolved down to three. (Not RSA: a set carrying an RSA member never exists,
+      because jwk.ParseSet refuses the whole document.) The per-token loop skips an unusable entry exactly
+      as it used to skip a bind failure.
+    name: indexByKid
+    params: set jwk.Set
+    results: map[string][]boundKeyValue
+  - doc: bindJWK maps a JWK onto the verifying binding its own type and curve imply.
+    name: bindJWK
+    params: key jwk.KeyValue
+    results: binding verifyingKey, err error
+  - doc: bindOctJWK binds a symmetric JWK to HS256.
+    name: bindOctJWK
+    params: key jwk.KeyValue
+    results: binding verifyingKey, err error
+  - doc: bindECJWK binds a P-256 JWK to ES256.
+    name: bindECJWK
+    params: key jwk.KeyValue
+    results: binding verifyingKey, err error
+  - doc: bindOKPJWK binds an Ed25519 JWK to EdDSA.
+    name: bindOKPJWK
+    params: key jwk.KeyValue
+    results: binding verifyingKey, err error
+  - doc: |-
+      checkJWKUsage honours the key's own advisory members: "use", "key_ops" and
+      "alg". They are the publisher's statement about their key, and a relying
+      party that ignores them is choosing to know less than it was told.
+    name: checkJWKUsage
+    params: key jwk.KeyValue
+    results: error
+  - doc: |-
+      impliedAlg reports the JOSE algorithm name a key's type and curve imply.
+      The second result is false when this package implements none for it, which
+      is a different statement from "the empty algorithm" and keeps the caller
+      from comparing a publisher's "alg" against nothing at all.
+    name: impliedAlg
+    params: key jwk.KeyValue
+    results: alg string, known bool
+  - doc: parseJOSEHeader reads a decoded JOSE header object.
+    name: parseJOSEHeader
+    params: raw []byte
+    results: header headerValue, err error
+  - doc: finishHeader reads the remaining members this package acts on.
+    name: finishHeader
+    params: members map[string]json.RawMessage, alg string
+    results: header headerValue, err error
+  - doc: newJWSIssuer validates cfg and pre-renders the header.
+    name: newJWSIssuer
+    params: bound signingKey, cfg IssuerConfig
+    results: issuer coretoken.Issuer, err error
+  - doc: |-
+      renderJOSEHeader builds the fixed header this issuer stamps on every token.
+
+      It is rendered by hand rather than marshalled from a map: the members are
+      known, the values are escaped, and a map marshal would re-encode identical
+      bytes on every mint while sorting "alg" after "kid".
+    name: renderJOSEHeader
+    params: alg coretoken.Algorithm, cfg IssuerConfig
+    results: string
+  - doc: parseHeaderSegment decodes and reads the first segment of a compact token.
+    name: parseHeaderSegment
+    params: segment string
+    results: header headerValue, err error
+  - doc: newJWSVerifier validates cfg and returns the bound verifier.
+    name: newJWSVerifier
+    params: bound verifyingKey, cfg VerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - name: NewHS256Issuer
+    params: secret corecrypto.Key, cfg IssuerConfig
+    results: issuer coretoken.Issuer, err error
+  - name: NewES256Issuer
+    params: priv *ecdsa.PrivateKey, cfg IssuerConfig
+    results: issuer coretoken.Issuer, err error
+  - name: NewEdDSAIssuer
+    params: priv ed25519.PrivateKey, cfg IssuerConfig
+    results: issuer coretoken.Issuer, err error
+  - name: NewHS256Verifier
+    params: secret corecrypto.Key, cfg VerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - name: NewES256Verifier
+    params: pub *ecdsa.PublicKey, cfg VerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - name: NewEdDSAVerifier
+    params: pub ed25519.PublicKey, cfg VerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - doc: |-
+      keyUnsuitable returns the KeyUnsuitable verdict carrying a fixed detail.
+
+      It wraps the SENTINEL rather than the underlying cause, and that is not a
+      stylistic choice: several of these causes are themselves *errs.Error values
+      out of internal/service/crypto/key/jwk, and Wrap's origin-wins rule would make
+      the RESULT carry the jwk package's code (0.3.42.*) instead of this domain's
+      KeyUnsuitable. A caller routing on the code would then be reading a verdict
+      about a key format where they asked about a token.
+
+      detail is a fixed string chosen at the call site — never key material.
+    name: keyUnsuitable
+    params: detail string
+    results: error
+  - doc: |-
+      bindSecret validates a symmetric key and returns the HS256 binding.
+
+      core/crypto.Key is fixed at 256 bits, so a short passphrase cannot become
+      one — which covers the LENGTH half of RFC 8725 §3.5. The ENTROPY half is not
+      something this package can measure: derive the key (pkg/v1/crypto/kdf) rather than
+      typing one.
+    name: bindSecret
+    params: secret corecrypto.Key
+    results: binding hs256Binding, err error
+  - doc: |-
+      bindP256Public validates an ECDSA public key for ES256.
+
+      The point is validated, not just measured: ECDH() rejects an off-curve point
+      and the identity, and using an off-curve point is a documented route to key
+      recovery (RFC 8725 §3.4).
+    name: bindP256Public
+    params: pub *ecdsa.PublicKey
+    results: binding es256Verifying, err error
+  - doc: |-
+      bindP256Private validates an ECDSA private key for ES256: its curve, its
+      public point, its scalar, and that the scalar and the point are one key.
+
+      The last two are checked here because nothing later would. crypto/ecdsa
+      reads D only when it signs — as of go1.27 it dereferences it on the first
+      Sign, so a nil scalar passes construction and panics inside Issue — and it
+      signs with D without ever comparing D·G to (X, Y). A struct whose halves came
+      from two different keys therefore mints tokens that the key's own public
+      half, the one the verifier is handed, refuses: every token, until someone
+      notices that the issuer was wrong from the start.
+    name: bindP256Private
+    params: priv *ecdsa.PrivateKey
+    results: binding es256Signing, err error
+  - doc: bindEd25519Public validates an Ed25519 public key for alg.
+    name: bindEd25519Public
+    params: pub ed25519.PublicKey, alg coretoken.Algorithm
+    results: binding ed25519Verifying, err error
+  - doc: bindEd25519Private validates an Ed25519 private key for alg.
+    name: bindEd25519Private
+    params: priv ed25519.PrivateKey, alg coretoken.Algorithm
+    results: binding ed25519Signing, err error
+  - name: NewPasetoV4Issuer
+    params: priv ed25519.PrivateKey, cfg PasetoIssuerConfig
+    results: issuer coretoken.Issuer, err error
+  - name: NewPasetoV4Verifier
+    params: pub ed25519.PublicKey, cfg PasetoVerifierConfig
+    results: verifier coretoken.Verifier, err error
+  - doc: |-
+      checkFooterLen refuses a configured footer longer than maxFooterLen, the
+      bound the verifier applies to a token's decoded footer.
+
+      It is the SAME constant on purpose, compared the same way: the issuer and
+      the verifier must agree on it exactly, because a footer one byte past the
+      verifier's bound is not a slightly large footer — it is a token nothing in
+      this package will accept.
+    name: checkFooterLen
+    params: footer []byte
+    results: error
+  - doc: |-
+      checkPasetoScheme refuses every version+purpose except v4.public, telling a
+      recognisable PASETO apart from a string that merely has dots in it.
+    name: checkPasetoScheme
+    params: version, purpose string
+    results: error
+  - doc: |-
+      newPolicy validates cfg and resolves every default, or returns
+      PolicyMisconfigured naming the offending knob.
+    name: newPolicy
+    params: cfg VerifierConfig
+    results: policy policyValue, err error
+  - doc: |-
+      nonUTF8VerifierKnob names the first VerifierConfig string a token is compared
+      against that is not valid UTF-8, or returns "" when every one of them is.
+    name: nonUTF8VerifierKnob
+    params: cfg VerifierConfig
+    results: string
+  - doc: misconfigured returns the PolicyMisconfigured verdict naming one knob.
+    name: misconfigured
+    params: knob string
+    results: error
+  - doc: resolveClock substitutes the system clock for a nil one.
+    name: resolveClock
+    params: configured clock.Clock
+    results: clock.Clock
+  - doc: |-
+      validateIssuerConfig refuses an IssuerConfig that cannot be honoured, before
+      it becomes an issuer whose every call fails (ADR 0031).
+    name: validateIssuerConfig
+    params: cfg IssuerConfig
+    results: error
+  - doc: |-
+      nonUTF8Knob names the first IssuerConfig string that is not valid UTF-8, or
+      returns "" when every one of them is.
+    name: nonUTF8Knob
+    params: cfg IssuerConfig
+    results: string
+  - doc: |-
+      stampIssuedClaims applies an issuer's configured defaults to claims on the
+      way out: "iss" when the claims carry none, "iat" always, and "exp" derived
+      from the configured lifetime when the claims carry no expiry of their own.
+
+      It refuses to mint a token with no expiry unless the issuer was built with
+      AllowMissingExpiry, which is the same rule the verifier applies, stated once
+      on each side so neither can drift into being the lenient one.
+    name: stampIssuedClaims
+    params: claims coretoken.ClaimsValue, cfg IssuerConfig, source clock.Clock
+    results: stamped coretoken.ClaimsValue, err error
+imports:
+  base64: encoding/base64
+  big: math/big
+  binary: encoding/binary
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  coretoken: github.com/kitsunium/sdk/internal/core/security/token
+  ecdsa: crypto/ecdsa
+  ed25519: crypto/ed25519
+  ed25519sig: github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig
+  elliptic: crypto/elliptic
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hmacsha2: github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2
+  json: encoding/json
+  jwk: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
+  math: math
+  rand: crypto/rand
+  sha256: crypto/sha256
+  slices: slices
+  strconv: strconv
+  strings: strings
+  subtle: crypto/subtle
+  time: time
+  utf8: unicode/utf8
+  x509: crypto/x509
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/security/token
+  name: token
+  purpose: Package token — one JWK Set member, with its binding already derived.
+types:
+  - doc: |-
+      boundKeyValue is one JWK Set member with its verifying binding already
+      derived, plus whether that derivation succeeded.
+    fields:
+      - doc: |-
+          binding is the verifying key this member implies. It is meaningful only
+          when usable is true.
+        name: binding
+        type: verifyingKey
+      - doc: |-
+          usable reports whether bindJWK accepted this member.
+
+          It is a BOOLEAN and not a nil check on binding, and that is load-bearing:
+          bindJWK's refusals do not all arrive as a nil interface. bindECJWK ends
+          in `return bindP256Public(public)`, whose first result is the VALUE type
+          es256Verifying, so a refusal there reaches this struct as a NON-nil
+          verifyingKey wrapping a zero es256Verifying — whose verify would
+          dereference a nil *ecdsa.PublicKey. bindOctJWK and bindOKPJWK have the
+          same shape through hs256Binding and ed25519Verifying.
+
+          Those three inner refusals are unreachable today, because jwk validates
+          length, curve and point before any of them can fire — this field is
+          defence against an edit that makes one reachable, not a fix for a panic
+          anything can currently produce. TestABindRefusalIsNotANilInterface pins
+          the shape so the claim stays checkable.
+        name: usable
+        type: bool
+    kind: struct
+    name: boundKeyValue
+  - doc: |-
+      boundsValue groups the size and depth limits a policy applies, so resolving
+      them stays one call rather than three near-identical error checks inside
+      newPolicy — which is what kept that function readable when the third bound
+      arrived.
+    fields:
+      - doc: tokenLen is the resolved maximum token-string length.
+        name: tokenLen
+        type: int
+      - doc: claimDepth is the resolved maximum claims JSON nesting.
+        name: claimDepth
+        type: int
+      - doc: |-
+          keyCandidates is the resolved maximum number of keys a set verifier
+          will try for one kid.
+        name: keyCandidates
+        type: int
+    kind: struct
+    name: boundsValue
+  - doc: |-
+      claimShape is the per-format encoding of the claim values whose spelling the
+      two formats disagree about.
+    kind: named
+    name: claimShape
+    underlying: |-
+      interface {
+      	// decodeTime reads one registered time claim.
+      	decodeTime(raw json.RawMessage) (time.Time, error)
+      	// encodeTime renders one registered time claim.
+      	encodeTime(instant time.Time) json.RawMessage
+      	// decodeAudience reads the "aud" claim into its general slice form.
+      	decodeAudience(raw json.RawMessage) ([]string, error)
+      	// encodeAudience renders "aud", or nil to omit the member entirely.
+      	encodeAudience(audience []string) (json.RawMessage, error)
+      }
+  - doc: |-
+      depthScan is the state a linear nesting scan needs: how deep it currently
+      is, and whether it is inside a JSON string (where a brace is data, not
+      structure) and past a backslash (where the next byte is escaped).
+
+      It is split out of checkJSONDepth so the "inside a string" rules live in one
+      place: the escape handling is exactly where a hand-rolled scanner gets it
+      wrong, and a `\"` read as a closing quote would make the rest of the payload
+      look like structure.
+    fields:
+      - doc: depth is the current bracket nesting level.
+        name: depth
+        type: int
+      - doc: inString reports whether the scan is inside a JSON string literal.
+        name: inString
+        type: bool
+      - doc: escaped reports whether the previous byte was an unconsumed backslash.
+        name: escaped
+        type: bool
+    kind: struct
+    methods:
+      - doc: consumeStringByte advances the scan by one byte of string content.
+        name: consumeStringByte
+        params: char byte
+        recv: s *depthScan
+      - doc: consumeStructuralByte advances the scan by one byte outside a string.
+        name: consumeStructuralByte
+        params: char byte
+        recv: s *depthScan
+    name: depthScan
+  - doc: |-
+      ed25519Signing is Ed25519 signing. It carries its algorithm as a field
+      because the same primitive backs two of them — JOSE "EdDSA" and PASETO
+      v4.public — over DIFFERENT signing inputs. Reporting which one it is keeps a
+      v4.public key from silently satisfying a JWS EdDSA binding.
+    fields:
+      - doc: key is the 64-octet stdlib private key.
+        name: key
+        type: ed25519.PrivateKey
+      - doc: alg is AlgorithmEdDSA or AlgorithmPasetoV4Public.
+        name: alg
+        type: coretoken.Algorithm
+    kind: struct
+    methods:
+      - doc: algorithm reports the bound algorithm.
+        name: algorithm
+        recv: b ed25519Signing
+        results: coretoken.Algorithm
+      - doc: sign returns the 64-octet Ed25519 signature over input.
+        name: sign
+        params: input []byte
+        recv: b ed25519Signing
+        results: sig []byte, err error
+    name: ed25519Signing
+  - doc: |-
+      ed25519Verifying is Ed25519 verification, algorithm-tagged like its signing
+      counterpart: the same keypair backs JOSE EdDSA and PASETO v4.public over
+      different signing inputs, and the tag is what stops one satisfying the other.
+    fields:
+      - doc: key is the 32-octet stdlib public key.
+        name: key
+        type: ed25519.PublicKey
+      - doc: alg is AlgorithmEdDSA or AlgorithmPasetoV4Public.
+        name: alg
+        type: coretoken.Algorithm
+    kind: struct
+    methods:
+      - doc: algorithm reports the bound algorithm.
+        name: algorithm
+        recv: b ed25519Verifying
+        results: coretoken.Algorithm
+      - doc: verify reports whether sig authenticates input under the bound public key.
+        name: verify
+        params: input, sig []byte
+        recv: b ed25519Verifying
+        results: bool
+    name: ed25519Verifying
+  - doc: |-
+      segmentsValue is a fixed-capacity view over a compact token's dot-separated
+      parts. It is an ARRAY, not a slice, and that is the whole point.
+
+      CVE-2025-30204 was a strings.Split on the token before any length check: an
+      input of a few megabytes of "." made the split allocate a slice header per
+      separator, so a request the size of a photo became hundreds of megabytes of
+      garbage. Here the bound is checked first, the count cannot exceed
+      maxSegments, and the parts are sub-slices of the caller's string — the split
+      allocates nothing at all.
+    fields:
+      - doc: part holds up to maxSegments views into the original token string.
+        name: part
+        type: "[maxSegments]string"
+      - doc: count is how many entries of part are populated.
+        name: count
+        type: int
+    kind: struct
+    name: segmentsValue
+  - doc: es256Signing is ECDSA P-256 signing with the RFC 7518 §3.4 R||S encoding.
+    fields:
+      - doc: key is the private key; its curve and point are checked at construction.
+        name: key
+        type: "*ecdsa.PrivateKey"
+    kind: struct
+    methods:
+      - doc: algorithm reports ES256.
+        name: algorithm
+        recv: es256Signing
+        results: coretoken.Algorithm
+      - doc: |-
+          sign hashes input with SHA-256 and emits the fixed-width R||S signature.
+
+          This is the one algorithm here that does NOT go through the SDK's registered
+          signer: service/crypto/sign/ecdsasig speaks ASN.1/DER, which is the right shape
+          for X.509 and the wrong shape for JOSE. Transcoding DER to R||S would mean
+          re-parsing an attacker-supplied structure on the verify path, so the JOSE
+          encoding is produced directly from crypto/ecdsa instead — one primitive, one
+          encoding, no converter to get wrong.
+        name: sign
+        params: input []byte
+        recv: b es256Signing
+        results: sig []byte, err error
+    name: es256Signing
+  - doc: es256Verifying is ECDSA P-256 verification over the R||S encoding.
+    fields:
+      - doc: key is the public key; its curve and point are checked at construction.
+        name: key
+        type: "*ecdsa.PublicKey"
+    kind: struct
+    methods:
+      - doc: algorithm reports ES256.
+        name: algorithm
+        recv: es256Verifying
+        results: coretoken.Algorithm
+      - doc: verify reports whether sig is a valid ES256 signature over input.
+        name: verify
+        params: input, sig []byte
+        recv: b es256Verifying
+        results: bool
+    name: es256Verifying
+  - doc: |-
+      hs256Binding is HMAC-SHA-256 over a 256-bit shared secret. It is the only
+      binding that is BOTH halves, because a symmetric key that can verify can
+      also mint — which is the property a caller should have to notice.
+    fields:
+      - doc: |-
+          secret is the redacting core key type. It is a struct with an
+          unexported field, so an *ecdsa.PublicKey cannot become one by
+          conversion — that is the compile-time half of the confusion defence.
+        name: secret
+        type: corecrypto.Key
+    kind: struct
+    methods:
+      - doc: algorithm reports HS256.
+        name: algorithm
+        recv: hs256Binding
+        results: coretoken.Algorithm
+      - doc: sign returns the HMAC-SHA-256 tag over input.
+        name: sign
+        params: input []byte
+        recv: b hs256Binding
+        results: sig []byte, err error
+      - doc: verify recomputes the tag and compares it in constant time.
+        name: verify
+        params: input, sig []byte
+        recv: b hs256Binding
+        results: bool
+    name: hs256Binding
+  - fields:
+      - doc: Issuer, when non-empty, is stamped as "iss" on claims that carry none.
+        name: Issuer
+        type: string
+      - doc: |-
+          Type overrides the JWS "typ" header. Empty means "JWT" (RFC 7519 §5.1).
+          Set it to an explicit media type such as "at+jwt" when this issuer mints
+          more than one kind of token (RFC 8725 §3.11 / §3.12).
+        name: Type
+        type: string
+      - doc: |-
+          KeyID, when non-empty, is stamped as the JWS "kid" header — the value a
+          recipient's key-set verifier selects on. An issuer that publishes a JWK
+          Set needs one; an issuer whose verifier holds a single key does not.
+        name: KeyID
+        type: string
+      - doc: |-
+          Lifetime, when positive, is stamped as "exp" = now + Lifetime on claims
+          that carry no expiry of their own. Zero means the claims must bring one.
+        name: Lifetime
+        type: time.Duration
+      - doc: |-
+          AllowMissingExpiry permits minting a token with no "exp" at all. The
+          zero value is false, so the dangerous shape is the one you have to ask
+          for by name: a bearer token that never expires is a password with worse
+          rotation (ADR 0030).
+        name: AllowMissingExpiry
+        type: bool
+      - doc: |-
+          Clock is the time source for "iat" and the derived "exp". Nil means
+          clock.System. It is a clock.Clock — the frozen read-only half of the
+          time port (ADR 0039) — because issuing stamps instants and never waits.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    name: IssuerConfig
+  - doc: |-
+      joseShape is the JWT/JOSE claim encoding: NumericDate seconds
+      (RFC 7519 §2), and an "aud" that is either one string or an array of them
+      (RFC 7519 §4.1.3).
+    kind: struct
+    methods:
+      - doc: |-
+          decodeTime reads a NumericDate. It accepts a fractional value because the
+          RFC defines one, and keeps it to nanosecond resolution.
+        name: decodeTime
+        params: raw json.RawMessage
+        recv: joseShape
+        results: instant time.Time, err error
+      - doc: encodeTime renders a NumericDate as whole seconds.
+        name: encodeTime
+        params: instant time.Time
+        recv: joseShape
+        results: json.RawMessage
+      - doc: |-
+          decodeAudience accepts the one-string and the array-of-strings forms, and
+          nothing else. An empty array decodes to no audience at all.
+        name: decodeAudience
+        params: raw json.RawMessage
+        recv: joseShape
+        results: audience []string, err error
+      - doc: |-
+          encodeAudience renders one audience as a string and several as an array,
+          which is the shape RFC 7519 §4.1.3 recommends for the single case.
+        name: encodeAudience
+        params: audience []string
+        recv: joseShape
+        results: raw json.RawMessage, err error
+    name: joseShape
+  - doc: setVerifier authenticates JWS compact tokens against a JWK Set.
+    fields:
+      - doc: |-
+          byKid holds the set's members grouped by their "kid", in document order,
+          each with its binding already derived. Members carrying no kid are
+          absent: a lookup by id never means "match the keys that have no id",
+          which is jwk.Set.AllByKid's own rule preserved here.
+        name: byKid
+        type: map[string][]boundKeyValue
+      - doc: policy is the validated verification policy.
+        name: policy
+        type: policyValue
+    kind: struct
+    methods:
+      - doc: Verify selects candidate keys by kid and authenticates against them.
+        name: Verify
+        params: token string
+        recv: v *setVerifier
+        results: claims coretoken.ClaimsValue, err error
+      - doc: candidates resolves the keys to try for kid, refusing both ends.
+        name: candidates
+        params: kid string
+        recv: v *setVerifier
+        results: keys []boundKeyValue, err error
+    name: setVerifier
+  - doc: |-
+      headerValue is the subset of the JOSE header this package acts on. Every
+      other member is IGNORED on the way in (RFC 7515 allows unknown parameters)
+      and not carried on the way out — re-emitting a parameter we never understood
+      would be vouching for it.
+    fields:
+      - doc: |-
+          alg is the "alg" member, verbatim. It is COMPARED against the binding
+          and never used to look anything up.
+        name: alg
+        type: string
+      - doc: typ is the "typ" member, empty when absent.
+        name: typ
+        type: string
+      - doc: |-
+          kid is the "kid" member, empty when absent. A hint chosen by whoever
+          published the key — never proof of anything.
+        name: kid
+        type: string
+      - doc: critical reports whether a "crit" member was present.
+        name: critical
+        type: bool
+    kind: struct
+    name: headerValue
+  - doc: jwsIssuer mints JWS compact tokens under one algorithm-bound key.
+    fields:
+      - doc: bound is the signing key; its algorithm is fixed at construction.
+        name: bound
+        type: signingKey
+      - doc: |-
+          header is the pre-rendered, pre-encoded JOSE header. It is built once
+          because it never varies: the algorithm cannot change without a new
+          issuer, which is the same reason there is no algorithm parameter.
+        name: header
+        type: string
+      - doc: cfg carries the stamping policy (iss, lifetime, typ, kid).
+        name: cfg
+        type: IssuerConfig
+      - doc: timeSource is the resolved clock, never nil.
+        name: timeSource
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: Issue renders claims as a JWS compact token.
+        name: Issue
+        params: claims coretoken.ClaimsValue
+        recv: i *jwsIssuer
+        results: token string, err error
+    name: jwsIssuer
+  - doc: |-
+      jwsPartsValue is a parsed, NOT YET AUTHENTICATED compact token. Nothing in
+      it may be trusted; it exists so the parse happens once even when several
+      candidate keys are tried.
+    fields:
+      - doc: header is the parsed JOSE header.
+        name: header
+        type: headerValue
+      - doc: payload is the still-encoded claims segment.
+        name: payload
+        type: string
+      - doc: |-
+          input is the signing input: the header and payload segments, still
+          base64url-encoded, joined by their separator (RFC 7515 §5.1).
+        name: input
+        type: "[]byte"
+      - doc: signature is the decoded signature octets.
+        name: signature
+        type: "[]byte"
+    kind: struct
+    name: jwsPartsValue
+  - doc: jwsVerifier authenticates JWS compact tokens under one algorithm-bound key.
+    fields:
+      - doc: |-
+          bound is the verification key; its algorithm is fixed at construction
+          and is the only algorithm this verifier will ever accept.
+        name: bound
+        type: verifyingKey
+      - doc: policy is the validated verification policy.
+        name: policy
+        type: policyValue
+    kind: struct
+    methods:
+      - doc: |-
+          Verify authenticates token and returns its claims.
+
+          The order is the contract: parse, compare the algorithm against the binding,
+          verify the signature, and only then decode and judge the claims. A caller
+          never receives — or logs — a claim out of a token that did not authenticate.
+        name: Verify
+        params: token string
+        recv: v *jwsVerifier
+        results: claims coretoken.ClaimsValue, err error
+    name: jwsVerifier
+  - doc: "signingKey is the private half of a binding: one algorithm, one key."
+    kind: named
+    name: signingKey
+    underlying: |-
+      interface {
+      	// algorithm reports what this key signs as.
+      	algorithm() coretoken.Algorithm
+      	// sign produces a detached signature over input.
+      	sign(input []byte) (sig []byte, err error)
+      }
+  - doc: "verifyingKey is the public half of a binding: one algorithm, one key."
+    kind: named
+    name: verifyingKey
+    underlying: |-
+      interface {
+      	// algorithm reports what this key verifies.
+      	algorithm() coretoken.Algorithm
+      	// verify reports whether sig authenticates input. It returns a bool and
+      	// not an error: "this signature is wrong" is an answer, not a fault.
+      	verify(input, sig []byte) bool
+      }
+  - doc: pasetoIssuer mints v4.public tokens.
+    fields:
+      - doc: bound is the Ed25519 signing key, tagged AlgorithmPasetoV4Public.
+        name: bound
+        type: signingKey
+      - doc: "cfg is the PASETO policy: footer and implicit assertion included."
+        name: cfg
+        type: PasetoIssuerConfig
+      - doc: issuing is the shared claim-stamping projection of cfg.
+        name: issuing
+        type: IssuerConfig
+      - doc: |-
+          timeSource is the resolved clock, never nil. It is a clock.Clock — the
+          frozen read-only half of the time port (ADR 0039) — because issuing
+          stamps instants and never waits for one.
+        name: timeSource
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: Issue renders claims as a v4.public token.
+        name: Issue
+        params: claims coretoken.ClaimsValue
+        recv: i *pasetoIssuer
+        results: token string, err error
+    name: pasetoIssuer
+  - fields:
+      - doc: Issuer, when non-empty, is stamped as "iss" on claims that carry none.
+        name: Issuer
+        type: string
+      - doc: |-
+          Footer is the optional, AUTHENTICATED but unencrypted footer. It is
+          covered by the signature through the pre-authentication encoding, and it
+          is where a key identifier belongs in this format.
+        name: Footer
+        type: "[]byte"
+      - doc: |-
+          ImplicitAssertion is v4's optional out-of-band context: it is covered by
+          the signature but never transmitted, so a token only verifies for a
+          recipient who already knows it. Both sides must configure the same value.
+        name: ImplicitAssertion
+        type: "[]byte"
+      - doc: |-
+          Lifetime, when positive, is stamped as "exp" = now + Lifetime on claims
+          that carry no expiry of their own. Zero means the claims must bring one.
+        name: Lifetime
+        type: time.Duration
+      - doc: |-
+          AllowMissingExpiry permits minting a token with no "exp" at all. The
+          zero value is false, so the dangerous shape is the one you have to ask
+          for by name (ADR 0030).
+        name: AllowMissingExpiry
+        type: bool
+      - doc: |-
+          Clock is the time source for "iat" and the derived "exp". Nil means
+          clock.System.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          issuing projects the PASETO config onto the shared issuing policy, so the
+          claim-stamping rules are written once and cannot drift between the formats.
+        name: issuing
+        recv: c PasetoIssuerConfig
+        results: IssuerConfig
+    name: PasetoIssuerConfig
+  - doc: |-
+      pasetoShape is the PASETO claim encoding: RFC 3339 timestamps and a single
+      string audience. PASETO's registered claims are typed, and its "aud" is a
+      string — there is no array form to accept.
+    kind: struct
+    methods:
+      - doc: decodeTime reads an RFC 3339 timestamp.
+        name: decodeTime
+        params: raw json.RawMessage
+        recv: pasetoShape
+        results: instant time.Time, err error
+      - doc: encodeTime renders an RFC 3339 timestamp in UTC.
+        name: encodeTime
+        params: instant time.Time
+        recv: pasetoShape
+        results: json.RawMessage
+      - doc: decodeAudience accepts a single string only.
+        name: decodeAudience
+        params: raw json.RawMessage
+        recv: pasetoShape
+        results: audience []string, err error
+      - doc: |-
+          encodeAudience refuses to render more than one audience: PASETO has no array
+          form, and silently emitting only the first would mint a token whose audience
+          check passes for a recipient the caller did not intend to include.
+        name: encodeAudience
+        params: audience []string
+        recv: pasetoShape
+        results: raw json.RawMessage, err error
+    name: pasetoShape
+  - doc: pasetoVerifier authenticates v4.public tokens.
+    fields:
+      - doc: bound is the Ed25519 verification key, tagged AlgorithmPasetoV4Public.
+        name: bound
+        type: verifyingKey
+      - doc: policy is the validated verification policy.
+        name: policy
+        type: policyValue
+      - doc: cfg carries the expected footer and implicit assertion.
+        name: cfg
+        type: PasetoVerifierConfig
+    kind: struct
+    methods:
+      - doc: |-
+          Verify authenticates token and returns its claims, in the same order the JWS
+          verifier uses: parse, check the scheme, verify the signature, and only then
+          decode and judge the claims.
+        name: Verify
+        params: token string
+        recv: v *pasetoVerifier
+        results: claims coretoken.ClaimsValue, err error
+      - doc: decodeAuthenticated turns an authenticated PASETO payload into claims.
+        name: decodeAuthenticated
+        params: message []byte
+        recv: v *pasetoVerifier
+        results: claims coretoken.ClaimsValue, err error
+      - doc: |-
+          split decodes a v4.public token into its payload+signature body and footer,
+          refusing any other version or purpose by name.
+        name: split
+        params: token string
+        recv: v *pasetoVerifier
+        results: payload, footer []byte, err error
+    name: pasetoVerifier
+  - fields:
+      - doc: Issuer, when non-empty, must equal the token's "iss" (RFC 8725 §3.8).
+        name: Issuer
+        type: string
+      - doc: |-
+          Audience, when non-empty, must equal the token's "aud". PASETO's
+          audience is a single string, so there is no list to search.
+        name: Audience
+        type: string
+      - doc: |-
+          Footer is the footer this verifier expects, compared in constant time.
+          Empty means the token must carry NO footer.
+
+          The Verifier port returns claims, not a footer, so an unconstrained
+          footer would be data this package authenticated and then dropped on the
+          floor. Refusing is the only answer that does not quietly lose it.
+        name: Footer
+        type: "[]byte"
+      - doc: ImplicitAssertion must equal the value the issuer signed with.
+        name: ImplicitAssertion
+        type: "[]byte"
+      - doc: |-
+          Leeway is the clock-skew allowance applied to "exp" and "nbf". It must
+          be in [0, MaxLeeway].
+        name: Leeway
+        type: time.Duration
+      - doc: |-
+          MaxLifetime, when positive, refuses an authenticated token whose exp-iat
+          span exceeds it. It requires "iat".
+        name: MaxLifetime
+        type: time.Duration
+      - doc: MaxTokenLen bounds the token string. Zero means DefaultMaxTokenLen.
+        name: MaxTokenLen
+        type: int
+      - doc: |-
+          MaxClaimDepth bounds the claims' JSON nesting. Zero means
+          DefaultMaxClaimDepth.
+        name: MaxClaimDepth
+        type: int
+      - doc: AllowMissingExpiry accepts a token with no "exp".
+        name: AllowMissingExpiry
+        type: bool
+      - doc: |-
+          Clock is the time source for the temporal claims. Nil means
+          clock.System; a clock.ManualClock makes an expiry test deterministic.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          verifying projects the PASETO config onto the shared verification policy, so
+          the temporal and identity rules are written once for both formats.
+        name: verifying
+        recv: c PasetoVerifierConfig
+        results: VerifierConfig
+    name: PasetoVerifierConfig
+  - doc: |-
+      policyValue is a VerifierConfig with every knob validated and every default
+      resolved. It exists so a misconfiguration is a constructor error rather than
+      a surprise on the first request (ADR 0031).
+    fields:
+      - doc: issuer / audience / requireType are the configured expectations.
+        name: issuer
+        type: string
+      - doc: issuer / audience / requireType are the configured expectations.
+        name: audience
+        type: string
+      - doc: issuer / audience / requireType are the configured expectations.
+        name: requireType
+        type: string
+      - doc: leeway is the validated skew allowance.
+        name: leeway
+        type: time.Duration
+      - doc: maxLifetime is the validated exp-iat cap, zero when unchecked.
+        name: maxLifetime
+        type: time.Duration
+      - doc: maxTokenLen / maxClaimDepth / maxKeyCandidates are the resolved bounds.
+        name: maxTokenLen
+        type: int
+      - doc: maxTokenLen / maxClaimDepth / maxKeyCandidates are the resolved bounds.
+        name: maxClaimDepth
+        type: int
+      - doc: maxTokenLen / maxClaimDepth / maxKeyCandidates are the resolved bounds.
+        name: maxKeyCandidates
+        type: int
+      - doc: allowMissingExpiry mirrors the config knob.
+        name: allowMissingExpiry
+        type: bool
+      - doc: timeSource is the resolved clock, never nil.
+        name: timeSource
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          checkHeader enforces the algorithm binding and the typing policy.
+
+          This is the algorithm-confusion gate. It COMPARES the header against the
+          algorithm the verifier was constructed with; it never uses the header to
+          choose a key, an algorithm or a branch. It runs before any key material
+          reaches any primitive.
+        name: checkHeader
+        params: header headerValue, bound coretoken.Algorithm
+        recv: p policyValue
+        results: error
+      - doc: |-
+          decodeAndValidate turns an AUTHENTICATED payload segment into claims and
+          applies the policy. It is only ever called after a signature has verified.
+        name: decodeAndValidate
+        params: payload string, shape claimShape
+        recv: p policyValue
+        results: claims coretoken.ClaimsValue, err error
+      - doc: parseJWS splits, decodes and reads a compact token without consulting a key.
+        name: parseJWS
+        params: tok string
+        recv: p policyValue
+        results: parts jwsPartsValue, err error
+      - doc: |-
+          validateClaims applies the policy's temporal and identity checks to an
+          already-authenticated claim set, returning the first verdict that refuses it.
+
+          The order is cheapest-and-most-common first: a token is far more often
+          expired than addressed to the wrong service.
+        name: validateClaims
+        params: claims coretoken.ClaimsValue
+        recv: p policyValue
+        results: error
+      - doc: |-
+          checkIdentity enforces the issuer and audience expectations, each only when
+          the caller named one — this package has no opinion about who should have
+          minted a token, only about whether it matches what the caller said.
+        name: checkIdentity
+        params: claims coretoken.ClaimsValue
+        recv: p policyValue
+        results: error
+      - doc: |-
+          checkExpiry enforces the exp claim and the profile's requirement that one be
+          present.
+
+          RFC 7519 §4.1.4 makes "exp" OPTIONAL, which means a conforming token can be
+          valid forever. A bearer token that never expires is a password with no
+          rotation story, so the default here inverts the RFC's optionality — and the
+          opt-out is a named field rather than a silent absence.
+        name: checkExpiry
+        params: claims coretoken.ClaimsValue, now time.Time
+        recv: p policyValue
+        results: error
+      - doc: |-
+          checkLifetime enforces MaxLifetime over the exp-iat span.
+
+          It requires "iat". A token with an expiry but no issue time has a validity
+          window this recipient cannot measure, and "I could not measure it" is not a
+          reason to accept it — the whole point of the cap is to refuse a credential
+          that outlives the recipient's tolerance for one it cannot revoke.
+        name: checkLifetime
+        params: claims coretoken.ClaimsValue
+        recv: p policyValue
+        results: error
+    name: policyValue
+  - fields:
+      - doc: Issuer, when non-empty, must equal the token's "iss" (RFC 8725 §3.8).
+        name: Issuer
+        type: string
+      - doc: |-
+          Audience, when non-empty, must appear in the token's "aud"
+          (RFC 8725 §3.9). A correctly signed token minted for another API is not
+          a valid token here.
+        name: Audience
+        type: string
+      - doc: |-
+          RequireType, when non-empty, must equal the JWS "typ" header. It is the
+          mechanism RFC 8725 §3.12 asks for: two kinds of token from one issuer
+          need validation rules that reject each other's tokens.
+        name: RequireType
+        type: string
+      - doc: |-
+          Leeway is the clock-skew allowance applied to "exp" and "nbf". It must
+          be in [0, MaxLeeway].
+        name: Leeway
+        type: time.Duration
+      - doc: |-
+          MaxLifetime, when positive, refuses an authenticated token whose
+          exp-iat span exceeds it. It requires "iat": a lifetime that cannot be
+          computed is not a lifetime this recipient has accepted.
+        name: MaxLifetime
+        type: time.Duration
+      - doc: |-
+          MaxTokenLen bounds the token string. Zero means DefaultMaxTokenLen; a
+          value outside [MinTokenLen, MaxTokenLenCeiling] is refused.
+        name: MaxTokenLen
+        type: int
+      - doc: |-
+          MaxClaimDepth bounds the claims' JSON nesting. Zero means
+          DefaultMaxClaimDepth; a value outside [1, MaxClaimDepthCeiling] is
+          refused.
+        name: MaxClaimDepth
+        type: int
+      - doc: |-
+          MaxKeyCandidates bounds how many keys a set verifier tries for one kid.
+          Zero means DefaultMaxKeyCandidates. Ignored by single-key verifiers.
+        name: MaxKeyCandidates
+        type: int
+      - doc: |-
+          AllowMissingExpiry accepts a token with no "exp". The zero value is
+          false, so the profile that RFC 7519 §4.1.4 leaves optional is required
+          here unless the caller opts out by name.
+        name: AllowMissingExpiry
+        type: bool
+      - doc: |-
+          Clock is the time source for the temporal claims. Nil means
+          clock.System; a clock.ManualClock makes an expiry test deterministic
+          without sleeping.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    name: VerifierConfig
+vars:
+  - doc: |-
+      b64 is the ONLY base64 alphabet this package accepts: unpadded base64url
+      (RFC 7515 §2), in Strict mode.
+
+      Strict matters. Without it, Go accepts a final quantum whose unused bits are
+      non-zero, so two different strings decode to the same octets — and a token is
+      a string somebody may have already keyed a cache, a replay table or a
+      revocation list on. One encoding, one spelling.
+    items:
+      - name: b64
+        value: base64.RawURLEncoding.Strict()
+    name: b64
+  - doc: |-
+      pasetoVersions is the closed set of versions the PASETO specification
+      defines. It is hoisted so recognising one allocates nothing per token.
+    items:
+      - name: pasetoVersions
+        value: "[]string{\"v1\", \"v2\", \"v3\", \"v4\"}"
+    name: pasetoVersions
+  - doc: |-
+      Compile-time assertions that every implementation satisfies the contract it
+      claims — the build fails before any test runs if an interface and one of its
+      implementations drift apart. Collecting them makes the set greppable: every
+      type that must satisfy a port is named here, so a port that quietly lost an
+      implementation is one diff away from being visible. hs256Binding is asserted
+      against BOTH halves on purpose — HMAC is symmetric, so a verifier can also
+      mint, and that is the property a caller should have to notice.
+    grouped: true
+    items:
+      - name: _
+        type: signingKey
+        value: hs256Binding{}
+      - name: _
+        type: verifyingKey
+        value: hs256Binding{}
+      - name: _
+        type: signingKey
+        value: es256Signing{}
+      - name: _
+        type: verifyingKey
+        value: es256Verifying{}
+      - name: _
+        type: signingKey
+        value: ed25519Signing{}
+      - name: _
+        type: verifyingKey
+        value: ed25519Verifying{}
+      - name: _
+        type: claimShape
+        value: joseShape{}
+      - name: _
+        type: claimShape
+        value: pasetoShape{}
+      - name: _
+        type: coretoken.Issuer
+        value: (*jwsIssuer)(nil)
+      - name: _
+        type: coretoken.Issuer
+        value: (*pasetoIssuer)(nil)
+      - name: _
+        type: coretoken.Verifier
+        value: (*jwsVerifier)(nil)
+      - name: _
+        type: coretoken.Verifier
+        value: (*pasetoVerifier)(nil)
+      - name: _
+        type: coretoken.Verifier
+        value: (*setVerifier)(nil)
+    name: _

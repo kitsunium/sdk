@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: ClaimsValue.registeredCount
+    steps:
+      - bind: present
+        eval: |-
+          [claimSlots]bool{
+          		c.issuer != "", c.subject != "", c.id != "", len(c.audience) != 0,
+          		!c.expiry.IsZero(), !c.notBefore.IsZero(), !c.issuedAt.IsZero(),
+          	}
+      - bind: count
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: count
+                when: set
+          key: _
+          range: present
+          value: set
+      - return: count

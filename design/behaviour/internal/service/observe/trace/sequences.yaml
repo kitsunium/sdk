@@ -1,0 +1,1294 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: TracerConfig.resolved
+    participants:
+      - id: caller
+        kind: actor
+      - id: TracerConfig.resolved
+        kind: self
+      - id: ParentBased
+        kind: internal
+    steps:
+      - bind: resolved
+        eval: |-
+          TracerConfig{
+          		Resource: coretrace.NormalizeResource(c.Resource),
+          		Scope:    coretrace.NormalizeScope(c.Scope),
+          		Sampler:  c.Sampler,
+          		Sink:     c.Sink,
+          		Clock:    c.Clock,
+          	}
+      - opt:
+          do:
+            - set: resolved.Sampler
+              to: ParentBased
+              value: ParentBased(AlwaysSample)
+          when: resolved.Sampler == nil
+      - opt:
+          do:
+            - set: resolved.Sink
+              value: discardSpan
+          when: resolved.Sink == nil
+      - opt:
+          do:
+            - set: resolved.Clock
+              value: clock.System
+          when: resolved.Clock == nil
+      - return: resolved
+  - of: discardSpan
+  - of: NewOTLPHTTPExporter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewOTLPHTTPExporter
+        kind: self
+      - id: otlp
+        kind: package
+    steps:
+      - bind: sender, senderErr
+        eval: otlp.NewSender((*otlp.HTTPConfig)(&cfg), &otlpSignal)
+        to: otlp
+      - opt:
+          do:
+            - return: nil, senderErr
+          when: senderErr != nil
+      - return: "&otlpHTTPExporter{name: name, sender: sender}, nil"
+  - of: OTLPRetryable
+    participants:
+      - id: caller
+        kind: actor
+      - id: OTLPRetryable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.HasCode(err, coretrace.CodeOTLPExportUnavailable)
+        to: errs
+  - of: (*otlpHTTPExporter).Name
+    steps:
+      - return: e.name
+  - of: (*otlpHTTPExporter).Export
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).Export
+        kind: self
+      - id: EncodeOTLPJSON
+        kind: internal
+      - id: e.sender.Post
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: spans.IsEmpty()
+      - bind: body, err
+        eval: EncodeOTLPJSON(spans)
+        to: EncodeOTLPJSON
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: e.sender.Post(body)
+        to: e.sender.Post
+  - of: EncodeOTLPJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: EncodeOTLPJSON
+        kind: self
+      - id: otlpSpans
+        kind: internal
+      - id: otlp
+        kind: package
+    steps:
+      - bind: rendered, buildErr
+        eval: otlpSpans(spans.Spans)
+        to: otlpSpans
+      - opt:
+          do:
+            - return: nil, buildErr
+          when: buildErr != nil
+      - bind: scope
+        eval: |-
+          otlpScopeSpans{
+          		Scope: otlp.ScopeOf(spans.Scope),
+          		Spans: rendered,
+          	}
+      - bind: resource
+        eval: |-
+          otlpResourceSpans{
+          		Resource:   otlp.ResourceOf(spans.Resource),
+          		ScopeSpans: []otlpScopeSpans{scope},
+          	}
+      - return: "otlp.Marshal(otlpRequest{ResourceSpans: []otlpResourceSpans{resource}}, &otlpEncodeFailure)"
+        to: otlp
+  - of: otlpSpans
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpSpans
+        kind: self
+      - id: checkOTLPSpan
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(spans) == 0
+      - bind: out
+        eval: make([]otlpSpan, 0, len(spans))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, checkErr
+                init:
+                  bind: checkErr
+                  eval: checkOTLPSpan(span)
+                  to: checkOTLPSpan
+                when: checkErr != nil
+            - set: out
+              value: append(out, otlpSpanOf(span))
+          key: _
+          range: spans
+          value: span
+      - return: out, nil
+  - of: checkOTLPSpan
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOTLPSpan
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coretrace.OTLPInvalidSpanContext, errs.WrapParams{}, errs.String("span", span.Name))
+              to: errs
+          when: "!span.Context.IsValid()"
+      - opt:
+          do:
+            - return: errs.Wrap(coretrace.OTLPSpanNotEnded, errs.WrapParams{}, errs.String("span", span.Name))
+              to: errs
+          when: span.EndTime.IsZero()
+      - return: nil
+  - of: otlpSpanOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpSpanOf
+        kind: self
+      - id: span.Parent.SpanID.String
+        kind: value
+    steps:
+      - bind: parent
+        eval: "\"\""
+      - opt:
+          do:
+            - set: parent
+              to: span.Parent.SpanID.String
+              value: span.Parent.SpanID.String()
+          when: span.Parent.IsValid()
+      - return: |-
+          otlpSpan{
+          		TraceID:           span.Context.TraceID.String(),
+          		SpanID:            span.Context.SpanID.String(),
+          		TraceState:        span.Context.State.String(),
+          		ParentSpanID:      parent,
+          		Name:              span.Name,
+          		Kind:              int32(span.Kind.Resolved()),
+          		StartTimeUnixNano: otlp.UnixNano(span.StartTime),
+          		EndTimeUnixNano:   otlp.UnixNano(span.EndTime),
+          		Attributes:        otlp.Attrs(span.Attrs),
+          		Events:            otlpEvents(span.Events),
+          		Links:             otlpLinks(span.Links),
+          		Status:            otlpStatusOf(span.Status),
+          		Flags:             otlpSpanFlags(span.Context, span.Parent),
+          	}
+  - of: otlpSpanFlags
+    steps:
+      - bind: flags
+        eval: uint32(context.Flags.Sanitized()) & spanFlagsTraceFlagsMask
+      - op: "|="
+        set: flags
+        value: spanFlagsHasIsRemote
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: spanFlagsIsRemote
+          when: parent.IsValid() && parent.Remote
+      - return: flags
+  - of: otlpStatusOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpStatusOf
+        kind: self
+      - id: status.Resolved
+        kind: value
+    steps:
+      - bind: resolved
+        eval: status.Resolved()
+        to: status.Resolved
+      - opt:
+          do:
+            - return: nil
+          when: resolved.IsUnset()
+      - return: "&otlpStatus{Message: resolved.Message, Code: int32(resolved.Code)}"
+  - of: otlpEvents
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(events) == 0
+      - bind: out
+        eval: make([]otlpEvent, 0, len(events))
+      - loop:
+          do:
+            - set: out
+              value: |-
+                append(out, otlpEvent{
+                			TimeUnixNano: otlp.UnixNano(event.Time),
+                			Name:         event.Name,
+                			Attributes:   otlp.Attrs(event.Attrs),
+                		})
+          key: _
+          range: events
+          value: event
+      - return: out
+  - of: otlpLinks
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(links) == 0
+      - bind: out
+        eval: make([]otlpLink, 0, len(links))
+      - loop:
+          do:
+            - set: out
+              value: |-
+                append(out, otlpLink{
+                			TraceID:    link.Context.TraceID.String(),
+                			SpanID:     link.Context.SpanID.String(),
+                			TraceState: link.Context.State.String(),
+                			Attributes: otlp.Attrs(link.Attrs),
+                			Flags:      otlpSpanFlags(link.Context, link.Context),
+                		})
+          key: _
+          range: links
+          value: link
+      - return: out
+  - of: newOTLPJSONExporter
+    steps:
+      - return: "&otlpJSONExporter{name: name, stream: otlp.NewStream(dst, &otlpWriteFailure)}"
+  - of: NewOTLPJSONExporter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewOTLPJSONExporter
+        kind: self
+      - id: newOTLPJSONExporter
+        kind: internal
+    steps:
+      - return: newOTLPJSONExporter(name, dst)
+        to: newOTLPJSONExporter
+  - of: (*otlpJSONExporter).Name
+    steps:
+      - return: e.name
+  - of: (*otlpJSONExporter).Export
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpJSONExporter).Export
+        kind: self
+      - id: EncodeOTLPJSON
+        kind: internal
+      - id: e.stream.Emit
+        kind: value
+    steps:
+      - bind: doc, err
+        eval: EncodeOTLPJSON(spans)
+        to: EncodeOTLPJSON
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: e.stream.Emit(doc)
+        to: e.stream.Emit
+  - of: ClientMiddleware
+    steps:
+      - return:
+          closure:
+            params: next http.RoundTripper
+            results: http.RoundTripper
+            steps:
+              - opt:
+                  do:
+                    - return: next
+                  when: tracer == nil || next == nil
+              - return: "&tracedRoundTripper{tracer: tracer, next: next}"
+  - of: (*tracedRoundTripper).RoundTrip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tracedRoundTripper).RoundTrip
+        kind: self
+      - id: t.tracer.Start
+        kind: value
+      - id: span.End
+        kind: value
+      - id: request.Clone
+        kind: value
+      - id: Inject
+        kind: internal
+      - id: t.next.RoundTrip
+        kind: value
+      - id: span.SetAttrs
+        kind: value
+      - id: span.SetStatus
+        kind: value
+    steps:
+      - bind: ctx, span
+        eval: |-
+          t.tracer.Start(request.Context(), request.Method, coretrace.SpanParams{
+          		Kind: coretrace.SpanKindClient,
+          		Attrs: []coreotel.AttrValue{
+          			coreotel.String(HTTPRequestMethodKey, request.Method),
+          			//: Redacted(), never String(): url.URL.String() renders userinfo
+          			//: verbatim, so a caller who dials https://user:secret@host puts that
+          			//: password into a span attribute, which the exporter then ships to a
+          			//: telemetry backend that is very often a different trust domain from
+          			//: the credential. Redacted() replaces the password with "xxxxx" and
+          			//: changes nothing else. It does NOT touch the query string, so a
+          			//: secret passed as ?api_key= still travels — that one the SDK cannot
+          			//: fix without guessing which parameters are sensitive, and it is
+          			//: stated in URLFullKey's own doc rather than left to be discovered.
+          			coreotel.String(URLFullKey, request.URL.Redacted()),
+          			coreotel.String(ServerAddressKey, request.URL.Host),
+          		},
+          	})
+        to: t.tracer.Start
+      - defer: span.End()
+        to: span.End
+      - bind: outbound
+        eval: request.Clone(ctx)
+        to: request.Clone
+      - eval: Inject(span.SpanContext(), outbound.Header)
+        to: Inject
+      - bind: answer, callErr
+        eval: t.next.RoundTrip(outbound)
+        to: t.next.RoundTrip
+      - opt:
+          do:
+            - eval: span.SetAttrs(coreotel.String(ErrorTypeKey, "transport"))
+              to: span.SetAttrs
+            - eval: span.SetStatus(coretrace.StatusError, "")
+              to: span.SetStatus
+            - return: nil, callErr
+          when: callErr != nil
+      - eval: span.SetAttrs(coreotel.Int64(HTTPResponseStatusCodeKey, int64(answer.StatusCode)))
+        to: span.SetAttrs
+      - opt:
+          do:
+            - eval: span.SetStatus(coretrace.StatusError, "")
+              to: span.SetStatus
+          when: answer.StatusCode >= httpClientErrorFloor
+      - return: answer, nil
+  - of: ServerMiddleware
+    participants:
+      - id: caller
+        kind: actor
+      - id: ServerMiddleware
+        kind: self
+      - id: http
+        kind: stdlib
+    steps:
+      - return:
+          closure:
+            params: next http.Handler
+            results: http.Handler
+            steps:
+              - opt:
+                  do:
+                    - return: next
+                  when: tracer == nil
+              - return: |-
+                  http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                  			//: serve the request under a SERVER span.
+                  			serveTraced(tracer, next, w, r)
+                  		})
+                to: http
+  - of: serveTraced
+    participants:
+      - id: caller
+        kind: actor
+      - id: serveTraced
+        kind: self
+      - id: Extract
+        kind: internal
+      - id: coretrace
+        kind: package
+      - id: tracer.Start
+        kind: value
+      - id: span.End
+        kind: value
+      - id: next.ServeHTTP
+        kind: value
+      - id: recorder.resolvedStatus
+        kind: internal
+      - id: span.SetAttrs
+        kind: value
+      - id: span.SetStatus
+        kind: value
+    steps:
+      - bind: parent
+        eval: Extract(r.Header)
+        to: Extract
+      - bind: ctx
+        eval: coretrace.ContextWithSpanContext(r.Context(), parent)
+        to: coretrace
+      - bind: ctx, span
+        eval: |-
+          tracer.Start(ctx, r.Method, coretrace.SpanParams{
+          		Kind: coretrace.SpanKindServer,
+          		Attrs: []coreotel.AttrValue{
+          			coreotel.String(HTTPRequestMethodKey, r.Method),
+          			coreotel.String(URLPathKey, r.URL.EscapedPath()),
+          			coreotel.String(URLSchemeKey, requestScheme(r)),
+          			coreotel.String(ServerAddressKey, r.Host),
+          		},
+          	})
+        to: tracer.Start
+      - defer: span.End()
+        to: span.End
+      - bind: recorder
+        eval: "&statusRecorder{ResponseWriter: w}"
+      - eval: next.ServeHTTP(recorder, r.WithContext(ctx))
+        to: next.ServeHTTP
+      - bind: status
+        eval: recorder.resolvedStatus()
+        to: recorder.resolvedStatus
+      - eval: span.SetAttrs(coreotel.Int64(HTTPResponseStatusCodeKey, int64(status)))
+        to: span.SetAttrs
+      - opt:
+          do:
+            - eval: span.SetStatus(coretrace.StatusError, "")
+              to: span.SetStatus
+          when: status >= httpServerErrorFloor
+  - of: requestScheme
+    steps:
+      - opt:
+          do:
+            - return: schemeHTTPS
+          when: r.TLS != nil
+      - return: schemeHTTP
+  - of: (*statusRecorder).WriteHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*statusRecorder).WriteHeader
+        kind: self
+      - id: w.ResponseWriter.WriteHeader
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: w.status
+              value: code
+          when: w.status == 0
+      - eval: w.ResponseWriter.WriteHeader(code)
+        to: w.ResponseWriter.WriteHeader
+  - of: (*statusRecorder).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*statusRecorder).Write
+        kind: self
+      - id: w.ResponseWriter.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: w.status
+              value: http.StatusOK
+          when: w.status == 0
+      - return: w.ResponseWriter.Write(data)
+        to: w.ResponseWriter.Write
+  - of: (*statusRecorder).Unwrap
+    steps:
+      - return: w.ResponseWriter
+  - of: (*statusRecorder).resolvedStatus
+    steps:
+      - opt:
+          do:
+            - return: http.StatusOK
+          when: w.status == 0
+      - return: w.status
+  - of: NewTraceID
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTraceID
+        kind: self
+      - id: drawTraceID
+        kind: internal
+    steps:
+      - return: drawTraceID(), nil
+        to: drawTraceID
+  - of: drawTraceID
+    participants:
+      - id: caller
+        kind: actor
+      - id: drawTraceID
+        kind: self
+      - id: rand
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - var:
+                name: drawn
+                type: coretrace.TraceID
+            - set: _, _
+              to: rand
+              value: rand.Read(drawn[:])
+            - opt:
+                do:
+                  - return: drawn
+                when: drawn.IsValid()
+          forever: true
+  - of: NewSpanID
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSpanID
+        kind: self
+      - id: drawSpanID
+        kind: internal
+    steps:
+      - return: drawSpanID(), nil
+        to: drawSpanID
+  - of: drawSpanID
+    participants:
+      - id: caller
+        kind: actor
+      - id: drawSpanID
+        kind: self
+      - id: rand
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - var:
+                name: drawn
+                type: coretrace.SpanID
+            - set: _, _
+              to: rand
+              value: rand.Read(drawn[:])
+            - opt:
+                do:
+                  - return: drawn
+                when: drawn.IsValid()
+          forever: true
+  - of: noopSpan.SpanContext
+    steps:
+      - return: s.context
+  - of: noopSpan.SetAttrs
+  - of: noopSpan.AddEvent
+  - of: noopSpan.SetStatus
+  - of: noopSpan.End
+  - of: formatFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatFloat
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - return: strconv.FormatFloat(value, floatFmt, floatPrec, floatBitSize)
+        to: strconv
+  - of: (*otlpPartialSuccess).RejectedCount
+    steps:
+      - return: int64(p.RejectedSpans)
+  - of: decodeRejected
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRejected
+        kind: self
+      - id: otlp
+        kind: package
+    steps:
+      - var:
+          name: message
+          type: otlpPartialSuccess
+      - return: otlp.DecodeRejected(payload, &message)
+        to: otlp
+  - of: Inject
+    participants:
+      - id: caller
+        kind: actor
+      - id: Inject
+        kind: self
+      - id: FormatTraceParent
+        kind: internal
+      - id: carrier.Set
+        kind: value
+    steps:
+      - bind: header, ok
+        eval: FormatTraceParent(context)
+        to: FormatTraceParent
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - eval: carrier.Set(TraceParentHeader, header)
+        to: carrier.Set
+      - opt:
+          do:
+            - eval: carrier.Set(TraceStateHeader, context.State.String())
+              to: carrier.Set
+          when: context.State.Len() > 0
+  - of: Extract
+    participants:
+      - id: caller
+        kind: actor
+      - id: Extract
+        kind: self
+      - id: ParseTraceParent
+        kind: internal
+      - id: ParseTraceState
+        kind: internal
+      - id: context.WithState
+        kind: value
+    steps:
+      - bind: context, err
+        eval: ParseTraceParent(carrier.Get(TraceParentHeader))
+        to: ParseTraceParent
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}
+          when: err != nil
+      - bind: state, stateErr
+        eval: ParseTraceState(carrier.Get(TraceStateHeader))
+        to: ParseTraceState
+      - opt:
+          do:
+            - return: context
+          when: stateErr != nil
+      - return: context.WithState(state)
+        to: context.WithState
+  - of: RecordError
+    participants:
+      - id: caller
+        kind: actor
+      - id: RecordError
+        kind: self
+      - id: errs
+        kind: package
+      - id: span.AddEvent
+        kind: value
+      - id: span.SetStatus
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: span == nil || err == nil
+      - bind: attrs
+        eval: "[]coreotel.AttrValue{coreotel.String(coretrace.ExceptionMessageKey, err.Error())}"
+      - opt:
+          do:
+            - set: attrs
+              value: append(attrs, coreotel.String(coretrace.ExceptionTypeKey, code.String()))
+          init:
+            bind: code, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok
+      - eval: span.AddEvent(coretrace.ExceptionEventName, attrs...)
+        to: span.AddEvent
+      - eval: span.SetStatus(coretrace.StatusError, "")
+        to: span.SetStatus
+  - of: NewRecorder
+    steps:
+      - bind: maxSpans
+        eval: cfg.MaxSpans
+      - opt:
+          do:
+            - set: maxSpans
+              value: DefaultMaxSpans
+          when: maxSpans <= 0
+      - return: |-
+          &Recorder{
+          		resource: coretrace.NormalizeResource(cfg.Resource),
+          		scope:    coretrace.NormalizeScope(cfg.Scope),
+          		maxSpans: maxSpans,
+          	}
+  - of: (*Recorder).Resource
+    steps:
+      - return: r.resource
+  - of: (*Recorder).Scope
+    steps:
+      - return: r.scope
+  - of: (*Recorder).Sink
+    steps:
+      - return: r.record
+  - of: (*Recorder).record
+    steps:
+      - lock:
+          mutex: r.mu
+      - opt:
+          do:
+            - op: ++
+              set: r.dropped
+            - return: ""
+          when: len(r.spans) >= r.maxSpans
+      - set: r.spans
+        value: append(r.spans, span)
+  - of: (*Recorder).Collect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Recorder).Collect
+        kind: self
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+    steps:
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - bind: drained
+        eval: r.spans
+      - set: r.spans
+        value: nil
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
+      - return: "coretrace.SpansValue{Resource: r.resource, Scope: r.scope, Spans: drained}"
+  - of: (*Recorder).Len
+    steps:
+      - lock:
+          mutex: r.mu
+      - return: len(r.spans)
+  - of: (*Recorder).Dropped
+    steps:
+      - lock:
+          mutex: r.mu
+      - return: r.dropped
+  - of: AlwaysSample
+    steps:
+      - return: "true"
+  - of: NeverSample
+    steps:
+      - return: "false"
+  - of: ParentBased
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParentBased
+        kind: self
+      - id: params.Parent.IsSampled
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: root
+              value: AlwaysSample
+          when: root == nil
+      - return:
+          closure:
+            params: params coretrace.SamplingParams
+            results: bool
+            steps:
+              - opt:
+                  do:
+                    - return: params.Parent.IsSampled()
+                      to: params.Parent.IsSampled
+                  when: params.Parent.IsValid()
+              - return: root(params)
+  - of: Ratio
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coretrace.InvalidSampleRatio, errs.WrapParams{}, errs.String("ratio", formatRatio(fraction)))
+          when: math.IsNaN(fraction) || fraction <= 0 || fraction > 1
+      - opt:
+          do:
+            - return: AlwaysSample, nil
+          when: fraction == 1
+      - bind: threshold
+        eval: uint64(fraction * ratioSpace)
+      - return: |-
+          func(params coretrace.SamplingParams) bool {
+          		//: the id's tail, with the top bit dropped, is a uniform in [0,2^63).
+          		return traceIDUniform(params.TraceID) < threshold
+          	}, nil
+  - of: traceIDUniform
+    steps:
+      - return: binary.BigEndian.Uint64(id[traceIDUniformOffset:]) >> 1
+  - of: formatRatio
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatRatio
+        kind: self
+      - id: formatFloat
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"NaN\""
+          when: math.IsNaN(fraction)
+      - return: formatFloat(fraction)
+        to: formatFloat
+  - of: newSpan
+    participants:
+      - id: caller
+        kind: actor
+      - id: newSpan
+        kind: self
+      - id: tracer.cfg.Clock.Now
+        kind: value
+    steps:
+      - bind: start
+        eval: params.StartTime
+      - opt:
+          do:
+            - set: start
+              to: tracer.cfg.Clock.Now
+              value: tracer.cfg.Clock.Now()
+          when: start.IsZero()
+      - return: |-
+          &span{
+          		tracer:  tracer,
+          		context: context,
+          		parent:  parent,
+          		name:    name,
+          		kind:    params.Kind.Resolved(),
+          		start:   start,
+          		links:   normalizeLinks(params.Links),
+          		attrs:   coretrace.SortAttrs(params.Attrs),
+          	}
+  - of: (*span).SpanContext
+    steps:
+      - return: s.context
+  - of: (*span).SetAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*span).SetAttrs
+        kind: self
+      - id: sortedIncoming
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(attrs) == 0
+      - bind: incoming
+        eval: sortedIncoming(attrs)
+        to: sortedIncoming
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: ""
+          when: s.ended
+      - loop:
+          do:
+            - bind: at, found
+              eval: slices.BinarySearchFunc(s.attrs, attr, coreotel.CompareAttrKey)
+              to: slices
+            - opt:
+                do:
+                  - set: s.attrs[at]
+                    value: attr
+                  - continue: true
+                when: found
+            - set: s.attrs
+              to: slices
+              value: slices.Insert(s.attrs, at, attr)
+          key: _
+          range: incoming
+          value: attr
+  - of: sortedIncoming
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortedIncoming
+        kind: self
+      - id: coretrace
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: coretrace.SortAttrs(attrs)
+              to: coretrace
+          when: len(attrs) > 1
+      - eval: coretrace.ValidateAttrs(attrs)
+        to: coretrace
+      - return: attrs
+  - of: (*span).AddEvent
+    steps:
+      - bind: event
+        eval: |-
+          coretrace.EventValue{
+          		Time:  s.tracer.cfg.Clock.Now(),
+          		Name:  name,
+          		Attrs: coretrace.SortAttrs(attrs),
+          	}
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: ""
+          when: s.ended
+      - set: s.events
+        value: append(s.events, event)
+  - of: (*span).SetStatus
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: ""
+          when: s.ended
+      - set: s.status
+        value: "coretrace.StatusValue{Code: code, Message: message}"
+  - of: (*span).End
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*span).End
+        kind: self
+      - id: s.finish
+        kind: internal
+    steps:
+      - bind: value, first
+        eval: s.finish()
+        to: s.finish
+      - opt:
+          do:
+            - return: ""
+          when: "!first"
+      - eval: s.tracer.cfg.Sink(value)
+  - of: (*span).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*span).finish
+        kind: self
+      - id: s.tracer.cfg.Clock.Now
+        kind: value
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: coretrace.SpanValue{}, false
+          when: s.ended
+      - set: s.ended
+        value: "true"
+      - set: s.end
+        to: s.tracer.cfg.Clock.Now
+        value: s.tracer.cfg.Clock.Now()
+      - bind: attrs, events
+        eval: s.attrs, s.events
+      - set: s.attrs, s.events
+        value: nil, nil
+      - return: |-
+          coretrace.SpanValue{
+          		Context:   s.context,
+          		Parent:    s.parent,
+          		Name:      s.name,
+          		Kind:      s.kind,
+          		StartTime: s.start,
+          		EndTime:   s.end,
+          		Attrs:     attrs,
+          		Events:    events,
+          		Links:     s.links,
+          		Status:    s.status.Resolved(),
+          	}, true
+  - of: ParseTraceParent
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseTraceParent
+        kind: self
+      - id: parseTraceParentPrefix
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}, coretrace.InvalidTraceParent
+          when: len(header) < TraceParentLen
+      - bind: version
+        eval: header[:versionHexLen]
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}, coretrace.InvalidTraceParent
+          when: version == versionInvalid || !isLowerHex(version) || !hasValidTraceParentTail(version, header)
+      - return: parseTraceParentPrefix(header[:TraceParentLen])
+        to: parseTraceParentPrefix
+  - of: hasValidTraceParentTail
+    steps:
+      - opt:
+          do:
+            - return: len(header) == TraceParentLen
+          when: version == VersionSupported
+      - return: len(header) == TraceParentLen || strings.HasPrefix(header[TraceParentLen:], traceParentSep)
+  - of: parseTraceParentPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTraceParentPrefix
+        kind: self
+      - id: coretrace
+        kind: package
+      - id: parseTraceFlags
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}, coretrace.InvalidTraceParent
+          when: prefix[traceIDOffset-1] != '-' || prefix[parentIDOffset-1] != '-' || prefix[flagsOffset-1] != '-'
+      - bind: traceID, traceErr
+        eval: "coretrace.ParseTraceID(prefix[traceIDOffset : traceIDOffset+coretrace.TraceIDHexLen])"
+        to: coretrace
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}, traceErr
+          when: traceErr != nil
+      - bind: spanID, spanErr
+        eval: "coretrace.ParseSpanID(prefix[parentIDOffset : parentIDOffset+coretrace.SpanIDHexLen])"
+        to: coretrace
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}, spanErr
+          when: spanErr != nil
+      - bind: flags, flagsErr
+        eval: parseTraceFlags(prefix[flagsOffset:])
+        to: parseTraceFlags
+      - opt:
+          do:
+            - return: coretrace.SpanContextValue{}, flagsErr
+          when: flagsErr != nil
+      - return: "coretrace.SpanContextValue{TraceID: traceID, SpanID: spanID, Flags: flags, Remote: true}, nil"
+  - of: parseTraceFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTraceFlags
+        kind: self
+      - id: hex
+        kind: stdlib
+      - id: coretrace
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: 0, coretrace.InvalidTraceParent
+          when: len(text) != flagsHexLen || !isLowerHex(text)
+      - var:
+          name: decoded
+          type: "[1]byte"
+      - opt:
+          do:
+            - return: 0, coretrace.InvalidTraceParent
+          init:
+            bind: _, decodeErr
+            eval: hex.Decode(decoded[:], []byte(text))
+            to: hex
+          when: decodeErr != nil
+      - return: coretrace.TraceFlags(decoded[0]), nil
+        to: coretrace
+  - of: FormatTraceParent
+    participants:
+      - id: caller
+        kind: actor
+      - id: FormatTraceParent
+        kind: self
+      - id: out.Grow
+        kind: value
+      - id: out.WriteString
+        kind: value
+      - id: out.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!context.IsValid()"
+      - var:
+          name: out
+          type: strings.Builder
+      - eval: out.Grow(TraceParentLen)
+        to: out.Grow
+      - eval: out.WriteString(VersionSupported)
+        to: out.WriteString
+      - eval: out.WriteString(traceParentSep)
+        to: out.WriteString
+      - eval: out.WriteString(context.TraceID.String())
+        to: out.WriteString
+      - eval: out.WriteString(traceParentSep)
+        to: out.WriteString
+      - eval: out.WriteString(context.SpanID.String())
+        to: out.WriteString
+      - eval: out.WriteString(traceParentSep)
+        to: out.WriteString
+      - eval: out.WriteString(hex.EncodeToString([]byte{byte(context.Flags.Sanitized())}))
+        to: out.WriteString
+      - return: out.String(), true
+        to: out.String
+  - of: isLowerHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: isLowerHex
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: "!slices.ContainsFunc([]byte(text), isNotLowerHexDigit)"
+        to: slices
+  - of: isNotLowerHexDigit
+    steps:
+      - return: (c < '0' || c > '9') && (c < 'a' || c > 'f')
+  - of: NewTracer
+    steps:
+      - return: "&Tracer{cfg: cfg.resolved()}"
+  - of: (*Tracer).Resource
+    steps:
+      - return: t.cfg.Resource
+  - of: (*Tracer).Scope
+    steps:
+      - return: t.cfg.Scope
+  - of: (*Tracer).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Tracer).Start
+        kind: self
+      - id: coretrace
+        kind: package
+      - id: t.mint
+        kind: internal
+      - id: newSpan
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: coretrace.InvalidSpanName.Error()
+          when: name == ""
+      - bind: parent
+        eval: coretrace.SpanContextFromContext(ctx)
+        to: coretrace
+      - bind: spanContext
+        eval: t.mint(parent, name, params)
+        to: t.mint
+      - opt:
+          do:
+            - return: "coretrace.ContextWithSpanContext(ctx, spanContext), noopSpan{context: spanContext}"
+              to: coretrace
+          when: "!spanContext.IsSampled()"
+      - bind: recording
+        eval: newSpan(t, spanContext, parent, name, params)
+        to: newSpan
+      - return: coretrace.ContextWithSpanContext(ctx, spanContext), recording
+        to: coretrace
+  - of: (*Tracer).mint
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Tracer).mint
+        kind: self
+      - id: drawSpanID
+        kind: internal
+      - id: drawTraceID
+        kind: internal
+    steps:
+      - bind: spanID
+        eval: drawSpanID()
+        to: drawSpanID
+      - opt:
+          do:
+            - return: |-
+                coretrace.SpanContextValue{
+                			TraceID: parent.TraceID,
+                			SpanID:  spanID,
+                			Flags:   parent.Flags,
+                			State:   parent.State,
+                		}
+          when: parent.IsValid()
+      - bind: traceID
+        eval: drawTraceID()
+        to: drawTraceID
+      - bind: sampled
+        eval: |-
+          t.cfg.Sampler(coretrace.SamplingParams{
+          		Parent:  parent,
+          		TraceID: traceID,
+          		Name:    name,
+          		Kind:    params.Kind.Resolved(),
+          		Attrs:   params.Attrs,
+          		Links:   params.Links,
+          	})
+      - return: |-
+          coretrace.SpanContextValue{
+          		TraceID: traceID,
+          		SpanID:  spanID,
+          		Flags:   coretrace.TraceFlags(0).WithSampled(sampled),
+          	}
+  - of: ParseTraceState
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseTraceState
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: coretrace
+        kind: package
+      - id: builder.State
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: coretrace.StateValue{}, nil
+          when: strings.Trim(header, traceStateOWS) == ""
+      - bind: fields
+        eval: strings.Split(header, traceStateListSep)
+        to: strings
+      - bind: builder
+        eval: coretrace.NewStateBuilder(len(fields))
+        to: coretrace
+      - loop:
+          do:
+            - bind: member
+              eval: strings.Trim(field, traceStateOWS)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: member == ""
+            - bind: key, value, found
+              eval: strings.Cut(member, traceStatePairSep)
+              to: strings
+            - opt:
+                do:
+                  - return: coretrace.StateValue{}, coretrace.InvalidTraceState
+                when: "!found || !builder.Add(key, value)"
+          key: _
+          range: fields
+          value: field
+      - return: builder.State(), nil
+        to: builder.State

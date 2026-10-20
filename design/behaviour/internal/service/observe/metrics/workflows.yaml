@@ -1,0 +1,87 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: appendEscapedHelp
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: "'\\\\'"
+                    do:
+                      - set: buf
+                        value: append(buf, '\\', '\\')
+                  - case: "'\\n'"
+                    do:
+                      - set: buf
+                        value: append(buf, '\\', 'n')
+                  - default: true
+                    do:
+                      - set: buf
+                        value: append(buf, char)
+                init:
+                  bind: char
+                  eval: description[i]
+                "on": char
+          key: i
+          range: len(description)
+      - return: buf
+  - of: validMetricName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!metricNameByte(s[i], i == 0)"
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: validLabelName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!labelNameByte(s[i], i == 0)"
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: appendEscapedValue
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: "'\\\\'"
+                    do:
+                      - set: buf
+                        value: append(buf, '\\', '\\')
+                  - case: "'\"'"
+                    do:
+                      - set: buf
+                        value: append(buf, '\\', '"')
+                  - case: "'\\n'"
+                    do:
+                      - set: buf
+                        value: append(buf, '\\', 'n')
+                  - default: true
+                    do:
+                      - set: buf
+                        value: append(buf, char)
+                init:
+                  bind: char
+                  eval: value[i]
+                "on": char
+          key: i
+          range: len(value)
+      - return: buf

@@ -1,0 +1,57 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - failoverSink
+      - New
+      - (*failoverSink).Write
+      - (*failoverSink).Flush
+      - (*failoverSink).Close
+    name: failover_sink.go
+functions:
+  - name: New
+    params: branches ...corelogger.Sink
+    results: sink corelogger.Sink, err error
+imports:
+  context: context
+  corefailover: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover
+  name: failover
+  purpose: Package failover implements a sequential-retry Sink that tries downstream sinks in order until one succeeds.
+types:
+  - doc: failoverSink wraps an ordered list of downstream sinks tried sequentially.
+    fields:
+      - doc: chain is the ordered sink list — first hit returns; misses cascade.
+        name: chain
+        type: "[]corelogger.Sink"
+    kind: struct
+    methods:
+      - doc: |-
+          Write tries each branch in order, returning the first success. When every
+          branch fails, Write returns Exhausted wrapping the joined failure chain.
+        name: Write
+        params: ctx context.Context, rec corelogger.RecordEvent, p []byte
+        recv: s *failoverSink
+        results: n int, err error
+      - doc: |-
+          Flush forwards to every distinct branch and aggregates per-branch errors via
+          errors.Join. A sink reused across multiple chain slots (V33) is flushed once.
+        name: Flush
+        params: ctx context.Context
+        recv: s *failoverSink
+        results: error
+      - doc: |-
+          Close forwards to every distinct branch and aggregates per-branch errors via
+          errors.Join. A sink reused across multiple chain slots (V33) is closed once so
+          a non-idempotent terminal sink does not surface a spurious double-close error.
+        name: Close
+        recv: s *failoverSink
+        results: error
+    name: failoverSink

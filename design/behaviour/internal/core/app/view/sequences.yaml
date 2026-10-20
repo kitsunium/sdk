@@ -1,0 +1,105 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: plugin
+        kind: package
+      - id: f.Engine
+        kind: internal
+      - id: publish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "EngineInvalid.Error() + \": \" + why"
+          init:
+            bind: why
+            eval: plugin.Unusable(f)
+            to: plugin
+          when: why != ""
+      - bind: name
+        eval: f.Engine()
+        to: f.Engine
+      - opt:
+          do:
+            - panic: EngineInvalid.Error()
+          when: name == ""
+      - opt:
+          do:
+            - panic: err.Error()
+          init:
+            bind: err
+            eval: publish(name, f)
+            to: publish
+          when: err != nil
+      - return: f
+  - of: publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: publish
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!registry.Publish(name, f)"
+      - return: |-
+          errs.Wrap(DuplicateEngine, errs.WrapParams{},
+          		errs.String("engine", string(name)))
+        to: errs
+  - of: Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lookup
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - return: registry.Lookup(name)
+        to: registry.Lookup
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: registry.Names
+        kind: value
+    steps:
+      - return: registry.Names()
+        to: registry.Names
+  - of: Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: Open
+        kind: self
+      - id: Lookup
+        kind: internal
+      - id: factory.New
+        kind: internal
+    steps:
+      - bind: factory, found
+        eval: Lookup(name)
+        to: Lookup
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(EngineUnknown, errs.WrapParams{},
+                			errs.String("engine", string(name)),
+                			errs.Int("registered", len(registry.Names())))
+          when: "!found"
+      - return: factory.New(cfg)
+        to: factory.New
+  - of: TrustHTML
+    steps:
+      - return: TrustedHTML(s)

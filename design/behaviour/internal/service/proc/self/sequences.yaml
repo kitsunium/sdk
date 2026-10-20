@@ -1,0 +1,300 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: cpuTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: cpuTime
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: runtimeCPU
+        kind: internal
+      - id: time
+        kind: stdlib
+    steps:
+      - var:
+          name: usage
+          type: syscall.Rusage
+      - opt:
+          do:
+            - return: runtimeCPU(), true
+              to: runtimeCPU
+          init:
+            bind: err
+            eval: syscall.Getrusage(syscall.RUSAGE_SELF, &usage)
+            to: syscall
+          when: err != nil
+      - return: time.Duration(usage.Utime.Nano() + usage.Stime.Nano()), false
+        to: time
+  - of: DistributionValue.Count
+    steps:
+      - var:
+          name: total
+          type: uint64
+      - loop:
+          do:
+            - op: +=
+              set: total
+              value: count
+          key: _
+          range: d.Counts
+          value: count
+      - return: total
+  - of: DistributionValue.Quantile
+    participants:
+      - id: caller
+        kind: actor
+      - id: DistributionValue.Quantile
+        kind: self
+      - id: d.Count
+        kind: internal
+      - id: seconds
+        kind: internal
+    steps:
+      - bind: total
+        eval: d.Count()
+        to: d.Count
+      - opt:
+          do:
+            - return: "0"
+          when: total == 0 || len(d.Buckets) != len(d.Counts)+1
+      - opt:
+          do:
+            - set: q
+              value: "0"
+          when: math.IsNaN(q)
+      - bind: target
+        eval: max(uint64(math.Ceil(min(max(q, 0), 1)*float64(total))), 1)
+      - var:
+          name: seen
+          type: uint64
+      - loop:
+          do:
+            - op: +=
+              set: seen
+              value: count
+            - opt:
+                do:
+                  - continue: true
+                when: seen < target
+            - return: seconds(bucketBound(d.Buckets[index], d.Buckets[index+1]))
+              to: seconds
+          key: index
+          range: d.Counts
+          value: count
+      - return: "0"
+  - of: bucketBound
+    steps:
+      - switch:
+          cases:
+            - case: "!math.IsInf(upper, 0)"
+              do:
+                - return: upper
+            - case: "!math.IsInf(lower, 0)"
+              do:
+                - return: lower
+            - default: true
+              do:
+                - return: "0"
+  - of: seconds
+    participants:
+      - id: caller
+        kind: actor
+      - id: seconds
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: nanos
+        eval: value * float64(time.Second)
+      - opt:
+          do:
+            - return: "0"
+          when: nanos <= 0 || math.IsNaN(nanos)
+      - opt:
+          do:
+            - return: maxDuration
+          when: nanos >= math.MaxInt64
+      - return: time.Duration(nanos)
+        to: time
+  - of: ReadStats
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadStats
+        kind: self
+      - id: metrics
+        kind: stdlib
+      - id: time
+        kind: stdlib
+      - id: apply
+        kind: internal
+      - id: runtime
+        kind: stdlib
+      - id: lastGC
+        kind: internal
+      - id: cpuTime
+        kind: internal
+    steps:
+      - bind: samples
+        eval: |-
+          []metrics.Sample{
+          		{Name: metricGoroutines},
+          		{Name: metricHeapBytes},
+          		{Name: metricHeapGoal},
+          		{Name: metricMemoryTotal},
+          		{Name: metricHeapObjects},
+          		{Name: metricTotalAlloc},
+          		{Name: metricGCCycles},
+          		{Name: metricGCPauses},
+          		{Name: metricSchedLatency},
+          	}
+      - eval: metrics.Read(samples)
+        to: metrics
+      - bind: now
+        eval: time.Now()
+        to: time
+      - bind: stats
+        eval: |-
+          StatsValue{
+          		At: now, Started: started, Uptime: now.Sub(started),
+          		PID: os.Getpid(), MaxProcs: runtime.GOMAXPROCS(0), CPUs: runtime.NumCPU(),
+          	}
+      - loop:
+          do:
+            - eval: apply(&stats, &samples[index])
+              to: apply
+          key: index
+          range: samples
+      - opt:
+          do:
+            - set: stats.Goroutines
+              to: runtime
+              value: runtime.NumGoroutine()
+          when: stats.Goroutines == 0
+      - set: stats.LastGC
+        to: lastGC
+        value: lastGC()
+      - set: stats.CPUTime, stats.CPUEstimated
+        to: cpuTime
+        value: cpuTime()
+      - return: stats
+  - of: apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: apply
+        kind: self
+      - id: applyCount
+        kind: internal
+      - id: applyDistribution
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: metrics.KindUint64
+              do:
+                - eval: applyCount(stats, sample.Name, sample.Value.Uint64())
+                  to: applyCount
+            - case: metrics.KindFloat64Histogram
+              do:
+                - eval: applyDistribution(stats, sample.Name, sample.Value.Float64Histogram())
+                  to: applyDistribution
+            - default: true
+          "on": sample.Value.Kind()
+  - of: applyCount
+    steps:
+      - switch:
+          cases:
+            - case: metricGoroutines
+              do:
+                - set: stats.Goroutines
+                  value: int(min(value, math.MaxInt32))
+            - case: metricHeapBytes
+              do:
+                - set: stats.HeapBytes
+                  value: value
+            - case: metricHeapGoal
+              do:
+                - set: stats.HeapGoalBytes
+                  value: value
+            - case: metricMemoryTotal
+              do:
+                - set: stats.MemoryBytes
+                  value: value
+            - case: metricHeapObjects
+              do:
+                - set: stats.HeapObjects
+                  value: value
+            - case: metricTotalAlloc
+              do:
+                - set: stats.TotalAllocBytes
+                  value: value
+            - case: metricGCCycles
+              do:
+                - set: stats.GCCycles
+                  value: value
+            - default: true
+          "on": name
+  - of: applyDistribution
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: histogram == nil
+      - bind: distribution
+        eval: "DistributionValue{Counts: histogram.Counts, Buckets: histogram.Buckets}"
+      - switch:
+          cases:
+            - case: metricGCPauses
+              do:
+                - set: stats.GCPauses
+                  value: distribution
+            - case: metricSchedLatency
+              do:
+                - set: stats.SchedLatencies
+                  value: distribution
+            - default: true
+          "on": name
+  - of: lastGC
+    participants:
+      - id: caller
+        kind: actor
+      - id: lastGC
+        kind: self
+      - id: debug
+        kind: stdlib
+    steps:
+      - var:
+          name: stats
+          type: debug.GCStats
+      - eval: debug.ReadGCStats(&stats)
+        to: debug
+      - opt:
+          do:
+            - return: time.Time{}
+          when: stats.NumGC == 0
+      - return: stats.LastGC
+  - of: runtimeCPU
+    participants:
+      - id: caller
+        kind: actor
+      - id: runtimeCPU
+        kind: self
+      - id: metrics
+        kind: stdlib
+      - id: seconds
+        kind: internal
+    steps:
+      - bind: samples
+        eval: "[]metrics.Sample{{Name: metricCPUTotal}, {Name: metricCPUIdle}}"
+      - eval: metrics.Read(samples)
+        to: metrics
+      - opt:
+          do:
+            - return: "0"
+          when: samples[0].Value.Kind() != metrics.KindFloat64 || samples[1].Value.Kind() != metrics.KindFloat64
+      - return: seconds(samples[0].Value.Float64() - samples[1].Value.Float64())
+        to: seconds

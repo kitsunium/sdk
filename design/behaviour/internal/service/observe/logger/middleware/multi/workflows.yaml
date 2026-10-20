@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: New
+    steps:
+      - bind: cp
+        eval: make([]corelogger.Sink, 0, len(branches))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: b == nil
+            - set: cp
+              value: append(cp, b)
+          key: _
+          range: branches
+          value: b
+      - return: "&fanoutSink{branches: cp}"

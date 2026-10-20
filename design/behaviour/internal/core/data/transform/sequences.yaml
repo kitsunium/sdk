@@ -1,0 +1,88 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: plugin
+        kind: package
+      - id: publishCompressor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "DuplicateRegistration.Error() + \": \" + why"
+          init:
+            bind: why
+            eval: plugin.Unusable(c)
+            to: plugin
+          when: why != ""
+      - opt:
+          do:
+            - panic: err.Error()
+          init:
+            bind: err
+            eval: publishCompressor(c.Algorithm(), c)
+            to: publishCompressor
+          when: err != nil
+      - return: c
+  - of: publishCompressor
+    participants:
+      - id: caller
+        kind: actor
+      - id: publishCompressor
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!registry.Publish(name, c)"
+      - return: errs.Wrap(DuplicateRegistration, errs.WrapParams{}, errs.String("algorithm", string(name)))
+        to: errs
+  - of: Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lookup
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - return: registry.Lookup(name)
+        to: registry.Lookup
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: registry.Names
+        kind: value
+    steps:
+      - return: registry.Names()
+        to: registry.Names
+  - of: Algorithm.String
+    steps:
+      - return: string(a)
+  - of: Algorithm.Known
+    participants:
+      - id: caller
+        kind: actor
+      - id: Algorithm.Known
+        kind: self
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: a == ""
+      - bind: _, found
+        eval: Lookup(a)
+        to: Lookup
+      - return: found

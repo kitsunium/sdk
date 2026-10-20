@@ -1,0 +1,411 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      retryBase is the numeric base the retry field is written in. The format
+      says decimal, so this is not a choice.
+    items:
+      - name: retryBase
+        type: int
+        value: "10"
+    name: retryBase
+  - doc: |-
+      crlfWidth is how many bytes a CRLF terminator occupies. Naming it is the
+      point: treating CRLF as two terminators emits a spurious empty data line
+      between every pair of lines, which is a corruption nobody reads back.
+    items:
+      - name: crlfWidth
+        type: int
+        value: "2"
+    name: crlfWidth
+  - doc: |-
+      DefaultKeepAlive is the comment cadence a stream uses when the caller sets
+      none. It sits under the idle timeout of every proxy worth naming — nginx and
+      most cloud load balancers default to 60 s, some CDNs to 30 — so a stream that
+      has nothing to say still proves it is alive before anything cuts it.
+    items:
+      - name: DefaultKeepAlive
+        type: time.Duration
+        value: 15 * time.Second
+    name: DefaultKeepAlive
+  - doc: |-
+      DefaultWriteTimeout bounds ONE frame's write. It is not a budget for the
+      stream, which by nature has none; it is what stops a peer that has stopped
+      reading from pinning a goroutine and a socket buffer forever.
+    items:
+      - name: DefaultWriteTimeout
+        type: time.Duration
+        value: 10 * time.Second
+    name: DefaultWriteTimeout
+  - doc: |-
+      initialFrameCapacity pre-sizes the per-stream encode buffer. One frame of a
+      few hundred bytes is the overwhelmingly common shape, and the buffer is
+      reused for the stream's whole life, so a steady-state send allocates nothing
+      once it has reached its high-water mark — which is exactly why
+      maxRetainedFrameCapacity exists.
+    items:
+      - name: initialFrameCapacity
+        type: int
+        value: "512"
+    name: initialFrameCapacity
+  - doc: |-
+      maxRetainedFrameCapacity is the buffer size above which reuse stops being
+      unconditional. The buffer is kept for the stream's whole LIFE, so with no
+      ceiling at all one outsized event pins its own size until the client
+      disconnects — measured, a single one-mebibyte event left 1 056 768 B held per
+      stream forever, which on 10 000 streams is 10.6 GB bought by something that
+      happened once.
+
+      64 KiB is chosen against what a stream costs otherwise: 10 000 streams at the
+      ceiling is 640 MB, against 5 MB at the 512-byte floor and against a measured
+      80.8 MB for everything else 10 000 streams hold. Below the ceiling, churning
+      a buffer would buy nothing worth measuring, so reuse is unconditional there.
+
+      It is NOT a hard cap, and retain says why: releasing on size alone made a
+      stream that genuinely sends outsized frames re-grow its buffer on every send,
+      which measured 25.5 µs against 6.6 µs for the same frame — 3.89×, a
+      regression paid by exactly the workload the ceiling was never aimed at.
+    items:
+      - name: maxRetainedFrameCapacity
+        type: int
+        value: 64 * 1024
+    name: maxRetainedFrameCapacity
+  - doc: |-
+      retainUseFraction is how much of an oversized buffer the last frame must
+      still be using for the stream to keep it. A half is coarse on purpose: it
+      separates "this stream works at this size" from "this stream is done with
+      that size" without inventing a third case, and no finer setting was measured
+      to matter.
+    items:
+      - name: retainUseFraction
+        type: int
+        value: "2"
+    name: retainUseFraction
+  - doc: |-
+      keepAliveComment is the text of the periodic keep-alive. It is a comment,
+      which every client ignores by construction, so it can never be mistaken for
+      an event by a consumer that forgot to filter it.
+    items:
+      - name: keepAliveComment
+        type: string
+        value: "\"keep-alive\""
+    name: keepAliveComment
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - retryBase
+      - crlfWidth
+      - AppendEvent
+      - AppendComment
+      - validateComment
+      - appendData
+      - terminatorWidth
+      - advance
+      - firstTerminator
+      - indexFrom
+      - appendField
+    name: frame.go
+  - decls:
+      - DefaultKeepAlive
+      - DefaultWriteTimeout
+      - Option
+      - config
+      - KeepAlive
+      - WithoutKeepAlive
+      - WriteTimeout
+      - Retry
+      - resolve
+    name: options.go
+  - decls:
+      - initialFrameCapacity
+      - maxRetainedFrameCapacity
+      - retainUseFraction
+      - keepAliveComment
+      - Stream
+      - New
+      - (*Stream).LastEventID
+      - (*Stream).Done
+      - (*Stream).Send
+      - (*Stream).Comment
+      - (*Stream).Close
+      - (*Stream).retain
+      - (*Stream).write
+      - (*Stream).ended
+      - (*Stream).end
+      - (*Stream).watch
+      - (*Stream).startKeepAlive
+      - setStreamHeaders
+      - canFlush
+    name: sse.go
+functions:
+  - name: AppendEvent
+    params: dst []byte, e corenet.SSEEventValue
+    results: wire []byte, err error
+  - name: AppendComment
+    params: dst []byte, text string
+    results: wire []byte, err error
+  - doc: |-
+      validateComment refuses a line terminator in a comment: a comment is a single
+      line, so a terminator inside one would end it early and turn the remainder
+      into fields the client obeys. It is the rule corenet.SSEEventValue.Validate
+      applies to an id and an event name, applied to the one line the value does
+      not carry, and it is spelled the same way: two assembly-backed byte searches
+      behind an emptiness test, measured in internal/core/net/BENCH.md.
+    name: validateComment
+    params: text string
+    results: error
+  - doc: |-
+      appendData writes the payload as one "data:" line per line it contains.
+
+      The scan is what this function costs. Both terminator cursors are found once
+      over the WHOLE payload and afterwards only ever move FORWARD, so each of the
+      two searches reads each stretch of the payload exactly once and the walk is
+      linear whatever shape the payload has. The obvious alternative — an IndexByte
+      pair per line — is quadratic on half of the possible payloads, and which half
+      depends on which of the two scans is left unbounded: bound neither and a
+      payload of LF-terminated lines re-reads its whole tail looking for a CR that
+      is not there; bound the CR scan by the LF and the mirror payload, CR-only,
+      does the same. Both are measured in BENCH.md and both are refused.
+    name: appendData
+    params: dst []byte, data string
+    results: "[]byte"
+  - doc: terminatorWidth reports how many bytes the terminator at idx occupies.
+    name: terminatorWidth
+    params: data string, idx int
+    results: int
+  - doc: |-
+      advance returns where the next b sits at or after at, re-scanning only
+      when the cut just made consumed or overtook the cursor it is given.
+
+      The untouched case is not an optimisation: a cursor still ahead of the cut is
+      already the answer, and re-scanning for it would read the same bytes again on
+      every line, which is what makes the obvious per-line form quadratic.
+    name: advance
+    params: data string, cursor, at int, b byte
+    results: int
+  - doc: |-
+      firstTerminator returns whichever of the two cursors comes first, with -1
+      meaning that terminator is absent from the rest of the payload.
+    name: firstTerminator
+    params: lf, cr int
+    results: int
+  - doc: |-
+      indexFrom returns the index of b at or after from in s, expressed in s's
+      own coordinates, or -1 when the rest of s does not carry it.
+    name: indexFrom
+    params: s string, from int, b byte
+    results: int
+  - doc: |-
+      appendField writes one "name: value" line, or ": value" when name is empty
+      (a comment).
+    name: appendField
+    params: dst []byte, name, value string
+    results: "[]byte"
+  - name: KeepAlive
+    params: d time.Duration
+    results: Option
+  - name: WithoutKeepAlive
+    results: Option
+  - name: WriteTimeout
+    params: d time.Duration
+    results: Option
+  - name: Retry
+    params: d time.Duration
+    results: Option
+  - doc: |-
+      resolve turns the raw option set into a usable one: it clamps where a working
+      default needs no explanation, and refuses where any value the SDK chose would
+      be arbitrary (ADR 0031).
+    name: resolve
+    params: opts []Option
+    results: resolved config, err error
+  - name: New
+    params: w http.ResponseWriter, r *http.Request, opts ...Option
+    results: stream *Stream, err error
+  - doc: setStreamHeaders puts the response in event-stream mode.
+    name: setStreamHeaders
+    params: h http.Header
+  - doc: |-
+      canFlush reports whether the response can be flushed, walking the same
+      unwrap chain http.ResponseController does.
+
+      It exists because ResponseController answers the question only by ANSWERING
+      it — calling Flush on a supported writer commits the response — and the whole
+      point is to refuse before anything is written. The recognised forms mirror
+      net/http's own: FlushError, and the older http.Flusher.
+    name: canFlush
+    params: w http.ResponseWriter
+    results: bool
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/sse
+  name: sse
+  purpose: "Package sse — an event's wire form, as the WHATWG HTML standard's Server-Sent Events format spells it: the encoder that turns a corenet.SSEEventValue into the bytes a stream writes, and a comment into the one frame no client dispatches."
+types:
+  - kind: named
+    name: Option
+    underlying: func(*config)
+  - doc: |-
+      config is the resolved option set. It is unexported because every field has
+      a zero value that means something specific, and the meaning is decided by
+      resolve rather than by whoever fills the struct.
+    fields:
+      - doc: |-
+          keepAlive is the comment cadence. Zero is CLAMPED to DefaultKeepAlive;
+          negative is REFUSED. See resolve.
+        name: keepAlive
+        type: time.Duration
+      - doc: writeTimeout bounds one frame's write. Zero is clamped the same way.
+        name: writeTimeout
+        type: time.Duration
+      - doc: |-
+          retry, when non-zero, is sent as the stream's opening frame so the client
+          knows how long to wait before reconnecting.
+        name: retry
+        type: time.Duration
+      - doc: |-
+          noKeepAlive is the explicit spelling of "never send a keep-alive". It is
+          a separate field rather than a sentinel duration because "never" and "use
+          the default" are different intents and a single zero cannot carry both.
+        name: noKeepAlive
+        type: bool
+      - doc: |-
+          clock is what the keep-alive ticks on. No public option sets it: resolve
+          defaults it to clock.System, and only a white-box test hands it a
+          ManualClock, so a cadence is asserted by advancing time.
+        name: clock
+        type: clock.Waiter
+    kind: struct
+    name: config
+  - fields:
+      - doc: w is the response being streamed.
+        name: w
+        type: http.ResponseWriter
+      - doc: |-
+          rc drives Flush and SetWriteDeadline through net/http's own controller,
+          so a wrapped ResponseWriter that forwards Unwrap keeps working.
+        name: rc
+        type: "*http.ResponseController"
+      - doc: |-
+          lastEventID is the id the client says it last processed, taken from the
+          request header at construction.
+        name: lastEventID
+        type: string
+      - doc: writeTimeout bounds one frame's write, refreshed per frame.
+        name: writeTimeout
+        type: time.Duration
+      - doc: |-
+          deadlines records whether the response supports write deadlines. A
+          recorder or a hand-rolled ResponseWriter does not, and that is not a
+          failure: the stream simply cannot bound its writes and says so here
+          rather than refusing to run.
+        name: deadlines
+        type: bool
+      - doc: |-
+          mu serialises frame writes. Every write must be whole: two interleaved
+          frames are not two events, they are one corrupt one.
+        name: mu
+        type: sync.Mutex
+      - doc: frame is the reusable encode buffer, guarded by mu.
+        name: frame
+        type: "[]byte"
+      - doc: done is closed exactly once, when the stream ends for any reason.
+        name: done
+        type: chan struct{}
+      - doc: |-
+          endOnce guards close(done) against the several goroutines that can end a
+          stream: the handler, the keep-alive, and the watcher.
+        name: endOnce
+        type: sync.Once
+      - doc: pinger owns the keep-alive goroutine; nil when keep-alive is disabled.
+        name: pinger
+        type: "*worker.LoopDaemon"
+      - doc: |-
+          watcher owns the goroutine translating the request context and the
+          server's drain signal into done.
+        name: watcher
+        type: "*worker.LoopDaemon"
+    kind: struct
+    methods:
+      - name: LastEventID
+        recv: s *Stream
+        results: string
+      - name: Done
+        recv: s *Stream
+        results: <-chan struct{}
+      - name: Send
+        params: event corenet.SSEEventValue
+        recv: s *Stream
+        results: error
+      - name: Comment
+        params: text string
+        recv: s *Stream
+        results: error
+      - name: Close
+        recv: s *Stream
+        results: error
+      - doc: |-
+          retain keeps the buffer the frame was encoded into for the next frame, unless
+          it has grown past the ceiling AND the frame just written no longer needs it.
+          The caller holds s.mu.
+
+          The two clauses are two different mistakes. Without the first, a stream would
+          churn its buffer at the 512-byte floor for no gain. Without the second — a
+          plain "release anything above the ceiling" — a stream that genuinely sends
+          outsized frames re-grows one on EVERY send, measured at 3.83× the cost of the
+          send itself; the case worth releasing is the stream that sent one outsized
+          frame and went back to small ones, and that is exactly what "the frame just
+          written used less than half of it" names.
+
+          The frame just encoded is NOT invalidated by a release: write is handed the
+          slice directly and keeps it alive across the call, so the outsized buffer is
+          dropped only once the wire has seen its bytes.
+        name: retain
+        params: frame []byte
+        recv: s *Stream
+      - doc: |-
+          write puts one already-encoded frame on the wire and flushes it. The caller
+          holds s.mu.
+        name: write
+        params: frame []byte
+        recv: s *Stream
+        results: error
+      - doc: ended reports the stream's terminal error, or nil while it is open.
+        name: ended
+        recv: s *Stream
+        results: error
+      - doc: end closes done exactly once, whichever goroutine gets there first.
+        name: end
+        recv: s *Stream
+      - doc: |-
+          watch starts the goroutine that turns the request's end and the server's
+          drain into this stream's end.
+
+          Goroutine lifecycle: exactly one per stream, owned by the Stream, joined by
+          Close. It returns as soon as the stream ends, whatever ended it.
+        name: watch
+        params: ctx context.Context
+        recv: s *Stream
+      - doc: |-
+          startKeepAlive spawns the periodic comment writer, unless it is disabled.
+
+          Goroutine lifecycle: at most one per stream, owned by the Stream and joined
+          by Close. It exits on the stream's own end, so it cannot outlive the response
+          it writes to: worker.Every's loop leaves when done closes (WithDone), and a
+          keep-alive that finds the peer gone ends the stream itself, which closes done.
+        name: startKeepAlive
+        params: cfg config
+        recv: s *Stream
+    name: Stream

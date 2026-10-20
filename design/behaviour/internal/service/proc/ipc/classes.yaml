@@ -1,0 +1,399 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      worldWritable is the bit that lets any account create, rename or remove an
+      entry in a directory.
+    items:
+      - name: worldWritable
+        type: os.FileMode
+        value: "0o002"
+    name: worldWritable
+  - doc: |-
+      rootUID is the one account besides this process's user a component may
+      belong to: root can replace anything anyway.
+    items:
+      - name: rootUID
+        type: int
+        value: "0"
+    name: rootUID
+  - doc: |-
+      The kind field of a PATH_UNSAFE refusal: how another account could steer
+      the component it names.
+    grouped: true
+    items:
+      - doc: kindIndirection is a link held by a directory anybody can write.
+        name: kindIndirection
+        type: string
+        value: "\"indirection\""
+      - doc: |-
+          kindForeign is a component another account owns, held by a directory
+          anybody can write.
+        name: kindForeign
+        type: string
+        value: "\"foreign\""
+      - doc: |-
+          kindReplaceable is a component held by a directory anybody can write
+          and that has no sticky bit.
+        name: kindReplaceable
+        type: string
+        value: "\"replaceable\""
+    name: kindIndirection
+  - doc: |-
+      groupOrWorldWritable are the mode bits that let another account plant an
+      entry in the directory.
+    items:
+      - name: groupOrWorldWritable
+        type: os.FileMode
+        value: "0o022"
+    name: groupOrWorldWritable
+  - doc: |-
+      maxPath is the longest socket path every supported kernel accepts: 104
+      bytes of sun_path on the BSDs and macOS, 108 on Linux, and one for the NUL.
+    items:
+      - name: maxPath
+        type: int
+        value: "103"
+    name: maxPath
+  - doc: |-
+      dialTimeout bounds Dial and the liveness probe Listen makes on a socket
+      already at the path. A local socket answers in microseconds; a second is a
+      process that is not coming.
+    items:
+      - name: dialTimeout
+        type: time.Duration
+        value: time.Second
+    name: dialTimeout
+files:
+  - decls:
+      - worldWritable
+      - rootUID
+      - kindIndirection
+      - checkChain
+      - checkHolder
+      - steerable
+      - ours
+      - pathUnsafe
+    name: chain_unix.go
+  - decls:
+      - groupOrWorldWritable
+      - prepareDir
+      - checkDir
+      - checkEntry
+      - ownerOf
+    name: dir_unix.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxPath
+      - dialTimeout
+      - Config
+      - Listener
+      - acceptor
+      - (*Config).validate
+      - negative
+      - NewListener
+      - (*Listener).Accept
+      - (*Listener).Refused
+      - (*Listener).Addr
+      - (*Listener).Path
+      - (*Listener).Close
+      - admit
+      - Dialer
+      - NewDialer
+      - (*Dialer).Dial
+      - Dial
+      - RuntimeDir
+      - RuntimeDirOr
+      - closeBestEffort
+    name: ipc.go
+  - decls:
+      - _
+    name: ipc_compliance.go
+  - decls:
+      - peerOf
+    name: peer_linux.go
+  - decls:
+      - socketAcceptor
+      - socketAcceptor.accept
+      - listen
+      - clearStale
+      - (*Listener).admits
+      - dial
+    name: socket.go
+functions:
+  - doc: |-
+      checkChain refuses the socket directory dir when another account could steer
+      a component of the path ABOVE it. The socket directory's own entry is not
+      judged here — [checkEntry] holds it to stricter rules — so the walk is over
+      its parent, and dir need not exist yet: [prepareDir] runs this before it
+      creates anything, so nothing is ever created inside a steered tree.
+    name: checkChain
+    params: dir string
+    results: error
+  - doc: |-
+      checkHolder refuses a socket directory anybody could replace: one held by a
+      directory anybody can write that has no sticky bit. [checkChain] judged the
+      holder's own path first, so the lookup lands where that audit did.
+    name: checkHolder
+    params: dir string
+    results: error
+  - doc: |-
+      steerable says whether another account could steer the path at step and,
+      when one could, how — the kind a refusal names. steered is false when no
+      account the deployment did not choose can.
+    name: steerable
+    params: step *pathchain.StepValue, self int
+    results: kind string, steered bool
+  - doc: |-
+      ours reports whether info belongs to this process's user or to root. An
+      owner that cannot be read belongs to nobody trusted — a gate does not guess
+      — though on Unix it always can be read.
+    name: ours
+    params: info os.FileInfo, self int
+    results: bool
+  - doc: |-
+      pathUnsafe is the PATH_UNSAFE refusal for step: the component that may be
+      steered and how, the socket directory the caller configured, the mode of the
+      directory holding the component, where an indirection leads and who owns
+      what was found.
+    name: pathUnsafe
+    params: dir string, step *pathchain.StepValue, kind string
+    results: error
+  - doc: |-
+      prepareDir creates dir 0700 when it is missing, then checks it. The path
+      above dir is audited BEFORE anything is created, because Mkdir follows a
+      link at a parent and would otherwise create the directory inside whatever
+      tree the link names; and again after, with the rest of [checkDir], because a
+      parent missing at the first audit may have been created by somebody else
+      in between.
+    name: prepareDir
+    params: dir string
+    results: error
+  - doc: |-
+      checkDir refuses a socket directory another account could write to, read
+      through, replace or reach through a path it steers: every component above
+      it first ([checkChain], PATH_UNSAFE), then its own entry ([checkEntry],
+      DIRECTORY_UNSAFE), then the directory holding it ([checkHolder]).
+    name: checkDir
+    params: dir string
+    results: error
+  - doc: |-
+      checkEntry refuses a socket directory whose own entry another account could
+      write to or read through: it must be a real directory — not a link —, owned
+      by this process's user, and writable by nobody else. Group or world search
+      permission is allowed: that is how a deployment admits an on-call group,
+      and without write permission nobody can plant an entry there.
+    name: checkEntry
+    params: dir string
+    results: error
+  - doc: |-
+      ownerOf is the UID owning the file info describes; unknown for a nil info
+      or one the platform does not describe with a Stat_t.
+    name: ownerOf
+    params: info os.FileInfo
+    results: uid int, known bool
+  - doc: negative reports whether n cannot be a UID or a GID.
+    name: negative
+    params: n int
+    results: bool
+  - name: NewListener
+    params: cfg *Config
+    results: "*Listener, error"
+  - doc: |-
+      admit says whether p may use a socket of account self under cfg. An
+      unverified peer passed the directory, which is the only gate there is.
+    name: admit
+    params: p coreipc.PeerValue, self int, cfg *Config
+    results: error
+  - name: NewDialer
+    params: cfg *Config
+    results: "*Dialer, error"
+  - name: Dial
+    params: ctx context.Context, cfg *Config
+    results: "*coreipc.Conn, error"
+  - name: RuntimeDir
+    params: app string
+    results: string
+  - name: RuntimeDirOr
+    params: app, fallback string
+    results: string
+  - doc: |-
+      closeBestEffort closes a connection this package refuses or no longer
+      needs. Its error changes nothing — the connection is abandoned either way —
+      so it is logged, never returned in place of the verdict that caused it.
+    name: closeBestEffort
+    params: c io.Closer, path string
+  - doc: |-
+      peerOf asks the kernel who is at the other end of c: SO_PEERCRED, the
+      credentials the peer had when it connected — or listened —, which it cannot
+      forge.
+    name: peerOf
+    params: c *net.UnixConn
+    results: coreipc.PeerValue
+  - doc: |-
+      listen opens the Unix socket at cfg.Path, once its directory is private
+      and what was at the path is known to be a leftover.
+    name: listen
+    params: cfg *Config
+    results: "*Listener, error"
+  - doc: |-
+      clearStale removes a socket nobody answers on, and refuses one somebody
+      does. What is not a socket, or not ours, is never removed.
+    name: clearStale
+    params: cfg *Config
+    results: error
+  - doc: |-
+      dial connects to the Unix socket at cfg.Path, once the path to its
+      directory is known to be steered by nobody else, the directory to be this
+      account's and its file this account's (or an allowed one's). A directory
+      that does not exist is nobody listening — the first client of a daemon not
+      started yet —, DIAL_FAILED, not an unsafe directory.
+    name: dial
+    params: ctx context.Context, cfg *Config
+    results: "*coreipc.Conn, error"
+imports:
+  context: context
+  coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  io: io
+  log: log
+  net: net
+  os: os
+  pathchain: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
+  runtime: runtime
+  slices: slices
+  strconv: strconv
+  sync: sync
+  syscall: syscall
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/ipc
+  name: ipc
+  purpose: "Package ipc — the components ABOVE the socket's directory, and who could steer them: ADR 0083's rule, applied where the directory is the whole of the access control (ADR 0148)."
+types:
+  - fields:
+      - doc: |-
+          Path is the socket's absolute path. Its directory is created 0700 when
+          missing and refused when another account could write to it.
+        name: Path
+        type: string
+      - doc: |-
+          AllowUIDs and AllowGIDs admit peers besides this process's own user:
+          an on-call group declared at deployment, say. They are enforced where
+          the kernel names the peer (Peer.Verified); the directory must still
+          let those accounts reach the socket, which is the deployment's to
+          arrange — this package never widens a directory. Windows has no UID:
+          there the pipe's DACL admits this account only, and the lists admit
+          nobody more.
+        name: AllowUIDs
+        type: "[]int"
+      - doc: |-
+          AllowUIDs and AllowGIDs admit peers besides this process's own user:
+          an on-call group declared at deployment, say. They are enforced where
+          the kernel names the peer (Peer.Verified); the directory must still
+          let those accounts reach the socket, which is the deployment's to
+          arrange — this package never widens a directory. Windows has no UID:
+          there the pipe's DACL admits this account only, and the lists admit
+          nobody more.
+        name: AllowGIDs
+        type: "[]int"
+    kind: struct
+    methods:
+      - doc: validate refuses a configuration no endpoint can be built from.
+        name: validate
+        recv: c *Config
+        results: error
+    name: Config
+  - fields:
+      - name: cfg
+        type: Config
+      - name: ln
+        type: acceptor
+      - name: self
+        type: int
+      - doc: selfSID is this process's account on Windows, empty elsewhere.
+        name: selfSID
+        type: string
+      - name: mu
+        type: sync.Mutex
+      - name: closed
+        type: bool
+      - name: refused
+        type: int64
+    kind: struct
+    methods:
+      - name: Accept
+        recv: l *Listener
+        results: "*coreipc.Conn, error"
+      - name: Refused
+        recv: l *Listener
+        results: int64
+      - name: Addr
+        recv: l *Listener
+        results: net.Addr
+      - name: Path
+        recv: l *Listener
+        results: string
+      - name: Close
+        recv: l *Listener
+        results: error
+      - doc: |-
+          admits is the Unix admission: this account, or an allowed user or group,
+          or a peer the kernel did not name — the directory admitted it.
+        name: admits
+        params: p coreipc.PeerValue
+        recv: l *Listener
+        results: error
+    name: Listener
+  - doc: |-
+      acceptor is the endpoint a Listener accepts on: a Unix socket
+      (socket.go), a named pipe on Windows (pipe_windows.go). accept returns the
+      next connection and what the kernel says of its peer; admission is the
+      Listener's.
+    kind: named
+    name: acceptor
+    underlying: |-
+      interface {
+      	accept() (net.Conn, coreipc.PeerValue, error)
+      	Close() error
+      	Addr() net.Addr
+      }
+  - fields:
+      - name: cfg
+        type: Config
+    kind: struct
+    methods:
+      - name: Dial
+        params: ctx context.Context
+        recv: d *Dialer
+        results: "*coreipc.Conn, error"
+    name: Dialer
+  - doc: socketAcceptor accepts on a Unix socket; its peers are named by peerOf.
+    fields:
+      - name: ""
+        role: embedded
+        type: "*net.UnixListener"
+    kind: struct
+    methods:
+      - doc: accept returns the next connection and its peer as the kernel names it.
+        name: accept
+        recv: s socketAcceptor
+        results: net.Conn, coreipc.PeerValue, error
+    name: socketAcceptor
+vars:
+  - doc: |-
+      The socket listener is the engine behind the Listener port, the dialer the
+      engine behind the Dialer port.
+    grouped: true
+    items:
+      - name: _
+        type: coreipc.Listener
+        value: (*Listener)(nil)
+      - name: _
+        type: coreipc.Dialer
+        value: (*Dialer)(nil)
+    name: _

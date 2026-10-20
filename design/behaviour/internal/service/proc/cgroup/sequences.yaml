@@ -1,0 +1,477 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: available
+        kind: internal
+    steps:
+      - return: available()
+        to: available
+  - of: Create
+    participants:
+      - id: caller
+        kind: actor
+      - id: Create
+        kind: self
+      - id: createGroup
+        kind: internal
+    steps:
+      - return: createGroup(name, opts...)
+        to: createGroup
+  - of: available
+    participants:
+      - id: caller
+        kind: actor
+      - id: available
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, err
+            eval: os.Stat(filepath.Join(mountRoot, controllersFile))
+            to: os
+          when: err != nil
+      - bind: probe, err
+        eval: os.MkdirTemp(mountRoot, ".sdk-cgroup-probe-")
+        to: os
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - opt:
+          do:
+            - return: "true"
+          init:
+            bind: rerr
+            eval: os.Remove(probe)
+            to: os
+          when: rerr != nil
+      - return: "true"
+  - of: cgroupUnavailable
+    participants:
+      - id: caller
+        kind: actor
+      - id: cgroupUnavailable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupUnavailable,
+          		Reason:   "CGROUP_UNAVAILABLE",
+          		Public:   "cgroup v2 is not available or not delegated",
+          		Private:  "service/proc/cgroup: the unified cgroup v2 hierarchy is absent or not writable by the caller",
+          		ExitCode: exitUnavailable,
+          	}, errs.String(pathKey, pathVal))
+        to: errs
+  - of: createGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: createGroup
+        kind: self
+      - id: applyOptions
+        kind: internal
+      - id: filepath
+        kind: stdlib
+      - id: validateName
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: cfg
+        eval: applyOptions(opts)
+        to: applyOptions
+      - bind: root
+        eval: filepath.Clean(cfg.root)
+        to: filepath
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: validateName(name)
+            to: validateName
+          when: verr != nil
+      - opt:
+          do:
+            - return: nil, cgroupUnavailable(serr, "root", root)
+          init:
+            bind: _, serr
+            eval: os.Stat(filepath.Join(root, controllersFile))
+            to: os
+          when: serr != nil
+      - bind: dir
+        eval: filepath.Join(root, name)
+        to: filepath
+      - opt:
+          do:
+            - return: nil, invalidName(name)
+          when: "!withinRoot(root, dir)"
+      - opt:
+          do:
+            - return: nil, classifyCreate(merr, dir)
+          init:
+            bind: merr
+            eval: os.Mkdir(dir, controllerPerm)
+            to: os
+          when: merr != nil
+      - return: "&controlGroup{dir: dir}, nil"
+  - of: validateName
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateName
+        kind: self
+      - id: invalidName
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: invalidName(name)
+              to: invalidName
+          when: |-
+            name == "" || name == "." || name == ".." ||
+            		strings.ContainsRune(name, os.PathSeparator) ||
+            		filepath.Clean(name) != name
+      - return: nil
+  - of: withinRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: withinRoot
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: dir == root
+      - return: strings.HasPrefix(dir, root+string(os.PathSeparator))
+        to: strings
+  - of: invalidName
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidName
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{
+          		Code:     coreproc.CodeInvalidSpec,
+          		Reason:   "INVALID_SPEC",
+          		Public:   "Process specification is invalid",
+          		Private:  "service/proc/exec.Start: Spec is malformed (empty Path or contradictory attributes)",
+          		ExitCode: exitUsage,
+          	}, errs.String("name", name))
+        to: errs
+  - of: notDelegated
+    participants:
+      - id: caller
+        kind: actor
+      - id: notDelegated
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: os.IsPermission(cause)
+      - return: errors.Is(cause, syscall.EROFS)
+        to: errors
+  - of: classifyCreate
+    participants:
+      - id: caller
+        kind: actor
+      - id: classifyCreate
+        kind: self
+      - id: cgroupUnavailable
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: cgroupUnavailable(cause, "dir", dir)
+              to: cgroupUnavailable
+          when: notDelegated(cause)
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupCreateFailed,
+          		Reason:   "CGROUP_CREATE_FAILED",
+          		Public:   "Could not create the control group",
+          		Private:  "service/proc/cgroup.Create: mkdir under the cgroup v2 hierarchy failed",
+          		ExitCode: exitOSErr,
+          	}, errs.String("dir", dir))
+        to: errs
+  - of: (*controlGroup).SetMemoryMax
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryMax
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController("memory.max", maxOrValue(bytes))
+        to: g.writeController
+  - of: (*controlGroup).SetCPUMax
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetCPUMax
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - bind: value
+        eval: maxOrValue(quota) + " " + strconv.FormatInt(period, decimalBase)
+      - return: g.writeController("cpu.max", value)
+        to: g.writeController
+  - of: (*controlGroup).SetPidsMax
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetPidsMax
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController("pids.max", maxOrValue(n))
+        to: g.writeController
+  - of: (*controlGroup).SetIOMax
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetIOMax
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController("io.max", spec)
+        to: g.writeController
+  - of: (*controlGroup).Add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Add
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(procsFile, strconv.Itoa(pid))
+        to: g.writeController
+  - of: (*controlGroup).Kill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Kill
+        kind: self
+      - id: g.writeFeature
+        kind: internal
+    steps:
+      - return: g.writeFeature(killFile, killTrigger)
+        to: g.writeFeature
+  - of: (*controlGroup).Freeze
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Freeze
+        kind: self
+      - id: g.writeFeature
+        kind: internal
+    steps:
+      - return: g.writeFeature(freezeFile, freezeOn)
+        to: g.writeFeature
+  - of: (*controlGroup).Thaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Thaw
+        kind: self
+      - id: g.writeFeature
+        kind: internal
+    steps:
+      - return: g.writeFeature(freezeFile, freezeOff)
+        to: g.writeFeature
+  - of: (*controlGroup).writeFeature
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).writeFeature
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: cgroupUnsupported
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: path
+        eval: filepath.Join(g.dir, name)
+        to: filepath
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: cgroupUnsupported(err, name)
+                    to: cgroupUnsupported
+                when: errors.Is(err, os.ErrNotExist)
+            - return: |-
+                errs.Wrap(err, errs.WrapParams{
+                			Code:     coreproc.CodeCgroupWriteFailed,
+                			Reason:   "CGROUP_WRITE_FAILED",
+                			Public:   "Could not write the cgroup controller file",
+                			Private:  "service/proc/cgroup: writing a feature file (cgroup.kill/cgroup.freeze) failed",
+                			ExitCode: exitOSErr,
+                		}, errs.String("file", name))
+              to: errs
+          init:
+            bind: err
+            eval: os.WriteFile(path, []byte(value), controllerPerm)
+            to: os
+          when: err != nil
+      - return: nil
+  - of: cgroupUnsupported
+    participants:
+      - id: caller
+        kind: actor
+      - id: cgroupUnsupported
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeUnsupportedPlatform,
+          		Reason:   "UNSUPPORTED_PLATFORM",
+          		Public:   "This operation is not supported on this platform",
+          		Private:  "service/proc/cgroup: the cgroup.kill/cgroup.freeze interface file is absent (kernel too old)",
+          		ExitCode: exitUnavailable,
+          	}, errs.String("file", file))
+        to: errs
+  - of: (*controlGroup).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Delete
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(err, errs.WrapParams{
+                			Code:     coreproc.CodeCgroupDeleteFailed,
+                			Reason:   "CGROUP_DELETE_FAILED",
+                			Public:   "Could not delete the control group",
+                			Private:  "service/proc/cgroup.Delete: rmdir of the control group failed (still populated?)",
+                			ExitCode: exitOSErr,
+                		}, errs.String("dir", g.dir))
+              to: errs
+          init:
+            bind: err
+            eval: os.Remove(g.dir)
+            to: os
+          when: err != nil
+      - return: nil
+  - of: (*controlGroup).writeController
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).writeController
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: path
+        eval: filepath.Join(g.dir, name)
+        to: filepath
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(err, errs.WrapParams{
+                			Code:     coreproc.CodeCgroupWriteFailed,
+                			Reason:   "CGROUP_WRITE_FAILED",
+                			Public:   "Could not write the cgroup controller file",
+                			Private:  "service/proc/cgroup: writing a controller file failed (controller disabled or value rejected)",
+                			ExitCode: exitOSErr,
+                		}, errs.String("file", name))
+              to: errs
+          init:
+            bind: err
+            eval: os.WriteFile(path, []byte(value), controllerPerm)
+            to: os
+          when: err != nil
+      - return: nil
+  - of: maxOrValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: maxOrValue
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: unlimited
+          when: v < 0
+      - return: strconv.FormatInt(v, decimalBase)
+        to: strconv
+  - of: defaultConfig
+    steps:
+      - return: "groupConfig{root: mountRoot}"
+  - of: applyOptions
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyOptions
+        kind: self
+      - id: defaultConfig
+        kind: internal
+    steps:
+      - bind: cfg
+        eval: defaultConfig()
+        to: defaultConfig
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: opt(&cfg)
+                when: opt != nil
+          key: _
+          range: opts
+          value: opt
+      - return: cfg
+  - of: WithRoot
+    steps:
+      - return:
+          closure:
+            params: c *groupConfig
+            steps:
+              - set: c.root
+                value: root

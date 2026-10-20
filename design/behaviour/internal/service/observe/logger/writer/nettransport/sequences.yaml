@@ -1,0 +1,460 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: newConnSeam
+    participants:
+      - id: caller
+        kind: actor
+      - id: newConnSeam
+        kind: self
+      - id: conn.Write
+        kind: value
+    steps:
+      - bind: dial
+        eval: dialer
+      - opt:
+          do:
+            - set: dial
+              value: net.Dial
+          when: dial == nil
+      - bind: conn, derr
+        eval: dial(network, addr)
+      - opt:
+          do:
+            - return: nil, nil, wrapDial(derr, network)
+          when: derr != nil
+      - set: send
+        value:
+          closure:
+            params: _ context.Context, p []byte
+            results: error
+            steps:
+              - bind: _, werr
+                eval: conn.Write(p)
+                to: conn.Write
+              - return: werr
+      - return: send, conn.Close, nil
+  - of: newHTTPSeam
+    participants:
+      - id: caller
+        kind: actor
+      - id: newHTTPSeam
+        kind: self
+      - id: newHTTPClient
+        kind: internal
+      - id: c.CloseIdleConnections
+        kind: value
+      - id: postRecord
+        kind: internal
+    steps:
+      - bind: c
+        eval: client
+      - set: closer
+        value:
+          closure:
+            results: error
+            steps:
+              - return: nil
+      - opt:
+          do:
+            - set: c
+              to: newHTTPClient
+              value: newHTTPClient(defaultHTTPTimeout)
+            - set: closer
+              value:
+                closure:
+                  results: error
+                  steps:
+                    - eval: c.CloseIdleConnections()
+                      to: c.CloseIdleConnections
+                    - return: nil
+          when: c == nil
+      - set: send
+        value:
+          closure:
+            params: ctx context.Context, p []byte
+            results: error
+            steps:
+              - return: postRecord(ctx, c, url, p)
+                to: postRecord
+      - return: send, closer
+  - of: newHTTPClient
+    steps:
+      - return: |-
+          &http.Client{
+          		Timeout: timeout,
+          		//: this sink's own pool, which nothing else in the process can empty.
+          		Transport: newHTTPTransport(),
+          		//: stop at the first redirect and return that response.
+          		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+          			//: stop following and hand back the redirect response as-is.
+          			return http.ErrUseLastResponse
+          		},
+          	}
+  - of: newHTTPTransport
+    participants:
+      - id: caller
+        kind: actor
+      - id: newHTTPTransport
+        kind: self
+      - id: base.Clone
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: base.Clone()
+              to: base.Clone
+          init:
+            bind: base, isTransport
+            eval: http.DefaultTransport.(*http.Transport)
+          when: isTransport
+      - return: "&http.Transport{Proxy: http.ProxyFromEnvironment, IdleConnTimeout: httpFallbackIdleTimeout}"
+  - of: postRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: postRecord
+        kind: self
+      - id: http
+        kind: stdlib
+      - id: req.Header.Set
+        kind: value
+      - id: c.Do
+        kind: value
+    steps:
+      - bind: req, rerr
+        eval: http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(p))
+        to: http
+      - opt:
+          do:
+            - return: rerr
+          when: rerr != nil
+      - eval: req.Header.Set("Content-Type", contentTypeJSON)
+        to: req.Header.Set
+      - bind: resp, derr
+        eval: c.Do(req)
+        to: c.Do
+      - opt:
+          do:
+            - return: derr
+          when: derr != nil
+      - defer: |-
+          func() {
+          		//: drain the unread body so the connection returns to the pool, and
+          		//: no more than httpDrainMaxBytes of it.
+          		_, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, httpDrainMaxBytes))
+          		//: swallow both teardown errors — the verdict already stands.
+          		swallowErr(drainErr)
+          		swallowErr(resp.Body.Close())
+          	}()
+      - opt:
+          do:
+            - return: corenettransport.NetTransportWriteFailed
+          when: resp.StatusCode < httpStatusFloor || resp.StatusCode >= httpStatusCeil
+      - return: nil
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: compose
+    participants:
+      - id: caller
+        kind: actor
+      - id: compose
+        kind: self
+      - id: newNetSink
+        kind: internal
+      - id: async
+        kind: package
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: base
+        eval: newNetSink(network, send, closer)
+        to: newNetSink
+      - bind: nonblocking
+        eval: "async.New(base, async.Config{BufferSize: cfg.BufferSize, OnDrop: cfg.OnDrop, OnError: cfg.OnError})"
+        to: async
+      - return: levelgate.New(nonblocking, cfg.MinLevel)
+        to: levelgate
+  - of: (*netFactory).Decode
+    steps:
+      - bind: c
+        eval: NetConfig{}
+      - opt:
+          do:
+            - return: nil, f.invalid()
+          when: |-
+            !decodeStr(raw, "address", &c.Address) || c.Address == "" ||
+            		!decodeLevelKey(raw, &c.MinLevel) ||
+            		!decodeIntKey(raw, "buffer_size", &c.BufferSize)
+      - return: c, nil
+  - of: (*netFactory).invalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netFactory).invalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(writer.WriterConfigInvalid, errs.WrapParams{}, errs.String("writer", f.proto))
+        to: errs
+  - of: decodeStr
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - set: "*dst"
+        value: s
+      - return: "true"
+  - of: decodeLevelKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeLevelKey
+        kind: self
+      - id: level
+        kind: package
+    steps:
+      - bind: v, present
+        eval: raw["min_level"]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: lvl, perr
+        eval: level.ParseLevel(s)
+        to: level
+      - opt:
+          do:
+            - return: "false"
+          when: perr != nil
+      - set: "*dst"
+        value: lvl
+      - return: "true"
+  - of: decodeIntKey
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - typeswitch:
+          bind: t
+          cases:
+            - do:
+                - set: "*dst"
+                  value: t
+              types: int
+            - do:
+                - set: "*dst"
+                  value: int(t)
+              types: int64
+            - do:
+                - set: "*dst"
+                  value: int(t)
+              types: float64
+            - default: true
+              do:
+                - return: "false"
+          "on": v
+      - return: "true"
+  - of: newNetSink
+    steps:
+      - opt:
+          do:
+            - set: closer
+              value:
+                closure:
+                  results: error
+                  steps:
+                    - return: nil
+          when: closer == nil
+      - return: "&netSink{network: network, send: send, closer: closer}"
+  - of: (*netSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netSink).Write
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, wrapWrite(ctx.Err(), s.network, len(p))
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: serr
+        eval: s.send(ctx, p)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: 0, wrapWrite(serr, s.network, len(p))
+          when: serr != nil
+      - return: len(p), nil
+  - of: (*netSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netSink).Flush
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corenettransport.CodeNetTransportWriteFailed,
+                			Reason:  "NET_TRANSPORT_WRITE_FAILED",
+                			Public:  "Network transport flush aborted due to cancellation",
+                			Private: "service/observe/logger/writer/nettransport.Flush saw a cancelled context",
+                		}, errs.String("network", s.network))
+              to: errs
+          when: ctx != nil && ctx.Err() != nil
+      - return: nil
+  - of: (*netSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netSink).Close
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: wrapWrite
+        kind: internal
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: cerr
+        eval: s.closer()
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: wrapWrite(cerr, s.network, 0)
+              to: wrapWrite
+          when: cerr != nil
+      - return: nil
+  - of: (*netFactory).Name
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netFactory).Name
+        kind: self
+      - id: writer
+        kind: package
+    steps:
+      - return: writer.Name(f.proto)
+        to: writer
+  - of: (*netFactory).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netFactory).Open
+        kind: self
+      - id: f.build
+        kind: internal
+    steps:
+      - bind: c, ok
+        eval: cfg.(NetConfig)
+      - opt:
+          do:
+            - return: nil, writer.WriterConfigInvalid
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil, wrapDial(nil, f.proto)
+          when: c.Address == ""
+      - return: f.build(c)
+        to: f.build
+  - of: (*netFactory).build
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netFactory).build
+        kind: self
+      - id: newHTTPSeam
+        kind: internal
+      - id: compose
+        kind: internal
+      - id: newConnSeam
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: send, closer
+              eval: newHTTPSeam(c.Address, c.HTTPClient)
+              to: newHTTPSeam
+            - return: compose(f.proto, send, closer, c), nil
+              to: compose
+          when: f.proto == protoHTTP
+      - bind: send, closer, derr
+        eval: newConnSeam(f.proto, c.Address, c.Dialer)
+        to: newConnSeam
+      - opt:
+          do:
+            - return: nil, derr
+          when: derr != nil
+      - return: compose(f.proto, send, closer, c), nil
+        to: compose
+  - of: wrapDial
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapDial
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corenettransport.CodeNetTransportDialFailed,
+          		Reason:  "NET_TRANSPORT_DIAL_FAILED",
+          		Public:  "Network transport could not establish its destination",
+          		Private: "service/observe/logger/writer/nettransport: establishing the transport failed",
+          	}, errs.String("network", network))
+        to: errs
+  - of: wrapWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapWrite
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corenettransport.CodeNetTransportWriteFailed,
+          		Reason:  "NET_TRANSPORT_WRITE_FAILED",
+          		Public:  "Network transport write failed",
+          		Private: "service/observe/logger/writer/nettransport: the underlying transport returned an error",
+          	}, errs.String("network", network), errs.Int("bytes", n))
+        to: errs

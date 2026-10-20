@@ -1,0 +1,634 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      uncompressedPointTag is the SEC1 §2.3.3 prefix of an uncompressed point,
+      the encoding crypto/ecdh accepts for a NIST public key.
+    items:
+      - name: uncompressedPointTag
+        type: byte
+        value: "0x04"
+    name: uncompressedPointTag
+  - doc: |-
+      bitsPerOctet bounds a big.Int against a fixed-width field element: an integer
+      wider than coordLen(crv)*bitsPerOctet cannot be a coordinate on that curve,
+      and would make math/big.Int.FillBytes panic.
+    items:
+      - name: bitsPerOctet
+        type: int
+        value: "8"
+    name: bitsPerOctet
+  - doc: p256CoordLen is the fixed octet width of one coordinate on NIST P-256.
+    items:
+      - name: p256CoordLen
+        type: int
+        value: "32"
+    name: p256CoordLen
+  - doc: p384CoordLen is the fixed octet width of one coordinate on NIST P-384.
+    items:
+      - name: p384CoordLen
+        type: int
+        value: "48"
+    name: p384CoordLen
+  - doc: |-
+      p521CoordLen is the fixed octet width of one coordinate on NIST P-521 — the
+      odd one out, because that curve's bit length is not a multiple of eight and
+      therefore rounds up to a whole extra octet.
+    items:
+      - name: p521CoordLen
+        type: int
+        value: "66"
+    name: p521CoordLen
+  - doc: |-
+      ed25519KeyLen is the octet length of an Ed25519 public key and of the seed
+      RFC 8037 §2 puts in "d" — both 32, unlike crypto/ed25519's 64-octet private
+      key, which is seed||public.
+    items:
+      - name: ed25519KeyLen
+        type: int
+        value: "32"
+    name: ed25519KeyLen
+  - grouped: true
+    items:
+      - doc: |-
+          TypeEC is an elliptic-curve key over a NIST prime curve (RFC 7518 §6.2):
+          public members "x"/"y", private member "d".
+        name: TypeEC
+        type: Type
+        value: "\"EC\""
+      - doc: |-
+          TypeOKP is an octet key pair — an Edwards-curve key (RFC 8037 §2):
+          public member "x", private member "d" (the 32-octet seed).
+        name: TypeOKP
+        type: Type
+        value: "\"OKP\""
+      - doc: |-
+          TypeOct is a symmetric key carried whole in "k" (RFC 7518 §6.4). It has
+          no public half, which is why MarshalPublic refuses it.
+        name: TypeOct
+        type: Type
+        value: "\"oct\""
+    name: TypeEC
+  - grouped: true
+    items:
+      - doc: |-
+          CurveP256 is NIST P-256, the curve behind JOSE "ES256" and the SDK's
+          registered "ecdsa-p256" signer.
+        name: CurveP256
+        type: Curve
+        value: "\"P-256\""
+      - doc: |-
+          CurveP384 is NIST P-384 (JOSE "ES384"). Representable here, but the SDK
+          registers no signer for it — see the package CLAUDE.md.
+        name: CurveP384
+        type: Curve
+        value: "\"P-384\""
+      - doc: |-
+          CurveP521 is NIST P-521 (JOSE "ES512"); field elements are 66 octets, not
+          65, because 521 bits round up to 66 whole octets.
+        name: CurveP521
+        type: Curve
+        value: "\"P-521\""
+      - doc: CurveEd25519 is the Edwards curve behind JOSE "EdDSA" (RFC 8037).
+        name: CurveEd25519
+        type: Curve
+        value: "\"Ed25519\""
+    name: CurveP256
+files:
+  - decls:
+      - FromECDSAPublic
+      - FromECDSAPrivate
+      - attachScalar
+      - fromECDSAPublicKey
+      - KeyValue.ECDSAPublic
+      - KeyValue.ECDSAPrivate
+      - KeyValue.ecdsaPublicKey
+      - FromEd25519Public
+      - FromEd25519Private
+      - KeyValue.Ed25519Public
+      - KeyValue.Ed25519Private
+      - FromSecret
+      - KeyValue.Secret
+    name: bridge.go
+  - decls:
+      - uncompressedPointTag
+      - bitsPerOctet
+      - p256CoordLen
+      - p384CoordLen
+      - p521CoordLen
+      - coordLen
+      - ecdhCurve
+      - ellipticCurve
+      - curveFromElliptic
+      - uncompressedPoint
+      - checkECPoint
+      - checkECScalar
+    name: curve.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - ed25519KeyLen
+      - Type
+      - TypeEC
+      - Curve
+      - CurveP256
+      - KeyValue
+      - KeyValue.Kty
+      - KeyValue.Crv
+      - KeyValue.Kid
+      - KeyValue.Use
+      - KeyValue.Alg
+      - KeyValue.KeyOps
+      - KeyValue.IsZero
+      - KeyValue.IsPrivate
+      - KeyValue.WithKid
+      - KeyValue.WithUse
+      - KeyValue.WithAlg
+      - KeyValue.WithKeyOps
+      - KeyValue.Public
+      - KeyValue.Equal
+      - KeyValue.equalMetadata
+      - KeyValue.equalMaterial
+      - KeyValue.String
+      - KeyValue.GoString
+    name: jwk.go
+  - decls:
+      - KeyValue.MarshalPublic
+      - KeyValue.MarshalPrivate
+      - KeyValue.MarshalJSON
+      - KeyValue.publicWire
+      - KeyValue.privateWire
+      - encodeWire
+      - KeyValue.Thumbprint
+      - KeyValue.WithThumbprintKid
+      - KeyValue.thumbprintInput
+      - KeyValue.thumbprintEC
+      - KeyValue.thumbprintOKP
+      - KeyValue.thumbprintOct
+    name: marshal.go
+  - decls:
+      - Parse
+      - isJSONNull
+      - fromWire
+      - parseEC
+      - attachECPrivate
+      - parseOKP
+      - attachOKPPrivate
+      - parseOct
+    name: parse.go
+  - decls:
+      - Set
+      - NewSet
+      - ParseSet
+      - parseMembers
+      - Set.Len
+      - Set.Keys
+      - Set.AllByKid
+      - Set.ByKid
+      - Set.MarshalPublic
+      - Set.MarshalPrivate
+      - Set.MarshalJSON
+      - Set.marshalWith
+      - Set.String
+      - Set.GoString
+    name: set.go
+  - decls:
+      - keyJSON
+      - setJSON
+      - b64Encode
+      - b64Decode
+      - b64DecodeFixed
+    name: wire.go
+functions:
+  - name: FromECDSAPublic
+    params: der []byte
+    results: key KeyValue, err error
+  - name: FromECDSAPrivate
+    params: der []byte
+    results: key KeyValue, err error
+  - doc: |-
+      attachScalar fixes the private scalar to the curve's width and checks it
+      derives the key's declared point, the same way Parse checks a "d" member.
+    name: attachScalar
+    params: base KeyValue, scalar *big.Int
+    results: key KeyValue, err error
+  - doc: fromECDSAPublicKey converts a parsed *ecdsa.PublicKey into the EC members.
+    name: fromECDSAPublicKey
+    params: pub *ecdsa.PublicKey
+    results: key KeyValue, err error
+  - name: FromEd25519Public
+    params: pub []byte
+    results: key KeyValue, err error
+  - name: FromEd25519Private
+    params: priv []byte
+    results: key KeyValue, err error
+  - name: FromSecret
+    params: secret corecrypto.Key
+    results: key KeyValue, err error
+  - doc: |-
+      coordLen returns the fixed octet length of one field element on crv, or 0
+      when crv is not a NIST prime curve this package models. The length is fixed
+      by RFC 7518 §6.2.1.2: leading zero octets are part of the encoding, so a
+      "compact" 31-octet P-256 coordinate is a different number, not a tidier one.
+    name: coordLen
+    params: crv Curve
+    results: int
+  - doc: |-
+      ecdhCurve maps a JWK curve name onto the crypto/ecdh curve that validates
+      its points and scalars. ok is false for OKP and unknown curves.
+    name: ecdhCurve
+    params: crv Curve
+    results: curve ecdh.Curve, ok bool
+  - doc: |-
+      ellipticCurve maps a JWK curve name onto the crypto/elliptic curve that
+      crypto/x509 needs to marshal an ECDSA key. ok is false outside the NIST set.
+    name: ellipticCurve
+    params: crv Curve
+    results: curve elliptic.Curve, ok bool
+  - doc: |-
+      curveFromElliptic is the reverse map, naming the JWK curve of a parsed
+      crypto/ecdsa key. The elliptic.PXXX constructors return singletons, so
+      interface comparison is the idiomatic identity test (service/crypto/sign/ecdsasig
+      pins its curve the same way).
+    name: curveFromElliptic
+    params: curve elliptic.Curve
+    results: crv Curve, ok bool
+  - doc: |-
+      uncompressedPoint assembles the SEC1 uncompressed encoding 0x04||x||y that
+      crypto/ecdh consumes and produces.
+    name: uncompressedPoint
+    params: x, y []byte
+    results: "[]byte"
+  - doc: |-
+      checkECPoint reports whether (x, y) is a point on crv. It is the check that
+      separates "these are two well-formed integers" from "this is a public key":
+      an off-curve or identity point is accepted by any parser that only measures
+      coordinate lengths, and using one is a documented route to key recovery.
+    name: checkECPoint
+    params: crv Curve, x, y []byte
+    results: error
+  - doc: |-
+      checkECScalar reports whether d is a valid private scalar on crv AND derives
+      exactly the public point (x, y). The second half matters: a JWK whose "d"
+      disagrees with its "x"/"y" is either corrupt or an attempt to make a verifier
+      and a signer disagree about which key they hold.
+    name: checkECScalar
+    params: crv Curve, d, x, y []byte
+    results: error
+  - doc: |-
+      encodeWire renders a keyJSON. The struct holds only strings and a []string,
+      so encoding/json cannot fail here; the error is still surfaced typed rather
+      than dropped, because a silently ignored error is how an impossible case
+      becomes a debugging session.
+    name: encodeWire
+    params: raw keyJSON
+    results: document []byte, err error
+  - name: Parse
+    params: document []byte
+    results: key KeyValue, err error
+  - doc: |-
+      isJSONNull reports whether document is the JSON literal null, surrounding
+      whitespace aside.
+    name: isJSONNull
+    params: document []byte
+    results: bool
+  - doc: fromWire validates a decoded keyJSON and builds the immutable KeyValue.
+    name: fromWire
+    params: raw keyJSON
+    results: key KeyValue, err error
+  - doc: parseEC validates an "EC" JWK (RFC 7518 §6.2).
+    name: parseEC
+    params: base KeyValue, raw keyJSON
+    results: key KeyValue, err error
+  - doc: attachECPrivate validates and attaches the optional EC "d" member.
+    name: attachECPrivate
+    params: base KeyValue, member string, size int
+    results: key KeyValue, err error
+  - doc: |-
+      parseOKP validates an "OKP" JWK (RFC 8037 §2). Ed25519 is the only OKP curve
+      the SDK signs with, so it is the only one accepted: representing X25519 or
+      Ed448 here would promise an interop no registered scheme can honour.
+    name: parseOKP
+    params: base KeyValue, raw keyJSON
+    results: key KeyValue, err error
+  - doc: attachOKPPrivate validates and attaches the optional OKP "d" seed.
+    name: attachOKPPrivate
+    params: base KeyValue, member string
+    results: key KeyValue, err error
+  - doc: |-
+      parseOct validates an "oct" JWK (RFC 7518 §6.4). The whole key is the secret,
+      which is why every serialisation path treats this family apart.
+    name: parseOct
+    params: base KeyValue, raw keyJSON
+    results: key KeyValue, err error
+  - name: NewSet
+    params: keys ...KeyValue
+    results: Set
+  - name: ParseSet
+    params: document []byte
+    results: set Set, err error
+  - doc: |-
+      parseMembers runs Parse over each raw member, failing the whole document on
+      the first rejection.
+    name: parseMembers
+    params: members []json.RawMessage
+    results: set Set, err error
+  - doc: |-
+      b64Encode renders raw as unpadded base64url, the only encoding RFC 7515 §2
+      admits for a JOSE member.
+    name: b64Encode
+    params: raw []byte
+    results: string
+  - doc: |-
+      b64Decode parses one member as unpadded base64url. Padded input and the
+      standard '+' / '/' alphabet are REJECTED rather than accommodated: a JOSE
+      member has exactly one valid spelling, and accepting a second one would let
+      the same key present two different thumbprints.
+    name: b64Decode
+    params: member string
+    results: raw []byte, err error
+  - doc: |-
+      b64DecodeFixed parses member and requires exactly want octets. The fixed
+      length is the rule RFC 7518 §6.2.1.2 states for EC coordinates and RFC 8037
+      §2 for OKP keys: leading zero octets carry meaning, so a "compact" 31-octet
+      P-256 coordinate is a different number, not a tidier one.
+    name: b64DecodeFixed
+    params: member string, want int
+    results: raw []byte, err error
+imports:
+  base64: encoding/base64
+  big: math/big
+  bytes: bytes
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  corejwk: github.com/kitsunium/sdk/internal/core/crypto/key/jwk
+  ecdh: crypto/ecdh
+  ecdsa: crypto/ecdsa
+  ed25519: crypto/ed25519
+  elliptic: crypto/elliptic
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  json: encoding/json
+  sha256: crypto/sha256
+  slices: slices
+  strconv: strconv
+  x509: crypto/x509
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
+  name: jwk
+  purpose: "Package jwk — the bridge between a JWK and the key encodings the SDK's own schemes already speak, so adopting the format costs no re-encoding by hand: service/crypto/sign/ecdsasig PKIX DER public / SEC1 DER private service/crypto/sign/ed25519sig raw 32-octet public / raw 64-octet private service/crypto/mac/hmacsha2 core/crypto.Key (redacting, 32 octets) The out-bound accessors named *Private / Secret hand back live key material, exactly as core/crypto.Key.Bytes() does, and carry the same rule: they feed a scheme, never a log line."
+types:
+  - kind: named
+    name: Type
+    underlying: string
+  - kind: named
+    name: Curve
+    underlying: string
+  - fields:
+      - doc: kty is the key-type family; the empty string marks the zero KeyValue.
+        name: kty
+        type: Type
+      - doc: crv is the curve for EC and OKP keys, empty for oct.
+        name: crv
+        type: Curve
+      - doc: kid is the optional "kid" member — a hint, never an authenticator.
+        name: kid
+        type: string
+      - doc: use is the optional "use" member ("sig" or "enc").
+        name: use
+        type: string
+      - doc: alg is the optional "alg" member (e.g. "ES256", "EdDSA", "HS256").
+        name: alg
+        type: string
+      - doc: keyOps is the optional "key_ops" member, preserved verbatim.
+        name: keyOps
+        type: "[]string"
+      - doc: x holds the EC affine x coordinate, or the OKP public key.
+        name: x
+        type: "[]byte"
+      - doc: y holds the EC affine y coordinate; nil for OKP and oct.
+        name: "y"
+        type: "[]byte"
+      - doc: |-
+          priv holds the secret member: the EC "d" scalar, the OKP "d" seed, or the
+          oct "k" key. Nil on a public-only key. One field, because exactly one of
+          those members can be set and "does this key hold a secret" must be a
+          single question.
+        name: priv
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: ECDSAPublic
+        recv: k KeyValue
+        results: der []byte, err error
+      - name: ECDSAPrivate
+        recv: k KeyValue
+        results: der []byte, err error
+      - doc: ecdsaPublicKey rebuilds the crypto/ecdsa public key behind an EC JWK.
+        name: ecdsaPublicKey
+        recv: k KeyValue
+        results: pub *ecdsa.PublicKey, err error
+      - name: Ed25519Public
+        recv: k KeyValue
+        results: pub []byte, err error
+      - name: Ed25519Private
+        recv: k KeyValue
+        results: priv []byte, err error
+      - name: Secret
+        recv: k KeyValue
+        results: secret corecrypto.Key, err error
+      - name: Kty
+        recv: k KeyValue
+        results: Type
+      - name: Crv
+        recv: k KeyValue
+        results: Curve
+      - name: Kid
+        recv: k KeyValue
+        results: string
+      - name: Use
+        recv: k KeyValue
+        results: string
+      - name: Alg
+        recv: k KeyValue
+        results: string
+      - name: KeyOps
+        recv: k KeyValue
+        results: "[]string"
+      - name: IsZero
+        recv: k KeyValue
+        results: bool
+      - name: IsPrivate
+        recv: k KeyValue
+        results: bool
+      - name: WithKid
+        params: kid string
+        recv: k KeyValue
+        results: KeyValue
+      - name: WithUse
+        params: use string
+        recv: k KeyValue
+        results: KeyValue
+      - name: WithAlg
+        params: alg string
+        recv: k KeyValue
+        results: KeyValue
+      - name: WithKeyOps
+        params: ops ...string
+        recv: k KeyValue
+        results: KeyValue
+      - name: Public
+        recv: k KeyValue
+        results: pub KeyValue, err error
+      - name: Equal
+        params: other KeyValue
+        recv: k KeyValue
+        results: bool
+      - doc: equalMetadata compares the non-secret members, key_ops included.
+        name: equalMetadata
+        params: other KeyValue
+        recv: k KeyValue
+        results: bool
+      - doc: equalMaterial compares the public members and the secret alike.
+        name: equalMaterial
+        params: other KeyValue
+        recv: k KeyValue
+        results: bool
+      - name: String
+        recv: k KeyValue
+        results: string
+      - name: GoString
+        recv: k KeyValue
+        results: string
+      - name: MarshalPublic
+        recv: k KeyValue
+        results: document []byte, err error
+      - name: MarshalPrivate
+        recv: k KeyValue
+        results: document []byte, err error
+      - name: MarshalJSON
+        recv: k KeyValue
+        results: document []byte, err error
+      - doc: publicWire assembles the public member set for k.
+        name: publicWire
+        recv: k KeyValue
+        results: raw keyJSON, err error
+      - doc: privateWire assembles the full member set for k, private member included.
+        name: privateWire
+        recv: k KeyValue
+        results: raw keyJSON, err error
+      - name: Thumbprint
+        recv: k KeyValue
+        results: thumb string, err error
+      - name: WithThumbprintKid
+        recv: k KeyValue
+        results: identified KeyValue, err error
+      - doc: |-
+          thumbprintInput builds the RFC 7638 §3.2 canonical JSON: required members
+          only, lexicographic order, no whitespace, no optional members.
+
+          It is assembled by concatenation rather than through encoding/json because
+          the canonical form is order-sensitive and Go's map ordering is not. Every
+          interpolated value is closed-vocabulary — a validated Curve name or base64url
+          output — so none of them can contain a character JSON would need to escape.
+        name: thumbprintInput
+        recv: k KeyValue
+        results: canonical []byte, err error
+      - doc: thumbprintEC builds the canonical form of an EC key.
+        name: thumbprintEC
+        recv: k KeyValue
+        results: canonical []byte, err error
+      - doc: thumbprintOKP builds the canonical form of an OKP key.
+        name: thumbprintOKP
+        recv: k KeyValue
+        results: canonical []byte, err error
+      - doc: thumbprintOct builds the canonical form of a symmetric key.
+        name: thumbprintOct
+        recv: k KeyValue
+        results: canonical []byte, err error
+    name: KeyValue
+  - fields:
+      - doc: |-
+          keys holds the members in document order, which AllByKid preserves so a
+          caller's "newest first" convention survives the round trip.
+        name: keys
+        type: "[]KeyValue"
+    kind: struct
+    methods:
+      - name: Len
+        recv: s Set
+        results: int
+      - name: Keys
+        recv: s Set
+        results: "[]KeyValue"
+      - name: AllByKid
+        params: kid string
+        recv: s Set
+        results: "[]KeyValue"
+      - name: ByKid
+        params: kid string
+        recv: s Set
+        results: key KeyValue, err error
+      - name: MarshalPublic
+        recv: s Set
+        results: document []byte, err error
+      - name: MarshalPrivate
+        recv: s Set
+        results: document []byte, err error
+      - name: MarshalJSON
+        recv: s Set
+        results: document []byte, err error
+      - doc: |-
+          marshalWith renders the set, encoding each member through render. Taking the
+          per-key method as a parameter keeps the public and private envelopes
+          identical — the two paths cannot drift into different set semantics.
+        name: marshalWith
+        params: render func(KeyValue) ([]byte, error)
+        recv: s Set
+        results: document []byte, err error
+      - name: String
+        recv: s Set
+        results: string
+      - name: GoString
+        recv: s Set
+        results: string
+    name: Set
+  - doc: |-
+      keyJSON is the RFC 7517 JWK object. Field order is the emitted member order,
+      so this package's own output is octet-stable; a document parsed from
+      elsewhere round-trips SEMANTICALLY, not octet-for-octet, because RFC 7159
+      objects are unordered and unrecognised members are dropped (RFC 7517 §4 lets
+      a parser ignore them, and re-emitting members we do not understand would
+      mean vouching for them).
+    fields:
+      - name: Kty
+        type: string
+      - name: Crv
+        type: string
+      - name: Kid
+        type: string
+      - name: Use
+        type: string
+      - name: Alg
+        type: string
+      - name: KeyOps
+        type: "[]string"
+      - name: X
+        type: string
+      - name: "Y"
+        type: string
+      - name: D
+        type: string
+      - name: K
+        type: string
+    kind: struct
+    name: keyJSON
+  - doc: |-
+      setJSON is the RFC 7517 §5 JWK Set envelope, used in both directions: members
+      stay as raw JSON so the decode side can run each through Parse and the encode
+      side can splice in whichever rendering the caller asked for. A nil Keys covers
+      both an absent and a null "keys" member; an empty array does not.
+    fields:
+      - name: Keys
+        type: "[]json.RawMessage"
+    kind: struct
+    name: setJSON

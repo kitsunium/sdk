@@ -1,0 +1,36 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: GenerateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: GenerateKey
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.GenerateKey(corecrypto.Algorithm(a))
+        to: corecrypto
+  - of: Sign
+    participants:
+      - id: caller
+        kind: actor
+      - id: Sign
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.Sign(corecrypto.Algorithm(a), priv, message)
+        to: corecrypto
+  - of: Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: Verify
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.Verify(corecrypto.Algorithm(a), pub, message, sig)
+        to: corecrypto

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kit-pinned.sh — sourced, never run: what scripts/regen.sh,
-# scripts/from-zero.sh and scripts/kit-coverage.sh share (ADR 0169), so the
-# three decide alike. The caller is at the repository root.
+# scripts/from-zero.sh, scripts/kit-coverage.sh and scripts/models.sh share
+# (ADR 0169), so the four decide alike. The caller is at the repository root.
 #
 #   - `kit_pinned NAME` refuses, naming NAME, unless `kit` on PATH is the
 #     version design/sdk.yaml pins (project.kit.version), and sets KIT_PINNED

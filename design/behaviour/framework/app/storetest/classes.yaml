@@ -1,0 +1,447 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          App is the name of the app every case runs: a database's URL is read
+          from STORETEST_<NAME>_URL.
+        name: App
+        type: string
+        value: "\"storetest\""
+      - doc: putN is the N a Put gives the document an insert wrote.
+        name: putN
+        type: int
+        value: "3"
+      - doc: writers is how many run at once.
+        name: writers
+        type: int
+        value: "32"
+      - doc: |-
+          pageUpdates is the N of a page's last update in the revisions case:
+          its versions are 2 to pageUpdates, the oldest pruned.
+        name: pageUpdates
+        type: int
+        value: "4"
+      - doc: |-
+          transitioned is the number of the version a guard's transition makes
+          after the revisions case's updates.
+        name: transitioned
+        type: uint64
+        value: "5"
+      - doc: rolledN is the N a rolled back write gives a page.
+        name: rolledN
+        type: int
+        value: "99"
+      - doc: stopWait bounds a case's stop.
+        name: stopWait
+        type: time.Duration
+        value: 10 * time.Second
+      - doc: waitFor bounds what eventually waits for.
+        name: waitFor
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: pollEvery is how often eventually looks.
+        name: pollEvery
+        type: time.Duration
+        value: 10 * time.Millisecond
+      - doc: |-
+          trashDays is how long a store with revisions keeps what is deleted,
+          unless its setting says otherwise (ADR 0178 C4).
+        name: trashDays
+        type: time.Duration
+        value: 30 * 24 * time.Hour
+      - doc: rewrittenN is the N of a page written again after its purge.
+        name: rewrittenN
+        type: int
+        value: "7"
+    name: App
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - App
+      - errRolled
+      - BackendConfig
+      - doc
+      - suite
+      - heard
+      - doc.key
+      - (*heard).add
+      - (*heard).has
+      - Run
+      - open
+      - stateOf
+      - isReady
+      - code
+      - message
+      - expect
+      - must
+      - eventually
+      - idsOf
+      - setN
+      - writeModes
+      - oneInsertWins
+      - updateIsAtomic
+      - uniqueNamesItsIndex
+      - findInKeyOrder
+      - keysAreBytes
+      - documentAsWritten
+      - transactions
+      - rolledBack
+      - savepoint
+      - heldPublish
+      - ready
+      - hooksAfterTheCommit
+      - ns
+      - expectVersions
+      - revisions
+      - transitionVersions
+      - rawText
+      - revisionsRestore
+      - revisionsRollback
+      - rolledTransition
+      - trash
+      - trashDeletes
+      - trashUntrashes
+      - trashPurges
+      - trashNeedsRevisions
+      - expectTrash
+    name: storetest.go
+functions:
+  - name: Run
+    params: t *testing.T, b BackendConfig
+  - doc: |-
+      open declares the case's service — its store, a topic and its
+      subscription, a workflow — and runs it on b until the test ends.
+    name: open
+    params: t *testing.T, b BackendConfig, name string, clocked bool
+    results: "*suite"
+  - doc: stateOf is where a document keeps its workflow's state.
+    name: stateOf
+    params: d *doc
+    results: "*string"
+  - doc: isReady is the workflows' guard.
+    name: isReady
+    params: d doc
+    results: bool
+  - doc: code is the kit error code of err, "" for none.
+    name: code
+    params: err error
+    results: string
+  - doc: message is the wire-safe message of err, "" for none.
+    name: message
+    params: err error
+    results: string
+  - doc: expect fails the test when err's code is not want.
+    name: expect
+    params: t *testing.T, what string, err error, want string
+  - doc: must stops the test on err.
+    name: must
+    params: t *testing.T, err error
+  - doc: eventually waits up to five seconds for cond.
+    name: eventually
+    params: t *testing.T, what string, cond func() bool
+  - doc: idsOf are the documents' keys, in their order.
+    name: idsOf
+    params: docs []doc
+    results: "[]string"
+  - doc: setN is an update that sets a document's N.
+    name: setN
+    params: n int
+    results: func(d *doc) error
+  - doc: |-
+      writeModes runs the three write modes, an update, a delete, and what each
+      refuses.
+    name: writeModes
+    params: t *testing.T, s *suite
+  - doc: |-
+      oneInsertWins runs 32 inserts of one key at once: one wins, the others
+      are refused.
+    name: oneInsertWins
+    params: t *testing.T, s *suite
+  - doc: |-
+      updateIsAtomic runs 32 updates of one entity at once: each sees the one
+      before.
+    name: updateIsAtomic
+    params: t *testing.T, s *suite
+  - doc: |-
+      uniqueNamesItsIndex checks that a unique index refuses a second holder of
+      a key, naming the index and never the key.
+    name: uniqueNamesItsIndex
+    params: t *testing.T, s *suite
+  - doc: |-
+      findInKeyOrder checks that Find answers in store-key order, whatever the
+      order of the writes.
+    name: findInKeyOrder
+    params: t *testing.T, s *suite
+  - doc: |-
+      keysAreBytes checks that keys compare as bytes, as Go compares them: a
+      and A, a and "a ", é and e are distinct keys.
+    name: keysAreBytes
+    params: t *testing.T, s *suite
+  - doc: |-
+      documentAsWritten checks that a document reads back as kit encoded it:
+      its members' order, a number's spelling, a duplicate member.
+    name: documentAsWritten
+    params: t *testing.T, s *suite
+  - doc: |-
+      transactions checks that a transaction commits its writes together; one
+      that fails undoes every one — an insert, a replacement, a deletion —; one
+      nested in it is a savepoint.
+    name: transactions
+    params: t *testing.T, s *suite
+  - doc: |-
+      rolledBack runs a transaction that fails, and checks that it undid every
+      write.
+    name: rolledBack
+    params: t *testing.T, s *suite
+  - doc: |-
+      savepoint runs a transaction with a nested one that fails: the outer one
+      commits without the inner one's writes.
+    name: savepoint
+    params: t *testing.T, s *suite
+  - doc: |-
+      heldPublish checks that a publish waits for its transaction's commit, and
+      that a rollback drops it.
+    name: heldPublish
+    params: t *testing.T, s *suite
+  - doc: ready is an update that makes a document ready.
+    name: ready
+    params: d *doc
+    results: error
+  - doc: |-
+      hooksAfterTheCommit checks that a write's hooks — what wakes a workflow —
+      run once its transaction committed, and never for one rolled back.
+    name: hooksAfterTheCommit
+    params: t *testing.T, s *suite
+  - doc: ns are the numbers and the N of a page's versions, newest first.
+    name: ns
+    params: t *testing.T, s *suite, key string
+    results: "[]string"
+  - doc: expectVersions fails the test when a page's versions are not want.
+    name: expectVersions
+    params: t *testing.T, s *suite, what string, want []string
+  - doc: |-
+      revisions checks that a record keeps its two previous versions, numbered,
+      stamped with the user, the oldest pruned in the write that makes a newer
+      one; the same JSON makes none, nor a transition that changes only the
+      state; Diff says what changed (ADR 0007 §3).
+    name: revisions
+    params: t *testing.T, s *suite
+  - doc: |-
+      transitionVersions checks a page's versions after a write and a
+      transition of the state, and what changed between them.
+    name: transitionVersions
+    params: t *testing.T, s *suite
+  - doc: rawText is a JSON value as its bytes read, "" for none.
+    name: rawText
+    params: raw json.RawMessage
+    results: string
+  - doc: |-
+      revisionsRestore checks that a restore writes a version back as a new
+      one — whole, or the fields named —, keeping the workflow's state; a unique
+      index refuses one and nothing changes.
+    name: revisionsRestore
+    params: t *testing.T, s *suite
+  - doc: |-
+      revisionsRollback checks that a write app.Transact rolls back leaves no
+      version behind — nor does a transition of the state alone, which writes in
+      place —: the record reads as before, and no version holds what never
+      committed.
+    name: revisionsRollback
+    params: t *testing.T, s *suite
+  - doc: |-
+      rolledTransition checks that a transition a rollback undid leaves no
+      version holding its state.
+    name: rolledTransition
+    params: t *testing.T, s *suite
+  - doc: |-
+      trash checks the trash of a store with revisions (ADR 0178 C4): a deletion
+      leaves every read and frees its unique keys, Untrash brings the record
+      back with its versions — refused while another record holds its unique
+      key —, and kit purges it 30 days after on the app's clock, not a second
+      before, after which the key starts again at version 1. A store without
+      revisions deletes at once and keeps no trash.
+    name: trash
+    params: t *testing.T, s *suite
+  - doc: trashDeletes checks that a deletion leaves every read, into the trash.
+    name: trashDeletes
+    params: t *testing.T, s *suite
+  - doc: |-
+      trashUntrashes checks that Untrash brings a page back with its versions,
+      once no other page holds its unique key.
+    name: trashUntrashes
+    params: t *testing.T, s *suite
+  - doc: |-
+      trashPurges checks that kit purges each page at its instant on the app's
+      clock, not a second before, and that its key starts again at version 1.
+    name: trashPurges
+    params: t *testing.T, s *suite
+  - doc: |-
+      trashNeedsRevisions checks that a store without revisions deletes at once
+      and keeps no trash.
+    name: trashNeedsRevisions
+    params: t *testing.T, s *suite
+  - doc: expectTrash checks what the pages' trash holds.
+    name: expectTrash
+    params: t *testing.T, s *suite, what string, want []app.Tombstone
+imports:
+  app: github.com/kitsunium/sdk/framework/app
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errors: errors
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  io: io
+  json: encoding/json
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  testing: testing
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/app/storetest
+  name: storetest
+  purpose: "Package storetest is the conformance suite of the framework's stores (ADR 0004): what a store does on every backend — in memory, in the data directory, on each database engine —, run by the framework's tests on memory, files and the framework's fake database, and by each engine module's tests on its engine."
+types:
+  - fields:
+      - doc: Name names the backend in the subtests.
+        name: Name
+        type: string
+      - doc: |-
+          Options place the stores of the app named app on the backend —
+          app.InMemory(), app.DataDir, an app.Database whose URL the environment
+          holds —, once per case. A database is named "database": the suite
+          gives its calls a minute, as 32 writers of one entity queue on a
+          server's lock.
+        name: Options
+        type: func(t *testing.T, app string) []app.AppOption
+    kind: struct
+    name: BackendConfig
+  - doc: doc is what the suite stores.
+    fields:
+      - name: ID
+        type: string
+      - name: Email
+        type: string
+      - name: Teams
+        type: "[]string"
+      - name: "N"
+        type: int
+      - name: Ready
+        type: bool
+      - name: State
+        type: string
+      - name: Raw
+        type: json.RawMessage
+    kind: struct
+    methods:
+      - doc: key is the document's key.
+        name: key
+        recv: d doc
+        results: string
+    name: doc
+  - doc: suite is one case's product, running.
+    fields:
+      - name: docs
+        type: "*app.Store[doc]"
+      - name: moved
+        type: "*app.Topic[doc]"
+      - name: lifecycle
+        type: "*app.Workflow[doc, string]"
+      - name: heard
+        type: "*heard"
+      - doc: |-
+          pages keep their two previous versions (ADR 0007 §3), a workflow
+          over them.
+        name: pages
+        type: "*app.Store[doc]"
+      - name: pageFlow
+        type: "*app.Workflow[doc, string]"
+      - doc: |-
+          clock is the app's, a manual one at epoch, for a case that waits on
+          it; nil for the others, which run on the wall clock.
+        name: clock
+        type: "*clock.ManualClock"
+    kind: struct
+    name: suite
+  - doc: heard are the messages a subscription was delivered.
+    fields:
+      - name: ""
+        role: embedded
+        type: sync.Mutex
+      - name: ids
+        type: "[]string"
+    kind: struct
+    methods:
+      - doc: add records that id was delivered.
+        name: add
+        params: id string
+        recv: h *heard
+      - doc: has reports whether id was delivered.
+        name: has
+        params: id string
+        recv: h *heard
+        results: bool
+    name: heard
+vars:
+  - grouped: true
+    items:
+      - doc: errRolled rolls a transaction back.
+        name: errRolled
+        value: |-
+          errs.New(CodeRolledBack, "ROLLED_BACK", "the case rolled its transaction back",
+          		"storetest: a case returned this error from a transaction's function to roll it back")
+      - doc: cases are the suite's, in order.
+        name: cases
+        value: |-
+          []struct {
+          		name string
+          		run  func(t *testing.T, s *suite)
+          		// clocked runs the case on a manual clock: what it checks waits
+          		// on the app's clock, never on the wall clock.
+          		clocked bool
+          	}{
+          		{"trash", trash, true},
+          		{"write-modes", writeModes, false},
+          		{"one-insert-wins", oneInsertWins, false},
+          		{"update-is-atomic", updateIsAtomic, false},
+          		{"unique-names-its-index", uniqueNamesItsIndex, false},
+          		{"find-in-key-order", findInKeyOrder, false},
+          		{"keys-are-bytes", keysAreBytes, false},
+          		{"document-as-written", documentAsWritten, false},
+          		{"transactions", transactions, false},
+          		{"held-publish", heldPublish, false},
+          		{"hooks-after-the-commit", hooksAfterTheCommit, false},
+          		{"revisions", revisions, false},
+          		{"revisions-restore", revisionsRestore, false},
+          		{"revisions-rollback", revisionsRollback, false},
+          	}
+      - doc: unorderedKeys are written out of order.
+        name: unorderedKeys
+        value: "[]string{\"c\", \"a\", \"b\"}"
+      - doc: orderedKeys is how Find answers unorderedKeys.
+        name: orderedKeys
+        value: "[]string{\"a\", \"b\", \"c\"}"
+      - doc: byteKeys are keys a collation would fold.
+        name: byteKeys
+        value: "[]string{\"a\", \"A\", \"a \", \"é\", \"e\"}"
+      - doc: byteOrder is how List answers byteKeys, as Go compares them.
+        name: byteOrder
+        value: "[]string{\"A\", \"a\", \"a \", \"e\", \"é\"}"
+      - doc: keptVersions are a page's versions after the revisions case's updates.
+        name: keptVersions
+        value: "[]string{\"4:4\", \"3:3\", \"2:2\"}"
+      - doc: transitionEdits are what changed between versions 3 and 5.
+        name: transitionEdits
+        value: "[]string{\"replace /n 3 4\", \"add /ready  true\", \"replace /state \\\"new\\\" \\\"done\\\"\"}"
+      - doc: refusedRestore are a page's versions after a refused restore.
+        name: refusedRestore
+        value: "[]string{\"3:1\", \"2:2\", \"1:1\"}"
+      - doc: epoch is where the suite's manual clock starts.
+        name: epoch
+        value: time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
+    name: errRolled

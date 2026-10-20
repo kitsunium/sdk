@@ -1,0 +1,32 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: newSealedOutbox
+    steps:
+      - bind: o
+        eval: "&sealedOutbox{Broker: inner, seal: cfg.Seal, unseal: cfg.Unseal, node: cfg.Name, max: cfg.MaxPayload}"
+      - var:
+          name: ok
+          type: "[5]bool"
+      - set: o.waker, ok[0]
+        value: inner.(queue.Waker)
+      - set: o.renew, ok[1]
+        value: inner.(queue.LeaseExtender)
+      - set: o.dead, ok[2]
+        value: inner.(queue.DeadLetterReader)
+      - set: o.reject, ok[3]
+        value: inner.(queue.Rejecter)
+      - set: o.manager, ok[4]
+        value: inner.(queue.DeadLetterManager)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(queue.QueueMisconfigured, errs.WrapParams{},
+                      				errs.String("mailer", o.node), errs.String("problem", "a mailer's outbox broker lacks a capability the spool needs"))
+                when: "!has"
+          key: _
+          range: ok
+          value: has
+      - return: o, nil

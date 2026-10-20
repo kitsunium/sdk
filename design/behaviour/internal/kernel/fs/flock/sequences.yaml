@@ -1,0 +1,57 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: TryLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: TryLock
+        kind: self
+      - id: tryLock
+        kind: internal
+    steps:
+      - return: tryLock(file)
+        to: tryLock
+  - of: Unlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: Unlock
+        kind: self
+      - id: unlock
+        kind: internal
+    steps:
+      - return: unlock(file)
+        to: unlock
+  - of: tryLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryLock
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: flockErr
+        eval: syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+        to: syscall
+      - opt:
+          do:
+            - return: true, nil
+          when: flockErr == nil
+      - opt:
+          do:
+            - return: false, nil
+          when: errors.Is(flockErr, syscall.EWOULDBLOCK) || errors.Is(flockErr, syscall.EAGAIN)
+      - return: false, flockErr
+  - of: unlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: unlock
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - return: syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+        to: syscall

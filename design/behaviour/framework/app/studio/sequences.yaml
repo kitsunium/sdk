@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: enable
+        kind: self
+      - id: studioengine
+        kind: package
+      - id: iapp
+        kind: package
+    steps:
+      - eval: studioengine.Enable()
+        to: studioengine
+      - eval: iapp.EnableStudio()
+        to: iapp
+      - return: "true"

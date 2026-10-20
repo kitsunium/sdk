@@ -1,0 +1,93 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AcquireBuffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: AcquireBuffer
+        kind: self
+      - id: bufferPool.Get
+        kind: value
+    steps:
+      - return: bufferPool.Get()
+        to: bufferPool.Get
+  - of: ReleaseBuffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReleaseBuffer
+        kind: self
+      - id: bufferPool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: buf == nil
+      - eval: bufferPool.Put(buf)
+        to: bufferPool.Put
+  - of: DetachBuffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: DetachBuffer
+        kind: self
+      - id: buf.Bytes
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: ReleaseBuffer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: buf == nil
+      - opt:
+          do:
+            - return: buf.Bytes()
+              to: buf.Bytes
+          when: buf.Cap() > MaxRetainedBufBytes
+      - bind: out
+        eval: slices.Clone(buf.Bytes())
+        to: slices
+      - eval: ReleaseBuffer(buf)
+        to: ReleaseBuffer
+      - return: out
+  - of: AcquireReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: AcquireReader
+        kind: self
+      - id: readerPool.Get
+        kind: value
+      - id: r.Reset
+        kind: value
+    steps:
+      - bind: r
+        eval: readerPool.Get()
+        to: readerPool.Get
+      - eval: r.Reset(src)
+        to: r.Reset
+      - return: r
+  - of: ReleaseReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReleaseReader
+        kind: self
+      - id: r.Reset
+        kind: value
+      - id: readerPool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r == nil
+      - eval: r.Reset(nil)
+        to: r.Reset
+      - eval: readerPool.Put(r)
+        to: readerPool.Put

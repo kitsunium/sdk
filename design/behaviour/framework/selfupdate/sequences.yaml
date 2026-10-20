@@ -1,0 +1,9 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - forward: svcupd.NewService
+    of: New
+  - forward: svcupd.NewUpdaterWithDeps
+    of: NewWithDeps
+  - forward: svcupd.StdinIsTerminal
+    of: StdinIsTerminal

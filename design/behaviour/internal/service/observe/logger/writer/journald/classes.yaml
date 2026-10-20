@@ -1,0 +1,233 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      writerName is the canonical registry key. socketNetwork / defaultSocketPath
+      are the unix-datagram network and the systemd journal socket default.
+    grouped: true
+    items:
+      - name: writerName
+        value: "\"journald\""
+      - name: socketNetwork
+        value: "\"unixgram\""
+      - name: defaultSocketPath
+        value: "\"/run/systemd/journal/socket\""
+    name: writerName
+  - doc: |-
+      messagePrefix is the journal field name framing each record as the entry's
+      MESSAGE. The trailing '=' separates the field name from the value.
+    items:
+      - name: messagePrefix
+        type: string
+        value: "\"MESSAGE=\""
+    name: messagePrefix
+  - doc: |-
+      unixDatagrams reports whether this platform can open the AF_UNIX datagram
+      socket the default dialer connects. Off Windows the kernel answers: a host
+      without journald fails the connect with JOURNALD_OPEN_FAILED, as it always
+      has.
+    items:
+      - name: unixDatagrams
+        type: bool
+        value: "true"
+    name: unixDatagrams
+files:
+  - decls:
+      - (*journaldFactory).Decode
+      - configInvalid
+      - decodeStr
+      - decodeLevelKey
+      - decodeIntKey
+    name: decode.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - writerName
+      - Writer
+      - journaldFactory
+      - (*journaldFactory).Name
+      - (*journaldFactory).Open
+    name: journald.go
+  - decls:
+      - Config
+    name: journald_config.go
+  - decls:
+      - messagePrefix
+      - journaldSink
+      - newJournaldSink
+      - (*journaldSink).Write
+      - (*journaldSink).Flush
+      - (*journaldSink).Close
+    name: journald_sink.go
+  - decls:
+      - unixDatagrams
+    name: socket_other.go
+  - decls:
+      - wrapOpen
+      - wrapWrite
+    name: wrap.go
+functions:
+  - doc: |-
+      configInvalid returns the shared, redacted WriterConfigInvalid sentinel tagged
+      with the writer name only — never a decoded option value (secret gate).
+    name: configInvalid
+    results: error
+  - doc: |-
+      decodeStr maps an optional string key onto dst, reporting false only when the
+      key is present with a non-string value. An absent key leaves dst untouched.
+    name: decodeStr
+    params: raw map[string]any, key string, dst *string
+    results: bool
+  - doc: |-
+      decodeLevelKey maps the optional "min_level" name onto dst, reporting false on
+      a non-string or unknown level. An absent key leaves dst untouched.
+    name: decodeLevelKey
+    params: raw map[string]any, dst *level.Level
+    results: bool
+  - doc: |-
+      decodeIntKey maps an optional integer key onto dst, accepting the numeric
+      shapes a config codec yields (int / int64 / float64). An absent key leaves dst
+      untouched; a present non-numeric value reports false.
+    name: decodeIntKey
+    params: raw map[string]any, key string, dst *int
+    results: bool
+  - doc: newJournaldSink builds a datagram sink over an already-connected socket.
+    name: newJournaldSink
+    params: conn net.Conn
+    results: "*journaldSink"
+  - doc: |-
+      wrapOpen wraps cause under the open sentinel. The socket path is NOT attached
+      (it may be operator-sensitive); only a fixed private string is added.
+    name: wrapOpen
+    params: cause error
+    results: error
+  - doc: wrapWrite wraps cause under the write sentinel with only the byte count.
+    name: wrapWrite
+    params: cause error, n int
+    results: error
+imports:
+  async: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
+  context: context
+  corejournald: github.com/kitsunium/sdk/internal/core/observe/logger/writer/journald
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  net: net
+  sync: sync
+  writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/journald
+  name: journald
+  purpose: Package journald — the config Decoder making "journald" reachable from a config file via pkg/v1/observe/logger.FromConfig.
+types:
+  - doc: journaldFactory builds a journald Sink from a Config.
+    kind: struct
+    methods:
+      - doc: |-
+          Decode builds a Config from a raw config map, satisfying
+          core/observe/logger/writer.Decoder. Every key is optional — the zero config connects the
+          default journal socket.
+        name: Decode
+        params: raw map[string]any
+        recv: "*journaldFactory"
+        results: cfg writer.Config, err error
+      - doc: Name reports the canonical key "journald".
+        name: Name
+        recv: "*journaldFactory"
+        results: writer.Name
+      - doc: |-
+          Open connects the journal socket and composes the level-gated, non-blocking
+          chain over the datagram sink. A wrong config type yields the shared
+          WriterConfigInvalid; a connect failure surfaces JournaldOpenFailed; the
+          default dialer on a platform with no AF_UNIX datagram socket (Windows) is
+          UNSUPPORTED_PLATFORM. A caller-supplied Dialer is used as given everywhere.
+        name: Open
+        params: cfg writer.Config
+        recv: "*journaldFactory"
+        results: sink corelogger.Sink, err error
+    name: journaldFactory
+  - fields:
+      - doc: |-
+          SocketPath overrides the journal datagram socket; the zero value uses the
+          systemd default (/run/systemd/journal/socket).
+        name: SocketPath
+        type: string
+      - doc: |-
+          Dialer, when non-nil, replaces net.Dial for connecting the socket.
+          Injectable so tests connect an in-memory pipe with no real journald.
+        name: Dialer
+        type: func(network, addr string) (conn net.Conn, err error)
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          (level.Info) inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          BufferSize is the async ring capacity; a non-positive value applies
+          async's own default. The producer never blocks on the socket — a slow
+          journald surfaces as drops via OnDrop.
+        name: BufferSize
+        type: int
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked with each downstream send failure the
+          async drainer observes; the zero value silently discards them.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: Config
+  - doc: |-
+      journaldSink is the unexported datagram sink behind core/observe/logger.Sink. It owns
+      the connected socket and a reused frame buffer, both guarded by mu so a Close
+      never races an in-flight send.
+    fields:
+      - doc: conn is the connected unix-datagram socket to journald.
+        name: conn
+        type: net.Conn
+      - doc: mu serialises framing + send against Close.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          buf is the reused frame buffer; guarded by mu, it makes the steady-state
+          Write path allocation-free after its one-time growth.
+        name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          Write frames p as a single "MESSAGE=<line>\n" journal entry and sends it as
+          one datagram. The frame is assembled into the reused buffer under the mutex,
+          so steady-state Write allocates nothing.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *journaldSink
+        results: n int, err error
+      - doc: |-
+          Flush is a no-op: each record is sent synchronously as its own datagram, so
+          nothing is buffered on this side. It still honours cancellation.
+        name: Flush
+        params: ctx context.Context
+        recv: s *journaldSink
+        results: error
+      - doc: |-
+          Close releases the socket under the mutex. Subsequent sends fail with the
+          socket's own closed error, wrapped as JournaldWriteFailed.
+        name: Close
+        recv: s *journaldSink
+        results: error
+    name: journaldSink
+vars:
+  - doc: |-
+      Writer is the registered journald factory singleton. The blank assignment runs
+      writer.Register at package load (no init()), mirroring the codec convention.
+    items:
+      - name: Writer
+        value: writer.Register(&journaldFactory{})
+    name: Writer

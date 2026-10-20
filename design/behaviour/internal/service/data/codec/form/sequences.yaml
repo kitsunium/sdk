@@ -1,0 +1,380 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*formCodec).Name
+    steps:
+      - return: "\"form\""
+  - of: (*formCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*formCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*formCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*formCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*formCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*formCodec).Marshal
+        kind: self
+      - id: asValues
+        kind: internal
+      - id: encodeInto
+        kind: internal
+    steps:
+      - bind: values, ok
+        eval: asValues(v)
+        to: asValues
+      - opt:
+          do:
+            - return: "nil, valueInvalid(\"Marshal: argument is not url.Values / map[string][]string / map[string]string\")"
+          when: "!ok"
+      - return: encodeInto(nil, values), nil
+        to: encodeInto
+  - of: (*formCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*formCodec).Append
+        kind: self
+      - id: asValues
+        kind: internal
+      - id: encodeInto
+        kind: internal
+    steps:
+      - bind: values, ok
+        eval: asValues(v)
+        to: asValues
+      - opt:
+          do:
+            - return: "dst, valueInvalid(\"Append: argument is not url.Values / map[string][]string / map[string]string\")"
+          when: "!ok"
+      - return: encodeInto(dst, values), nil
+        to: encodeInto
+  - of: (*formCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*formCodec).Unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: url
+        kind: stdlib
+      - id: publish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coreform.CodeFormUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "form body exceeds size limit",
+                			Private: "service/data/codec/form.Unmarshal: payload length exceeds maxFormBytes",
+                		}, errs.Int("len", len(data)), errs.Int("cap", maxFormBytes))
+              to: errs
+          when: len(data) > maxFormBytes
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coreform.CodeFormUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "form body declares too many pairs",
+                			Private: "service/data/codec/form.Unmarshal: pair count exceeds maxFormPairs",
+                		}, errs.Int("pairs", pairs), errs.Int("cap", maxFormPairs))
+              to: errs
+          init:
+            bind: pairs
+            eval: bytes.Count(data, []byte{'&'}) + 1
+          when: pairs > maxFormPairs
+      - bind: values, perr
+        eval: url.ParseQuery(string(data))
+        to: url
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(perr, errs.WrapParams{
+                			Code:    coreform.CodeFormUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "form decoding failed",
+                			Private: "service/data/codec/form.Unmarshal: net/url.ParseQuery returned an error",
+                		})
+              to: errs
+          when: perr != nil
+      - return: publish(values, v)
+        to: publish
+  - of: publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: publish
+        kind: self
+      - id: valueInvalid
+        kind: internal
+      - id: collapseSingle
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: dst
+          cases:
+            - do:
+                - opt:
+                    do:
+                      - return: "valueInvalid(\"Unmarshal: *url.Values target is nil\")"
+                        to: valueInvalid
+                    when: dst == nil
+                - set: "*dst"
+                  value: values
+                - return: nil
+              types: "*url.Values"
+            - do:
+                - opt:
+                    do:
+                      - return: "valueInvalid(\"Unmarshal: *map[string][]string target is nil\")"
+                        to: valueInvalid
+                    when: dst == nil
+                - set: "*dst"
+                  value: values
+                - return: nil
+              types: "*map[string][]string"
+            - do:
+                - opt:
+                    do:
+                      - return: "valueInvalid(\"Unmarshal: *map[string]string target is nil\")"
+                        to: valueInvalid
+                    when: dst == nil
+                - bind: single, cerr
+                  eval: collapseSingle(values)
+                  to: collapseSingle
+                - opt:
+                    do:
+                      - return: cerr
+                    when: cerr != nil
+                - set: "*dst"
+                  value: single
+                - return: nil
+              types: "*map[string]string"
+          "on": v
+      - return: "valueInvalid(\"Unmarshal: target is not *url.Values / *map[string][]string / *map[string]string\")"
+        to: valueInvalid
+  - of: asValues
+    participants:
+      - id: caller
+        kind: actor
+      - id: asValues
+        kind: self
+      - id: widenSingle
+        kind: internal
+      - id: asPointedValues
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: src
+          cases:
+            - do:
+                - return: src, true
+              types: url.Values
+            - do:
+                - return: src, true
+              types: map[string][]string
+            - do:
+                - return: widenSingle(src), true
+                  to: widenSingle
+              types: map[string]string
+          "on": v
+      - return: asPointedValues(v)
+        to: asPointedValues
+  - of: asPointedValues
+    participants:
+      - id: caller
+        kind: actor
+      - id: asPointedValues
+        kind: self
+      - id: widenSingle
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: src
+          cases:
+            - do:
+                - opt:
+                    do:
+                      - return: nil, false
+                    when: src == nil
+                - return: "*src, true"
+              types: "*url.Values"
+            - do:
+                - opt:
+                    do:
+                      - return: nil, false
+                    when: src == nil
+                - return: "*src, true"
+              types: "*map[string][]string"
+            - do:
+                - opt:
+                    do:
+                      - return: nil, false
+                    when: src == nil
+                - return: widenSingle(*src), true
+                  to: widenSingle
+              types: "*map[string]string"
+          "on": v
+      - return: nil, false
+  - of: widenSingle
+    steps:
+      - bind: out
+        eval: make(url.Values, len(src))
+      - bind: backing
+        eval: make([]string, len(src))
+      - bind: slot
+        eval: "0"
+      - loop:
+          do:
+            - set: backing[slot]
+              value: val
+            - set: out[key]
+              value: "backing[slot : slot+1 : slot+1]"
+            - op: ++
+              set: slot
+          key: key
+          range: src
+          value: val
+      - return: out
+  - of: encodeInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeInto
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: appendQueryEscape
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(values) == 0
+      - bind: keys
+        eval: slices.AppendSeq(make([]string, 0, len(values)), maps.Keys(values))
+        to: slices
+      - eval: slices.Sort(keys)
+        to: slices
+      - set: dst
+        to: slices
+        value: slices.Grow(dst, encodedLen(values, keys))
+      - bind: written
+        eval: "0"
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: dst
+                          value: append(dst, '&')
+                      when: written > 0
+                  - set: dst
+                    to: appendQueryEscape
+                    value: appendQueryEscape(dst, key)
+                  - set: dst
+                    value: append(dst, '=')
+                  - set: dst
+                    to: appendQueryEscape
+                    value: appendQueryEscape(dst, val)
+                  - op: ++
+                    set: written
+                key: _
+                range: values[key]
+                value: val
+          key: _
+          range: keys
+          value: key
+      - return: dst
+  - of: encodedLen
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodedLen
+        kind: self
+      - id: escapedLen
+        kind: internal
+    steps:
+      - bind: total
+        eval: "0"
+      - bind: pairs
+        eval: "0"
+      - loop:
+          do:
+            - bind: keyLen
+              eval: escapedLen(key)
+              to: escapedLen
+            - loop:
+                do:
+                  - op: +=
+                    set: total
+                    value: keyLen + 1 + escapedLen(val)
+                  - op: ++
+                    set: pairs
+                key: _
+                range: values[key]
+                value: val
+          key: _
+          range: keys
+          value: key
+      - opt:
+          do:
+            - op: +=
+              set: total
+              value: pairs - 1
+          when: pairs > 0
+      - return: total
+  - of: isUnreservedQueryByte
+    steps:
+      - return: isASCIIAlphanumeric(c) || isUnreservedMark(c)
+  - of: isASCIIAlphanumeric
+    steps:
+      - return: |-
+          'a' <= c && c <= 'z' ||
+          		'A' <= c && c <= 'Z' ||
+          		'0' <= c && c <= '9'
+  - of: isUnreservedMark
+    steps:
+      - return: c == '-' || c == '_' || c == '.' || c == '~'
+  - of: valueInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: valueInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coreform.CodeFormValueInvalid,
+          		Reason:  "VALUE_INVALID",
+          		Public:  "form codec requires a url.Values-shaped value",
+          		Private: "service/data/codec/form." + detail,
+          	})
+        to: errs

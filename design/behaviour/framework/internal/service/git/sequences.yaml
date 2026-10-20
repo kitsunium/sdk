@@ -1,0 +1,1476 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewChangedSetValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewChangedSetValue
+        kind: self
+      - id: newChangedSetValue
+        kind: internal
+    steps:
+      - return: newChangedSetValue(repoRoot, "")
+        to: newChangedSetValue
+  - of: newChangedSetValue
+    steps:
+      - return: |-
+          &ChangedSetValue{
+          		repoRoot:         repoRoot,
+          		lineRangesByFile: make(map[string][]coregit.LineRangeValue, changedFilesHint),
+          		touchedFiles:     make(map[string]struct{}, changedFilesHint),
+          		touchedDirs:      make(map[string]struct{}, changedFilesHint),
+          		aliasRoot:        aliasRoot,
+          	}
+  - of: childPrefix
+    steps:
+      - opt:
+          do:
+            - return: dir
+          when: strings.HasSuffix(dir, separator)
+      - return: dir + separator
+  - of: (*ChangedSetValue).spelledAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ChangedSetValue).spelledAs
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: s.aliasRoot == ""
+      - bind: rest, under
+        eval: strings.CutPrefix(absPath, childPrefix(s.repoRoot))
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!under"
+      - return: filepath.Join(s.aliasRoot, rest), true
+        to: filepath
+  - of: (*ChangedSetValue).addLineRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ChangedSetValue).addLineRange
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: s.spelledAs
+        kind: internal
+      - id: s.markTouched
+        kind: internal
+    steps:
+      - bind: clean
+        eval: filepath.Clean(absFile)
+        to: filepath
+      - set: s.lineRangesByFile[clean]
+        value: append(s.lineRangesByFile[clean], rng)
+      - opt:
+          do:
+            - set: s.lineRangesByFile[aliased]
+              value: append(s.lineRangesByFile[aliased], rng)
+          init:
+            bind: aliased, ok
+            eval: s.spelledAs(clean)
+            to: s.spelledAs
+          when: ok
+      - eval: s.markTouched(clean)
+        to: s.markTouched
+  - of: (*ChangedSetValue).addWholeFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ChangedSetValue).addWholeFile
+        kind: self
+      - id: s.addLineRange
+        kind: internal
+    steps:
+      - eval: "s.addLineRange(absFile, coregit.LineRangeValue{Start: 1, End: wholeFileEnd})"
+        to: s.addLineRange
+  - of: (*ChangedSetValue).markTouched
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ChangedSetValue).markTouched
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: s.spelledAs
+        kind: internal
+    steps:
+      - bind: clean
+        eval: filepath.Clean(absFile)
+        to: filepath
+      - set: s.touchedFiles[clean]
+        value: struct{}{}
+      - set: s.touchedDirs[filepath.Dir(clean)]
+        value: struct{}{}
+      - opt:
+          do:
+            - set: s.touchedFiles[aliased]
+              value: struct{}{}
+            - set: s.touchedDirs[filepath.Dir(aliased)]
+              value: struct{}{}
+          init:
+            bind: aliased, ok
+            eval: s.spelledAs(clean)
+            to: s.spelledAs
+          when: ok
+  - of: (*ChangedSetValue).ContainsFile
+    steps:
+      - bind: _, ok
+        eval: s.touchedFiles[filepath.Clean(absFile)]
+      - return: ok
+  - of: (*ChangedSetValue).ContainsDir
+    steps:
+      - bind: _, ok
+        eval: s.touchedDirs[filepath.Clean(absDir)]
+      - return: ok
+  - of: (*ChangedSetValue).IsEmpty
+    steps:
+      - return: len(s.touchedFiles) == 0
+  - of: parseUnifiedDiff
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseUnifiedDiff
+        kind: self
+      - id: flushFile
+        kind: internal
+      - id: updatePaths
+        kind: internal
+    steps:
+      - var:
+          name: blk
+          type: fileBlock
+      - bind: inHunks
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: flushFile(set, root, include, blk)
+                    to: flushFile
+                  - set: blk
+                    value: fileBlock{}
+                  - set: inHunks
+                    value: "false"
+                  - continue: true
+                when: strings.HasPrefix(line, "diff --git ")
+            - opt:
+                do:
+                  - set: inHunks
+                    value: "true"
+                  - opt:
+                      do:
+                        - set: blk.hadHunk
+                          value: "true"
+                      when: applyHunk(line, blk.target, root, set, include)
+                  - continue: true
+                when: strings.HasPrefix(line, "@@ ")
+            - opt:
+                do:
+                  - continue: true
+                when: inHunks
+            - set: blk.target, blk.oldPath
+              to: updatePaths
+              value: updatePaths(line, blk.target, blk.oldPath)
+          key: line
+          range: strings.SplitSeq(diff, "\n")
+      - eval: flushFile(set, root, include, blk)
+        to: flushFile
+  - of: updatePaths
+    participants:
+      - id: caller
+        kind: actor
+      - id: updatePaths
+        kind: self
+      - id: cutAnyPrefix
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: newPathFrom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: target, from
+          init:
+            bind: from, ok
+            eval: cutAnyPrefix(line, "rename from ", "copy from ")
+            to: cutAnyPrefix
+          when: ok
+      - opt:
+          do:
+            - return: to, oldPath
+          init:
+            bind: to, ok
+            eval: cutAnyPrefix(line, "rename to ", "copy to ")
+            to: cutAnyPrefix
+          when: ok
+      - opt:
+          do:
+            - return: target, oldPathFrom(raw, oldPath)
+          init:
+            bind: raw, ok
+            eval: strings.CutPrefix(line, "--- ")
+            to: strings
+          when: ok
+      - opt:
+          do:
+            - bind: newTgt, _
+              eval: newPathFrom(raw)
+              to: newPathFrom
+            - return: newTgt, oldPath
+          init:
+            bind: raw, ok
+            eval: strings.CutPrefix(line, "+++ ")
+            to: strings
+          when: ok
+      - return: target, oldPath
+  - of: flushFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: flushFile
+        kind: self
+      - id: markPath
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: markPath(set, blk.target, root, include)
+              to: markPath
+          when: blk.target != "" && !blk.hadHunk
+      - opt:
+          do:
+            - eval: markPath(set, blk.oldPath, root, include)
+              to: markPath
+          when: blk.oldPath != "" && blk.oldPath != blk.target
+  - of: applyHunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyHunk
+        kind: self
+      - id: parseHunkPlusRange
+        kind: internal
+      - id: scopedAbs
+        kind: internal
+      - id: set.addLineRange
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: target == ""
+      - bind: rng, ok
+        eval: parseHunkPlusRange(line)
+        to: parseHunkPlusRange
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: abs, scoped
+        eval: scopedAbs(target, root, include)
+        to: scopedAbs
+      - opt:
+          do:
+            - return: "false"
+          when: "!scoped"
+      - eval: set.addLineRange(abs, rng)
+        to: set.addLineRange
+      - return: "true"
+  - of: markPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: markPath
+        kind: self
+      - id: scopedAbs
+        kind: internal
+      - id: set.markTouched
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: set.markTouched(abs)
+              to: set.markTouched
+          init:
+            bind: abs, ok
+            eval: scopedAbs(relPath, root, include)
+            to: scopedAbs
+          when: ok
+  - of: scopedAbs
+    participants:
+      - id: caller
+        kind: actor
+      - id: scopedAbs
+        kind: self
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: candidate
+        eval: filepath.Join(root, relPath)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: include != nil && !include(candidate)
+      - return: candidate, true
+  - of: cutAnyPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: cutAnyPrefix
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: after, true
+          init:
+            bind: after, found
+            eval: strings.CutPrefix(line, primary)
+            to: strings
+          when: found
+      - return: strings.CutPrefix(line, secondary)
+        to: strings
+  - of: newPathFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: newPathFrom
+        kind: self
+      - id: trimHeaderTab
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - set: raw
+        to: trimHeaderTab
+        value: trimHeaderTab(raw)
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: raw == "/dev/null"
+      - return: strings.TrimPrefix(raw, "b/"), true
+        to: strings
+  - of: oldPathFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: oldPathFrom
+        kind: self
+      - id: trimHeaderTab
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - set: raw
+        to: trimHeaderTab
+        value: trimHeaderTab(raw)
+      - opt:
+          do:
+            - return: fallback
+          when: raw == "/dev/null"
+      - return: strings.TrimPrefix(raw, "a/")
+        to: strings
+  - of: trimHeaderTab
+    participants:
+      - id: caller
+        kind: actor
+      - id: trimHeaderTab
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: strings.TrimSuffix(raw, "\t")
+        to: strings
+  - of: parseNameStatus
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseNameStatus
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: markPath
+        kind: internal
+    steps:
+      - bind: tokens
+        eval: strings.Split(payload, "\x00")
+        to: strings
+      - loop:
+          cond: i < len(tokens)
+          do:
+            - bind: status
+              eval: tokens[i]
+            - opt:
+                do:
+                  - op: ++
+                    set: i
+                  - continue: true
+                when: status == ""
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: ""
+                      when: i+nameStatusNewPathOffset >= len(tokens)
+                  - eval: markPath(set, tokens[i+1], root, include)
+                    to: markPath
+                  - eval: markPath(set, tokens[i+nameStatusNewPathOffset], root, include)
+                    to: markPath
+                  - op: +=
+                    set: i
+                    value: nameStatusRenameWidth
+                  - continue: true
+                when: status[0] == 'R' || status[0] == 'C'
+            - opt:
+                do:
+                  - return: ""
+                when: i+1 >= len(tokens)
+            - eval: markPath(set, tokens[i+1], root, include)
+              to: markPath
+            - op: +=
+              set: i
+              value: nameStatusSingleWidth
+          init: i := 0
+  - of: parseHunkPlusRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseHunkPlusRange
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: plusToken
+        kind: internal
+      - id: parseStartCount
+        kind: internal
+    steps:
+      - bind: fields
+        eval: strings.Fields(line)
+        to: strings
+      - opt:
+          do:
+            - return: coregit.LineRangeValue{}, false
+          when: len(fields) < minHunkFields
+      - bind: plus, found
+        eval: plusToken(fields)
+        to: plusToken
+      - opt:
+          do:
+            - return: coregit.LineRangeValue{}, false
+          when: "!found"
+      - bind: start, count, parsed
+        eval: parseStartCount(plus)
+        to: parseStartCount
+      - opt:
+          do:
+            - return: coregit.LineRangeValue{}, false
+          when: "!parsed || count == 0 || start < 1"
+      - return: "coregit.LineRangeValue{Start: start, End: start + count - 1}, true"
+  - of: plusToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: plusToken
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: f == "@@"
+            - opt:
+                do:
+                  - return: after, true
+                init:
+                  bind: after, found
+                  eval: strings.CutPrefix(f, "+")
+                  to: strings
+                when: found
+          key: _
+          range: fields[1:]
+          value: f
+      - return: "\"\", false"
+  - of: parseStartCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseStartCount
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: startStr, countStr, hasComma
+        eval: strings.Cut(token, ",")
+        to: strings
+      - bind: start, err
+        eval: strconv.Atoi(startStr)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, 0, false
+          when: err != nil
+      - opt:
+          do:
+            - return: start, 1, true
+          when: "!hasComma"
+      - set: count, err
+        to: strconv
+        value: strconv.Atoi(countStr)
+      - opt:
+          do:
+            - return: 0, 0, false
+          when: err != nil
+      - return: start, count, true
+  - of: extDiffGuard
+    steps:
+      - opt:
+          do:
+            - return: args
+          when: len(args) == 0 || !extDiffSubcommands[args[0]]
+      - bind: guarded
+        eval: make([]string, 0, len(args)+1)
+      - set: guarded
+        value: append(guarded, args[0], "--no-ext-diff")
+      - set: guarded
+        value: append(guarded, args[1:]...)
+      - return: guarded
+  - of: runGitOutput
+    participants:
+      - id: caller
+        kind: actor
+      - id: runGitOutput
+        kind: self
+      - id: exec
+        kind: stdlib
+      - id: cmd.Output
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: full
+        eval: append(append([]string{"-C", repo}, hardenedGitConfig...), extDiffGuard(args)...)
+      - bind: cmd
+        eval: exec.CommandContext(ctx, "git", full...)
+        to: exec
+      - var:
+          name: stderr
+          type: bytes.Buffer
+      - set: cmd.Stderr
+        value: "&stderr"
+      - bind: stdout, runErr
+        eval: cmd.Output()
+        to: cmd.Output
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(runErr, errs.WrapParams{
+                			Code:    coregit.CodeCommandFailed,
+                			Reason:  "COMMAND_FAILED",
+                			Public:  "the version-control command failed",
+                			Private: "service/git: git " + strings.Join(args, " ") + ": " + strings.TrimSpace(stderr.String()),
+                		})
+          when: runErr != nil
+      - return: strings.TrimSpace(string(stdout)), nil
+        to: strings
+  - of: runGitBlob
+    participants:
+      - id: caller
+        kind: actor
+      - id: runGitBlob
+        kind: self
+      - id: exec
+        kind: stdlib
+      - id: cmd.Output
+        kind: value
+    steps:
+      - bind: full
+        eval: append(append([]string{"-C", repo}, hardenedGitConfig...), extDiffGuard(args)...)
+      - bind: cmd
+        eval: exec.CommandContext(ctx, "git", full...)
+        to: exec
+      - var:
+          name: stderr
+          type: bytes.Buffer
+      - set: cmd.Stderr
+        value: "&stderr"
+      - bind: stdout, runErr
+        eval: cmd.Output()
+        to: cmd.Output
+      - opt:
+          do:
+            - return: "\"\", strings.TrimSpace(stderr.String()), runErr"
+          when: runErr != nil
+      - return: string(stdout), "", nil
+  - of: blobFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: blobFailure
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coregit.CodeCommandFailed,
+          		Reason:  "COMMAND_FAILED",
+          		Public:  "the version-control command failed",
+          		Private: "service/git: git " + strings.Join(args, " ") + ": " + stderrTail,
+          	})
+        to: errs
+  - of: gitProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: gitProbe
+        kind: self
+      - id: runGitOutput
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: runGitOutput(ctx, repo, args...)
+        to: runGitOutput
+      - return: err == nil
+  - of: GitDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: GitDir
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: memoizedGitDir
+        kind: internal
+      - id: lstatOrNil
+        kind: internal
+      - id: runGitOutput
+        kind: internal
+      - id: gitDirCache.Store
+        kind: value
+    steps:
+      - bind: abs, err
+        eval: filepath.Abs(root)
+        to: filepath
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(err, errs.WrapParams{
+                			Code:    coregit.CodeRepositoryUnresolved,
+                			Reason:  "REPOSITORY_UNRESOLVED",
+                			Public:  "the path is not inside a readable repository",
+                			Private: "service/git: the root path could not be made absolute: " + root,
+                		})
+          when: err != nil
+      - set: abs
+        to: filepath
+        value: filepath.Clean(abs)
+      - opt:
+          do:
+            - return: dir, nil
+          init:
+            bind: dir, ok
+            eval: memoizedGitDir(abs)
+            to: memoizedGitDir
+          when: ok
+      - bind: entry
+        eval: lstatOrNil(filepath.Join(abs, gitEntry))
+        to: lstatOrNil
+      - bind: out, err
+        eval: runGitOutput(ctx, abs, "rev-parse", "--git-dir")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(err, errs.WrapParams{
+                			Code:    coregit.CodeRepositoryUnresolved,
+                			Reason:  "REPOSITORY_UNRESOLVED",
+                			Public:  "the path is not inside a readable repository",
+                			Private: "service/git: rev-parse --git-dir failed for " + abs,
+                		})
+          when: err != nil
+      - bind: dir
+        eval: out
+      - opt:
+          do:
+            - set: dir
+              to: filepath
+              value: filepath.Join(abs, dir)
+          when: "!filepath.IsAbs(dir)"
+      - set: dir
+        to: filepath
+        value: filepath.Clean(dir)
+      - eval: "gitDirCache.Store(abs, gitDirMemo{dir: dir, entry: entry, resolved: lstatOrNil(dir)})"
+        to: gitDirCache.Store
+      - return: dir, nil
+  - of: memoizedGitDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: memoizedGitDir
+        kind: self
+      - id: gitDirCache.Load
+        kind: value
+    steps:
+      - bind: cached, found
+        eval: gitDirCache.Load(abs)
+        to: gitDirCache.Load
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!found"
+      - bind: memo, isMemo
+        eval: cached.(gitDirMemo)
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!isMemo || !memo.stillTrue(abs)"
+      - return: memo.dir, true
+  - of: gitDirMemo.stillTrue
+    participants:
+      - id: caller
+        kind: actor
+      - id: gitDirMemo.stillTrue
+        kind: self
+      - id: sameEntry
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!sameEntry(m.entry, lstatOrNil(filepath.Join(abs, gitEntry)))"
+      - return: sameEntry(m.resolved, lstatOrNil(m.dir))
+        to: sameEntry
+  - of: sameEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: sameEntry
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: before == nil && now == nil
+          when: before == nil || now == nil
+      - return: os.SameFile(before, now)
+        to: os
+  - of: lstatOrNil
+    participants:
+      - id: caller
+        kind: actor
+      - id: lstatOrNil
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: info, err
+        eval: os.Lstat(path)
+        to: os
+      - opt:
+          do:
+            - return: nil
+          when: err != nil
+      - return: info
+  - of: Head
+    participants:
+      - id: caller
+        kind: actor
+      - id: Head
+        kind: self
+      - id: runGitOutput
+        kind: internal
+      - id: committerTime
+        kind: internal
+      - id: filterGuard
+        kind: internal
+    steps:
+      - bind: revision, revErr
+        eval: runGitOutput(ctx, dir, "rev-parse", "--verify", "HEAD^{commit}")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: HeadValue{}, revErr
+          when: revErr != nil && ctx.Err() != nil
+      - opt:
+          do:
+            - return: HeadValue{}, headFailure(ctx, dir, revErr)
+          when: revErr != nil
+      - bind: commit, catErr
+        eval: runGitOutput(ctx, dir, "cat-file", "commit", revision)
+        to: runGitOutput
+      - opt:
+          do:
+            - return: HeadValue{}, catErr
+          when: catErr != nil
+      - bind: at, parsed
+        eval: committerTime(commit)
+        to: committerTime
+      - opt:
+          do:
+            - return: |-
+                HeadValue{}, errs.Wrap(coregit.CommandFailed, errs.WrapParams{},
+                			errs.String("revision", revision), errs.String("problem", "no readable committer line"))
+          when: "!parsed"
+      - bind: guard, guardErr
+        eval: filterGuard(ctx, dir)
+        to: filterGuard
+      - opt:
+          do:
+            - return: HeadValue{}, guardErr
+          when: guardErr != nil
+      - bind: status, statusErr
+        eval: |-
+          runGitOutput(ctx, dir, append(guard,
+          		"--no-optional-locks", "status", "--porcelain", "--untracked-files=no")...)
+        to: runGitOutput
+      - opt:
+          do:
+            - return: HeadValue{}, statusErr
+          when: statusErr != nil
+      - return: "HeadValue{Revision: revision, Time: at, Modified: status != \"\"}, nil"
+  - of: headFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: headFailure
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: cause
+          when: gitProbe(ctx, dir, "rev-parse", "--git-dir")
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coregit.CodeRepositoryUnresolved,
+          		Reason:  "REPOSITORY_UNRESOLVED",
+          		Public:  "the path is not inside a readable repository",
+          		Private: "service/git: no repository could be resolved from the directory",
+          	})
+        to: errs
+  - of: committerTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: committerTime
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseSignature
+        kind: internal
+    steps:
+      - bind: header, _, _
+        eval: strings.Cut(commit, "\n\n")
+        to: strings
+      - loop:
+          do:
+            - bind: identity, found
+              eval: strings.CutPrefix(line, committerPrefix)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: "!found"
+            - return: parseSignature(identity)
+              to: parseSignature
+          key: line
+          range: strings.SplitSeq(header, "\n")
+      - return: time.Time{}, false
+  - of: parseSignature
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseSignature
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: parseOffset
+        kind: internal
+      - id: time.Unix(seconds, 0).In
+        kind: value
+    steps:
+      - bind: _, stamp, closed
+        eval: strings.CutLast(identity, ">")
+        to: strings
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: "!closed"
+      - bind: fields
+        eval: strings.Fields(stamp)
+        to: strings
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: len(fields) != 2
+      - bind: seconds, secondsErr
+        eval: strconv.ParseInt(fields[0], decimalBase, int64Bits)
+        to: strconv
+      - bind: offset, offsetOK
+        eval: parseOffset(fields[1])
+        to: parseOffset
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: secondsErr != nil || !offsetOK
+      - return: time.Unix(seconds, 0).In(time.FixedZone("", offset)), true
+        to: time.Unix(seconds, 0).In
+  - of: parseOffset
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseOffset
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(zone) != tzDigits+1 || (zone[0] != '+' && zone[0] != '-')
+      - bind: hours, hoursErr
+        eval: strconv.Atoi(zone[1:3])
+        to: strconv
+      - bind: minutes, minutesErr
+        eval: strconv.Atoi(zone[3:])
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: hoursErr != nil || minutesErr != nil || hours < 0 || minutes < 0 || minutes >= minutesPerHour
+      - set: seconds
+        value: (hours*minutesPerHour + minutes) * secondsPerMinute
+      - opt:
+          do:
+            - return: "-seconds, true"
+          when: zone[0] == '-'
+      - return: seconds, true
+  - of: filterGuard
+    participants:
+      - id: caller
+        kind: actor
+      - id: filterGuard
+        kind: self
+      - id: runGitOutput
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: keys, listErr
+        eval: runGitOutput(ctx, dir, "config", "--list", "--name-only")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: nil, listErr
+          when: listErr != nil
+      - bind: seen
+        eval: map[string]bool{}
+      - loop:
+          do:
+            - bind: rest, isFilter
+              eval: strings.CutPrefix(key, "filter.")
+              to: strings
+            - bind: cut
+              eval: strings.LastIndexByte(rest, '.')
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: "!isFilter || cut <= 0 || seen[rest[:cut]]"
+            - bind: name
+              eval: rest[:cut]
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(coregit.CommandFailed, errs.WrapParams{},
+                      				errs.String("problem", "a filter driver name holds '=', which git -c cannot address"))
+                when: strings.Contains(name, "=")
+            - set: seen[name]
+              value: "true"
+            - set: guard
+              value: append(guard, "-c", "filter."+name+".clean=", "-c", "filter."+name+".process=")
+          key: key
+          range: strings.SplitSeq(keys, "\n")
+      - return: guard, nil
+  - of: fullFallback
+    steps:
+      - return: "coregit.ResolutionValue{FullFallback: true, Reason: reason}"
+  - of: Resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: Resolve
+        kind: self
+      - id: repoTopLevel
+        kind: internal
+      - id: fullFallback
+        kind: internal
+      - id: shallowState
+        kind: internal
+      - id: resolveBaseRef
+        kind: internal
+      - id: mergeBase
+        kind: internal
+      - id: runGitOutput
+        kind: internal
+      - id: newChangedSetValue
+        kind: internal
+      - id: collectChanges
+        kind: internal
+    steps:
+      - bind: root, spelled, ok
+        eval: repoTopLevel(ctx, cfg.Root)
+        to: repoTopLevel
+      - opt:
+          do:
+            - return: fullFallback("not a git repository — everything in scope")
+              to: fullFallback
+          when: "!ok"
+      - bind: shallow, known
+        eval: shallowState(ctx, root)
+        to: shallowState
+      - opt:
+          do:
+            - return: fullFallback("shallow probe failed — everything in scope")
+              to: fullFallback
+          when: "!known"
+      - opt:
+          do:
+            - return: fullFallback("shallow clone — everything in scope")
+              to: fullFallback
+          when: shallow
+      - bind: baseRef, ok
+        eval: resolveBaseRef(ctx, root)
+        to: resolveBaseRef
+      - opt:
+          do:
+            - return: fullFallback("default branch unresolved — everything in scope")
+              to: fullFallback
+          when: "!ok"
+      - bind: baseSHA, ok
+        eval: mergeBase(ctx, root, baseRef)
+        to: mergeBase
+      - opt:
+          do:
+            - return: fullFallback("no merge-base with " + baseRef + " — everything in scope")
+              to: fullFallback
+          when: "!ok"
+      - bind: headSHA, err
+        eval: runGitOutput(ctx, root, "rev-parse", "HEAD")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: fullFallback("HEAD unresolved — everything in scope")
+              to: fullFallback
+          when: err != nil
+      - bind: set
+        eval: newChangedSetValue(root, spelled)
+        to: newChangedSetValue
+      - opt:
+          do:
+            - return: fullFallback("git diff failed or timed out — everything in scope")
+              to: fullFallback
+          init:
+            bind: err
+            eval: collectChanges(ctx, root, baseSHA, set, cfg.Include)
+            to: collectChanges
+          when: err != nil
+      - return: |-
+          coregit.ResolutionValue{
+          		Set:     set,
+          		BaseRef: baseRef,
+          		BaseSHA: baseSHA,
+          		HeadSHA: headSHA,
+          	}
+  - of: repoTopLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: repoTopLevel
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: runGitOutput
+        kind: internal
+      - id: spelledTopLevel
+        kind: internal
+    steps:
+      - bind: start
+        eval: hint
+      - opt:
+          do:
+            - set: start
+              value: "\".\""
+          when: start == ""
+      - bind: abs, err
+        eval: filepath.Abs(start)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: err != nil
+      - bind: out, err
+        eval: runGitOutput(ctx, abs, "rev-parse", "--show-toplevel")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: err != nil
+      - set: canonical
+        to: filepath
+        value: filepath.Clean(out)
+      - set: asSpelled, _
+        to: spelledTopLevel
+        value: spelledTopLevel(abs, canonical)
+      - return: canonical, asSpelled, true
+  - of: spelledTopLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: spelledTopLevel
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: trimRepoTail
+        kind: internal
+    steps:
+      - bind: clean
+        eval: filepath.Clean(absHint)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: clean == canonical || strings.HasPrefix(clean, canonical+separator)
+      - bind: resolved, err
+        eval: filepath.EvalSymlinks(clean)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - bind: root, rootErr
+        eval: filepath.EvalSymlinks(canonical)
+        to: filepath
+      - opt:
+          do:
+            - set: root
+              value: canonical
+          when: rootErr != nil
+      - return: trimRepoTail(clean, root, resolved)
+        to: trimRepoTail
+  - of: trimRepoTail
+    participants:
+      - id: caller
+        kind: actor
+      - id: trimRepoTail
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: rel, err
+        eval: filepath.Rel(canonical, resolved)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil || rel == ".." || strings.HasPrefix(rel, ".."+separator)
+      - opt:
+          do:
+            - return: clean, true
+          when: rel == "."
+      - bind: trimmed, cut
+        eval: strings.CutSuffix(clean, separator+rel)
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!cut"
+      - return: trimmed, true
+  - of: shallowState
+    participants:
+      - id: caller
+        kind: actor
+      - id: shallowState
+        kind: self
+      - id: runGitOutput
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: runGitOutput(ctx, root, "rev-parse", "--is-shallow-repository")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: false, false
+          when: err != nil
+      - switch:
+          cases:
+            - case: "\"true\""
+              do:
+                - return: true, true
+            - case: "\"false\""
+              do:
+                - return: false, true
+            - default: true
+              do:
+                - return: false, false
+          "on": out
+  - of: resolveBaseRef
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveBaseRef
+        kind: self
+      - id: runGitOutput
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: runGitOutput(ctx, root, "rev-parse", "--verify", "--quiet", "--abbrev-ref", originHEAD)
+        to: runGitOutput
+      - opt:
+          do:
+            - return: out, true
+          when: err == nil && out != ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: cand, true
+                when: gitProbe(ctx, root, "rev-parse", "--verify", "--quiet", cand+"^{commit}")
+          key: _
+          range: defaultBranchCandidates
+          value: cand
+      - return: "\"\", false"
+  - of: mergeBase
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeBase
+        kind: self
+      - id: runGitOutput
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: runGitOutput(ctx, root, "merge-base", baseRef, "HEAD")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil || out == ""
+      - return: out, true
+  - of: collectChanges
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectChanges
+        kind: self
+      - id: addDiff
+        kind: internal
+      - id: addUntracked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: addDiff(ctx, root, set, include, baseSHA, "HEAD")
+            to: addDiff
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: addDiff(ctx, root, set, include, "--cached")
+            to: addDiff
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: addDiff(ctx, root, set, include)
+            to: addDiff
+          when: err != nil
+      - return: addUntracked(ctx, root, set, include)
+        to: addUntracked
+  - of: addDiff
+    participants:
+      - id: caller
+        kind: actor
+      - id: addDiff
+        kind: self
+      - id: addNameStatus
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: runGitOutput
+        kind: internal
+      - id: parseUnifiedDiff
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: addNameStatus(ctx, root, set, include, extraArgs...)
+            to: addNameStatus
+          when: err != nil
+      - bind: args
+        eval: slices.Concat(diffBaseArgs, extraArgs)
+        to: slices
+      - bind: out, err
+        eval: runGitOutput(ctx, root, args...)
+        to: runGitOutput
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: out == ""
+      - eval: parseUnifiedDiff(out, root, set, include)
+        to: parseUnifiedDiff
+      - return: nil
+  - of: addNameStatus
+    participants:
+      - id: caller
+        kind: actor
+      - id: addNameStatus
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: runGitOutput
+        kind: internal
+      - id: parseNameStatus
+        kind: internal
+    steps:
+      - bind: args
+        eval: slices.Concat(nameStatusBaseArgs, extraArgs)
+        to: slices
+      - bind: out, err
+        eval: runGitOutput(ctx, root, args...)
+        to: runGitOutput
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: out == ""
+      - eval: parseNameStatus(out, root, set, include)
+        to: parseNameStatus
+      - return: nil
+  - of: addUntracked
+    participants:
+      - id: caller
+        kind: actor
+      - id: addUntracked
+        kind: self
+      - id: runGitOutput
+        kind: internal
+      - id: scopedAbs
+        kind: internal
+      - id: set.addWholeFile
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: runGitOutput(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
+        to: runGitOutput
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: out == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: rel == ""
+            - opt:
+                do:
+                  - eval: set.addWholeFile(abs)
+                    to: set.addWholeFile
+                init:
+                  bind: abs, ok
+                  eval: scopedAbs(rel, root, include)
+                  to: scopedAbs
+                when: ok
+          key: rel
+          range: strings.SplitSeq(out, "\x00")
+      - return: nil
+  - of: ShowFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: ShowFile
+        kind: self
+      - id: runGitBlob
+        kind: internal
+    steps:
+      - bind: spec
+        eval: sha + ":./" + relPath
+      - bind: content, stderrTail, runErr
+        eval: runGitBlob(ctx, repoRoot, "show", spec)
+        to: runGitBlob
+      - opt:
+          do:
+            - return: content, nil
+          when: runErr == nil
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(runErr, errs.WrapParams{
+                			Code:    coregit.CodePathAbsent,
+                			Reason:  "PATH_ABSENT",
+                			Public:  "the path does not exist at that commit",
+                			Private: "service/git: " + relPath + " is absent from " + sha + ": " + stderrTail,
+                		})
+          when: pathAbsent(ctx, repoRoot, sha, spec)
+      - return: "\"\", blobFailure(runErr, stderrTail, \"show\", spec)"
+  - of: pathAbsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: pathAbsent
+        kind: self
+      - id: gitProbe
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!gitProbe(ctx, repoRoot, \"cat-file\", \"-e\", sha+\"^{commit}\")"
+      - return: "!gitProbe(ctx, repoRoot, \"cat-file\", \"-e\", spec)"
+        to: gitProbe

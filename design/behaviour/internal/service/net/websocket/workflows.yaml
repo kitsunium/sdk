@@ -1,0 +1,52 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: forwardedScheme
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: r.TLS != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: _, sent
+                  eval: r.Header[textproto.CanonicalMIMEHeaderKey(name)]
+                when: sent
+          key: _
+          range: "[]string{\"Forwarded\", \"X-Forwarded-Proto\"}"
+          value: name
+      - return: "false"
+  - of: slicesContainsFold
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: strings.EqualFold(entry, want)
+          key: _
+          range: list
+          value: entry
+      - return: "false"
+  - of: isToken
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                init:
+                  bind: c
+                  eval: s[i]
+                when: "!isTokenChar(c)"
+          key: i
+          range: len(s)
+      - return: "true"

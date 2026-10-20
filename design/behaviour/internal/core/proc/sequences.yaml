@@ -1,0 +1,136 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ExitValue.Success
+    steps:
+      - return: "!e.Signaled && e.Code == 0"
+  - of: MemorySource.String
+    steps:
+      - switch:
+          cases:
+            - case: MemorySourceOperator
+              do:
+                - return: "\"operator\""
+            - case: MemorySourceUnconstrained
+              do:
+                - return: "\"unconstrained\""
+            - case: MemorySourceBelowFloor
+              do:
+                - return: "\"below-floor\""
+            - case: MemorySourceCgroup
+              do:
+                - return: "\"cgroup\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": s
+  - of: MemoryLimitValue.Applied
+    steps:
+      - return: m.Source == MemorySourceCgroup
+  - of: NotificationValue.Ready
+    steps:
+      - return: n.State["READY"] == "1"
+  - of: NotificationValue.Reloading
+    steps:
+      - return: n.State["RELOADING"] == "1"
+  - of: NotificationValue.Stopping
+    steps:
+      - return: n.State["STOPPING"] == "1"
+  - of: NotificationValue.Watchdog
+    steps:
+      - return: n.State["WATCHDOG"] == "1"
+  - of: Resource.String
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: resourceNames[r]
+          when: ok
+      - return: "\"unknown\""
+  - of: Resource.Known
+    steps:
+      - return: r > ResourceUnknown && r <= ResourceMemLock
+  - of: Signal.OS
+    participants:
+      - id: caller
+        kind: actor
+      - id: Signal.OS
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - return: syscall.Signal(s)
+        to: syscall
+  - of: Signal.Int
+    steps:
+      - return: int(s)
+  - of: Signal.String
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: signalNames[s]
+          when: ok
+      - return: "\"signal \" + strconv.Itoa(int(s))"
+  - of: Signal.Known
+    steps:
+      - bind: _, ok
+        eval: signalNames[s]
+      - return: ok
+  - of: Parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: Parse
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: trimmed
+        eval: strings.TrimSpace(name)
+        to: strings
+      - opt:
+          do:
+            - bind: candidate
+              eval: Signal(n)
+            - opt:
+                do:
+                  - return: 0, UnknownSignal
+                when: "!candidate.Known()"
+            - return: candidate, nil
+          init:
+            bind: n, convErr
+            eval: strconv.Atoi(trimmed)
+            to: strconv
+          when: convErr == nil
+      - bind: canonical
+        eval: "\"SIG\" + strings.TrimPrefix(strings.ToUpper(trimmed), \"SIG\")"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: value, nil
+                when: named == canonical
+          key: value
+          range: signalNames
+          value: named
+      - return: 0, UnknownSignal
+  - of: StdioMode.String
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: stdioModeNames[m]
+          when: ok
+      - return: "\"stdiomode(\" + strconv.Itoa(int(m)) + \")\""
+  - of: StdioMode.Known
+    steps:
+      - return: m <= StdioCapture

@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: New
+    steps:
+      - bind: cp
+        eval: make([]Params, 0, len(entries))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: entry.When == nil || entry.Sink == nil
+            - set: cp
+              value: append(cp, entry)
+          key: _
+          range: entries
+          value: entry
+      - return: "&routerSink{entries: cp, fallback: fallback}"

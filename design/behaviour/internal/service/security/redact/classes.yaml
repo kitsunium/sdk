@@ -1,0 +1,662 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      floatFormat and floatBits render a float attribute the way strconv's
+      shortest round-trip form does.
+    grouped: true
+    items:
+      - name: floatFormat
+        type: byte
+        value: "'g'"
+      - name: floatBits
+        type: int
+        value: "64"
+      - name: floatShort
+        type: int
+        value: "-1"
+      - name: decimal
+        type: int
+        value: "10"
+    name: floatFormat
+  - doc: Byte costs the bound accounts for.
+    grouped: true
+    items:
+      - doc: |-
+          minValueBytes is the smallest value a cut can still write where a value
+          is owed: the Ellipsis as a JSON string, `"…"`.
+        name: minValueBytes
+        type: int
+        value: len(`"` + coreredact.Ellipsis + `"`)
+      - doc: quoteBytes is the two quotation marks around a string.
+        name: quoteBytes
+        type: int
+        value: "2"
+      - doc: |-
+          separatorBytes is a comma between members or elements, or the colon
+          after a member name.
+        name: separatorBytes
+        type: int
+        value: "1"
+    name: minValueBytes
+  - doc: quotedPlaceholder is the Placeholder as a JSON string.
+    items:
+      - name: quotedPlaceholder
+        type: string
+        value: "`\"` + coreredact.Placeholder + `\"`"
+    name: quotedPlaceholder
+  - doc: truncatedValue is what a value that cannot fit becomes.
+    items:
+      - name: truncatedValue
+        type: string
+        value: "`\"` + coreredact.Ellipsis + `\"`"
+    name: truncatedValue
+  - doc: fieldOffset carries where the reader refused a document.
+    items:
+      - name: fieldOffset
+        type: string
+        value: "\"offset\""
+    name: fieldOffset
+  - doc: hexDigits spells the four digits of a \uXXXX escape.
+    items:
+      - name: hexDigits
+        type: string
+        value: "\"0123456789abcdef\""
+    name: hexDigits
+  - doc: |-
+      lineSeparator and paragraphSeparator are legal inside a JSON string and end
+      a line in JavaScript, so a document shown in a page is escaped for them.
+    grouped: true
+    items:
+      - name: lineSeparator
+        type: rune
+        value: "0x2028"
+      - name: paragraphSeparator
+        type: rune
+        value: "0x2029"
+    name: lineSeparator
+  - doc: defaultTag is the struct tag key read when Config.Tag is empty.
+    items:
+      - name: defaultTag
+        type: string
+        value: "\"redact\""
+    name: defaultTag
+  - doc: secretOption is the tag option that declares a field secret.
+    items:
+      - name: secretOption
+        type: string
+        value: "\"secret\""
+    name: secretOption
+files:
+  - decls:
+      - floatFormat
+      - (*Redactor).Attrs
+      - (*Redactor).walk
+      - dotted
+      - (*Redactor).render
+      - (*Redactor).format
+      - (*Redactor).renderAny
+      - (*Redactor).errorText
+    name: attrs.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - candidate
+      - writtenField
+      - embedding
+      - writtenFields
+      - scanLevel
+      - dominant
+      - byPrecedence
+      - jsonName
+      - unnamedElem
+    name: fields.go
+  - decls:
+      - minValueBytes
+      - quotedPlaceholder
+      - truncatedValue
+      - fieldOffset
+      - hexDigits
+      - lineSeparator
+      - shortEscapes
+      - (*Redactor).JSON
+      - (*Redactor).Value
+      - (*Redactor).redact
+      - copier
+      - (*copier).room
+      - (*copier).invalid
+      - (*copier).value
+      - (*copier).object
+      - (*copier).array
+      - (*copier).open
+      - (*copier).close
+      - (*copier).separator
+      - (*copier).fitsMember
+      - (*copier).member
+      - (*copier).scalar
+      - (*copier).text
+      - quotedLength
+      - appendQuoted
+      - escapedLength
+      - needsUnicodeEscape
+      - appendEscaped
+    name: json.go
+  - decls:
+      - plan
+      - (*plan).member
+      - (*plan).item
+      - jsonMarshalerType
+      - (*Redactor).planOf
+      - writesOwnJSON
+      - (*Redactor).build
+      - (*Redactor).below
+      - (*Redactor).fields
+      - (*Redactor).memberPlan
+      - (*Redactor).declared
+    name: plan.go
+  - decls:
+      - defaultTag
+      - secretOption
+      - defaultWords
+      - DefaultWords
+      - Config
+      - Redactor
+      - NewRedactor
+      - (*Redactor).Name
+      - bound
+    name: redact.go
+  - decls:
+      - _
+    name: redact_compliance.go
+  - decls:
+      - credentials
+      - (*Redactor).Text
+      - (*Redactor).scrub
+      - clip
+    name: text.go
+functions:
+  - doc: |-
+      dotted joins a group's key and a member's, skipping an empty one: an
+      unnamed group inlines its members, as log/slog does.
+    name: dotted
+    params: prefix, key string
+    results: string
+  - doc: |-
+      writtenFields returns, for struct t, the one field encoding/json writes under
+      each member name, in name order.
+
+      The plan applies to what json.Marshal wrote, so it must select exactly the
+      field json.Marshal selected — an approximation is a secret applied to the
+      wrong value, or not applied at all. This is encoding/json's own resolution:
+      Go's rules for embedded fields, amended so a tagged field wins a tie.
+
+        - Embedded structs are expanded one LEVEL at a time, shallowest first, and
+          each type once, at its shallowest level.
+        - For one name, only the fields at the smallest depth compete. One wins
+          alone; of several, a single tagged one wins; otherwise NONE is written —
+          and a deeper field of that name is not written either.
+        - A struct type embedded twice at one level has its fields counted twice,
+          so they tie and cancel out.
+        - An embedded struct is promoted by its kind alone. One that writes its own
+          JSON only reaches here when its method was not promoted — two such
+          structs at one level — and encoding/json then flattens both.
+    name: writtenFields
+    params: t reflect.Type
+    results: "[]writtenField"
+  - doc: |-
+      scanLevel records the fields of one embedded struct and queues the structs
+      it embeds for the next level. twice duplicates every recorded field, for a
+      type embedded more than once at this level. counted tallies what the next
+      level embeds.
+    name: scanLevel
+    params: level embedding, twice bool, found []candidate, next []embedding, counted map[reflect.Type]int
+    results: "[]candidate, []embedding"
+  - doc: |-
+      dominant keeps, for each name, the field encoding/json writes, and drops the
+      names it writes no field for.
+    name: dominant
+    params: found []candidate
+    results: "[]candidate"
+  - doc: |-
+      byPrecedence orders fields by name, then depth, then tagged first, then
+      declaration order — so the first of a name is the one that can win.
+    name: byPrecedence
+    params: a, b candidate
+    results: int
+  - doc: |-
+      jsonName returns the member name encoding/json writes field under and
+      whether it came from the json tag, whether the field is an embedded struct
+      whose fields are promoted instead, and whether it is written at all.
+    name: jsonName
+    params: field reflect.StructField
+    results: name string, tagged, promoted, visible bool
+  - doc: |-
+      unnamedElem returns what an unnamed pointer type points to, and any other
+      type unchanged: the type whose kind decides whether a field is promoted.
+    name: unnamedElem
+    params: t reflect.Type
+    results: reflect.Type
+  - doc: quotedLength returns the length of value as a JSON string.
+    name: quotedLength
+    params: value string
+    results: int
+  - doc: appendQuoted appends value as a JSON string.
+    name: appendQuoted
+    params: out []byte, value string
+    results: "[]byte"
+  - doc: escapedLength returns how many bytes appendEscaped writes for character.
+    name: escapedLength
+    params: character rune
+    results: int
+  - doc: |-
+      needsUnicodeEscape reports whether character is written as \uXXXX: a control
+      character without a short escape, or one of the two separators.
+    name: needsUnicodeEscape
+    params: character rune
+    results: bool
+  - doc: |-
+      appendEscaped appends one character of a JSON string, escaped where RFC
+      8259 requires it or a JavaScript consumer would break.
+    name: appendEscaped
+    params: out []byte, character rune
+    results: "[]byte"
+  - doc: |-
+      writesOwnJSON reports whether t writes its own JSON, whose shape reflection
+      cannot see: only its names can then be judged.
+    name: writesOwnJSON
+    params: t reflect.Type
+    results: bool
+  - name: DefaultWords
+    results: "[]string"
+  - name: NewRedactor
+    params: cfg Config
+    results: "*Redactor"
+  - doc: bound resolves a caller's byte bound to one the output can honour.
+    name: bound
+    params: maxBytes int
+    results: int
+  - doc: |-
+      clip cuts s to at most limit bytes at a rune boundary, the Ellipsis
+      included.
+    name: clip
+    params: s string, limit int
+    results: string
+imports:
+  bytes: bytes
+  cmp: cmp
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coreredact: github.com/kitsunium/sdk/internal/core/security/redact
+  encoding: encoding
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  io: io
+  iter: iter
+  json: encoding/json
+  jsontext: encoding/json/jsontext
+  reflect: reflect
+  regexp: regexp
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/security/redact
+  name: redact
+  purpose: Package redact — log attributes rendered as display text.
+types:
+  - doc: |-
+      candidate is one field encoding/json may write under name: index is its path
+      from the struct being planned (reflect.Type.FieldByIndex), len(index) its
+      depth, and tagged reports that the name came from its json tag.
+    fields:
+      - name: name
+        type: string
+      - name: index
+        type: "[]int"
+      - name: tagged
+        type: bool
+    kind: struct
+    name: candidate
+  - doc: |-
+      writtenField is a member encoding/json writes: its name and the field whose
+      value it writes.
+    fields:
+      - name: name
+        type: string
+      - name: field
+        type: reflect.StructField
+    kind: struct
+    name: writtenField
+  - doc: |-
+      embedding is a struct type whose fields are promoted into the struct being
+      planned, and the index path that reaches it.
+    fields:
+      - name: typ
+        type: reflect.Type
+      - name: index
+        type: "[]int"
+    kind: struct
+    name: embedding
+  - doc: |-
+      copier streams one JSON value from decoder into out, writing nothing that
+      would leave too little room for the closers it owes.
+    fields:
+      - name: redactor
+        type: "*Redactor"
+      - name: decoder
+        type: "*jsontext.Decoder"
+      - name: out
+        type: "[]byte"
+      - name: bound
+        type: int
+      - doc: "depth is how many containers are open: one closing byte owed for each."
+        name: depth
+        type: int
+      - doc: |-
+          cut is set once anything was left out; from then on nothing more is
+          written, and every open container is closed as it ends.
+        name: cut
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          room returns how many bytes the next token may take, the closers owed kept
+          aside.
+        name: room
+        recv: c *copier
+        results: int
+      - doc: invalid is the refusal of a document the reader could not read.
+        name: invalid
+        recv: c *copier
+        results: error
+      - doc: |-
+          value copies the next value. A secret one — by its member's name, or by
+          declaration — is skipped and written as the Placeholder.
+
+          The caller guarantees room for at least minValueBytes.
+        name: value
+        params: declared *plan, secretName bool
+        recv: c *copier
+        results: error
+      - doc: object copies the members of an object whose opening brace was read.
+        name: object
+        params: declared *plan
+        recv: c *copier
+        results: error
+      - doc: array copies the elements of an array whose opening bracket was read.
+        name: array
+        params: declared *plan
+        recv: c *copier
+        results: error
+      - doc: open writes an opening brace or bracket and owes its closer.
+        name: open
+        params: opener byte
+        recv: c *copier
+      - doc: close reads the closing token and writes the closer that was owed.
+        name: close
+        params: closer byte
+        recv: c *copier
+        results: error
+      - doc: separator returns the byte a member or element after the first costs.
+        name: separator
+        params: first bool
+        recv: c *copier
+        results: int
+      - doc: |-
+          fitsMember reports whether a member named name fits: its separator, its
+          quoted name, the colon, and the smallest value a cut could still write.
+        name: fitsMember
+        params: first bool, name string
+        recv: c *copier
+        results: bool
+      - doc: |-
+          member writes a member's separator, name and colon. The caller checked
+          that they fit.
+        name: member
+        params: first bool, name string
+        recv: c *copier
+      - doc: |-
+          scalar writes a token whole, or the truncated value when it does not fit.
+          The caller guarantees room for the truncated value.
+        name: scalar
+        params: token string
+        recv: c *copier
+      - doc: |-
+          text writes a string whole, or as long a prefix as fits followed by the
+          Ellipsis. The caller guarantees room for the truncated value.
+        name: text
+        params: value string
+        recv: c *copier
+    name: copier
+  - doc: |-
+      plan says, for one Go type, which members of its JSON form are secret by
+      declaration, and the plans of the members below them. A nil plan declares
+      nothing: only names are then judged.
+    fields:
+      - name: members
+        type: map[string]*plan
+      - name: items
+        type: "*plan"
+      - name: secret
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          member returns the plan of an object member: a struct's field by its JSON
+          name, or a map's value whatever its key.
+        name: member
+        params: name string
+        recv: p *plan
+        results: "*plan"
+      - doc: item returns the plan of an array's elements.
+        name: item
+        recv: p *plan
+        results: "*plan"
+    name: plan
+  - fields:
+      - doc: |-
+          Field is an extra rule: it reports whether a struct field is secret
+          by declaration, beyond the tag — a field bound to a cookie, a field
+          bound to a header whose name is a secret's. Nil adds nothing. It is
+          called once per field per type, when the type is first seen.
+        name: Field
+        type: func(field reflect.StructField) bool
+      - doc: |-
+          Error renders an error found in a log attribute. Nil uses the error's
+          own text, scrubbed and cut like any other text. A framework that
+          shows only an error's wire-safe half passes its own.
+        name: Error
+        type: func(err error) string
+      - doc: |-
+          Tag is the struct tag key whose comma-separated options, when one of
+          them is "secret", declare a field secret: Tag "kit" reads
+          `kit:"secret"` and `kit:"other,secret"`. Empty means "redact".
+        name: Tag
+        type: string
+      - doc: |-
+          Words are the fragments of a member or attribute name that make it a
+          secret, matched case-insensitively anywhere in the name. Nil or empty
+          means DefaultWords — there is no way to recognise NO name, because a
+          redactor that recognises nothing by name is a formatter.
+        name: Words
+        type: "[]string"
+    kind: struct
+    name: Config
+  - fields:
+      - name: field
+        type: func(field reflect.StructField) bool
+      - name: error
+        type: func(err error) string
+      - name: plans
+        type: sync.Map
+      - name: tag
+        type: string
+      - name: words
+        type: "[]string"
+    kind: struct
+    methods:
+      - name: Attrs
+        params: attrs []corelogger.AttrValue, maxBytes int
+        recv: r *Redactor
+        results: iter.Seq2[string, string]
+      - doc: |-
+          walk yields every attribute under prefix, and reports false once the
+          caller stopped ranging.
+        name: walk
+        params: |2
+
+          	attrs []corelogger.AttrValue, prefix string, limit int, yield func(key, text string) bool,
+        recv: r *Redactor
+        results: bool
+      - doc: |-
+          render returns one non-group attribute's value as display text, cut to
+          limit like every other text Attrs hands out: a timestamp or a long duration
+          is as much a text as a string is.
+        name: render
+        params: attr *corelogger.AttrValue, limit int
+        recv: r *Redactor
+        results: string
+      - doc: format returns one non-group attribute's value as text, uncut.
+        name: format
+        params: attr *corelogger.AttrValue, limit int
+        recv: r *Redactor
+        results: string
+      - doc: renderAny renders the opaque value logger.Any put in an attribute.
+        name: renderAny
+        params: attr *corelogger.AttrValue, limit int
+        recv: r *Redactor
+        results: string
+      - doc: errorText renders an error with the caller's renderer, or its own text.
+        name: errorText
+        params: err error
+        recv: r *Redactor
+        results: string
+      - name: JSON
+        params: document []byte, maxBytes int
+        recv: r *Redactor
+        results: redacted coreredact.DocumentValue, err error
+      - name: Value
+        params: v any, maxBytes int
+        recv: r *Redactor
+        results: redacted coreredact.DocumentValue, err error
+      - doc: redact copies one document with its secrets replaced, within the bound.
+        name: redact
+        params: document []byte, declared *plan, maxBytes int
+        recv: r *Redactor
+        results: coreredact.DocumentValue, error
+      - doc: planOf returns the plan of t, from the cache when t was seen before.
+        name: planOf
+        params: t reflect.Type
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          build walks t the way encoding/json lays it out. seen holds the plans being
+          built, so a recursive type shares its own plan instead of looping.
+        name: build
+        params: t reflect.Type, seen map[reflect.Type]*plan
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          below builds the plan shared by every element of an array or value of a
+          map, or nil when the element declares nothing.
+        name: below
+        params: element reflect.Type, seen map[reflect.Type]*plan
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          fields adds to p the plan of every member encoding/json writes for struct t:
+          for each member name, the plan of the one field encoding/json itself selects
+          (writtenFields). A member that declares nothing keeps no plan, so only its
+          name is judged. seen holds the plans being built, so a recursive type shares
+          its own plan instead of walking forever.
+        name: fields
+        params: p *plan, t reflect.Type, seen map[reflect.Type]*plan
+        recv: r *Redactor
+      - doc: |-
+          memberPlan is the plan of one member: the whole member replaced when the
+          field is secret by declaration, else whatever its own type declares below
+          it — nil when that is nothing.
+        name: memberPlan
+        params: field reflect.StructField, seen map[reflect.Type]*plan
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          declared reports whether a field is secret by declaration: the Redactor's
+          tag carries the "secret" option, or its extra field rule says so.
+        name: declared
+        params: field reflect.StructField
+        recv: r *Redactor
+        results: bool
+      - name: Name
+        params: name string
+        recv: r *Redactor
+        results: bool
+      - name: Text
+        params: s string, maxBytes int
+        recv: r *Redactor
+        results: string
+      - doc: scrub replaces the credentials of every URL in s.
+        name: scrub
+        params: s string
+        recv: r *Redactor
+        results: string
+    name: Redactor
+vars:
+  - doc: |-
+      shortEscapes maps each character JSON escapes with a backslash and one
+      letter — or with a backslash and itself — to that letter.
+    items:
+      - name: shortEscapes
+        value: |-
+          map[rune]byte{
+          	'"': '"', '\\': '\\', '\b': 'b', '\f': 'f', '\n': 'n', '\r': 'r', '\t': 't',
+          }
+    name: shortEscapes
+  - doc: Types whose JSON form reflection cannot see.
+    grouped: true
+    items:
+      - name: jsonMarshalerType
+        value: reflect.TypeFor[json.Marshaler]()
+      - name: textMarshalerType
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+    name: jsonMarshalerType
+  - doc: |-
+      defaultWords are the fragments of a member name that make it a secret,
+      matched case-insensitively anywhere in the name — "accessToken",
+      "password_confirm", "X-Api-Key", "Set-Cookie" all match.
+    items:
+      - name: defaultWords
+        value: |-
+          []string{
+          	"password", "passwd", "secret", "token", "authorization",
+          	"cookie", "session", "apikey", "api_key", "api-key",
+          }
+    name: defaultWords
+  - doc: |-
+      The engine satisfies the port it claims (ADR 0160): the build fails before
+      any test runs the day a method of either drifts from the other.
+    grouped: true
+    items:
+      - name: _
+        type: coreredact.Redactor
+        value: (*Redactor)(nil)
+    name: _
+  - doc: |-
+      credentials matches the userinfo of a URL: the scheme, then everything up
+      to the LAST "@" before the path or the end of the word. Greedy on purpose:
+      "https://user:p@ss@host" is one userinfo with an unescaped "@" in the
+      password, and stopping at the first "@" would show "ss". A "?" or "#" before
+      the "@" is read as part of the userinfo, which over-redacts a host — the
+      safe direction. It is compiled at the first text that may hold one, not in
+      every program that links this package.
+    items:
+      - name: credentials
+        value: |-
+          sync.OnceValue(func() *regexp.Regexp {
+          	return regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.\-]*://)[^/\s]+@`)
+          })
+    name: credentials

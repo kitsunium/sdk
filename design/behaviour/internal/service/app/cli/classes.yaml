@@ -1,0 +1,389 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      exitIOErr matches sysexits EX_IOERR (74), the status corecli.HelpWriteFailed
+      carries: an error occurred while doing I/O — here, on the stream the help
+      is written to.
+    items:
+      - name: exitIOErr
+        type: int
+        value: "74"
+    name: exitIOErr
+  - doc: |-
+      typicalDepth is the initial capacity of the per-invocation flag-set slice:
+      a root plus one sub-command covers most tools, and a deeper tree costs one
+      append. It is a sizing hint and never a limit — the resolution loop has no
+      depth bound at all.
+    items:
+      - name: typicalDepth
+        type: int
+        value: "2"
+    name: typicalDepth
+  - doc: |-
+      helpColumnGap is the minimum run of spaces between a listed sub-command name
+      and its summary, so the summaries line up without a tab stop the terminal
+      may or may not honour.
+    items:
+      - name: helpColumnGap
+        type: int
+        value: "2"
+    name: helpColumnGap
+  - doc: helpIndent is the two-space indent every list entry and usage line carries.
+    items:
+      - name: helpIndent
+        type: string
+        value: "\"  \""
+    name: helpIndent
+files:
+  - decls:
+      - reservedFlagNames
+      - executor
+      - New
+      - cloneTree
+      - validate
+      - validateName
+      - validateShape
+      - validateFlags
+      - newFlagSet
+      - hasFlags
+    name: cli.go
+  - decls:
+      - Config
+      - Config.resolveOutput
+      - Config.resolveErrOutput
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - exitIOErr
+      - helpWriteWrap
+    name: errors.go
+  - decls:
+      - typicalDepth
+      - (*executor).Execute
+      - (*executor).reportParse
+      - helpWriteFailure
+      - withHelpFailure
+      - (*executor).resolveChild
+      - (*executor).dispatch
+      - guard
+    name: execute.go
+  - decls:
+      - FlagSourceValue
+      - FlagSource
+      - (*FlagSourceValue).Load
+      - flagValue
+    name: flagsource.go
+  - decls:
+      - helpColumnGap
+      - helpIndent
+      - (*executor).writeHelp
+      - writeUsage
+      - writeCommands
+      - writeFlags
+    name: help.go
+functions:
+  - name: New
+    params: cfg Config, root corecli.CommandValue
+    results: runner corecli.Executor, err error
+  - doc: |-
+      cloneTree returns cmd with every Commands slice copied, all the way down. A
+      nil slice stays nil, so a leaf is still a leaf.
+    name: cloneTree
+    params: cmd corecli.CommandValue
+    results: corecli.CommandValue
+  - doc: |-
+      validate checks one command and recurses into its children. parents is the
+      path ABOVE cmd, root first; isRoot suppresses only the Summary requirement.
+    name: validate
+    params: cmd corecli.CommandValue, parents []string, isRoot bool
+    results: error
+  - doc: validateName refuses a name that could never be typed.
+    name: validateName
+    params: cmd corecli.CommandValue, parents []string
+    results: error
+  - doc: validateShape enforces the leaf-or-group trichotomy and the summary rule.
+    name: validateShape
+    params: cmd corecli.CommandValue, path string, isRoot bool
+    results: error
+  - doc: |-
+      validateFlags runs the Binder once on a throwaway set and refuses a reserved
+      name. Running it is the point: a declaration cannot be inspected without
+      executing it, and the alternative — discovering the collision on the first
+      -h an operator types — is the same fault found later by somebody else.
+    name: validateFlags
+    params: cmd corecli.CommandValue, path string
+    results: error
+  - doc: |-
+      newFlagSet builds the one shape of flag set this domain ever creates.
+
+      Three properties, each of which is a decision:
+
+        - flag.ContinueOnError, never ExitOnError and never PanicOnError. The
+          first calls os.Exit from a library; the second is os.Exit with a
+          corrupted stack on the way out. Both take the "is this process still
+          alive" decision away from main.
+        - output io.Discard. On a parse failure flag writes its own message AND
+          calls the usage function before returning the error, so a set left at
+          its default would report the failure to os.Stderr in flag's words and
+          then let the caller report it again in its own. The engine renders the
+          help itself and hands the caller the error; flag stays silent.
+        - a no-op Usage. It is what flag calls on -h and on failure, and it is the
+          only way to stop the stdlib's own usage text competing with the help
+          generated from the declarations.
+    name: newFlagSet
+    params: path string
+    results: "*flag.FlagSet"
+  - doc: hasFlags reports whether any flag was bound onto set.
+    name: hasFlags
+    params: set *flag.FlagSet
+    results: bool
+  - doc: |-
+      helpWriteFailure is the -h verdict when the stream did not take the help.
+
+      An untyped stream error is wrapped, so errors.Is still finds it beneath
+      HELP_WRITE_FAILED. A typed one is not: origin-wins would hand the verdict to
+      the stream — its code, and its exit status where the contract promises
+      EX_IOERR — and a diagnostic stream that is itself SDK code returns exactly
+      that. Its text travels as a field instead, as a tier failure's does in the
+      cache domain.
+    name: helpWriteFailure
+    params: werr error, command string
+    results: error
+  - doc: |-
+      withHelpFailure returns fields, plus one naming the stream's error when the
+      help that should have accompanied a usage verdict was not delivered. The
+      verdict stays the usage error — the operator's mistake earned it — and the
+      missing page stays visible to whoever reads that error.
+    name: withHelpFailure
+    params: werr error, fields ...kerrs.FieldValue
+    results: "[]kerrs.FieldValue"
+  - doc: |-
+      guard runs one Action and converts a panic into a typed failure.
+
+      The Action's own error is returned VERBATIM and is deliberately not wrapped.
+      Wrapping would buy nothing and could cost two things: origin-wins
+      (CLAUDE.md rule 6) already preserves an *errs.Error's code and exit status,
+      so there is nothing to add; and a plain stdlib error wrapped with empty
+      WrapParams would come back as INVALID_WRAP_PARAMS, relabelling a command
+      failure as an SDK defect. Verbatim also keeps the caller's own errors.Is
+      working, which is the same rule internal/service/app/lifecycle applies to a
+      component's error.
+    name: guard
+    params: ctx context.Context, run corecli.Action, invocation corecli.InvocationValue
+    results: err error
+  - name: FlagSource
+    params: invocation corecli.InvocationValue
+    results: "*FlagSourceValue"
+  - doc: |-
+      flagValue extracts a flag's value in its Go type where the stdlib offers
+      one.
+
+      Every flag type package flag ships implements flag.Getter, so an int stays
+      an int and a Duration stays a time.Duration rather than becoming the string
+      "30s" that a decode would then have to guess at. A caller's own flag.Value
+      that does NOT implement Getter falls back to its String form, which is the
+      only thing it offers — stated rather than silently typed as something else.
+    name: flagValue
+    params: f *flag.Flag
+    results: any
+  - doc: writeUsage renders the single usage line the declaration implies.
+    name: writeUsage
+    params: out *strings.Builder, cmd corecli.CommandValue, joined string, set *flag.FlagSet
+  - doc: writeCommands renders a group's children, in declaration order.
+    name: writeCommands
+    params: out *strings.Builder, cmd corecli.CommandValue
+  - doc: |-
+      writeFlags renders package flag's own defaults table.
+
+      PrintDefaults is used rather than reimplemented: it already knows how to
+      render a flag.Value's zero, how to pull the type name out of the usage
+      string's backquotes, and how to fold a multi-line usage. Reimplementing it
+      would be a second renderer that disagrees with the stdlib the day a caller
+      uses a stdlib idiom this domain had not heard of.
+
+      The set's output is redirected at this exact moment and nowhere else: for
+      the whole of Parse it is io.Discard, so flag never reports a failure the
+      engine is about to report itself, and so nothing this domain writes can
+      reach os.Stdout by way of a writer flag chose (ADR 0030).
+    name: writeFlags
+    params: out *strings.Builder, set *flag.FlagSet
+imports:
+  context: context
+  corecli: github.com/kitsunium/sdk/internal/core/app/cli
+  debug: runtime/debug
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  flag: flag
+  fmt: fmt
+  io: io
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  os: os
+  slices: slices
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/cli
+  name: cli
+  purpose: "Package cli is the command-line engine: it validates a whole command tree once, resolves an argument vector against it, renders the help the tree implies, and returns a typed error carrying an exit status."
+types:
+  - doc: |-
+      executor is the concrete [corecli.Executor]. It holds an already-validated
+      tree and two writers, and nothing that changes between invocations, so the
+      ENGINE is safe for concurrent use.
+
+      What is not, and cannot be made so from here, is a [corecli.Binder] writing
+      into a variable the caller closed over: that memory belongs to the caller
+      and every concurrent invocation writes it. The contract is stated on
+      corecli.Binder and pinned by TestTheEngineHoldsNothingPerInvocation.
+    fields:
+      - name: root
+        type: corecli.CommandValue
+      - name: out
+        type: io.Writer
+      - name: errOut
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: |-
+          Execute resolves args against the tree and runs the command it names.
+
+          The loop is the whole algorithm, and it borrows package flag's own rule
+          rather than inventing one: a FlagSet stops at the first argument that is not
+          a flag. That token is therefore unambiguously the name of a sub-command, and
+          `tool --verbose db migrate --dry-run` needs no lookahead, no two-pass parse
+          and no re-ordering — --verbose belongs to the group that declared it and
+          --dry-run to the leaf that declared it, because each set stopped where the
+          next command began.
+
+          Three outcomes, and their exit statuses are the point of the domain:
+
+            - the command ran: its own error, VERBATIM, or nil;
+            - help was requested: the help is written and the result is nil, because
+              asking a question is not a failure;
+            - the command line was wrong: the help is written AND a typed EX_USAGE
+              error is returned.
+
+          Nothing in this path calls os.Exit.
+        name: Execute
+        params: ctx context.Context, args []string
+        recv: e *executor
+        results: error
+      - doc: reportParse turns package flag's Parse outcome into this domain's verdict.
+        name: reportParse
+        params: cmd corecli.CommandValue, path []string, set *flag.FlagSet, cause error
+        recv: e *executor
+        results: error
+      - doc: resolveChild picks the sub-command rest names, or reports why it cannot.
+        name: resolveChild
+        params: |2
+
+          	cmd corecli.CommandValue, path []string, set *flag.FlagSet, rest []string,
+        recv: e *executor
+        results: child corecli.CommandValue, err error
+      - doc: dispatch assembles the invocation and runs the leaf's Action under a guard.
+        name: dispatch
+        params: |2
+
+          	ctx context.Context, cmd corecli.CommandValue, path []string, sets []*flag.FlagSet, rest []string,
+        recv: e *executor
+        results: error
+      - doc: |-
+          writeHelp renders the help for one command and writes it in ONE call.
+
+          Everything in it is read from the declaration: the summary and description
+          come from the [corecli.CommandValue], the sub-command list from its
+          Commands, and the flag table from package flag's own PrintDefaults over the
+          set the Binder just filled. Nothing is written twice and nothing is written
+          by hand, which is CLAUDE.md rule 11 applied to the executable: a help text
+          maintained beside the declarations is a help text that eventually describes
+          a flag that was renamed, and a help that lies is worse than no help — an
+          operator acts on it.
+
+          It is assembled into a buffer and flushed once. A help page interleaved with
+          another goroutine's output is a page nobody can read, and a partial one is
+          worse: it stops mid-list, which reads as "these are all the commands".
+
+          The returned error is the stream's: nil once the whole page was taken,
+          io.ErrShortWrite for a writer that took part of it without saying why.
+        name: writeHelp
+        params: cmd corecli.CommandValue, path []string, set *flag.FlagSet
+        recv: e *executor
+        results: error
+    name: executor
+  - fields:
+      - doc: |-
+          Output is where a command's OWN output goes. It reaches a [corecli.Action] as
+          InvocationValue.Output, so a command never has to reach for a process
+          stream itself.
+
+          The zero value resolves to os.Stderr, NOT os.Stdout. ADR 0030 makes
+          stdout a protocol channel that no SDK default may claim: a tool whose
+          output is a JSON document on a pipe sets Output: os.Stdout in main,
+          which is one visible line at the one place that can honestly make the
+          choice. A zero value is what somebody who has not yet learned the
+          question exists chose, so it must not be the dangerous one.
+        name: Output
+        type: io.Writer
+      - doc: |-
+          ErrOutput is where the generated help, and the usage that follows a bad
+          command line, are written. The zero value resolves to os.Stderr.
+
+          It is a SECOND writer rather than the same one so that setting Output to
+          os.Stdout for a machine-readable tool does not put a help page in the
+          middle of the document a consumer is parsing.
+
+          What is deliberately NOT written here is the error itself. The engine
+          owns the help — it is generated from the declarations and only the SDK
+          can render it — and the caller owns how an error is presented, because a
+          caller may want it as a line on stderr, as a log record, or as JSON. Two
+          voices printing one failure is how a CLI ends up saying it twice.
+        name: ErrOutput
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: resolveOutput returns the writer a command prints to.
+        name: resolveOutput
+        recv: c Config
+        results: io.Writer
+      - doc: resolveErrOutput returns the writer help and usage are written to.
+        name: resolveErrOutput
+        recv: c Config
+        results: io.Writer
+    name: Config
+  - fields:
+      - name: values
+        type: map[string]any
+    kind: struct
+    methods:
+      - name: Load
+        recv: s *FlagSourceValue
+        results: values map[string]any, err error
+    name: FlagSourceValue
+vars:
+  - doc: |-
+      reservedFlagNames are the two flag names package flag answers itself. An
+      undefined -h makes Parse return flag.ErrHelp, which is the ONLY signal that
+      separates a help request (exit 0) from a usage error (exit 64); a command
+      that binds either name takes that signal away.
+    items:
+      - name: reservedFlagNames
+        value: "[]string{\"h\", \"help\"}"
+    name: reservedFlagNames
+  - doc: |-
+      helpWriteWrap is the WrapParams the engine attaches to the writer's own
+      error. Its fields mirror corecli.HelpWriteFailed, so errors.Is answers both
+      the sentinel and the cause the writer reported.
+    items:
+      - name: helpWriteWrap
+        value: |-
+          errs.WrapParams{
+          	Code:     corecli.CodeHelpWriteFailed,
+          	Reason:   "HELP_WRITE_FAILED",
+          	Public:   "The help could not be written",
+          	Private:  "service/app/cli: the diagnostic stream refused the help -h asked for, or took part of it; the fields carry the command path",
+          	ExitCode: exitIOErr,
+          }
+    name: helpWriteWrap

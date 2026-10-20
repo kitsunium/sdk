@@ -1,0 +1,60 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      initialCap is the starting capacity (in bytes) handed out by the pool;
+      chosen to comfortably hold a single log line without a re-alloc.
+    items:
+      - name: initialCap
+        type: int
+        value: "1024"
+    name: initialCap
+  - doc: |-
+      maxRetain bounds the capacity we are willing to keep alive in the pool;
+      buffers that grew past this threshold are dropped to prevent the pool
+      from retaining unbounded memory after a rare large log record.
+    items:
+      - name: maxRetain
+        type: int
+        value: 64 * 1024
+    name: maxRetain
+files:
+  - decls:
+      - initialCap
+      - maxRetain
+      - bytePool
+      - Get
+      - Put
+    name: buffer.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: Get
+    results: "*[]byte"
+  - name: Put
+    params: b *[]byte
+imports:
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/buffer
+  name: buffer
+  purpose: Package buffer provides a pooled *[]byte for zero-alloc formatting in hot paths.
+types: []
+vars:
+  - doc: |-
+      bytePool recycles *[]byte via the kernel CappedPool. Storing *[]byte
+      (rather than []byte) avoids boxing the slice header into sync.Pool's any
+      payload on every Put, which is what keeps the hot path allocation-free.
+      reset truncates length to zero; capOf reports cap so the recycler drops any
+      buffer grown past maxRetain (discard-before-reset).
+    items:
+      - name: bytePool
+        value: |-
+          recycler.NewCappedPool[*[]byte](
+          	func() *[]byte { return new(make([]byte, 0, initialCap)) },
+          	func(b *[]byte) { *b = (*b)[:0] },
+          	func(b *[]byte) int { return cap(*b) },
+          	maxRetain,
+          )
+    name: bytePool

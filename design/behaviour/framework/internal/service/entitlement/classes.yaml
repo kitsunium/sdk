@@ -1,0 +1,2792 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxAnchors bounds how many vendor keys one verifier will accept.
+
+      A rotation needs two — the key being retired and the key replacing it — and a
+      rotation interrupted by a second one needs three. Four leaves that headroom
+      and stops there, because the list's cost is exactly its length: an anchor is a
+      key whose compromise is accepted while it is listed, so a bound that is never
+      reached is a bound that lets the list become the place retired keys accumulate.
+    items:
+      - name: maxAnchors
+        type: int
+        value: "4"
+    name: maxAnchors
+  - doc: |-
+      cachedBundleName is the file the last authenticated bundle is kept under. It
+      carries the published name so an operator reading a cache directory can tell
+      at a glance what the file is and where it came from.
+    items:
+      - name: cachedBundleName
+        type: string
+        value: "\"roster.signed.json\""
+    name: cachedBundleName
+  - doc: cacheDirMode keeps the cache directory owner-only.
+    items:
+      - name: cacheDirMode
+        type: os.FileMode
+        value: "0o700"
+    name: cacheDirMode
+  - doc: |-
+      markCeiling bounds how far AHEAD of the local clock the mark may sit before the
+      CACHE, rather than the clock, is what a refusal names.
+
+      coreent.RosterLifetime and not a dial of its own: the mark IS a roster's
+      IssuedAt, so a publisher cannot legitimately be more than one roster lifetime
+      ahead of a client whose clock is right. Past that the bundle and the clock
+      cannot both be plausible, and the bundle is the one that got there by being
+      WRITTEN rather than by being fetched — ParseBundle refuses
+      `now.Before(IssuedAt)`, so no install through rememberRoster can produce such a
+      mark, and a file dropped into the cache directory is the whole of how this
+      state is reached.
+
+      # The trap this is NOT
+
+      It is not a reason to DISCARD an implausible mark, and turning it into one
+      would hand over the ratchet's own bypass. "Ignore a mark more than markCeiling
+      ahead of now" reads as prudence and is a hole: rolling the clock back by more
+      than markCeiling puts the LEGITIMATE mark outside the ceiling too, so the one
+      record the ratchet exists to consult is thrown away by exactly the move it
+      exists to catch — and checkClock then returns nil, which is the answer the
+      attacker wanted.
+
+      Both directions therefore stay REFUSALS, under the one sentinel
+      coreent.ErrClockRegressed, and only the `condition` field differs. It has to
+      differ, because the ADVICE does: "set the clock" is wrong when the clock is
+      right and a planted bundle is dated next year, and an operator following it
+      would break a machine that was working.
+      Test_Service_checkClock_refusesBothDirectionsOfAnImplausibleMark fails if this
+      is ever simplified into a discarded record.
+    items:
+      - name: markCeiling
+        type: time.Duration
+        value: coreent.RosterLifetime
+    name: markCeiling
+  - doc: |-
+      markCompareStage names the ratchet's comparison in the stage field of the two
+      refusals it raises. A constant rather than two literals: the two are one
+      operation, and a typo in either would split it in a log query.
+    items:
+      - name: markCompareStage
+        type: string
+        value: "\"mark_compare\""
+    name: markCompareStage
+  - doc: |-
+      cacheLockName is the lock every holder of one cache directory takes.
+
+      The name is scoped by the DIRECTORY — a file locker's locks exclude only
+      other users of the same directory — so one constant serves every product.
+      Two products with separate cache directories do not contend, and two
+      processes sharing one do, which is exactly the grouping wanted.
+    items:
+      - name: cacheLockName
+        type: string
+        value: "\"roster\""
+    name: cacheLockName
+  - doc: |-
+      cacheLockBudget bounds how long a caller waits for the cache.
+
+      The protected section is a file read, an ed25519 verification and a rename:
+      microseconds, with no network and no user interaction inside it. A wait that
+      reaches seconds therefore means something pathological — a holder stopped in
+      a debugger, a filesystem that has stopped answering — and the right response
+      to that is to stop waiting rather than to hang a licence gate a shell is
+      sitting in front of.
+    items:
+      - name: cacheLockBudget
+        type: time.Duration
+        value: 2 * time.Second
+    name: cacheLockBudget
+  - doc: |-
+      cacheLockPoll is how often a waiting caller retries while another process
+      holds the cache.
+
+      The locker's own default is 25 ms, chosen for a section whose length it
+      cannot know. This one's length IS known — a file read, an ed25519
+      verification and a rename — so 25 ms is roughly a thousand times the wait it
+      is pacing, and every contended handover pays most of it as dead time. One
+      millisecond is still four or five wakeups across a section that long, which
+      is polling rather than spinning.
+
+      Measured on the contended probe, 400 rounds of two writers racing:
+
+      	25 ms (the locker's default):  11.66 s
+      	 1 ms (this value):              2.53 s
+    items:
+      - name: cacheLockPoll
+        type: time.Duration
+        value: time.Millisecond
+    name: cacheLockPoll
+  - doc: |-
+      Environment variables the Actions runner injects when a workflow declares
+      `permissions: id-token: write`.
+    grouped: true
+    items:
+      - doc: actionsTokenURLEnv holds the endpoint that mints an OIDC token.
+        name: actionsTokenURLEnv
+        type: string
+        value: "\"ACTIONS_ID_TOKEN_REQUEST_URL\""
+      - doc: |-
+          actionsTokenBearerEnv holds the ephemeral credential authorising that
+          request. It is what someone outside Actions cannot obtain.
+        name: actionsTokenBearerEnv
+        type: string
+        value: "\"ACTIONS_ID_TOKEN_REQUEST_TOKEN\""
+    name: actionsTokenURLEnv
+  - doc: |-
+      actionsTokenHostSuffix is the only host family the request URL may name.
+
+      The URL arrives as an environment variable, so without this the bearer
+      credential would be sent wherever that variable pointed — handing an
+      attacker the one secret the runner has, by setting a variable.
+    items:
+      - name: actionsTokenHostSuffix
+        type: string
+        value: "\".actions.githubusercontent.com\""
+    name: actionsTokenHostSuffix
+  - doc: |-
+      maxTokenResponseBytes caps the mint endpoint's response. A token is a couple
+      of kilobytes; anything past this is not one.
+    items:
+      - name: maxTokenResponseBytes
+        type: int64
+        value: 64 << 10
+    name: maxTokenResponseBytes
+  - doc: sha256Size is the width of a SHA-256 digest, in bytes.
+    items:
+      - name: sha256Size
+        type: int
+        value: "32"
+    name: sha256Size
+  - doc: |-
+      ActionsJWKSURL is where GitHub publishes the keys. Fixed, https, and never
+      taken from a token: letting the thing being verified choose its own key
+      source is the whole trust decision handed to the attacker.
+    items:
+      - name: ActionsJWKSURL
+        type: string
+        value: ActionsIssuer + "/.well-known/jwks"
+    name: ActionsJWKSURL
+  - doc: |-
+      maxJWKSKeys caps how many entries a key set may carry. GitHub publishes a
+      handful; a set with thousands is either broken or an attempt to make key
+      selection expensive.
+    items:
+      - name: maxJWKSKeys
+        type: int
+        value: "32"
+    name: maxJWKSKeys
+  - doc: |-
+      maxJWKSBytes caps the document before it is decoded at all.
+
+      The entry-count limit below only applies AFTER json.Unmarshal has already
+      built every element in memory, so a multi-megabyte key set would be paid for
+      in full before being refused. GitHub's own set is a couple of kilobytes.
+    items:
+      - name: maxJWKSBytes
+        type: int
+        value: 1 << 20
+    name: maxJWKSBytes
+  - doc: |-
+      maxRSAModulusBits refuses a modulus larger than any real signing key.
+
+      rsa.VerifyPKCS1v15 does modular arithmetic over whatever it is given, so an
+      absurdly large modulus turns a verification into a long computation — and
+      this runs before anything has authenticated the key set.
+    items:
+      - name: maxRSAModulusBits
+        type: int
+        value: "8192"
+    name: maxRSAModulusBits
+  - doc: ActionsIssuer is the only issuer whose tokens mean anything here.
+    items:
+      - name: ActionsIssuer
+        type: string
+        value: "\"https://token.actions.githubusercontent.com\""
+    name: ActionsIssuer
+  - doc: |-
+      DefaultActionsAudience is the audience a product that names none falls back
+      to. A product SHOULD set its own: an audience shared between products lets a
+      token minted for one satisfy the other's gate.
+
+      A dedicated audience matters: a token minted for some other service — a
+      cloud provider, a registry — must not be replayable here, and `aud` is what
+      keeps the two apart. It is chosen by us, not by the caller, precisely so a
+      workflow cannot request a token this verifier will accept for a purpose it
+      never agreed to.
+    items:
+      - name: DefaultActionsAudience
+        type: string
+        value: "\"kitsunium-sdk-entitlement\""
+    name: DefaultActionsAudience
+  - doc: |-
+      maxTokenBytes caps a compact JWT. Real Actions tokens are two kilobytes at
+      most; anything past this is not a token we should be parsing.
+    items:
+      - name: maxTokenBytes
+        type: int
+        value: 16 << 10
+    name: maxTokenBytes
+  - doc: |-
+      maxTokenLifetime bounds how long a token may claim to be valid.
+
+      GitHub mints these for minutes. A token whose own window is wider is either
+      not from Actions or is being replayed, and accepting it would turn the skew
+      allowance below into an unbounded replay window.
+    items:
+      - name: maxTokenLifetime
+        type: time.Duration
+        value: 30 * time.Minute
+    name: maxTokenLifetime
+  - doc: |-
+      clockSkew is how far the local clock may disagree with GitHub's before a
+      valid token is refused. CI runners are well synchronised; this is slack for
+      the round trip, not for a drifting clock.
+    items:
+      - name: clockSkew
+        type: time.Duration
+        value: 2 * time.Minute
+    name: clockSkew
+  - doc: |-
+      minRSAModulusBits refuses a key too small to mean anything. GitHub signs
+      with 2048-bit keys; a JWKS offering less has been tampered with.
+    items:
+      - name: minRSAModulusBits
+        type: int
+        value: "2048"
+    name: minRSAModulusBits
+  - doc: |-
+      jwtParts is the number of segments in a compact JWS: header, payload,
+      signature.
+    items:
+      - name: jwtParts
+        type: int
+        value: "3"
+    name: jwtParts
+  - doc: Positions of the three segments in a compact JWS.
+    grouped: true
+    items:
+      - doc: headerSegment is the JOSE header.
+        name: headerSegment
+        type: int
+        value: iota
+      - doc: payloadSegment is the claims set.
+        name: payloadSegment
+      - doc: signatureSegment is the signature over the first two.
+        name: signatureSegment
+    name: headerSegment
+  - doc: |-
+      minRSAExponent is the smallest public exponent RSA allows. Anything below
+      is not a key.
+    items:
+      - name: minRSAExponent
+        type: int64
+        value: "3"
+    name: minRSAExponent
+  - doc: |-
+      maxRSAExponent bounds the public exponent so the int64 it is read into
+      cannot truncate when narrowed to int, which is 32 bits on some platforms.
+      Real exponents are 65537; this is far above any of them.
+    items:
+      - name: maxRSAExponent
+        type: int64
+        value: 1<<31 - 1
+    name: maxRSAExponent
+  - doc: |-
+      evenDivisor tests an exponent's parity. An even RSA exponent shares a factor
+      with every Euler totient, so it cannot be a valid public exponent.
+    items:
+      - name: evenDivisor
+        type: int64
+        value: "2"
+    name: evenDivisor
+  - doc: |-
+      unusableHost is the single bucket every origin that names no fetchable host
+      falls into. It is one shared value, not the URL itself: returning the URL made
+      two DIFFERENT malformed entries look like two different hosts and satisfy the
+      redundancy requirement, while neither could ever be fetched.
+    items:
+      - name: unusableHost
+        type: string
+        value: "\"\\x00unusable\""
+    name: unusableHost
+  - doc: |-
+      minRedundantHosts is the number of DISTINCT hosts a product's origin list
+      must span to count as redundant. Two branches on one host share that host's
+      outage, so a list where every entry resolves to the same name looks redundant
+      while being a single point of failure.
+    items:
+      - name: minRedundantHosts
+        type: int
+        value: "2"
+    name: minRedundantHosts
+  - doc: Roughtime wire constants.
+    grouped: true
+    items:
+      - doc: roughtimeFrameMagic prefixes every packet in the framed dialect.
+        name: roughtimeFrameMagic
+        type: string
+        value: "\"ROUGHTIM\""
+      - doc: roughtimeVersion is the protocol version this client advertises.
+        name: roughtimeVersion
+        type: uint32
+        value: "1"
+      - doc: |-
+          roughtimeNonceSize is the challenge length. The nonce is what makes a
+          captured response worthless: the server signs a tree containing it.
+        name: roughtimeNonceSize
+        type: int
+        value: "32"
+      - doc: |-
+          roughtimeMinRequest is the floor every request is padded to. It is an
+          anti-amplification rule of the protocol, not a preference: a server is
+          entitled to drop anything smaller, which is one reason a client that
+          forgets it sees perfect silence.
+        name: roughtimeMinRequest
+        type: int
+        value: "1024"
+      - doc: |-
+          roughtimeMaxResponse caps what is read back, for the same reason every
+          other endpoint in this package is capped.
+        name: roughtimeMaxResponse
+        type: int
+        value: "4096"
+      - doc: |-
+          roughtimeMaxPathDepth bounds the Merkle proof. A tree deeper than this
+          would hold more requests than a server batches in a second, and the
+          depth is attacker-chosen.
+        name: roughtimeMaxPathDepth
+        type: int
+        value: "32"
+      - doc: "roughtimeHashSize is the width of a Merkle node: SHA-512 truncated."
+        name: roughtimeHashSize
+        type: int
+        value: "32"
+      - doc: |-
+          roughtimeTimeout bounds one query. Short on purpose — this is a
+          corroborating signal on a start-up path, and a user must never wait on
+          it. A filtered port is the common case, and it costs exactly this.
+        name: roughtimeTimeout
+        type: time.Duration
+        value: 2 * time.Second
+    name: roughtimeFrameMagic
+  - doc: |-
+      Roughtime signature contexts, NUL-terminated as the draft specifies.
+
+      These are the two values an interoperability failure is most likely to hide
+      in: they are hashed into every signature, so a wrong byte here produces a
+      client that verifies nothing at all while looking entirely healthy. They are
+      named as constants rather than inlined so that whoever validates against a
+      real server has one place to correct.
+    grouped: true
+    items:
+      - doc: |-
+          roughtimeDelegationContext prefixes the long-term key's signature over
+          the delegation.
+        name: roughtimeDelegationContext
+        type: string
+        value: "\"RoughTime v1 delegation signature--\\x00\""
+      - doc: |-
+          roughtimeResponseContext prefixes the delegated key's signature over the
+          signed response.
+        name: roughtimeResponseContext
+        type: string
+        value: "\"RoughTime v1 response signature\\x00\""
+    name: roughtimeDelegationContext
+  - doc: |-
+      maxClockSkew is how far the local clock may sit from signed network time
+      before it is refused.
+
+      Generous on purpose. What this is aimed at is a clock wrong by hours or days
+      — a dead CMOS battery, a restored snapshot, a deliberate rollback — and a
+      tight bound would turn ordinary drift, a slow link and a server's own radius
+      into refusals for machines that are perfectly fine.
+    items:
+      - name: maxClockSkew
+        type: time.Duration
+        value: 5 * time.Minute
+    name: maxClockSkew
+  - doc: |-
+      Merkle node prefixes. They exist so a leaf hash can never be mistaken for an
+      interior one, which is what stops a second-preimage attack on the tree.
+    grouped: true
+    items:
+      - doc: roughtimeLeafPrefix marks a hash over a client nonce.
+        name: roughtimeLeafPrefix
+        type: byte
+        value: "0x00"
+      - doc: roughtimeNodePrefix marks a hash over two child hashes.
+        name: roughtimeNodePrefix
+        type: byte
+        value: "0x01"
+    name: roughtimeLeafPrefix
+  - doc: |-
+      roughtimeMaxTags caps how many fields one message may declare.
+
+      The count is the FIRST four bytes a hostile server controls, and it sizes
+      every allocation below it. Roughtime messages carry a handful of tags; this
+      is far above any real one and far below a number worth allocating for.
+    items:
+      - name: roughtimeMaxTags
+        type: int
+        value: "32"
+    name: roughtimeMaxTags
+  - doc: roughtimeTagSize is the width of a tag, an offset and a count alike.
+    items:
+      - name: roughtimeTagSize
+        type: int
+        value: "4"
+    name: roughtimeTagSize
+  - doc: |-
+      maxArtefactBytes caps each roster artefact. The endpoint is untrusted by
+      construction, so an unbounded read hands it a memory-exhaustion lever; a
+      roster of thousands of subjects still fits far inside this.
+    items:
+      - name: maxArtefactBytes
+        type: int64
+        value: 4 << 20
+    name: maxArtefactBytes
+  - doc: |-
+      fetchTimeout bounds ONE attempt at ONE origin. It is short on purpose:
+      with several origins tried in turn, a generous per-origin timeout stacks
+      into a wait no user would sit through, and a black-holed endpoint is far
+      better abandoned than waited on. The overall bound is this times the
+      number of origins, which is what makes adding an origin cheap.
+    items:
+      - name: fetchTimeout
+        type: time.Duration
+        value: 3 * time.Second
+    name: fetchTimeout
+  - doc: fieldSeparator joins one rendered field to the next in a diagnostic line.
+    items:
+      - name: fieldSeparator
+        type: string
+        value: "\" \""
+    name: fieldSeparator
+files:
+  - decls:
+      - maxAnchors
+      - anchorList
+      - parseBundleAnyAnchor
+      - bundleMarkAnyAnchor
+    name: anchors.go
+  - decls:
+      - BundleValue
+      - ParseBundle
+      - authenticateBundle
+      - decodeBundle
+    name: bundle.go
+  - decls:
+      - cachedBundleName
+      - cacheDirMode
+      - markCeiling
+      - markCompareStage
+      - (*ProductValue).DefaultCacheDir
+      - (*Service).WithCache
+      - cachedBundlePath
+      - markDecision
+      - judgeMark
+      - (*Service).rememberRoster
+      - writeCachedBundle
+      - stageBundle
+      - removeBestEffort
+      - (*Service).cachedRoster
+      - readCappedFile
+      - (*Service).signedHighWaterMark
+      - (*Service).raiseMarkFloor
+      - (*Service).markFloorNow
+      - judgeAgainstFloor
+      - markRecord
+      - rosterMark
+      - bundleMark
+      - (*Service).markWhileHeld
+      - (*Service).checkClock
+      - (*Service).checkClockAndTime
+    name: cache.go
+  - decls:
+      - cacheLockName
+      - cacheLockBudget
+      - cacheLockPoll
+      - (*Service).cacheGuard
+      - (*Service).underCacheLock
+      - (*Service).holdCacheForWrite
+    name: cache_lock.go
+  - decls:
+      - (*Service).holdCacheForRead
+    name: cache_lock_unix.go
+  - decls:
+      - actionsTokenURLEnv
+      - actionsTokenHostSuffix
+      - maxTokenResponseBytes
+      - InCI
+      - checkTokenURL
+      - RequestActionsToken
+      - tokenResponseBody
+      - fetchToken
+      - DefaultBearerFetch
+      - actionsTokenResponse
+      - VerifyCI
+    name: ci.go
+  - decls:
+      - (*Service).ciSeat
+      - (*Service).publishedJWKS
+      - ciRefusalIsFinal
+      - ciContext
+    name: ciseat.go
+  - decls:
+      - sha256Size
+      - verifiedBy
+      - digestOf
+      - payloadDigest
+      - sha512Prefix
+    name: crypto.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - nameFrame
+      - checkNoDuplicateNames
+      - admitToken
+      - applyDelim
+      - topFrame
+      - valueClosed
+    name: jsonnames.go
+  - decls:
+      - ActionsJWKSURL
+      - maxJWKSKeys
+      - maxJWKSBytes
+      - maxRSAModulusBits
+      - JWKValue
+      - JWKSValue
+      - decodeJWKS
+      - ParseJWKS
+    name: jwks.go
+  - decls:
+      - ActionsIssuer
+      - DefaultActionsAudience
+      - maxTokenBytes
+      - maxTokenLifetime
+      - clockSkew
+      - minRSAModulusBits
+      - jwtParts
+      - headerSegment
+      - minRSAExponent
+      - maxRSAExponent
+      - evenDivisor
+      - ActionsClaimsValue
+      - audienceClaim
+      - (*audienceClaim).UnmarshalJSON
+      - (*audienceClaim).contains
+      - jwtSegments
+      - jwtHeader
+      - strictUnmarshal
+      - checkHeaderShape
+      - checkHeader
+      - verifySignature
+      - checkTokenWindow
+      - checkTiming
+      - checkClaims
+      - VerifyActionsToken
+      - jwkNumbers
+      - jwkExponent
+      - signsRS256
+      - rsaKeyFromJWK
+      - usableRSAKey
+    name: oidc.go
+  - decls:
+      - unusableHost
+      - minRedundantHosts
+      - ProductValue
+      - (*ProductValue).Label
+      - (*ProductValue).PublishedOrigins
+      - (*ProductValue).cacheDir
+      - (*ProductValue).audience
+      - (*ProductValue).Validate
+      - misconfigured
+      - originScan
+      - newOriginScan
+      - (*originScan).admit
+      - hostOf
+    name: product.go
+  - decls:
+      - ParseRoster
+      - authenticateRoster
+    name: roster_parse.go
+  - decls:
+      - roughtimeFrameMagic
+      - roughtimeDelegationContext
+      - maxClockSkew
+      - RoughtimeServerValue
+      - RoughtimeServers
+      - QueryRoughtime
+      - buildRoughtimeRequest
+      - roughtimeExchange
+      - (*Service).checkNetworkTime
+    name: roughtime.go
+  - decls:
+      - roughtimeLeafPrefix
+      - verifyRoughtimeResponse
+      - checkRoughtimeBinding
+      - unframeRoughtime
+      - roughtimeDelegation
+      - verifyRoughtimeCert
+      - checkRoughtimeSignature
+      - roughtimeStatement
+      - readRoughtimeSrep
+      - verifyRoughtimeMerkle
+      - hashRoughtimeLeaf
+      - hashRoughtimeNode
+    name: roughtime_verify.go
+  - decls:
+      - roughtimeMaxTags
+      - roughtimeTagSize
+      - roughtimeTag
+      - decodeRoughtimeMessage
+      - roughtimeHeaderSize
+      - roughtimeValueBounds
+      - roughtimeField
+      - encodeRoughtimeMessage
+      - roughtimeUint64
+      - roughtimeUint32
+    name: roughtime_wire.go
+  - decls:
+      - maxArtefactBytes
+      - fetchTimeout
+      - Getter
+      - BearerFetch
+      - Service
+      - (*Service).WithTimeServers
+      - (*Service).WithBearerFetch
+      - (*Service).WithOrigins
+      - (*Service).WithVersion
+      - (*Service).WithAnchors
+      - NewService
+      - NewServiceWithAnchors
+      - NewServiceWithGetter
+      - NewServiceWithOrigins
+      - (*Service).Verify
+      - (*Service).authorise
+      - (*Service).currentRoster
+      - (*Service).rosterFrom
+      - (*Service).matchSubject
+      - (*Service).prove
+      - regularFile
+      - closeBestEffort
+      - (*Service).fetch
+      - readBounded
+    name: service.go
+  - decls:
+      - RequiresUpdate
+      - normaliseTag
+      - UpdateRequiredError
+      - (*UpdateRequiredError).Error
+      - (*UpdateRequiredError).Unwrap
+      - UpdateRefusal
+    name: version.go
+  - decls:
+      - fieldSeparator
+      - refuse
+      - classify
+      - foreignError
+      - foreignError.Error
+      - foreignError.Is
+      - classifyForeign
+      - annotate
+      - diagnose
+      - particulars
+      - foreignCause
+    name: wrap.go
+functions:
+  - doc: |-
+      anchorList normalises what a build declares into the list a verifier holds.
+
+      The slice is COPIED, so a caller that later appends to its own cannot extend
+      the set a running verifier trusts. The key BYTES are shared, exactly as the
+      single-key form has always shared them — deep-copying them would advertise an
+      immutability this package cannot actually provide, since the caller keeps the
+      backing array either way.
+
+      Past maxAnchors it CLAMPS and logs rather than refusing, which is ADR 0031's
+      clamp half and deliberate here: the list is a build decision, so an over-long
+      one is a build mistake, and answering a build mistake by refusing every
+      verification would take the product down over a misconfiguration that a log
+      line reports precisely. The entries dropped are the LAST ones, which is the
+      only end that can be dropped on a list whose order is its statement of
+      preference.
+    name: anchorList
+    params: anchors [][]byte
+    results: "[][]byte"
+  - doc: |-
+      parseBundleAnyAnchor authenticates a bundle against the first accepted anchor
+      that verifies it, and applies the identical window rules afterwards.
+
+      # Why any anchor is enough
+
+      A signature made with any key on the list is a statement by the vendor, which
+      is the only thing authentication establishes. Requiring more — a quorum, or a
+      specific anchor per origin — would answer a question the scheme does not ask:
+      there is one signer, and the list exists because that signer's KEY changes,
+      never because several parties must agree.
+
+      # Why the loop moves on from one failure and only one
+
+      The same rule currentRoster applies to origins, for the same reason: move on
+      from a document this anchor cannot AUTHENTICATE, never from one it
+      authenticated and the rules then refused. coreent.ErrRosterUnsigned is exactly
+      the first case — a malformed anchor, or a signature that does not verify
+      against it — and every other refusal (an undecodable bundle, a duplicated
+      member name, a window that is over-wide, unopened or closed) is a property of
+      the DOCUMENT and identical under every anchor.
+
+      Continuing past a document-level refusal would be a real defect and not merely
+      noise: an expired roster tried against a second anchor comes back
+      coreent.ErrRosterUnsigned, so an operator whose clock or whose publisher had
+      simply fallen behind would be told somebody is impersonating the vendor.
+    name: parseBundleAnyAnchor
+    params: raw []byte, anchors [][]byte, now time.Time
+    results: roster *coreent.RosterValue, err error
+  - doc: |-
+      bundleMarkAnyAnchor reads what a signed bundle proves about time, against any
+      accepted anchor.
+
+      A bundle cached under an anchor that is still accepted is still the vendor's
+      signed statement about when it was issued, so a rotation must not reset the
+      ratchet: dropping the mark would hand back exactly the rollback distance the
+      ratchet exists to hold, at the one moment — a key rotation — when an
+      installation is least able to re-establish it.
+
+      Both sides of the ratchet's comparison come through here, as they came through
+      bundleMark before: a mark installed under one anchor set and compared under
+      another is the seam this function exists not to have.
+    name: bundleMarkAnyAnchor
+    params: raw []byte, anchors [][]byte
+    results: markRecord
+  - name: ParseBundle
+    params: raw []byte, vendor ed25519.PublicKey, now time.Time
+    results: roster *coreent.RosterValue, err error
+  - doc: |-
+      authenticateBundle decodes and AUTHENTICATES a bundle without applying the
+      freshness window, and hands back the SIGNED BYTES alongside the roster they
+      decoded to.
+
+      It exists for one caller: the clock ratchet, which has to read the signing
+      instant of a bundle that may well have expired — that is the ordinary state
+      of a cached one — in order to compare it against the local clock. Every other
+      path goes through ParseBundle and gets the window with it.
+
+      The payload is returned because the ratchet has to tell two documents apart
+      at the SAME signed instant, and the thing that identifies a document is the
+      bytes the signature covers — never the bundle around them. Two bundles
+      differing only in their outer JSON (member order, whitespace, a re-encoded
+      base64) carry one statement by the vendor, and a digest taken over the
+      envelope would read them as two. See markRecord.
+
+      The SIGNATURE is still required. A ratchet that advanced on unauthenticated
+      bytes would let anyone who can write the cache file pin this machine's clock
+      wherever they liked, which is a denial of service handed over for free.
+    name: authenticateBundle
+    params: raw []byte, vendor ed25519.PublicKey
+    results: roster *coreent.RosterValue, payload []byte, err error
+  - doc: |-
+      decodeBundle splits a published bundle into the signed bytes and the
+      signature over them, without judging either.
+    name: decodeBundle
+    params: raw []byte
+    results: payload, signature []byte, err error
+  - doc: cachedBundlePath composes the cache file's location.
+    name: cachedBundlePath
+    params: dir string
+    results: string
+  - doc: |-
+      judgeMark decides what an offered bundle may do to the mark, and whether the
+      caller may act on it at all.
+
+      # Why equality is accepted
+
+      Every ordinary re-verification inside one publication interval offers the
+      roster already cached, so refusing an equal IssuedAt outright would refuse all
+      of them. What must not pass at an equal instant is a DIFFERENT statement, and
+      the digest over the SIGNED PAYLOAD is what tells the two apart: two bundles
+      differing only in their outer JSON are one statement by the vendor and compare
+      equal here, while two payloads that differ are two statements racing for one
+      instant and the one already accepted wins.
+
+      # Why an unprovable offer is not a refusal
+
+      A document that proves nothing about time cannot be compared, and installing it
+      would lower the mark by replacing a roster with something that is not one. It is
+      still not a refusal: it is unreachable from rosterFrom, which calls this one
+      line after ParseBundle returned, so the only way to get here is a caller
+      handing over bytes it never authenticated — and answering that with a refused
+      licence would be a worse defect than the cache entry it declines to write.
+    name: judgeMark
+    params: offered, held markRecord
+    results: markDecision
+  - doc: |-
+      writeCachedBundle replaces the cached bundle atomically.
+
+      Write-then-rename, not a truncating write in place: a process killed halfway
+      through the latter leaves a short file, and a short file is an unparseable
+      bundle — so the one thing a crash must not do is destroy the grace window a
+      later outage depends on.
+
+      The staging name is one the KERNEL guarantees nobody else holds, which the
+      previous one was not. It used to carry os.Getpid(), so that two concurrent
+      invocations — a hook and a CLI run, which is the ordinary case on this
+      project — staged into different files. Two goroutines inside one process
+      share a pid, so they shared a staging file: each truncated it, each wrote
+      its own bytes into it, and one renamed whatever was there at that instant
+      over a valid cache. A short bundle finishing inside a long one leaves the
+      long one's tail behind, and that is what got installed — measured at 15 of
+      400 rounds, against a doc comment promising the opposite.
+
+      os.CreateTemp answers that with an O_EXCL create, so uniqueness is enforced
+      rather than hoped for, and its 0600 is the mode this cache wants: applied at
+      creation, so no separate chmod can leave a window in which the file exists
+      at something wider. The reason this code avoided it before was that "a dropped
+      Close is how a full filesystem produces a truncated file that then gets
+      renamed over a good cache" — which is answered by not dropping it. stageBundle
+      checks the Close and refuses on it.
+    name: writeCachedBundle
+    params: dir string, raw []byte
+    results: error
+  - doc: |-
+      stageBundle writes raw to a file in dir that no other writer can be using,
+      and returns the path it wrote.
+
+      os.CreateTemp creates at 0600, which is the mode this cache wants: owner
+      -only, applied at creation, so no separate chmod can leave a window in which
+      the file exists at something wider. That is hygiene and NOT a control — the
+      bundle is a world-readable document published over plain HTTPS, so nothing
+      is protected by narrowing it; the reason to narrow it anyway is that there
+      is no reason to widen it. Nothing in this package ever reads the mode back,
+      which is the lesson key_windows.go paid for: os.Stat on Windows reports a
+      synthesised 0444/0666 carrying no access-control meaning, so a POSIX
+      permission gate here would refuse every cached bundle there. The integrity
+      of these bytes comes from the vendor's signature and from nowhere else.
+      Test_writeCachedBundle_unixInstallsOwnerOnly asserts the mode instead, where
+      the concept exists.
+
+      One thing the pid-named predecessor did better, named rather than hidden: a
+      process killed between the create and the rename leaves a staged file
+      behind, and the old name was reused by the next run with that pid while
+      these accumulate. Every path this function can RETURN from removes it, so
+      only a hard kill inside a window of a few microseconds leaks one, and what
+      leaks is a few hundred bytes that no reader ever looks at — cachedBundlePath
+      matches one exact name. Sweeping them would mean enumerating the cache
+      directory on a read path that currently opens one file by name, and deciding
+      by age which of them belong to a live process. That is more machinery, and
+      more ways to delete the wrong thing, than the residue justifies.
+
+      Both failures are reported, and the order between them is the point: a Write
+      that failed says the bytes are not all there, while a Close that failed says
+      they may not have reached the disk. Either one makes the staged file unfit
+      to rename over a cache that is currently valid, so either one removes it and
+      refuses.
+    name: stageBundle
+    params: dir string, raw []byte
+    results: path string, err error
+  - doc: removeBestEffort drops a staging file without masking the caller's error.
+    name: removeBestEffort
+    params: path string
+  - doc: |-
+      readCappedFile reads a file under the SAME artefact cap the network fetch
+      applies, rather than through os.ReadFile.
+
+      This file sits on a disk its holder controls, so its size is chosen by the
+      same party the cap exists to bound. Reading it whole before checking anything
+      would hand that party a memory-exhaustion lever the wire path has been
+      refusing all along — and worse, an over-cap bundle that was correctly signed
+      and in window would have been ACCEPTED here while the identical bytes off an
+      origin were refused.
+    name: readCappedFile
+    params: path string
+    results: raw []byte, err error
+  - doc: |-
+      judgeAgainstFloor refuses a document older than one THIS PROCESS has already
+      authenticated, and decides nothing about the cache.
+
+      It is separate from judgeMark on purpose, because the two questions have
+      different right answers and used to share one. judgeMark compares the offer
+      to the DISK, and raiseMarkFloor's doc comment explains at length why the
+      install must keep doing exactly that: refusing to install a generation newer
+      than what is cached but older than what was authenticated would leave the
+      offline fallback on a staler bundle to protect a number already protected in
+      memory. That reasoning is sound and is untouched here.
+
+      What it does not cover is ACTING on the document. The same verdict carried
+      both, so when an install stood down — the guard held elsewhere, no guard on
+      the platform, an unwritable directory, a write that failed halfway — a later
+      roster older than the one just authenticated was newer than the stale disk
+      copy, and was therefore installed AND returned to authorization. If the
+      newer one carried a withdrawal and the older one did not, the withdrawal
+      was undone for the rest of the process, and through the offline fallback
+      after it.
+
+      So: install against the disk, refuse against the floor. Both decisions keep
+      the reasoning that was written for them.
+    name: judgeAgainstFloor
+    params: offered, floor markRecord
+    results: error
+  - doc: |-
+      rosterMark turns an authenticated document into what it proves about time, or
+      into nothing.
+
+      # Why the checks are here at all
+
+      The ratchet reads a bundle that has usually EXPIRED — the ordinary state of a
+      cached one — so ParseRoster's judgement about now is precisely what this path
+      cannot run. What it CAN run is everything ParseRoster decides about the
+      document alone, and it was running none of it: authenticateBundle
+      authenticated and returned, so a signed document ParseRoster would refuse to
+      authorise on its own shape was nonetheless believed about time.
+
+      A document that is not a roster is evidence of NOTHING temporal. An over-wide
+      window is refused for authorisation by ParseRoster, and has to be refused here
+      for the identical reason — the signature proves the vendor issued these bytes,
+      never that the vendor issued them correctly. An inverted or absent window is
+      not a window; a zero IssuedAt is not an instant.
+
+      # What it deliberately does not judge
+
+      Nothing here reads a clock, and that is not an omission. The one judgement
+      that needs one — whether the instant is PLAUSIBLE against the local clock —
+      belongs to checkClock, where it is a refusal rather than a discarded record.
+      See markCeiling for why making it a discarded record here would hand the
+      ratchet's own bypass to anyone who can move a clock.
+    name: rosterMark
+    params: roster *coreent.RosterValue, payload []byte
+    results: markRecord
+  - doc: |-
+      bundleMark reads what a signed bundle proves about time.
+
+      Both sides of the ratchet's comparison come through here — the bundle on disk
+      and the one an origin just served — so the two can never be derived by
+      different rules. That symmetry is the point: a mark installed under one shape
+      policy and compared under another is a ratchet with a seam in it.
+    name: bundleMark
+    params: raw []byte, vendor ed25519.PublicKey
+    results: markRecord
+  - name: InCI
+    results: bool
+  - doc: |-
+      checkTokenURL refuses a mint endpoint that is not GitHub's.
+
+      The URL is environment-supplied and the request carries a bearer credential,
+      so an unchecked one is a way to exfiltrate that credential to any host by
+      setting a variable. https and a githubusercontent host are both required.
+    name: checkTokenURL
+    params: raw string
+    results: parsed *url.URL, err error
+  - name: RequestActionsToken
+    params: get BearerFetch, audience string
+    results: token string, err error
+  - doc: |-
+      tokenResponseBody performs the mint request and returns its body, refusing
+      every answer that is not one a token could be read from.
+    name: tokenResponseBody
+    params: get BearerFetch, endpoint, bearer string
+    results: body []byte, err error
+  - doc: fetchToken performs the mint request and extracts the token from the reply.
+    name: fetchToken
+    params: get BearerFetch, endpoint, bearer string
+    results: token string, err error
+  - name: DefaultBearerFetch
+    params: url, bearer string
+    results: resp *http.Response, err error
+  - name: VerifyCI
+    params: get BearerFetch, keys map[string]*rsa.PublicKey, roster *coreent.RosterValue, audience string, now time.Time
+    results: claims *ActionsClaimsValue, err error
+  - doc: |-
+      ciRefusalIsFinal reports whether a ciSeat failure must be REPORTED rather
+      than fallen through.
+
+      Inside GitHub Actions it is final by DEFAULT, which is the inversion this
+      function carries. Falling through used to be unconditional: a runner that
+      also held a device key could use it, so a single copied key bought unlimited
+      CI without any CI entitlement. For a scheme whose whole point is to meter CI,
+      that is the hole, and it was open by construction rather than by oversight.
+
+      Two conditions still gate it, both load-bearing. InCI, because a laptop never
+      had a seat to prove and refusing one would be a far worse defect than the
+      hole being closed. And the roster's CIRelaxed, because a self-hosted runner
+      legitimately carrying a device key is a real deployment the vendor may want
+      to keep working — stated once, in the one document nobody else can write.
+
+      The direction matters. This field can only RELAX, so absence — which is what
+      any tampering, truncation or substitution produces — reads as strict. There
+      is no way to forge a downgrade; the signature is what makes that true.
+
+      A vendor that publishes no `ci` block at all now refuses every CI run, and
+      that is deliberately NOT special-cased: it is a coherent statement rather
+      than a malformed value, it fails loudly with an error naming the account, and
+      one re-signature undoes it. It is also the deployment step that has to happen
+      before the next release ships.
+    name: ciRefusalIsFinal
+    params: roster *coreent.RosterValue
+    results: bool
+  - doc: |-
+      ciContext annotates a device refusal with the CI failure that preceded it.
+
+      Every ciSeat failure is swallowed so the device path can answer, which is
+      right up to the moment the device path ALSO refuses: the reason the seat did
+      not work out — the roster covers no CI account, the token was minted for
+      another owner, the key set was unreachable — is the actionable half on a
+      runner, and it was the half being dropped entirely.
+
+      The CI cause is folded in as TEXT — two fields, `ci_refusal` for the seat's
+      own sentence and `ci_detail` for the particulars behind it — and never as
+      a wrapped error, and that is the whole safety of this function. Wrapping it
+      would splice the seat's error CHAIN into the device refusal, and that chain
+      is not limited to CI sentinels: publishedJWKS goes through the same bounded
+      fetch the roster does, so a JWKS outage carries coreent.ErrRosterUnreachable
+      inside coreent.ErrCIUnverifiable. licenseExitCode matches
+      coreent.ErrRosterUnreachable BEFORE coreent.ErrLicenseExpired, and
+      licenseAdvice does the same — so an expired licence on a runner during a
+      GitHub outage would have been reported as "cannot reach the licence roster"
+      and exited with the wrong code. Taking the text and dropping the chain is
+      exactly the split wanted: the device sentinel stays the only one any dispatch
+      can see.
+
+      annotate rather than a bare errs.Wrap, because the device refusal may not be
+      ours at all: coreent.Identity is a port, and Discover is free to return a
+      plain error. Zero WrapParams over one of those returns
+      CodeInvalidWrapParams, which would replace the consumer's own refusal with
+      "internal wrap failure" on the one path that reports it. annotate returns
+      such an error untouched and drops the annotation instead.
+
+      Where the text actually lands, stated plainly because it is less than it
+      looks: a caller printing a FIXED advice string per sentinel never sees this
+      field. It reaches a structured debug log, errs.FieldsOf, and any fallback for
+      refusals that have no table entry. Making an advice table CI-aware is a
+      change to that table, not to this function.
+
+      Outside Actions there is nothing to add: the seat was never attempted, and
+      "not running in GitHub Actions" is noise on a laptop.
+    name: ciContext
+    params: deviceErr, ciErr error
+    results: error
+  - doc: |-
+      verifiedBy reports whether signature is key's ed25519 signature over message.
+
+      It asks the crypto domain's signing facade (ADR 0158 §2) rather than calling
+      crypto/ed25519 itself: one verifier for the vendor's roster, the self-update
+      manifest and a Roughtime answer, and the one the rest of the SDK uses. The
+      facade answers a key or a signature of the wrong length with false rather
+      than a panic, and an error only for an algorithm it does not register —
+      which Ed25519 always is, since importing the facade registers it. An error
+      therefore reads as "not verified": nothing that failed to verify is believed.
+    name: verifiedBy
+    params: key, message, signature []byte
+    results: bool
+  - doc: |-
+      digestOf returns data's digest under algorithm, through the crypto domain's
+      hash facade.
+
+      The facade registers every algorithm it names when it is imported — by this
+      file, so before any code of this package runs — and the one error it can
+      return, an unknown algorithm, is therefore unreachable here. It is not turned
+      into a value: both callers COMPARE what this returns, and a comparison
+      against a fallback nobody computed is the defect a digest exists to prevent.
+      It panics, which is how the framework already says "the SDK registers it"
+      (framework/internal/app's journal chain).
+    name: digestOf
+    params: algorithm hash.Algorithm, data []byte
+    results: "[]byte"
+  - doc: |-
+      payloadDigest is the SHA-256 of the bytes a roster signature covers: what
+      separates two statements the vendor signed at one instant (markRecord).
+    name: payloadDigest
+    params: payload []byte
+    results: "[sha256Size]byte"
+  - doc: |-
+      sha512Prefix is the first size bytes of data's SHA-512: a Roughtime Merkle
+      node, which the format truncates to roughtimeHashSize.
+    name: sha512Prefix
+    params: data []byte, size int
+    results: "[]byte"
+  - doc: |-
+      checkNoDuplicateNames reports the first member name declared twice in one
+      JSON object, at ANY depth.
+
+      # Why recursive, where internal/service/security/token's equivalent is not
+
+      internal/service/security/token/encoding.go stops at the top level and skips nested
+      values wholesale, which is right for a JWT claim set. It is not enough here:
+      Subjects and CIAccounts are map[string]…, so a duplicated subject uuid — one
+      entry authorising a key, a second one at the same uuid revoking it — lives
+      TWO levels down and a top-level scan never sees it. That case is precisely
+      the equivocation this package cannot afford to resolve by accident.
+
+      It is not shared with that package for one concrete reason: its refusal
+      carries a sentinel in the 0.3.44.* range, and this package may only emit
+      0.3.67.* and the contract's fifteen. Returning a name and a boolean rather
+      than an error is what lets each call site refuse under ITS OWN sentinel.
+
+      # What it does not do
+
+      It does not judge whether the document is well-formed JSON. A malformed one
+      is reported as carrying no duplicate, and the json.Unmarshal that follows
+      every call site reports the syntax error with the diagnosis it already had.
+      Two verdicts on one input, from two places, is the defect that produces
+      contradictory refusals.
+    name: checkNoDuplicateNames
+    params: data []byte
+    results: duplicate string, found bool
+  - doc: |-
+      admitToken folds one token into the frame stack.
+
+      Split out of the loop so the scan reads as "fold a token, or stop": the
+      member-name case has four conditions of its own, and inlining them next to
+      the decoder's own two left one function holding the whole grammar.
+    name: admitToken
+    params: stack []*nameFrame, token json.Token
+    results: duplicate string, found bool, next []*nameFrame
+  - doc: applyDelim moves the frame stack for one delimiter.
+    name: applyDelim
+    params: stack []*nameFrame, delim json.Delim
+    results: "[]*nameFrame"
+  - doc: topFrame returns the innermost open frame, or nil at the top level.
+    name: topFrame
+    params: stack []*nameFrame
+    results: "*nameFrame"
+  - doc: valueClosed records that a complete value was consumed in frame.
+    name: valueClosed
+    params: frame *nameFrame
+  - doc: |-
+      decodeJWKS decodes a published key set, refusing what is not one before any
+      of it is trusted.
+
+      Size is checked before json.Unmarshal because the entry-count limit only
+      applies once the whole document has already been built in memory, which is
+      too late to be a limit at all.
+    name: decodeJWKS
+    params: raw []byte
+    results: decoded JWKSValue, err error
+  - name: ParseJWKS
+    params: raw []byte
+    results: keys map[string]*rsa.PublicKey, err error
+  - doc: |-
+      jwtSegments splits a compact JWS and returns its parts plus the exact bytes
+      the signature covers.
+
+      The signing input is the ORIGINAL ASCII of "header.payload", not a
+      re-serialisation of the decoded values: re-encoding would not reproduce the
+      same bytes, and the signature covers those bytes and nothing else.
+    name: jwtSegments
+    params: raw string
+    results: signingInput string, header, payload, signature []byte, err error
+  - doc: |-
+      strictUnmarshal decodes exactly one JSON object, refusing trailing input.
+
+      encoding/json stops at the first value, so "{}{...}" would otherwise decode
+      as the first object and silently ignore whatever followed — a way to show a
+      verifier one document and a reader another.
+    name: strictUnmarshal
+    params: data []byte, what string
+    results: decoded T, err error
+    typeParams: T any
+  - doc: |-
+      checkHeaderShape refuses the header fields that decide whether verifying the
+      signature can mean anything: the algorithm, the type, and any extension the
+      token declares critical.
+    name: checkHeaderShape
+    params: header *jwtHeader
+    results: error
+  - doc: |-
+      checkHeader refuses every header shape that would make verification unsound,
+      and returns the key the token names.
+    name: checkHeader
+    params: raw []byte
+    results: kid string, err error
+  - doc: |-
+      verifySignature checks the RS256 signature over the signing input.
+
+      It stays a verifier of this package's own, and the one RSA code in the
+      framework. The crypto domain registers Ed25519 and ECDSA P-256 and no RSA
+      scheme, and ADR 0158 §2 sends the CI seat's RS256 token to the crypto domain
+      by an ADR, or not at all; until that ADR exists this is the CI seat's alone.
+      It is typed like everything else here — every refusal is ErrCIUnverifiable
+      with its stage and condition — and it sees no key jwks.go has not bounded.
+    name: verifySignature
+    params: signingInput string, signature []byte, key *rsa.PublicKey
+    results: error
+  - doc: |-
+      checkTokenWindow refuses a window that is not one: inverted, or wider than
+      GitHub ever issues.
+
+      The width bound is what keeps the clock-skew allowance from becoming an
+      unbounded replay window, and the inversion check has to come first — a
+      negative duration sails straight past a "greater than" comparison.
+    name: checkTokenWindow
+    params: issued, expires time.Time
+    results: error
+  - doc: checkTiming refuses a token outside its own validity window.
+    name: checkTiming
+    params: claims *ActionsClaimsValue, now time.Time
+    results: error
+  - doc: checkClaims refuses a token that is authentic but not addressed to us.
+    name: checkClaims
+    params: claims *ActionsClaimsValue, audience string, now time.Time
+    results: error
+  - name: VerifyActionsToken
+    params: raw string, keys map[string]*rsa.PublicKey, audience string, now time.Time
+    results: claims *ActionsClaimsValue, err error
+  - doc: |-
+      jwkNumbers decodes the two big-endian values that make up an RSA public key.
+
+      JWK requires the minimal big-endian encoding, so a leading zero byte means
+      the value has two spellings — and two encodings of one number is one too
+      many for something a trust decision rests on.
+    name: jwkNumbers
+    params: entry *JWKValue
+    results: modulus, exponent []byte, err error
+  - doc: |-
+      jwkExponent turns the decoded exponent into the int rsa.PublicKey wants.
+
+      RSA public exponents are small and odd: an even one shares a factor with
+      every Euler totient, so it cannot be one, and a huge one is either broken or
+      an attempt to make verification expensive.
+    name: jwkExponent
+    params: raw []byte, kid string
+    results: exponent int, err error
+  - doc: |-
+      signsRS256 reports whether a published entry is allowed to verify RS256.
+
+      "use" and "alg" are optional in JWK, so an entry that declares neither is
+      accepted: GitHub has published both shapes. What is refused is an entry that
+      declares something ELSE, since a key published for encryption or for another
+      algorithm is being repurposed for a job it was not published for.
+    name: signsRS256
+    params: entry *JWKValue
+    results: bool
+  - doc: |-
+      rsaKeyFromJWK builds a public key from a JWKS entry, refusing anything that
+      is not a usable RS256 signing key.
+    name: rsaKeyFromJWK
+    params: entry *JWKValue
+    results: key *rsa.PublicKey, err error
+  - doc: |-
+      usableRSAKey reports why the key selected by kid cannot verify a signature, or
+      nil when it can.
+
+      The kid comes from the TOKEN, which is attacker text, so a map entry that is
+      nil or carries no modulus must refuse rather than be dereferenced — a
+      malformed key set a caller built would otherwise become a process panic
+      instead of an unverifiable token.
+    name: usableRSAKey
+    params: key *rsa.PublicKey, kid string
+    results: error
+  - doc: |-
+      misconfigured builds the one refusal every Validate failure carries, so the
+      code, reason and public text are written once.
+    name: misconfigured
+    params: detail string
+    results: error
+  - doc: newOriginScan pre-sizes an accumulator for a list of n origins.
+    name: newOriginScan
+    params: n int
+    results: "*originScan"
+  - doc: |-
+      hostOf extracts the DNS host an origin resolves to, for the redundancy check.
+
+      Two normalisations matter, and both were defects before they were rules:
+
+        - the PORT is dropped. https://h/a and https://h:8443/a are one machine and
+          one outage; counting them as two hosts is how a list looks redundant
+          while being a single point of failure.
+        - the case is folded, because DNS is case-insensitive and Example.com and
+          example.com are the same name.
+
+      Anything that does not parse, names no host, or is not http(s) collapses into
+      unusableHost, which Validate then refuses outright and never counts — so
+      neither a pile of unfetchable entries nor one real origin beside one
+      unfetchable entry can add up to redundancy.
+    name: hostOf
+    params: bundleURL string
+    results: string
+  - name: ParseRoster
+    params: raw, sig []byte, vendor ed25519.PublicKey, now time.Time
+    results: roster *coreent.RosterValue, err error
+  - doc: |-
+      authenticateRoster verifies the vendor signature and decodes the payload,
+      WITHOUT applying the freshness window.
+
+      Split out of ParseRoster for the clock ratchet, which must read the signing
+      instant of a document that has usually expired — an expired roster is still
+      the vendor's statement about when it was signed, and that statement is the
+      whole point of the ratchet.
+
+      Nothing here is a weaker check: the signature is verified before a single
+      field is decoded, exactly as before. What is missing is only the judgement
+      about NOW, which is what the caller with a clock to doubt cannot use.
+    name: authenticateRoster
+    params: raw, sig []byte, vendor ed25519.PublicKey
+    results: roster *coreent.RosterValue, err error
+  - name: QueryRoughtime
+    params: server RoughtimeServerValue
+    results: midpoint time.Time, radius time.Duration, err error
+  - doc: |-
+      buildRoughtimeRequest assembles the padded request packet.
+
+      The padding is not decoration: a request under the protocol's floor is
+      dropped without a reply, so getting this wrong looks exactly like a filtered
+      port.
+    name: buildRoughtimeRequest
+    params: nonce []byte
+    results: "[]byte"
+  - doc: roughtimeExchange sends one datagram and reads one back, under a bound.
+    name: roughtimeExchange
+    params: address string, request []byte
+    results: response []byte, err error
+  - doc: |-
+      verifyRoughtimeResponse authenticates a server's answer and returns the
+      instant it attests to.
+
+      Order is the whole design: the delegation is checked against the pinned
+      long-term key first, so the key that signs the response is one the server's
+      owner actually delegated to; then the response; then the tree, which is what
+      ties any of it to THIS request rather than to a capture of somebody else's.
+    name: verifyRoughtimeResponse
+    params: packet, nonce []byte, longTerm ed25519.PublicKey
+    results: midpoint time.Time, radius time.Duration, err error
+  - doc: |-
+      checkRoughtimeBinding ties a signed statement to the delegation that allowed
+      it and to the request that asked for it.
+
+      Two checks, both indispensable and both easy to leave out because the
+      signatures already passed. Without the WINDOW, a delegated key kept past its
+      term keeps answering forever. Without the TREE, the answer is a genuine,
+      correctly signed statement about somebody else's request, captured and
+      replayed — which is exactly what the nonce exists to prevent.
+    name: checkRoughtimeBinding
+    params: stated roughtimeStatement, delegated roughtimeDelegation, fields map[uint32][]byte, nonce []byte
+    results: error
+  - doc: unframeRoughtime strips the packet header and returns the message inside it.
+    name: unframeRoughtime
+    params: packet []byte
+    results: message []byte, err error
+  - doc: |-
+      verifyRoughtimeCert authenticates the delegation against the pinned key.
+
+      This is where the pin does its work. Everything after it rests on a key the
+      server generated moments ago; the only reason to believe that key belongs to
+      the server at all is this signature, made with the half that was pinned into
+      the binary by somebody who checked.
+    name: verifyRoughtimeCert
+    params: cert []byte, longTerm ed25519.PublicKey
+    results: delegation roughtimeDelegation, err error
+  - doc: |-
+      checkRoughtimeSignature verifies one context-prefixed ed25519 signature.
+
+      The context string is what stops a signature made for one purpose being
+      replayed as another — a delegation presented as a response, say.
+    name: checkRoughtimeSignature
+    params: key ed25519.PublicKey, context string, signed, signature []byte
+    results: error
+  - doc: readRoughtimeSrep pulls the three fields a signed response carries.
+    name: readRoughtimeSrep
+    params: srep []byte
+    results: stated roughtimeStatement, err error
+  - doc: |-
+      verifyRoughtimeMerkle proves the nonce this process drew is in the tree the
+      signed response committed to.
+
+      This is the step that makes the answer about US. A response verified without
+      it is a genuine, correctly signed statement about somebody else's request,
+      captured and replayed — which is precisely what a nonce exists to prevent and
+      precisely what is left if the proof is skipped.
+    name: verifyRoughtimeMerkle
+    params: fields map[uint32][]byte, nonce, root []byte
+    results: error
+  - doc: hashRoughtimeLeaf hashes a client nonce into a tree leaf.
+    name: hashRoughtimeLeaf
+    params: nonce []byte
+    results: "[]byte"
+  - doc: hashRoughtimeNode hashes two children into their parent.
+    name: hashRoughtimeNode
+    params: left, right []byte
+    results: "[]byte"
+  - doc: |-
+      roughtimeTag renders a four-character tag the way the wire format compares
+      them: as a little-endian uint32 over the ASCII bytes.
+
+      Short names are NUL-padded on the right, which is how "VER" and "SIG" travel.
+      Tags longer than four characters are a programming error rather than input,
+      so they truncate rather than grow a return path nobody can act on.
+    name: roughtimeTag
+    params: name string
+    results: uint32
+  - doc: |-
+      decodeRoughtimeMessage splits a tagged message into its fields.
+
+      Every length and offset in here was chosen by the server, so each one is
+      checked against the buffer that actually arrived before it is used to slice
+      it. The format makes that easy to get wrong: the offset table describes
+      values 1..N-1 and the first value's offset is implicit, so an off-by-one
+      reads a field's worth of somebody else's memory.
+    name: decodeRoughtimeMessage
+    params: raw []byte
+    results: fields map[uint32][]byte, err error
+  - doc: |-
+      roughtimeHeaderSize validates the tag count and returns it with the byte
+      length of the header that precedes the values.
+    name: roughtimeHeaderSize
+    params: raw []byte
+    results: count, header int, err error
+  - doc: |-
+      roughtimeValueBounds resolves one field's extent inside the values section.
+
+      The first value always starts at zero — its offset is implicit and absent
+      from the table — and every other start is read from the entry BEFORE it.
+      Both ends are checked against the section and against each other, so a
+      descending or out-of-range table is refused rather than sliced with.
+    name: roughtimeValueBounds
+    params: raw []byte, count, index, valuesLen int
+    results: start, end int, err error
+  - doc: |-
+      encodeRoughtimeMessage builds a tagged message from fields already in
+      ascending tag order.
+
+      It does not sort: the caller builds the one request this package ever sends,
+      so an unsorted list is a programming error that a test catches, not input to
+      be tolerated at runtime.
+    name: encodeRoughtimeMessage
+    params: fields []roughtimeField
+    results: "[]byte"
+  - doc: roughtimeUint64 reads a little-endian uint64 field, refusing a short one.
+    name: roughtimeUint64
+    params: value []byte, what string
+    results: parsed uint64, err error
+  - doc: roughtimeUint32 reads a little-endian uint32 field, refusing a short one.
+    name: roughtimeUint32
+    params: value []byte, what string
+    results: parsed uint32, err error
+  - name: NewService
+    params: identity coreent.Identity, vendor []byte, product *ProductValue
+    results: "*Service"
+  - name: NewServiceWithAnchors
+    params: identity coreent.Identity, anchors [][]byte, product *ProductValue
+    results: "*Service"
+  - name: NewServiceWithGetter
+    params: client Getter, identity coreent.Identity, vendor []byte, product *ProductValue
+    results: "*Service"
+  - name: NewServiceWithOrigins
+    params: client Getter, identity coreent.Identity, vendor []byte, origins []coreent.OriginValue
+    results: "*Service"
+  - doc: |-
+      regularFile reports whether path is a regular file, following symlinks.
+
+      Following them is deliberate and applies to BOTH halves of a pair: a key
+      symlinked in from a password manager or a mounted volume is an ordinary
+      setup, and refusing it would break installs that work today. What must be
+      refused is a path that could never have held a key — a directory, a socket,
+      a FIFO — because those stat without error and would otherwise count as an
+      identity.
+    name: regularFile
+    params: path string
+    results: bool
+  - doc: closeBestEffort releases a reader without masking the caller's own error.
+    name: closeBestEffort
+    params: c io.Closer, what string
+  - doc: |-
+      readBounded reads at most maxArtefactBytes from r, refusing anything larger
+      rather than buffering it.
+
+      Shared by the network fetch and the cache read because BOTH sources are
+      untrusted: an endpoint by construction, and a cache file because it sits on a
+      disk its holder controls. An unbounded read hands either of them a
+      memory-exhaustion lever, and having the rule in one place is what stops the
+      two paths from drifting apart — which they already had, the cache reading
+      with a plain os.ReadFile while the fetch was capped.
+
+      what names the source in the diagnostics: a URL, or a path.
+    name: readBounded
+    params: r io.Reader, what string
+    results: body []byte, err error
+  - name: RequiresUpdate
+    params: current, floor string
+    results: bool
+  - doc: |-
+      normaliseTag puts a version into the "vX.Y.Z" form pkg/v1/data/semver requires,
+      tolerating the bare "1.5.14" that a build stamp produces.
+    name: normaliseTag
+    params: version string
+    results: string
+  - name: UpdateRefusal
+    params: current, floor string
+    results: error
+  - doc: |-
+      refuse reports a refusal this package reached on its own.
+
+      The sentinel is passed as the CAUSE rather than as parameters, so errors.Is
+      finds it by unwrapping as well as by (Code, Reason), and the fields carry
+      every particular the public sentence deliberately leaves out.
+    name: refuse
+    params: sentinel *errs.Error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      classify reports a failure that arrived from OUTSIDE — a transport, a
+      filesystem, a decoder — under the sentinel that says what it means here.
+
+      The sentinel's Code, Reason, Public, Private and exit status are READ from it
+      rather than restated at the call site. A restatement is four strings copied
+      by hand with nothing checking the copy, and coreent.ErrCIUnverifiable is
+      reached from more than sixty sites in six files here: the first copy to drift
+      would give one refusal two different sentences depending on which path
+      produced it. misconfigured in product.go restates, and stays restating,
+      because it is the only site that reaches CodeProductInvalid.
+
+      When cause ALREADY carries an *errs.Error, errs.Wrap's origin-wins rule
+      (ADR 0002 / SDK rule 6) keeps the cause's identity and the sentinel
+      contributes only a trail entry. That is usually right — a refusal from deeper
+      in this package has already classified itself — but it is NOT always what a
+      call site wants: publishedJWKS borrows the roster fetch and must not let
+      coreent.ErrRosterUnreachable out under a CI failure. Those sites pass the
+      cause's TEXT as a field to refuse instead, and say so where they do it.
+
+      A nil sentinel is refused rather than dereferenced. Only a bug in this
+      package can produce one, and the worst place to take a process down is the
+      path that is already reporting a failure. Neither sentinel.Code() nor
+      errs.CodeOf(sentinel) is total here: a typed-nil *errs.Error is a non-nil
+      error interface, so the accessor finds it in the chain and dereferences it
+      exactly as the method would.
+    name: classify
+    params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      classifyForeign reports a failure produced by code the CALLER supplied, under
+      the sentinel that says what it means here.
+
+      It exists because origin-wins is the wrong rule at exactly these seams. Inside
+      this SDK a deeper *errs.Error is the more specific classification and should
+      win. A Getter, a BearerFetch, an ssh.Signer or a response Body is not deeper —
+      it is somebody else's package, free to return an error from its own code
+      range, and letting that win means errors.Is stops finding this domain's
+      sentinel and a caller's exit-code table follows a number this SDK does not
+      own.
+
+      Measured, not reasoned: with a Getter returning an errs-typed error of its
+      own, plain classify gives
+      errors.Is(err, ErrRosterUnreachable)=false and code=0.3.48.1; this gives
+      true and 0.2.35.7, with errors.Is(err, theConsumerError) still true in both.
+
+      A cause with no SDK identity cannot hijack anything, so it takes the ordinary
+      path untouched — which is why every stdlib cause behaves exactly as before.
+    name: classifyForeign
+    params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      annotate attaches fields to an error without changing what it says.
+
+      Two call sites need it and both are the same situation: a refusal that has
+      already classified itself, plus one fact the layer above knows — which origin
+      produced it, or that the CI seat was refused too.
+
+      The guard is load-bearing rather than defensive. errs.Wrap has no spelling
+      for "add a field, decide nothing": zero WrapParams over a cause that carries
+      no *errs.Error fails validateDefineArgs and returns CodeInvalidWrapParams —
+      "internal wrap failure" — with the caller's error demoted to a cause. That is
+      reachable in production, not only in theory: coreent.Identity is a PORT, and
+      a consumer implementing it with plain errors.New would have every device
+      refusal replaced by a meta-code on the one path that reports it. So an error
+      with no identity of its own is returned untouched, and the annotation is the
+      thing that is dropped.
+    name: annotate
+    params: err error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      diagnose renders the half of an error that is NOT wire-safe: the private
+      sentence, every field, and the foreign cause underneath.
+
+      It exists because the public sentence is now all err.Error() carries, and one
+      place in this package writes to a LOG rather than to a wire — rememberRoster,
+      reporting a cache it could not replace. An operator reading that line is owed
+      the directory and what the filesystem said about it, and a terminal they own
+      is not a response body.
+
+      An error with nothing to add renders as the empty string, which is what a
+      caller interpolating it wants: nothing printed. That is a rendering rather
+      than a sentinel, so there is no second result to pair it with.
+    name: diagnose
+    params: err error
+    results: string
+  - doc: |-
+      particulars renders the FIELDS and the foreign cause of an error, and
+      deliberately not its Private sentence.
+
+      publishedJWKS is why it is separate from diagnose. It borrows the roster
+      fetch, so the error it holds carries coreent.ErrRosterUnreachable's private
+      half — "no origin answered and nothing was cached" — which is the roster
+      vocabulary that whole function exists to keep out of a CI failure. What it
+      wants is the url the fetch tried and the word the transport used, which is
+      exactly what the fields and the cause hold and nothing else.
+
+      Reading the cause's fields rather than its Error() is not a refinement: after
+      this package's conversion, Error() is the wire-safe sentence and carries no
+      url and no syscall text at all, so a call site that kept spelling it
+      cause.Error() would have silently swapped a diagnosis for a tautology.
+    name: particulars
+    params: err error
+    results: string
+  - doc: |-
+      foreignCause returns the message of the first error in the chain that this
+      SDK did not build, and the empty string when the chain is ours all the way
+      down.
+
+      Quoting our own Public back at the reader would be worse than saying nothing:
+      it is the sentence printed one line above, and it is precisely NOT the
+      filesystem's or the transport's account of what happened.
+    name: foreignCause
+    params: err error
+    results: string
+imports:
+  base64: encoding/base64
+  big: math/big
+  binary: encoding/binary
+  bytes: bytes
+  context: context
+  coreent: github.com/kitsunium/sdk/framework/internal/core/entitlement
+  crypto: crypto
+  ed25519: crypto/ed25519
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  fmt: fmt
+  fs: io/fs
+  hash: github.com/kitsunium/sdk/pkg/v1/crypto/hash
+  http: net/http
+  io: io
+  json: encoding/json
+  lock: github.com/kitsunium/sdk/pkg/v1/app/lock
+  log: log
+  net: net
+  os: os
+  rand: crypto/rand
+  rsa: crypto/rsa
+  semver: github.com/kitsunium/sdk/pkg/v1/data/semver
+  sha256: crypto/sha256
+  sign: github.com/kitsunium/sdk/pkg/v1/crypto/sign
+  slices: slices
+  strings: strings
+  sync: sync
+  time: time
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/service/entitlement
+  name: entitlement
+  purpose: Package entitlement — the trust anchors this verifier accepts, and why there is more than one of them.
+types:
+  - fields:
+      - doc: |-
+          Payload is the roster document, base64. Carrying the bytes rather than
+          a nested object is what keeps the signature verifiable: it covers this
+          exact byte sequence, and re-serialising a decoded struct would not
+          reproduce it.
+        name: Payload
+        type: string
+      - doc: |-
+          Signature is the vendor's detached ed25519 signature over the decoded
+          payload, base64.
+        name: Signature
+        type: string
+    kind: struct
+    name: BundleValue
+  - doc: |-
+      markDecision is the ratchet's verdict on one offered bundle.
+
+      Two fields and not one error, because "do not install this" and "do not act on
+      this" are different answers and one input needs the first without the second: a
+      document that proves nothing about time must not lower a mark this machine
+      holds, and must not turn a verification that already succeeded into a refusal
+      either.
+
+      Its ZERO value carries what a stand-down means — nothing installed, nothing
+      refused — which is why rememberRoster can leave it untouched on the one path
+      where the comparison never runs at all.
+    fields:
+      - doc: install is whether the offered bytes may replace what is cached.
+        name: install
+        type: bool
+      - doc: |-
+          refusal is why the offered document may not be acted on, or nil when it
+          may.
+        name: refusal
+        type: error
+    kind: struct
+    name: markDecision
+  - doc: |-
+      markRecord is what one authenticated document proves about time, and about
+      WHICH statement was made at that instant.
+
+      A bare time.Time was the whole of the mark until the ratchet had to compare an
+      OFFERED roster against it. At an equal IssuedAt "the same document again" and
+      "a different document signed at the same instant" are opposite answers — the
+      first is every ordinary re-verification, the second is two vendor statements
+      racing — and an instant alone cannot tell them apart.
+
+      The digest covers the signed PAYLOAD and not the bundle around it, because two
+      bundles differing only in their outer JSON are ONE statement by the vendor and
+      have to compare equal.
+
+      present is carried rather than derived from issued, because absence here is a
+      verdict on the document's SHAPE and not an instant. rosterMark refuses a
+      document that is not a roster, and "refused" must not be indistinguishable
+      from "a mark at the zero instant" — the two would compare equal, and the
+      second is a thing no vendor ever signed.
+    fields:
+      - doc: issued is the vendor-signed instant the document carries.
+        name: issued
+        type: time.Time
+      - doc: |-
+          payload is the SHA-256 of the bytes the signature covers, so two
+          readings of one statement compare equal and two statements never do.
+        name: payload
+        type: "[sha256Size]byte"
+      - doc: present is whether this record proves anything at all.
+        name: present
+        type: bool
+    kind: struct
+    name: markRecord
+  - doc: actionsTokenResponse is what the mint endpoint returns.
+    fields:
+      - doc: Value is the compact JWS.
+        name: Value
+        type: string
+    kind: struct
+    name: actionsTokenResponse
+  - doc: |-
+      nameFrame is one open JSON container during the scan.
+
+      names is allocated only for objects: an array has no member names to collide,
+      and allocating a map per array element would dominate the cost of the scan on
+      a roster whose subjects are the bulk of the document.
+    fields:
+      - doc: names is every member name seen in this object so far.
+        name: names
+        type: map[string]struct{}
+      - doc: object distinguishes an object frame from an array frame.
+        name: object
+        type: bool
+      - doc: |-
+          expectKey is true when the next scalar in this object is a member name
+          rather than a value. Only meaningful for an object frame.
+        name: expectKey
+        type: bool
+    kind: struct
+    name: nameFrame
+  - fields:
+      - doc: KeyType must be RSA for anything this package can verify.
+        name: KeyType
+        type: string
+      - doc: KeyID is what a token's `kid` header selects.
+        name: KeyID
+        type: string
+      - doc: |-
+          Use, when present, must be "sig": a key published for encryption is
+          being repurposed if it verifies signatures.
+        name: Use
+        type: string
+      - doc: Algorithm, when present, must be RS256.
+        name: Algorithm
+        type: string
+      - doc: Modulus is the RSA modulus, base64url, minimally encoded.
+        name: Modulus
+        type: string
+      - doc: Exponent is the RSA public exponent, base64url, minimally encoded.
+        name: Exponent
+        type: string
+    kind: struct
+    name: JWKValue
+  - fields:
+      - doc: Keys are the published signing keys.
+        name: Keys
+        type: "[]JWKValue"
+    kind: struct
+    name: JWKSValue
+  - fields:
+      - doc: |-
+          Issuer must be ActionsIssuer; anything else is another identity
+          provider entirely.
+        name: Issuer
+        type: string
+      - doc: |-
+          Subject identifies the workflow context. It is recorded for diagnostics
+          and policy, never parsed for ownership: its format varies with
+          environments, customisation and GitHub's immutable-subject rollout, so
+          reading an owner out of it would break silently.
+        name: Subject
+        type: string
+      - doc: |-
+          Audience is who the token was minted for. GitHub emits a single string;
+          the JWT spec allows an array, so both are accepted on decode.
+        name: Audience
+        type: audienceClaim
+      - doc: |-
+          RepositoryOwnerID is the entitlement key: the account id, which survives
+          renames and cannot be reused. RepositoryOwner is the display name for
+          the same account and must never be what a licence matches on — a freed
+          handle can be claimed by someone else.
+
+          GitHub sends a decimal string and nothing here VALIDATES that: the only
+          check is that it is non-empty, and the value is compared to the roster's
+          keys by string equality. "Numeric" therefore describes what the issuer
+          emits, not a property this package enforces — and it does not need to,
+          because a value that is not one of the roster's keys is not entitled
+          whatever its shape. A decimal check would be a second syntax for a
+          comparison that is already exact.
+        name: RepositoryOwnerID
+        type: string
+      - doc: RepositoryOwner is the account's current login, for diagnostics only.
+        name: RepositoryOwner
+        type: string
+      - doc: Repository is "owner/name", for diagnostics and optional narrowing.
+        name: Repository
+        type: string
+      - doc: |-
+          EventName is the workflow trigger, DECODED AND READ BY NOTHING. It is
+          carried so a diagnostic can print it and so a future policy would not
+          have to change the wire shape to see it.
+
+          It used to say pull_request_target "runs with the base repository's
+          identity while potentially executing code from a fork, so a policy may
+          want to refuse it" — which is true of Actions and describes no
+          behaviour of this package. Four lines above, this type's own doc
+          comment says a field that is not read cannot be relied on by accident;
+          a field whose comment describes a policy is exactly how that gets
+          relied on. Test_VerifyActionsToken_ignoresTheClaimsNothingReads makes
+          the silence mechanical.
+        name: EventName
+        type: string
+      - doc: |-
+          RunnerEnvironment distinguishes "github-hosted" from "self-hosted",
+          DECODED AND READ BY NOTHING, for the same reason and with the same
+          warning as EventName above.
+        name: RunnerEnvironment
+        type: string
+      - doc: ExpiresAt, IssuedAt and NotBefore are NumericDate seconds.
+        name: ExpiresAt
+        type: int64
+      - doc: IssuedAt is when GitHub minted the token.
+        name: IssuedAt
+        type: int64
+      - doc: NotBefore is when the token becomes usable.
+        name: NotBefore
+        type: int64
+    kind: struct
+    name: ActionsClaimsValue
+  - doc: audienceClaim decodes an `aud` that may be a string or an array of strings.
+    kind: named
+    methods:
+      - doc: UnmarshalJSON accepts both spellings the JWT spec allows.
+        name: UnmarshalJSON
+        params: data []byte
+        recv: a *audienceClaim
+        results: error
+      - doc: |-
+          contains reports whether the audience includes want.
+
+          Exact match only: no prefix rule and no case folding, either of which would
+          widen what this verifier accepts beyond what it was asked for.
+        name: contains
+        params: want string
+        recv: a *audienceClaim
+        results: bool
+    name: audienceClaim
+    underlying: "[]string"
+  - doc: jwtHeader is the subset of the JOSE header this package acts on.
+    fields:
+      - doc: Algorithm must be RS256; nothing else is accepted.
+        name: Algorithm
+        type: string
+      - doc: KeyID selects which JWKS key signed this token.
+        name: KeyID
+        type: string
+      - doc: Type is optional, and must be JWT when present.
+        name: Type
+        type: string
+      - doc: |-
+          Critical lists extensions a verifier must understand. We understand
+          none, so any value here is a refusal.
+        name: Critical
+        type: "[]string"
+      - doc: |-
+          JWKSetURL and X509URL are places a hostile token can point a naive
+          verifier at. They are decoded ONLY so a NON-EMPTY value can be refused —
+          honouring either would let the token nominate its own trust anchor.
+
+          Non-empty, and the precision matters: absent, `""` and `null` all decode
+          to the empty string and are therefore indistinguishable here, so none of
+          the three is refused. That is harmless rather than overlooked — neither
+          field CHOOSES a key source in this implementation, so an empty one
+          nominates nothing — but "their presence is refused" is what this comment
+          used to say, and it was not true of `"jku": ""`.
+        name: JWKSetURL
+        type: string
+      - doc: |-
+          X509URL is refused for the same reason as JWKSetURL, on the same
+          non-empty condition.
+        name: X509URL
+        type: string
+    kind: struct
+    name: jwtHeader
+  - fields:
+      - doc: |-
+          Name is the product's binary name. It scopes the cache directory and
+          labels generated key material.
+        name: Name
+        type: string
+      - doc: |-
+          Origins are the roster publication locations, tried in order. The first
+          that answers with an authentic bundle wins.
+        name: Origins
+        type: "[]coreent.OriginValue"
+      - doc: |-
+          CIAudience is the OIDC audience a CI provenance token must carry. It must
+          be unique to this product: a token minted for one audience must not
+          satisfy another's gate.
+        name: CIAudience
+        type: string
+      - doc: |-
+          EnrolURL is where a new subject is directed to request enrolment. Empty
+          means the product offers no self-service path.
+        name: EnrolURL
+        type: string
+    kind: struct
+    methods:
+      - name: DefaultCacheDir
+        recv: p *ProductValue
+        results: string
+      - name: Label
+        recv: p *ProductValue
+        results: string
+      - name: PublishedOrigins
+        recv: p *ProductValue
+        results: "[]coreent.OriginValue"
+      - doc: |-
+          cacheDir returns the directory name this product's cache is scoped under.
+
+          A product with no name falls back to the package name rather than writing to
+          the cache root itself — which is Label's fallback, shared so the two cannot
+          drift into scoping a cache and labelling a key differently.
+        name: cacheDir
+        recv: p *ProductValue
+        results: string
+      - doc: |-
+          audience returns the OIDC audience for this product's CI seats, falling back
+          to a package-scoped value that no other product would mint a token for.
+        name: audience
+        recv: p *ProductValue
+        results: string
+      - name: Validate
+        recv: p *ProductValue
+        results: error
+    name: ProductValue
+  - doc: |-
+      originScan is Validate's accumulator: what it has seen so far, and what it has
+      to say about it.
+    fields:
+      - name: names
+        type: map[string]bool
+      - name: urls
+        type: map[string]string
+      - name: hosts
+        type: map[string]bool
+      - name: problems
+        type: "[]error"
+    kind: struct
+    methods:
+      - doc: admit folds one origin into the scan, recording every way it fails.
+        name: admit
+        params: origin coreent.OriginValue
+        recv: s *originScan
+    name: originScan
+  - fields:
+      - doc: Name identifies the server in diagnostics.
+        name: Name
+        type: string
+      - doc: Address is "host:port", reached over UDP.
+        name: Address
+        type: string
+      - doc: |-
+          PublicKey is the server's long-term ed25519 public half, which signs
+          the delegation that in turn signs each response.
+        name: PublicKey
+        type: ed25519.PublicKey
+    kind: struct
+    name: RoughtimeServerValue
+  - doc: |-
+      roughtimeDelegation is what a certificate delegates: a key and the window it
+      is allowed to speak in.
+    fields:
+      - doc: key signs the responses this delegation covers.
+        name: key
+        type: ed25519.PublicKey
+      - doc: |-
+          notBefore and notAfter bound the midpoints it may attest to, in
+          microseconds since the epoch.
+        name: notBefore
+        type: uint64
+      - doc: |-
+          notBefore and notAfter bound the midpoints it may attest to, in
+          microseconds since the epoch.
+        name: notAfter
+        type: uint64
+    kind: struct
+    name: roughtimeDelegation
+  - doc: roughtimeStatement is what a signed response asserts.
+    fields:
+      - doc: midpoint is the attested instant, microseconds since the epoch.
+        name: midpoint
+        type: uint64
+      - doc: radius is the server's own uncertainty, in microseconds.
+        name: radius
+        type: uint32
+      - doc: root commits to every nonce the server answered in this batch.
+        name: root
+        type: "[]byte"
+    kind: struct
+    name: roughtimeStatement
+  - doc: roughtimeField is one tag and its value, for encoding.
+    fields:
+      - doc: tag is the little-endian rendering of the four-character name.
+        name: tag
+        type: uint32
+      - doc: |-
+          value is the field's bytes, which the format requires to be a multiple
+          of four bytes long.
+        name: value
+        type: "[]byte"
+    kind: struct
+    name: roughtimeField
+  - kind: named
+    name: Getter
+    underlying: |-
+      interface {
+      	// Get retrieves a URL.
+      	Get(url string) (*http.Response, error)
+      }
+  - kind: named
+    name: BearerFetch
+    underlying: func(url, bearer string) (resp *http.Response, err error)
+  - fields:
+      - doc: client performs the roster fetches.
+        name: client
+        type: Getter
+      - doc: |-
+          identity is how this machine proves who it is. A port, because the one
+          implementation that reads ssh key material needs a vendor dependency
+          this module bans — see core/entitlement's package comment.
+        name: identity
+        type: coreent.Identity
+      - doc: |-
+          anchors are the vendor keys this verifier accepts, in the order the
+          build declared them. A roster is authentic when it verifies against ANY
+          of them, which is what gives a key rotation a path in band; the list is
+          bounded and nothing at runtime can extend it, which is what keeps the
+          surface it costs a decision rather than a default. anchors.go carries
+          the argument, next to the code that applies it.
+        name: anchors
+        type: "[][]byte"
+      - doc: |-
+          origins is where the roster is looked for, in order. Held on the
+          Service rather than read from the package global so a test can point
+          it at a stub server without touching process-wide state.
+        name: origins
+        type: "[]coreent.OriginValue"
+      - doc: |-
+          product names the vendor whose roster this Service trusts, and scopes
+          the cache, the CI audience and the enrolment URL. It carries what the
+          source implementation kept as package constants.
+        name: product
+        type: "*ProductValue"
+      - doc: |-
+          version is this binary's own version, compared against the roster's
+          mandatory-update floor. Empty disables the check, which is what a
+          caller that has no version to declare gets.
+        name: version
+        type: string
+      - doc: |-
+          bearerFetch performs the one request that carries a credential: the
+          Actions token mint. Held on the Service so a test can exercise the CI
+          path without a network, and so the redirect-refusing default is what
+          production gets without every caller having to remember it.
+        name: bearerFetch
+        type: BearerFetch
+      - doc: |-
+          cacheDir is where the last authenticated bundle is kept, or "" to
+          disable the offline fallback entirely. Only NewService fills it: a
+          Service built around an injected getter must not reach a real
+          filesystem unless a test says so.
+        name: cacheDir
+        type: string
+      - doc: |-
+          cacheLockMu serialises the construction of cacheLock, which several
+          goroutines can reach at once through the first verification.
+        name: cacheLockMu
+        type: sync.Mutex
+      - doc: |-
+          cacheLockFor is the directory cacheLock was built for, so retargeting a
+          Service with WithCache rebuilds the guard instead of keeping one scoped
+          to a directory nobody is using. The empty string means "never built".
+        name: cacheLockFor
+        type: string
+      - doc: |-
+          cacheLock serialises the cache directory against every other goroutine
+          here and every other process on this machine, or is nil when no such
+          lock is available. See cache_lock.go for what nil costs.
+        name: cacheLock
+        type: lock.Locker
+      - doc: |-
+          markFloorMu guards markFloor. Separate from cacheLockMu because the two
+          are held for different reasons and one of them wraps a constructor.
+        name: markFloorMu
+        type: sync.Mutex
+      - doc: |-
+          markFloor is the newest document THIS PROCESS has authenticated, whether
+          or not it managed to install it. The cached bundle is still the durable
+          mark; this bounds it from below for as long as the process lives,
+          because an install that stood down or failed does not un-authenticate
+          the bytes that got it here. See raiseMarkFloor.
+
+          A full markRecord and not an instant: the digest is what separates two
+          statements signed at the same moment, and without it the floor could
+          only refuse a document that is strictly older — leaving the case the
+          disk comparison already refuses unrefused here.
+        name: markFloor
+        type: markRecord
+      - doc: |-
+          timeServers are the Roughtime servers consulted to corroborate the
+          local clock. Empty disables the check, which is what committed source
+          ships and what every test constructor gets: a Service must not reach
+          the network for time unless somebody asked it to.
+        name: timeServers
+        type: "[]RoughtimeServerValue"
+    kind: struct
+    methods:
+      - name: WithCache
+        params: dir string
+        recv: s *Service
+        results: "*Service"
+      - doc: |-
+          rememberRoster keeps the exact bytes that just authenticated, and refuses a
+          document that would undo a decision this machine has already reached.
+
+          # Two jobs, and the second one is the reason this returns anything
+
+          The monotonic guard is what makes this file a RATCHET rather than merely a
+          cache, and the ratchet is what checkClock reads. Without it, an origin lagging
+          behind another — or an attacker serving a genuine roster from before the clock
+          was rolled back — would lower the newest signed instant this machine can prove
+          it has seen, which is the one piece of evidence about time a local clock cannot
+          forge.
+
+          That was the whole of it, and it guarded the wrong verb. This function refused
+          to STORE an older roster; rosterFrom returned that same roster to the decision
+          regardless, and Verify never compared the roster in its hand against the mark.
+          So a genuine roster from before a revocation — replayed by any origin, or by a
+          mirror nobody had noticed was behind — was denied a place in the cache and
+          granted a seat at the table: the mark held, and the machine the newer roster
+          revoked kept running. The version floor and the CI policy were rollable back
+          the same way.
+
+          The comparison and the install are therefore ONE operation under ONE hold, and
+          the verdict is RETURNED. A caller that gets an error must not act on the roster
+          it fetched.
+
+          # What it still does not return
+
+          A write failure. A cache this machine cannot write costs the offline fallback
+          and nothing else, and must never turn a successful verification into a refusal;
+          it is logged here and goes no further. Only the supersession verdict leaves this
+          function.
+
+          # The guarantee, and the three ways it lapses
+
+          "An authenticated decision this machine already knows cannot be undone by an
+          earlier one" holds exactly as far as the mark PERSISTS, because the mark is the
+          cached bundle's IssuedAt and nothing else. It lapses when there is no cache to
+          compare against (cacheDir == "", which is every injected-getter construction),
+          when the install failed so the mark never advanced, and when the guard stood
+          down so no comparison ran at all. The last two log a line; none of the three is
+          a reason to refuse instead, because a contended lock turned into a refused
+          licence would be a far worse defect than the replay it would prevent. It is a
+          CONDITIONAL guarantee and is documented as one.
+
+          # Where the offered record comes from
+
+          From `raw`, through the SAME bundleMark the held record comes through, and not
+          from a roster the caller decoded. Two sides of one comparison derived by two
+          rules is a ratchet with a seam in it, and the seam was real: this function used
+          to take the caller's *coreent.RosterValue, so the shape checks rosterMark
+          applies to the cached document were applied to nothing at all on the offered
+          side. The caller must still have authenticated the bytes first — rosterFrom
+          calls this one line after ParseBundle returned — and that is a contract on the
+          caller rather than something re-derivable here.
+        name: rememberRoster
+        params: raw []byte
+        recv: s *Service
+        results: error
+      - doc: |-
+          cachedRoster re-reads the last bundle this machine authenticated.
+
+          The bytes come off a disk the holder controls, so they are exactly as
+          untrusted as the ones an origin serves — and they go through exactly the same
+          door. parseBundleAnyAnchor checks the signature against every accepted anchor
+          before decoding anything, then coreent.ParseRoster refuses an over-wide window,
+          one issued in the future and one already closed. A tampered copy is a forgery
+          here just as it would be there; an expired one is stale here just as it would be
+          there. A copy signed under an anchor the build no longer accepts is a forgery
+          here too, which is the one thing retiring a key is FOR.
+
+          Nothing about this path is more permissive than the network path. It is the
+          same document, read from somewhere else.
+
+          It is the ONE path the anti-replay comparison does not apply to, and that is a
+          choice rather than an omission. The mark IS this file: markWhileHeld reads the
+          bytes this function reads, so comparing what comes back against the mark
+          derived from it is tautological — it can only ever say "equal, same payload".
+          The one way it could say anything else is if a concurrent refresh replaced the
+          file between the two reads, and refusing THERE would turn lock contention into
+          a refused licence. The guarantee is therefore about what an ORIGIN can undo,
+          and rememberRoster's doc comment states its three other limits in the same
+          breath.
+        name: cachedRoster
+        params: now time.Time
+        recv: s *Service
+        results: roster *coreent.RosterValue, err error
+      - doc: |-
+          signedHighWaterMark returns the newest vendor-signed instant this machine has
+          ever authenticated, or the zero time when there is none.
+
+          The mark is not a file of its own: it IS the cached bundle's IssuedAt. That
+          is what makes it trustworthy — it carries the vendor's signature, so a local
+          attacker cannot pin this machine's clock by writing a number, only by
+          producing a genuine roster they do not have. A separate plain-text mark would
+          have handed them exactly that.
+
+          Absence is never an error worth reporting: a machine that has never fetched a
+          roster has no evidence about time, which is a fact rather than a fault.
+        name: signedHighWaterMark
+        recv: s *Service
+        results: time.Time
+      - doc: |-
+          raiseMarkFloor moves the in-process floor under the mark forward, and never
+          backward.
+
+          # What it is for
+
+          holdCacheForWrite SKIPS the install when the guard is held elsewhere, and its
+          own comment justifies that with "Nothing is lost by standing down: the holder
+          is installing, and the next verification caches whatever it fetches". That is
+          true of the CACHE and false of the MARK. The holder is installing A roster,
+          not THIS one — rememberRoster exists for "an origin lagging behind another",
+          which is two DIFFERENT generations in flight — so what the skip drops is the
+          distance between them, out of the one number checkClock refuses a rolled-back
+          clock against. Measured on windows-latest, run 34782571674: one stand-down,
+          logged one line above "the mark ended below the newest generation in 1 of 400
+          rounds".
+
+          The same hole opens on three other paths that never needed a race to reach
+          it: a platform with no file lock at all, where cacheGuard returns nil and two
+          goroutines run the compare-and-install unguarded; a cache directory that
+          cannot be written; and a write that fails halfway. All four end with this
+          process having authenticated an instant it cannot read back.
+
+          # Why it cannot refuse a clock it should not
+
+          checkClock refuses a clock reading earlier than the mark, so a floor that
+          ran ahead of reality would refuse a machine whose clock is correct. It cannot:
+          rememberRoster is reached from exactly one place, one line after ParseBundle
+          returned, and ParseRoster refuses a roster with `now.Before(IssuedAt)`. So
+          every instant that reaches this function was already NOT in the future of the
+          clock that admitted it.
+
+          # What it deliberately does not do
+
+          It does not persist, and it is not consulted by the ratchet's own comparison
+          inside rememberRoster. The cached bundle stays the durable mark and stays the
+          thing the comparison guards, for two reasons: a floor written to disk would
+          be a plain number a local holder could set, which is exactly the forgery
+          signedHighWaterMark's doc comment says the scheme avoids by making the mark
+          the vendor's own signature; and comparing an offered bundle against the floor
+          rather than the disk would REFUSE to install a generation newer than what is
+          cached but older than what was authenticated, leaving the offline fallback on
+          a staler bundle to protect a number that is already protected here.
+
+          It is also per SERVICE and not per cache directory, which is the same residue
+          seen from inside one process: a second Service built over the same directory
+          reads the disk and nothing else. A package-level map keyed by directory would
+          close that and was refused on three counts. It is process-wide mutable state
+          in a package that deliberately holds `origins` on the Service "so a test can
+          point it at a stub server without touching process-wide state". It grows
+          without bound, one entry per directory ever used, and this package's own tests
+          use a fresh t.TempDir() per round. And a directory is the wrong key: two
+          Services trusting DIFFERENT vendor roots may share a cache directory, so one
+          could raise a floor the other never authenticated and make it refuse a clock
+          on evidence it does not hold — a refusal manufactured out of the fix for a
+          dropped one. Keying on the vendor key as well makes the map worse, not safer.
+
+          The residue is therefore one Service instance wide, and one process restart
+          wide: after a stand-down, a fresh reader gets the older generation back until
+          the next successful refresh. Both halves are asserted in
+          Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown rather than described
+          here and nowhere else.
+        name: raiseMarkFloor
+        params: offered markRecord
+        recv: s *Service
+        results: markRecord
+      - doc: markFloorNow reads the in-process floor.
+        name: markFloorNow
+        recv: s *Service
+        results: markRecord
+      - doc: |-
+          markWhileHeld is signedHighWaterMark's body for a caller that already holds
+          the cache.
+
+          It exists because rememberRoster needs the mark INSIDE the exclusion it took
+          to install with, and the guard is not reentrant: taking it twice on one
+          goroutine deadlocks. Splitting the read out is what lets the compare and the
+          install be one operation, which is the whole of the ratchet's guarantee.
+        name: markWhileHeld
+        recv: s *Service
+        results: markRecord
+      - doc: |-
+          checkClock refuses a clock that disagrees with the newest signed instant this
+          machine ever authenticated, whichever of the two is wrong.
+
+          This is the whole of what an offline binary can say about time, and it is
+          worth saying. Every deadline in this scheme — the roster window, the subject
+          term, the grant's NotAfter — is compared against a clock the holder owns, so
+          rolling it back into a captured roster's window authorises indefinitely. A
+          vendor-signed IssuedAt is the one timestamp that party cannot forge, and a
+          local clock reading earlier than the newest one seen is the observable.
+
+          Three things it deliberately is not. It is not freeze detection: a clock
+          parked exactly on the mark is indistinguishable from a stopped world, here
+          and in every other purely local scheme. It is not tamper-proof: the mark
+          lives on a disk its holder can delete, which resets it — at the cost of the
+          offline window, since the same file is the cache. And its RESOLUTION is the
+          publication interval, not the second: the mark is a roster's IssuedAt, so
+          with hourly signing a rollback of under an hour lands above the mark and is
+          invisible. None of the three is a reason to skip the other side of the
+          ledger, which is rollbacks of days or weeks — the size an attacker actually
+          needs to re-enter a captured roster's window.
+
+          It refuses ONLINE as well as offline, which is the only placement that means
+          anything: the attack it answers is a rolled-back clock fed a genuine old
+          roster from a substituted origin, and that path is an online one. The refusal
+          is deliberately actionable rather than fatal — setting the clock resolves it,
+          except in the one case where setting the clock is the wrong advice, which is
+          why the ceiling below exists and why it refuses rather than forgiving.
+        name: checkClock
+        params: now time.Time
+        recv: s *Service
+        results: error
+      - doc: |-
+          checkClockAndTime runs the local ratchet and then, if any is configured, the
+          network corroboration.
+
+          Local FIRST, and the order is not arbitrary: the ratchet costs a file read
+          and answers without anybody's permission, while the network check costs a
+          round trip and is silent on most locked-down networks. A machine the ratchet
+          can already refuse should not wait on a datagram to be told so.
+        name: checkClockAndTime
+        params: now time.Time
+        recv: s *Service
+        results: error
+      - doc: |-
+          cacheGuard returns the locker guarding this cache directory, or nil when
+          there is none to be had.
+
+          Built on first use rather than in a constructor, because there are three
+          ways a Service acquires a cache directory — NewService reads it from the
+          product, WithCache sets it, and this package's own tests write the field —
+          and a guard that only one of them installed would be a guard that production
+          or the tests silently went without.
+
+          It is built once PER DIRECTORY, not once per Service. A sync.Once would have
+          been simpler and would have been wrong: WithCache can retarget a Service
+          after it has already cached something, and a locker retained from the first
+          directory would then exclude holders of a directory nobody is using while
+          leaving the live one unguarded — a failure that looks exactly like success.
+
+          It CREATES the cache directory, which the first successful write used to do.
+          On Windows, where reads are guarded too, a machine that never manages to
+          fetch a roster therefore ends up with an empty 0700 directory holding one
+          `.lock` file, where before it had nothing. That is a visible change and it is
+          accepted: the alternative is to take the guard only once there is something
+          to guard, which is exactly the ordering that makes a first write race a
+          concurrent one.
+
+          nil is a real answer, not a failure to report. A platform with no file-range
+          lock (NewFileLocker refuses with proc.UnsupportedPlatform) and a cache
+          directory whose lock files any account could replace both yield one, and in
+          both cases the cache must keep working: the offline grant is what a machine
+          falls back on, so degrading it to "no cache" to protect a ratchet would trade
+          a narrow race for a certain outage.
+        name: cacheGuard
+        recv: s *Service
+        results: lock.Locker
+      - doc: |-
+          underCacheLock runs fn with the cache directory held against every other
+          goroutine in this process and every other process on this machine. It
+          reports whether fn RAN, and when it did not, WHY.
+
+          It returns false in exactly one situation: a guard exists and the lock could
+          not be taken. It does NOT decide what that means, because the two callers
+          want opposite things from it — a write must not proceed unguarded, a read
+          must not be abandoned — and a helper that chose for both would have to be
+          wrong for one of them.
+
+          The error is returned rather than dropped because the two callers' log lines
+          used to ASSERT a cause they had no way to know. "Held elsewhere" is only one
+          of the answers Acquire can give: LockBackendFailed, LockFileReplaced and
+          LockFenceCorrupt are the others, and they say something entirely different
+          about the machine. On windows-latest, run 34782571674, that line was the only
+          evidence a dropped refresh left behind and it named a cause by assumption.
+
+          A nil guard is NOT that situation. There, fn runs unguarded and this reports
+          true, because "this platform has no file lock" is a standing fact about the
+          machine rather than a passing state of the cache, and treating it as
+          contention would disable caching on such a machine permanently.
+        name: underCacheLock
+        params: fn func()
+        recv: s *Service
+        results: ran bool, why error
+      - doc: |-
+          holdCacheForWrite runs a cache WRITE under exclusion, and SKIPS it when
+          exclusion is available but cannot be taken.
+
+          Skipping is the point, and it is the half a first version of this file got
+          wrong by falling through. Proceeding without the lock would be the lost
+          update this file exists to remove, reintroduced on the one path allowed to
+          lower the mark.
+
+          What skipping costs was overstated as nothing. An earlier version of this
+          comment read "Nothing is lost by standing down: the holder is installing, and
+          the next verification caches whatever it fetches", on the premise that the
+          holder is "doing the same work, with the same roster, from the same origins".
+          The premise is exactly the one rememberRoster's own doc comment denies: the
+          ratchet exists for "an origin lagging behind another", which is two DIFFERENT
+          generations in flight. The holder is installing A roster, not THIS one, so
+          the skip drops the distance between them out of the mark — measured once on
+          windows-latest, run 34782571674. What is lost is now bounded elsewhere:
+          rememberRoster raises an in-process floor under the mark BEFORE it reaches
+          this function, so the instant survives the skip even though the install does
+          not. See raiseMarkFloor for what that does and does not cover. The CACHE is
+          genuinely not lost: the holder is installing, and the next verification
+          caches whatever it fetches.
+        name: holdCacheForWrite
+        params: fn func()
+        recv: s *Service
+      - doc: |-
+          holdCacheForRead runs a cache READ with no exclusion at all.
+
+          rename(2) is atomic: a reader either sees the whole old file or the whole
+          new one, and a reader already inside the old one keeps reading it after the
+          name has moved on. Nothing a reader does can make a concurrent writer's
+          install fail, so a guard here would protect nobody.
+
+          It would also be expensive for nothing. The file locker fsyncs its fencing
+          ledger on every acquisition — 3.8 ms against 0.13 ms for the same read
+          unguarded, measured on ext4/NVMe — and Verify reads the cache on its ordinary
+          path, so guarding it would put two fsyncs into every licence check to buy a
+          property the kernel already provides. The Windows build takes the guard
+          because there the kernel does not; see cache_lock_windows.go.
+        name: holdCacheForRead
+        params: fn func()
+        recv: s *Service
+      - doc: |-
+          ciSeat authorises a proven CI run, or explains why it cannot.
+
+          Every failure is silent to the caller by design: not being in CI, not having
+          a token, not being covered are all ordinary, and the device path is what
+          answers next. Only a device failure is ever reported to a human, because
+          only a device failure is something they can act on.
+        name: ciSeat
+        params: roster *coreent.RosterValue, now time.Time
+        recv: s *Service
+        results: grant coreent.GrantValue, err error
+      - doc: |-
+          publishedJWKS fetches GitHub's signing keys.
+
+          # Fetched every time, cached never, retried never
+
+          There is no key-set cache anywhere in this package, and that is the design
+          rather than an omission — it is what makes a GitHub key rotation a non-event:
+          every verification reads the currently published set, so the next verification
+          after a rotation sees the new key with no cache to invalidate and no process
+          to restart. The cost is one round trip per CI verification, which is already
+          being paid for the roster.
+
+          What there is also no mechanism for is a SECOND fetch when the token names a
+          kid the set does not publish, and selectKey's own comment used to claim its
+          caller performed one. It never did, and building one would be worse than the
+          gap it appears to close:
+
+            - it cannot help. A second GET of the same URL, seconds after the first,
+              from the same process and the same network path, returns the same bytes.
+              An endpoint that does not publish a kid does not publish it twice.
+            - it would be an amplification lever. The fetch happens BEFORE any token is
+              examined and exactly once per verification, so no token can currently
+              cause a request. A refresh keyed on an unknown kid reverses that: a
+              random kid per invocation would buy a request per invocation, aimed at
+              somebody else's host, and would then need rate limiting to be safe —
+              new state, a timer, and a bound, to restore a property the absence of the
+              feature already has.
+            - the cache it presupposes does not exist. "Refresh on unknown kid" is the
+              repair for a STALE cached set. Adding the cache to make the refresh
+              meaningful would introduce the staleness the refresh then fixes.
+
+          So an unknown kid refuses, and Test_Service_ciSeat_fetchesTheKeySetOncePerVerification
+          and Test_Service_ciSeat_picksUpARotationOnTheNextVerification are what keep
+          these two paragraphs answerable to the code.
+
+          Bounded by the same reader the roster fetch uses: the endpoint is untrusted
+          by construction, and an unbounded read hands it a memory-exhaustion lever.
+
+          It reuses that reader and therefore inherits its VOCABULARY, which is the
+          subtle part: s.fetch speaks in coreent.ErrRosterUnreachable because its other caller
+          is fetching a roster. A JWKS outage is not a roster outage, and letting that
+          sentinel out of here mislabels it — the endpoint that went down is GitHub's
+          key set, not the licence roster. Worse, it is not only a wording problem:
+          licenseExitCode and licenseAdvice both match coreent.ErrRosterUnreachable ahead of
+          the CI sentinels, so a strict CI refusal during a GitHub outage exited
+          "cannot reach the licence roster" and sent its operator to check a network
+          path that was working. The cause is kept as a FIELD and the chain stops here.
+        name: publishedJWKS
+        recv: s *Service
+        results: keys map[string]*rsa.PublicKey, err error
+      - doc: |-
+          checkNetworkTime refuses a local clock that disagrees with a signed network
+          time by more than maxClockSkew.
+
+          FAIL-OPEN, and deliberately so. No server configured, none reachable, none
+          whose answer verifies: all three return nil and the verification carries on.
+          An adversary drops UDP to a nonstandard port for free, so failing closed
+          would buy nothing against them while refusing every legitimate user behind a
+          firewall that does the same thing by policy — a real cost for an imaginary
+          defence.
+
+          The first server that answers verifiably decides. Asking the rest would only
+          add latency to a start-up path: each one is pinned to its own key, so a
+          second opinion is not more trustworthy, just slower.
+        name: checkNetworkTime
+        params: now time.Time
+        recv: s *Service
+        results: error
+      - name: WithTimeServers
+        params: servers []RoughtimeServerValue
+        recv: s *Service
+        results: "*Service"
+      - name: WithBearerFetch
+        params: fetch BearerFetch
+        recv: s *Service
+        results: "*Service"
+      - name: WithOrigins
+        params: origins []coreent.OriginValue
+        recv: s *Service
+        results: "*Service"
+      - name: WithVersion
+        params: version string
+        recv: s *Service
+        results: "*Service"
+      - name: WithAnchors
+        params: anchors [][]byte
+        recv: s *Service
+        results: "*Service"
+      - name: Verify
+        params: now time.Time
+        recv: s *Service
+        results: grant coreent.GrantValue, err error
+      - doc: |-
+          authorise resolves the two ways a roster can entitle this process: a proven
+          CI run, which costs no device seat, or the enrolled identity.
+
+          discoverErr is carried in rather than re-derived because Verify deliberately
+          DEFERS it: outside CI an absent key refuses immediately, but inside Actions a
+          runner is not expected to hold one, so the seat is allowed to answer first
+          and the discovery failure is only reported if it does not.
+        name: authorise
+        params: roster *coreent.RosterValue, subject string, discoverErr error, now time.Time
+        recv: s *Service
+        results: grant coreent.GrantValue, err error
+      - doc: |-
+          currentRoster fetches and authenticates the published roster, trying each
+          origin until one yields a roster that both verifies and is still inside
+          its window, and falling back to the last one this machine authenticated
+          when no origin can be reached.
+
+          "First that answers" would be wrong: an origin whose publisher has stalled
+          still serves a perfectly well-signed roster whose window has closed, and
+          taking it would refuse a licence the next origin would have approved. So a
+          stale or forged answer is treated exactly like an unreachable one — move
+          on — and only the last failure is reported if every origin fails.
+
+          A SUPERSEDED answer joins that list, and the reason it has to is the same one:
+          a mirror running behind serves a genuine roster older than one this machine has
+          already accepted, and rosterFrom refuses it so it cannot undo that decision.
+          Failing outright there would turn one lagging mirror into a refused licence.
+
+          # The limit of the fallback, stated rather than discovered
+
+          The loop moves on when an origin fails to produce a USABLE DOCUMENT, and never
+          when the document it produced fails to produce a GRANT. So the first origin
+          that serves a roster which verifies, is in window and is not a replay ENDS the
+          search — including when that roster entitles nobody at all. A publisher that
+          ships an empty `subjects` map to one mirror therefore revokes every machine
+          reading that mirror, and a second mirror still holding the correct roster is
+          never consulted. Test_Service_currentRoster_stopsAtTheFirstUsableRoster pins
+          exactly that, so the limit cannot move without somebody meaning it to.
+
+          This is deliberate and it is NOT a claim that the behaviour is ideal. The
+          alternative — continue until an origin authorises — is the mirror-image defect
+          and a far worse one: it would let any configured endpoint veto a revocation by
+          serving an older roster that still lists the machine, which defeats the one
+          thing the scheme exists to do. The narrower variant, "continue when the roster
+          entitles nobody", is not the client's to assume either: an authentic empty
+          roster IS a vendor statement that nobody is entitled — a pulled release, a
+          discontinued product — and reading it as a publication fault instead is a
+          statement only the vendor is entitled to make. The same argument CIRelaxed
+          settled: it would have to travel in the signed roster, as a field that says
+          "an empty roster means I broke", and adding one is a product decision rather
+          than a repair. Until that field exists the first usable roster decides, and
+          re-signing is what corrects a publisher's mistake.
+
+          The second result says which of the two answered. It is not a permission
+          level: an offline roster passed the identical checks, and everything
+          downstream — the update floor, the CI seat, the subject match, the grant
+          deadline — is applied to it unchanged. It exists so the refusal, the grant
+          and the operator staring at either can say where the answer came from
+          instead of a cached roster being indistinguishable from a fresh one.
+        name: currentRoster
+        params: now time.Time
+        recv: s *Service
+        results: roster *coreent.RosterValue, offline bool, err error
+      - doc: |-
+          rosterFrom fetches and authenticates the roster from one origin.
+
+          One GET, not two. The roster and its signature travel in a single bundle
+          precisely so they cannot arrive out of step: served as separate objects
+          they were cached independently for five minutes each, and a new signature
+          over an old roster is indistinguishable from a forgery — a correct client
+          refusing a correct roster, with the scheme's most alarming error, for
+          roughly 8% of all wall-clock time.
+        name: rosterFrom
+        params: origin coreent.OriginValue, now time.Time
+        recv: s *Service
+        results: roster *coreent.RosterValue, err error
+      - doc: |-
+          matchSubject checks the local key against what the roster publishes for
+          this subject, rejects a subject whose own term has closed, then requires a
+          fresh possession proof. Order matters: the cheap comparisons run before the
+          signing round trip.
+        name: matchSubject
+        params: roster *coreent.RosterValue, subject string, now time.Time
+        recv: s *Service
+        results: matched coreent.SubjectValue, err error
+      - doc: |-
+          prove demands a possession proof, bound to the authorised fingerprint when the
+          identity can accept one.
+
+          # What the two calls claim, and why they are different claims
+
+          coreent.Identity's three methods cannot express "prove possession of the key
+          the roster authorised". The engine asks Fingerprint what this machine
+          presents, compares that answer itself, and then asks ProvePossession for a
+          proof — so the authorised value never traverses the port and the
+          implementation signs with whatever it finds on the SECOND call. Anything that
+          replaced the material in between (a rotation, a remounted volume, a deliberate
+          swap) is signed for, and the implementation had no way to notice: the strongest
+          thing it can do unaided is remember the key object across the two calls and
+          refuse a proof with nothing remembered, which detects a change without ever
+          learning what the key was supposed to be.
+
+          coreent.BoundProver carries the missing half, and is a SIBLING rather than a
+          fourth parameter on ProvePossession because Identity is reachable through a
+          pkg/v1 alias — ADR 0039, with ADR 0040 §4 removing the v0 licence from
+          interfaces. See BoundProver's own comment for why widening would not even buy
+          the guarantee that tempts it.
+
+          # Why the fallback is not a weakening
+
+          An identity that does not implement the sibling gets exactly the behaviour it
+          had: the same call, the same refusal, the same window between the two. This
+          function cannot close that window for an implementation that has not asked to
+          have it closed, and a type assertion is how the absence is discovered — the
+          same shape ADR 0052 uses for Deadliner and ADR 0049 for EntryFetcher.
+        name: prove
+        params: subject, authorised string
+        recv: s *Service
+        results: error
+      - doc: |-
+          fetch retrieves one roster artefact, mapping every failure to
+          coreent.ErrRosterUnreachable so callers can distinguish "cannot decide" from
+          "decided no".
+        name: fetch
+        params: url string
+        recv: s *Service
+        results: body []byte, err error
+    name: Service
+  - fields:
+      - doc: Current is the version of the binary that was refused.
+        name: Current
+        type: string
+      - doc: Required is the lowest version the roster accepts.
+        name: Required
+        type: string
+    kind: struct
+    methods:
+      - name: Error
+        recv: e *UpdateRequiredError
+        results: string
+      - name: Unwrap
+        recv: e *UpdateRequiredError
+        results: error
+    name: UpdateRequiredError
+  - doc: |-
+      foreignError hides a cause's SDK identity from errs.Wrap's origin-wins rule
+      while leaving the cause matchable by errors.Is.
+
+      It has deliberately NO Unwrap and no As. errs.Wrap reaches an inner
+      *errs.Error with errors.AsType, which walks Unwrap and honours an As method,
+      so providing either would defeat the whole point. What survives is
+      errors.Is, because the stdlib consults an Is method before it unwraps.
+
+      The cost is errors.As THROUGH this boundary: a caller cannot pull the
+      consumer's own concrete error type back out of a roster refusal. That is
+      accepted rather than overlooked — restoring it restores the hijack, and
+      errors.Is plus the rendered text carry everything a caller acts on.
+    fields:
+      - doc: cause is the error a caller's own code produced.
+        name: cause
+        type: error
+    kind: struct
+    methods:
+      - doc: Error renders the consumer's message verbatim.
+        name: Error
+        recv: f foreignError
+        results: string
+      - doc: Is delegates every sentinel question to the cause.
+        name: Is
+        params: target error
+        recv: f foreignError
+        results: bool
+    name: foreignError
+vars:
+  - doc: |-
+      RoughtimeServers is the list this client queries, EMPTY in committed source.
+
+      Empty means the network-time check does nothing, which is the correct state
+      until somebody has watched this client verify a live response: an entry added
+      on the strength of an untested implementation would either be inert anyway or
+      — worse — start refusing machines over a parsing bug. Adding one is the same
+      kind of decision as stamping the vendor anchor, and belongs to whoever can
+      confirm it works.
+    items:
+      - name: RoughtimeServers
+        type: "[]RoughtimeServerValue"
+    name: RoughtimeServers

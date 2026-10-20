@@ -1,0 +1,134 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*fileFactory).Name
+    steps:
+      - return: "\"file\""
+  - of: (*fileFactory).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileFactory).Open
+        kind: self
+      - id: filesink
+        kind: package
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: c, ok
+        eval: cfg.(writer.FileConfig)
+      - opt:
+          do:
+            - return: nil, writer.WriterConfigInvalid
+          when: "!ok"
+      - bind: base, oerr
+        eval: filesink.New(c.Path)
+        to: filesink
+      - opt:
+          do:
+            - return: nil, oerr
+          when: oerr != nil
+      - return: levelgate.New(base, c.MinLevel), nil
+        to: levelgate
+  - of: (*fileFactory).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileFactory).Decode
+        kind: self
+      - id: decodePath
+        kind: internal
+      - id: decodeMinLevel
+        kind: internal
+    steps:
+      - bind: c
+        eval: writer.FileConfig{}
+      - opt:
+          do:
+            - return: nil, perr
+          init:
+            bind: perr
+            eval: decodePath(raw, &c.Path)
+            to: decodePath
+          when: perr != nil
+      - opt:
+          do:
+            - return: nil, lerr
+          init:
+            bind: lerr
+            eval: decodeMinLevel(raw, &c.MinLevel)
+            to: decodeMinLevel
+          when: lerr != nil
+      - return: c, nil
+  - of: decodePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodePath
+        kind: self
+      - id: configInvalid
+        kind: internal
+    steps:
+      - bind: v, present
+        eval: raw["path"]
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: "!ok || s == \"\""
+      - set: "*dst"
+        value: s
+      - return: nil
+  - of: decodeMinLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeMinLevel
+        kind: self
+      - id: configInvalid
+        kind: internal
+      - id: level
+        kind: package
+    steps:
+      - bind: v, present
+        eval: raw["min_level"]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: "!ok"
+      - bind: lvl, perr
+        eval: level.ParseLevel(s)
+        to: level
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: perr != nil
+      - set: "*dst"
+        value: lvl
+      - return: nil
+  - of: configInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: configInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(writer.WriterConfigInvalid, errs.WrapParams{}, errs.String("writer", "file"))
+        to: errs

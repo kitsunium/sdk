@@ -1,0 +1,34 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: filtered
+    steps:
+      - bind: out
+        eval: all[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, d)
+                when: keep(d)
+          key: _
+          range: all
+          value: d
+      - return: out
+  - of: yieldKeys
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!yield(key, nil)"
+          key: _
+          range: keys
+          value: key
+      - opt:
+          do:
+            - return: "true"
+          when: failure == nil
+      - return: yield("", failure) && failure == nil

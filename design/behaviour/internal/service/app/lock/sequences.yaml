@@ -1,0 +1,1475 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: checkChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkChain
+        kind: self
+      - id: pathchain
+        kind: package
+      - id: backendFailed
+        kind: internal
+      - id: filepath
+        kind: stdlib
+      - id: plantable
+        kind: internal
+      - id: noteUninspected
+        kind: internal
+      - id: parentRedirected
+        kind: internal
+    steps:
+      - bind: steps, resolveErr
+        eval: pathchain.Resolve(dir)
+        to: pathchain
+      - opt:
+          do:
+            - return: backendFailed("resolve", dir, resolveErr)
+              to: backendFailed
+          when: resolveErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!step.Indirect"
+            - bind: container
+              eval: filepath.Dir(step.Path)
+              to: filepath
+            - bind: yes, observed
+              eval: plantable(step.Container, container)
+              to: plantable
+            - opt:
+                do:
+                  - eval: noteUninspected(container, observed)
+                    to: noteUninspected
+                  - continue: true
+                when: "!yes"
+            - return: parentRedirected(dir, step, observed)
+              to: parentRedirected
+          key: _
+          range: steps
+          value: step
+      - return: nil
+  - of: noteUninspected
+    participants:
+      - id: caller
+        kind: actor
+      - id: noteUninspected
+        kind: self
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: observed == ""
+      - eval: log.Printf("cannot read the access control list of %s (%s); an indirection planted there would not be refused", container, observed)
+        to: log
+  - of: parentRedirected
+    participants:
+      - id: caller
+        kind: actor
+      - id: parentRedirected
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corelock.LockPathRedirected, kerrs.WrapParams{},
+          		kerrs.String("path", step.Path),
+          		kerrs.String("dir", dir),
+          		kerrs.String("kind", kindIndirection),
+          		kerrs.String("target", step.Target),
+          		kerrs.String("observed", observed))
+        to: kerrs
+  - of: MemoryConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: MemoryConfig.validate
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelock.LockMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "TTL"),
+                			kerrs.String("value", c.TTL.String()))
+              to: kerrs
+          when: c.TTL <= 0
+      - return: nil
+  - of: MemoryConfig.clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: checkDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDir
+        kind: self
+      - id: info.Mode
+        kind: value
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: mode
+        eval: info.Mode()
+        to: info.Mode
+      - opt:
+          do:
+            - return: nil
+          when: mode&worldWritable == 0 || mode&os.ModeSticky != 0
+      - return: |-
+          kerrs.Wrap(corelock.LockDirectoryUnsafe, kerrs.WrapParams{},
+          		kerrs.String("path", dir),
+          		kerrs.String("mode", mode.Perm().String()))
+        to: kerrs
+  - of: plantable
+    steps:
+      - opt:
+          do:
+            - return: false, ""
+          when: container&worldWritable == 0
+      - return: true, "container=" + container.Perm().String()
+  - of: readFence
+    participants:
+      - id: caller
+        kind: actor
+      - id: readFence
+        kind: self
+      - id: file.ReadAt
+        kind: value
+      - id: bytes
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[maxFenceBytes]byte"
+      - bind: read, readErr
+        eval: file.ReadAt(buf[:], 0)
+        to: file.ReadAt
+      - opt:
+          do:
+            - return: 0, backendFailed("readFence", path, readErr)
+          when: read == 0 && readErr != nil && !errors.Is(readErr, io.EOF)
+      - bind: raw
+        eval: bytes.TrimSpace(buf[:read])
+        to: bytes
+      - opt:
+          do:
+            - return: 0, nil
+          when: len(raw) == 0
+      - bind: parsed, parseErr
+        eval: strconv.ParseUint(string(raw), fenceBase, fenceBits)
+        to: strconv
+      - opt:
+          do:
+            - return: |-
+                0, kerrs.Wrap(corelock.LockFenceCorrupt, kerrs.WrapParams{},
+                			kerrs.String("path", path),
+                			kerrs.Int("bytes", len(raw)),
+                			kerrs.String("condition", "unparseable"))
+          when: parseErr != nil
+      - opt:
+          do:
+            - return: |-
+                0, kerrs.Wrap(corelock.LockFenceCorrupt, kerrs.WrapParams{},
+                			kerrs.String("path", path),
+                			kerrs.Int("bytes", len(raw)),
+                			kerrs.String("condition", "exhausted"))
+          when: parsed == exhaustedFence
+      - return: parsed, nil
+  - of: writeFence
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeFence
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: file.Truncate
+        kind: internal
+      - id: backendFailed
+        kind: internal
+      - id: file.WriteAt
+        kind: value
+      - id: file.Sync
+        kind: internal
+    steps:
+      - bind: raw
+        eval: strconv.AppendUint(make([]byte, 0, maxFenceBytes), fence, fenceBase)
+        to: strconv
+      - set: raw
+        value: append(raw, '\n')
+      - opt:
+          do:
+            - return: backendFailed("truncateFence", path, truncErr)
+              to: backendFailed
+          init:
+            bind: truncErr
+            eval: file.Truncate(0)
+            to: file.Truncate
+          when: truncErr != nil
+      - opt:
+          do:
+            - return: backendFailed("writeFence", path, writeErr)
+              to: backendFailed
+          init:
+            bind: _, writeErr
+            eval: file.WriteAt(raw, 0)
+            to: file.WriteAt
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: backendFailed("syncFence", path, syncErr)
+              to: backendFailed
+          init:
+            bind: syncErr
+            eval: file.Sync()
+            to: file.Sync
+          when: syncErr != nil
+      - return: nil
+  - of: backendFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: backendFailed
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:    corelock.CodeLockBackendFailed,
+          		Reason:  "LOCK_BACKEND_FAILED",
+          		Public:  "The lock backend could not serve the operation",
+          		Private: "service/app/lock: a filesystem operation behind the file locker failed; the fields name the operation and the path",
+          	}, kerrs.String("operation", op), kerrs.String("path", path))
+        to: kerrs
+  - of: NewFileLocker
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewFileLocker
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: prepareDir
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.validate()
+            to: cfg.validate
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, coreproc.UnsupportedPlatform
+          when: "!platformNative"
+      - opt:
+          do:
+            - return: nil, dirErr
+          init:
+            bind: dirErr
+            eval: prepareDir(cfg.Dir)
+            to: prepareDir
+          when: dirErr != nil
+      - return: |-
+          &fileLocker{
+          		dir:  cfg.Dir,
+          		gate: newNameGate(),
+          		clk:  cfg.clockOrSystem(),
+          		poll: cfg.pollOrDefault(),
+          	}, nil
+  - of: (*fileLocker).Acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).Acquire
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: l.gate.enter
+        kind: internal
+      - id: l.takeFlock
+        kind: internal
+      - id: l.gate.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejected
+          init:
+            bind: rejected
+            eval: checkName(name)
+            to: checkName
+          when: rejected != nil
+      - opt:
+          do:
+            - return: nil, gateErr
+          init:
+            bind: gateErr
+            eval: l.gate.enter(ctx, name)
+            to: l.gate.enter
+          when: gateErr != nil
+      - bind: taken, takeErr
+        eval: l.takeFlock(ctx, name, true)
+        to: l.takeFlock
+      - opt:
+          do:
+            - eval: l.gate.leave(name)
+              to: l.gate.leave
+            - return: nil, takeErr
+          when: takeErr != nil
+      - return: taken, nil
+  - of: (*fileLocker).TryAcquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).TryAcquire
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: l.takeFlock
+        kind: internal
+      - id: l.gate.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false, rejected
+          init:
+            bind: rejected
+            eval: checkName(name)
+            to: checkName
+          when: rejected != nil
+      - opt:
+          do:
+            - return: nil, false, ctx.Err()
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: nil, false, nil
+          when: "!l.gate.tryEnter(name)"
+      - bind: taken, takeErr
+        eval: l.takeFlock(ctx, name, false)
+        to: l.takeFlock
+      - opt:
+          do:
+            - eval: l.gate.leave(name)
+              to: l.gate.leave
+            - return: nil, false, takeErr
+          when: takeErr != nil || taken == nil
+      - return: taken, true, nil
+  - of: (*fileLocker).takeFlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).takeFlock
+        kind: self
+      - id: l.pathFor
+        kind: internal
+      - id: openLockFile
+        kind: internal
+      - id: l.contend
+        kind: internal
+      - id: sameEntry
+        kind: internal
+      - id: l.mintLease
+        kind: internal
+    steps:
+      - bind: path
+        eval: l.pathFor(name)
+        to: l.pathFor
+      - bind: kept, locked
+        eval: false, false
+      - bind: file, openErr
+        eval: openLockFile(path)
+        to: openLockFile
+      - defer: |-
+          func() {
+          		//: an open that failed left no descriptor, and the success path keeps
+          		//: the one it got — the lease owns it from then on.
+          		if file == nil || kept {
+          			//: nothing to release.
+          			return
+          		}
+          		//: give the flock up while the descriptor is still valid, then close.
+          		//: Neither result is discarded: they are folded into the error already
+          		//: being returned, which is the one the caller actually needs.
+          		unlockErr := releaseIfLocked(file, locked)
+          		closeErr := file.Close()
+          		err = foldAbandon(err, path, unlockErr, closeErr)
+          	}()
+      - opt:
+          do:
+            - return: nil, openErr
+          when: openErr != nil
+      - set: locked, err
+        to: l.contend
+        value: l.contend(ctx, file, wait)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil || !locked
+      - opt:
+          do:
+            - return: nil, fileReplaced("Acquire", path, name, 0, observed)
+          init:
+            bind: same, observed
+            eval: sameEntry(file, path)
+            to: sameEntry
+          when: "!same"
+      - bind: minted, mintErr
+        eval: l.mintLease(file, path, name)
+        to: l.mintLease
+      - opt:
+          do:
+            - return: nil, mintErr
+          when: mintErr != nil
+      - set: kept
+        value: "true"
+      - return: minted, nil
+  - of: (*fileLocker).contend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).contend
+        kind: self
+      - id: flock
+        kind: package
+      - id: l.sleep
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: taken, flockErr
+              eval: flock.TryLock(file)
+              to: flock
+            - opt:
+                do:
+                  - return: false, backendFailed("flock", file.Name(), flockErr)
+                when: flockErr != nil
+            - opt:
+                do:
+                  - return: true, nil
+                when: taken
+            - opt:
+                do:
+                  - return: false, nil
+                when: "!wait"
+            - opt:
+                do:
+                  - return: false, sleepErr
+                init:
+                  bind: sleepErr
+                  eval: l.sleep(ctx)
+                  to: l.sleep
+                when: sleepErr != nil
+          forever: true
+  - of: (*fileLocker).sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).sleep
+        kind: self
+      - id: l.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: timer
+        eval: l.clk.NewTimer(l.poll)
+        to: l.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: (*fileLocker).mintLease
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).mintLease
+        kind: self
+      - id: readFence
+        kind: internal
+      - id: writeFence
+        kind: internal
+      - id: newFileLease
+        kind: internal
+    steps:
+      - bind: previous, readErr
+        eval: readFence(file, path)
+        to: readFence
+      - opt:
+          do:
+            - return: nil, readErr
+          when: readErr != nil
+      - bind: fence
+        eval: previous + 1
+      - opt:
+          do:
+            - return: nil, writeErr
+          init:
+            bind: writeErr
+            eval: writeFence(file, path, fence)
+            to: writeFence
+          when: writeErr != nil
+      - return: newFileLease(l, file, path, name, fence), nil
+        to: newFileLease
+  - of: (*fileLocker).pathFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).pathFor
+        kind: self
+      - id: sha256
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: sum
+        eval: sha256.Sum256([]byte(name))
+        to: sha256
+      - return: filepath.Join(l.dir, hex.EncodeToString(sum[:])+lockSuffix)
+        to: filepath
+  - of: (*fileLocker).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLocker).release
+        kind: self
+      - id: flock
+        kind: package
+      - id: file.Close
+        kind: value
+      - id: l.gate.leave
+        kind: internal
+      - id: backendFailed
+        kind: internal
+    steps:
+      - bind: unlockErr
+        eval: flock.Unlock(file)
+        to: flock
+      - bind: closeErr
+        eval: file.Close()
+        to: file.Close
+      - eval: l.gate.leave(name)
+        to: l.gate.leave
+      - opt:
+          do:
+            - return: backendFailed("funlock", name, unlockErr)
+              to: backendFailed
+          when: unlockErr != nil
+      - opt:
+          do:
+            - return: backendFailed("close", name, closeErr)
+              to: backendFailed
+          when: closeErr != nil
+      - return: nil
+  - of: foldAbandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: foldAbandon
+        kind: self
+      - id: backendFailed
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: cause
+          when: unlockErr == nil && closeErr == nil
+      - opt:
+          do:
+            - return: backendFailed("abandon", path, firstNonNil(unlockErr, closeErr))
+              to: backendFailed
+          when: cause == nil
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{},
+          		kerrs.String("abandon_error", abandonDetail(unlockErr, closeErr)))
+        to: kerrs
+  - of: releaseIfLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseIfLocked
+        kind: self
+      - id: flock
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!locked"
+      - return: flock.Unlock(file)
+        to: flock
+  - of: abandonDetail
+    steps:
+      - opt:
+          do:
+            - return: "\"unlock: \" + unlockErr.Error() + \"; close: \" + closeErr.Error()"
+          when: unlockErr != nil && closeErr != nil
+      - opt:
+          do:
+            - return: "\"unlock: \" + unlockErr.Error()"
+          when: unlockErr != nil
+      - return: "\"close: \" + closeErr.Error()"
+  - forward: cmp.Or
+    of: firstNonNil
+  - of: FileConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: FileConfig.validate
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelock.LockMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "Dir"),
+                			kerrs.String("value", ""))
+              to: kerrs
+          when: c.Dir == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelock.LockMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "Poll"),
+                			kerrs.String("value", c.Poll.String()))
+              to: kerrs
+          when: c.Poll < 0
+      - return: nil
+  - of: FileConfig.pollOrDefault
+    steps:
+      - opt:
+          do:
+            - return: defaultPoll
+          when: c.Poll == 0
+      - return: c.Poll
+  - of: FileConfig.clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: prepareDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareDir
+        kind: self
+      - id: checkChain
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: backendFailed
+        kind: internal
+      - id: checkCreated
+        kind: internal
+      - id: kerrs
+        kind: package
+      - id: checkDir
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: redirected
+          init:
+            bind: redirected
+            eval: checkChain(dir)
+            to: checkChain
+          when: redirected != nil
+      - bind: info, err
+        eval: os.Stat(dir)
+        to: os
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: backendFailed("mkdir", dir, mkErr)
+                    to: backendFailed
+                init:
+                  bind: mkErr
+                  eval: os.MkdirAll(dir, lockDirMode)
+                  to: os
+                when: mkErr != nil
+            - return: checkCreated(dir)
+              to: checkCreated
+          when: os.IsNotExist(err)
+      - opt:
+          do:
+            - return: backendFailed("stat", dir, err)
+              to: backendFailed
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelock.LockMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "Dir"),
+                			kerrs.String("value", dir))
+              to: kerrs
+          when: "!info.IsDir()"
+      - return: checkDir(dir, info)
+        to: checkDir
+  - of: checkCreated
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkCreated
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: backendFailed
+        kind: internal
+      - id: checkDir
+        kind: internal
+    steps:
+      - bind: info, err
+        eval: os.Stat(dir)
+        to: os
+      - opt:
+          do:
+            - return: backendFailed("stat", dir, err)
+              to: backendFailed
+          when: err != nil
+      - return: checkDir(dir, info)
+        to: checkDir
+  - of: newFileLease
+    steps:
+      - return: "&fileLease{locker: locker, file: file, path: path, name: name, fence: fence}"
+  - of: (*fileLease).Fence
+    steps:
+      - return: l.fence
+  - of: (*fileLease).Extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLease).Extend
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: notHeld
+        kind: internal
+      - id: sameEntry
+        kind: internal
+      - id: fileReplaced
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: l.mu
+          read: true
+      - opt:
+          do:
+            - return: notHeld("Extend", l.name, l.fence)
+              to: notHeld
+          when: l.released
+      - opt:
+          do:
+            - return: fileReplaced("Extend", l.path, l.name, l.fence, observed)
+              to: fileReplaced
+          init:
+            bind: same, observed
+            eval: sameEntry(l.file, l.path)
+            to: sameEntry
+          when: "!same"
+      - return: nil
+  - of: (*fileLease).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLease).Release
+        kind: self
+      - id: l.locker.release
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - return: nil
+          when: l.released
+      - set: l.released
+        value: "true"
+      - return: l.locker.release(l.file, l.name)
+        to: l.locker.release
+  - of: newNameGate
+    steps:
+      - return: "&nameGate{entries: make(map[string]chan struct{}, initialNames)}"
+  - of: (*nameGate).tryEnter
+    steps:
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, busy
+            eval: g.entries[name]
+          when: busy
+      - set: g.entries[name]
+        value: make(chan struct{})
+      - return: "true"
+  - of: (*nameGate).enter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*nameGate).enter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: ctx.Err()
+                    to: ctx.Err
+                when: ctx.Err() != nil
+            - eval: g.mu.Lock()
+              to: g.mu.Lock
+            - bind: freed, busy
+              eval: g.entries[name]
+            - opt:
+                do:
+                  - set: g.entries[name]
+                    value: make(chan struct{})
+                  - eval: g.mu.Unlock()
+                    to: g.mu.Unlock
+                  - return: nil
+                when: "!busy"
+            - eval: g.mu.Unlock()
+              to: g.mu.Unlock
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ctx.Err()
+                        to: ctx.Err
+                  - comm: <-freed
+          forever: true
+  - of: (*nameGate).leave
+    steps:
+      - lock:
+          mutex: g.mu
+      - bind: freed, busy
+        eval: g.entries[name]
+      - opt:
+          do:
+            - return: ""
+          when: "!busy"
+      - eval: delete(g.entries, name)
+      - eval: close(freed)
+  - of: (*holding).end
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*holding).end
+        kind: self
+      - id: h.ended.Do
+        kind: value
+    steps:
+      - eval: |-
+          h.ended.Do(func() {
+          		//: one close, whichever path got here first.
+          		close(h.free)
+          	})
+        to: h.ended.Do
+  - of: sameEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: sameEntry
+        kind: self
+      - id: file.Stat
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: held, heldErr
+        eval: file.Stat()
+        to: file.Stat
+      - opt:
+          do:
+            - return: true, ""
+          when: heldErr != nil
+      - bind: named, namedErr
+        eval: os.Lstat(path)
+        to: os
+      - opt:
+          do:
+            - return: false, observedUnlinked
+          when: namedErr != nil && os.IsNotExist(namedErr)
+      - opt:
+          do:
+            - return: true, ""
+          when: namedErr != nil
+      - opt:
+          do:
+            - return: false, observedReplaced
+          when: "!os.SameFile(held, named)"
+      - return: true, ""
+  - of: fileReplaced
+    participants:
+      - id: caller
+        kind: actor
+      - id: fileReplaced
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corelock.LockFileReplaced, kerrs.WrapParams{},
+          		kerrs.String("op", op),
+          		kerrs.String("path", path),
+          		kerrs.String("lock", name),
+          		kerrs.Int64("fence", int64(fence)),
+          		kerrs.String("observed", observed))
+        to: kerrs
+  - of: KeepaliveConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeepaliveConfig.validate
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelock.LockMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("option", "Every"),
+                			kerrs.String("value", c.Every.String()))
+              to: kerrs
+          when: c.Every <= 0
+      - return: nil
+  - of: KeepaliveConfig.clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: Keepalive
+    participants:
+      - id: caller
+        kind: actor
+      - id: Keepalive
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: cfg.clockOrSystem().NewTicker
+        kind: value
+      - id: renewUntilLost
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.validate()
+            to: cfg.validate
+          when: invalid != nil
+      - opt:
+          do:
+            - return: |-
+                nil, nil, kerrs.Wrap(corelock.LockNotHeld, kerrs.WrapParams{},
+                			kerrs.String("operation", "Keepalive"),
+                			kerrs.String("lock", ""))
+          when: lease == nil
+      - bind: derived, cancel
+        eval: context.WithCancelCause(ctx)
+        to: context
+      - bind: ticker
+        eval: cfg.clockOrSystem().NewTicker(cfg.Every)
+        to: cfg.clockOrSystem().NewTicker
+      - go: renewUntilLost(derived, cancel, ticker, lease)
+        to: renewUntilLost
+      - set: stop
+        value:
+          closure:
+            steps:
+              - eval: cancel(context.Canceled)
+      - return: derived, stop, nil
+  - of: renewUntilLost
+    participants:
+      - id: caller
+        kind: actor
+      - id: renewUntilLost
+        kind: self
+      - id: ticker.Stop
+        kind: value
+      - id: lease.Extend
+        kind: value
+    steps:
+      - defer: ticker.Stop()
+        to: ticker.Stop
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ""
+                  - comm: _, open := <-ticker.C()
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!open"
+                      - opt:
+                          do:
+                            - eval: cancel(keepaliveLost(err, lease.Fence()))
+                            - return: ""
+                          init:
+                            bind: err
+                            eval: lease.Extend(ctx)
+                            to: lease.Extend
+                          when: err != nil
+          forever: true
+  - of: keepaliveLost
+    participants:
+      - id: caller
+        kind: actor
+      - id: keepaliveLost
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:    corelock.CodeLockKeepaliveLost,
+          		Reason:  "LOCK_KEEPALIVE_LOST",
+          		Public:  "The lease could not be renewed and is no longer held",
+          		Private: "service/app/lock: a background Extend failed, so the derived context was cancelled with this cause; the fields name the fencing token that was lost",
+          	}, kerrs.Int64("fence", int64(fence)))
+        to: kerrs
+  - of: NewMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMemory
+        kind: self
+      - id: cfg.validate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.validate()
+            to: cfg.validate
+          when: invalid != nil
+      - return: |-
+          &memoryLocker{
+          		ttl:    cfg.TTL,
+          		clk:    cfg.clockOrSystem(),
+          		held:   make(map[string]*holding, initialNames),
+          		fences: make(map[string]uint64, initialNames),
+          	}, nil
+  - of: (*memoryLocker).Acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLocker).Acquire
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: l.attempt
+        kind: internal
+      - id: l.await
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, rejected
+          init:
+            bind: rejected
+            eval: checkName(name)
+            to: checkName
+          when: rejected != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, ctx.Err()
+                when: ctx.Err() != nil
+            - bind: taken, free, until
+              eval: l.attempt(name)
+              to: l.attempt
+            - opt:
+                do:
+                  - return: taken, nil
+                when: taken != nil
+            - opt:
+                do:
+                  - return: nil, waitErr
+                init:
+                  bind: waitErr
+                  eval: l.await(ctx, free, until)
+                  to: l.await
+                when: waitErr != nil
+          forever: true
+  - of: (*memoryLocker).TryAcquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLocker).TryAcquire
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: l.attempt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false, rejected
+          init:
+            bind: rejected
+            eval: checkName(name)
+            to: checkName
+          when: rejected != nil
+      - opt:
+          do:
+            - return: nil, false, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: taken, _, _
+        eval: l.attempt(name)
+        to: l.attempt
+      - return: taken, taken != nil, nil
+  - of: (*memoryLocker).attempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLocker).attempt
+        kind: self
+      - id: l.clk.Now
+        kind: value
+      - id: current.end
+        kind: internal
+      - id: newMemoryLease
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.mu
+      - bind: now
+        eval: l.clk.Now()
+        to: l.clk.Now
+      - bind: current, busy
+        eval: l.held[name]
+      - opt:
+          do:
+            - return: nil, current.free, current.deadline
+          when: busy && now.Before(current.deadline)
+      - opt:
+          do:
+            - eval: current.end()
+              to: current.end
+          when: busy
+      - op: ++
+        set: l.fences[name]
+      - op: ++
+        set: l.nextToken
+      - bind: next
+        eval: |-
+          &holding{
+          		token:    l.nextToken,
+          		fence:    l.fences[name],
+          		deadline: now.Add(l.ttl),
+          		free:     make(chan struct{}),
+          	}
+      - set: l.held[name]
+        value: next
+      - return: newMemoryLease(l, name, next), nil, time.Time{}
+        to: newMemoryLease
+  - of: (*memoryLocker).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLocker).await
+        kind: self
+      - id: l.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: timer
+        eval: l.clk.NewTimer(until.Sub(l.clk.Now()))
+        to: l.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+            - comm: <-free
+              do:
+                - return: nil
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: (*memoryLocker).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLocker).release
+        kind: self
+      - id: notHeld
+        kind: internal
+      - id: current.end
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.mu
+      - bind: current, busy
+        eval: l.held[name]
+      - opt:
+          do:
+            - return: notHeld("Release", name, token)
+              to: notHeld
+          when: "!busy || current.token != token"
+      - eval: delete(l.held, name)
+      - eval: current.end()
+        to: current.end
+      - opt:
+          do:
+            - return: notHeld("Release", name, token)
+              to: notHeld
+          when: "!l.clk.Now().Before(current.deadline)"
+      - return: nil
+  - of: (*memoryLocker).extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLocker).extend
+        kind: self
+      - id: l.clk.Now
+        kind: value
+      - id: now.Add
+        kind: value
+    steps:
+      - lock:
+          mutex: l.mu
+      - bind: current, busy
+        eval: l.held[name]
+      - opt:
+          do:
+            - return: time.Time{}, notHeld("Extend", name, token)
+          when: "!busy || current.token != token"
+      - bind: now
+        eval: l.clk.Now()
+        to: l.clk.Now
+      - opt:
+          do:
+            - return: time.Time{}, notHeld("Extend", name, token)
+          when: "!now.Before(current.deadline)"
+      - set: current.deadline
+        to: now.Add
+        value: now.Add(l.ttl)
+      - return: current.deadline, nil
+  - of: notHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: notHeld
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corelock.LockNotHeld, kerrs.WrapParams{},
+          		kerrs.String("operation", op),
+          		kerrs.String("lock", name),
+          		kerrs.Int64("holder", int64(token)))
+        to: kerrs
+  - of: checkName
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkName
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelock.LockNameRejected, kerrs.WrapParams{},
+                			kerrs.String("reason", "empty"))
+              to: kerrs
+          when: name == ""
+      - return: nil
+  - of: newMemoryLease
+    steps:
+      - return: |-
+          &memoryLease{
+          		locker:   locker,
+          		name:     name,
+          		token:    held.token,
+          		fence:    held.fence,
+          		deadline: held.deadline,
+          	}
+  - of: (*memoryLease).Fence
+    steps:
+      - return: l.fence
+  - of: (*memoryLease).Deadline
+    steps:
+      - lock:
+          mutex: l.mu
+          read: true
+      - return: l.deadline
+  - of: (*memoryLease).Extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLease).Extend
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: notHeld
+        kind: internal
+      - id: l.locker.extend
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - return: notHeld("Extend", l.name, l.token)
+              to: notHeld
+          when: l.released
+      - bind: deadline, err
+        eval: l.locker.extend(l.name, l.token)
+        to: l.locker.extend
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: l.deadline
+        value: deadline
+      - return: nil
+  - of: (*memoryLease).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryLease).Release
+        kind: self
+      - id: l.locker.release
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - return: nil
+          when: l.released
+      - set: l.released
+        value: "true"
+      - return: l.locker.release(l.name, l.token)
+        to: l.locker.release
+  - of: pathRedirected
+    participants:
+      - id: caller
+        kind: actor
+      - id: pathRedirected
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corelock.LockPathRedirected, kerrs.WrapParams{},
+          		kerrs.String("path", path),
+          		kerrs.String("kind", kind),
+          		kerrs.String("observed", observed))
+        to: kerrs
+  - of: openLockFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: openLockFile
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: opened, openErr
+        eval: os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, lockFileMode)
+        to: os
+      - opt:
+          do:
+            - return: nil, classifyOpenFailure(path, openErr)
+          when: openErr != nil
+      - return: opened, nil
+  - of: classifyOpenFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: classifyOpenFailure
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: pathRedirected
+        kind: internal
+      - id: backendFailed
+        kind: internal
+    steps:
+      - bind: info, statErr
+        eval: os.Lstat(path)
+        to: os
+      - opt:
+          do:
+            - return: pathRedirected(path, kindSymlink, openErr.Error())
+              to: pathRedirected
+          when: statErr == nil && info.Mode()&os.ModeSymlink != 0
+      - return: backendFailed("open", path, openErr)
+        to: backendFailed

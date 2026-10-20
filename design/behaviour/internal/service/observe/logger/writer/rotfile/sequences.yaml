@@ -1,0 +1,1021 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*rotatingSink).backupName
+    steps:
+      - bind: base
+        eval: s.cfg.Path + "." + strconv.Itoa(n)
+      - opt:
+          do:
+            - return: base + ".gz"
+          when: s.cfg.Compress
+      - return: base
+  - of: (*rotatingSink).highestSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).highestSlot
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: s.cfg.MaxBackups - 1
+          when: s.cfg.MaxBackups > 0
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "n"
+                init:
+                  bind: _, serr
+                  eval: os.Lstat(s.backupName(n + 1))
+                  to: os
+                when: serr != nil
+            - op: ++
+              set: "n"
+          forever: true
+  - of: (*rotatingSink).shiftExisting
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).shiftExisting
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: wrapRotate
+        kind: internal
+    steps:
+      - loop:
+          cond: n >= 1
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, serr
+                  eval: os.Lstat(s.backupName(n))
+                  to: os
+                when: serr != nil
+            - opt:
+                do:
+                  - return: "wrapRotate(rerr, \"service/observe/logger/writer/rotfile.shiftExisting: shifting a backup\")"
+                    to: wrapRotate
+                init:
+                  bind: rerr
+                  eval: os.Rename(s.backupName(n), s.backupName(n+1))
+                  to: os
+                when: rerr != nil
+          init: n := s.highestSlot()
+          post: n--
+      - return: nil
+  - of: (*rotatingSink).promoteActive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).promoteActive
+        kind: self
+      - id: s.gzipActive
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: wrapRotate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.gzipActive()
+              to: s.gzipActive
+          when: s.cfg.Compress
+      - opt:
+          do:
+            - return: "wrapRotate(rerr, \"service/observe/logger/writer/rotfile.promoteActive: renaming active to .1\")"
+              to: wrapRotate
+          init:
+            bind: rerr
+            eval: os.Rename(s.cfg.Path, s.cfg.Path+".1")
+            to: os
+          when: rerr != nil
+      - return: nil
+  - of: (*rotatingSink).gzipActive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).gzipActive
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: wrapRotate
+        kind: internal
+      - id: compressInto
+        kind: internal
+    steps:
+      - bind: dst, derr
+        eval: os.OpenFile(s.cfg.Path+".1.gz", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, defaultFilePerm)
+        to: os
+      - opt:
+          do:
+            - return: "wrapRotate(derr, \"service/observe/logger/writer/rotfile.gzipActive: creating .gz sibling\")"
+              to: wrapRotate
+          when: derr != nil
+      - defer: |-
+          func() {
+          		//: capture the close error only when the body itself succeeded.
+          		if cerr := dst.Close(); cerr != nil && err == nil {
+          			//: a close failure means the .gz may be truncated — surface it.
+          			err = wrapRotate(cerr, "service/observe/logger/writer/rotfile.gzipActive: closing .gz sibling")
+          		}
+          	}()
+      - opt:
+          do:
+            - return: cerr
+          init:
+            bind: cerr
+            eval: compressInto(dst, s.cfg.Path)
+            to: compressInto
+          when: cerr != nil
+      - opt:
+          do:
+            - return: "wrapRotate(rerr, \"service/observe/logger/writer/rotfile.gzipActive: removing uncompressed original\")"
+              to: wrapRotate
+          init:
+            bind: rerr
+            eval: os.Remove(s.cfg.Path)
+            to: os
+          when: rerr != nil && !os.IsNotExist(rerr)
+      - return: nil
+  - of: compressInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: compressInto
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: wrapRotate
+        kind: internal
+      - id: gzip
+        kind: stdlib
+      - id: io
+        kind: stdlib
+      - id: zw.Close
+        kind: value
+    steps:
+      - bind: src, oerr
+        eval: os.Open(srcPath)
+        to: os
+      - opt:
+          do:
+            - return: "wrapRotate(oerr, \"service/observe/logger/writer/rotfile.compressInto: opening source\")"
+              to: wrapRotate
+          when: oerr != nil
+      - defer: |-
+          func() {
+          		//: a source-close failure matters only when the copy itself succeeded.
+          		if cerr := src.Close(); cerr != nil && err == nil {
+          			//: surface the close failure under the rotate sentinel.
+          			err = wrapRotate(cerr, "service/observe/logger/writer/rotfile.compressInto: closing source")
+          		}
+          	}()
+      - bind: zw
+        eval: gzip.NewWriter(dst)
+        to: gzip
+      - bind: _, cerr
+        eval: io.Copy(zw, src)
+        to: io
+      - bind: zerr
+        eval: zw.Close()
+        to: zw.Close
+      - opt:
+          do:
+            - return: "wrapRotate(cerr, \"service/observe/logger/writer/rotfile.compressInto: copying through gzip\")"
+              to: wrapRotate
+          when: cerr != nil
+      - opt:
+          do:
+            - return: "wrapRotate(zerr, \"service/observe/logger/writer/rotfile.compressInto: closing gzip writer\")"
+              to: wrapRotate
+          when: zerr != nil
+      - return: nil
+  - of: (*rotFileFactory).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotFileFactory).Decode
+        kind: self
+      - id: decodeReqString
+        kind: internal
+      - id: decodeRotScalars
+        kind: internal
+      - id: decodeRotateEvery
+        kind: internal
+    steps:
+      - bind: c
+        eval: Config{}
+      - opt:
+          do:
+            - return: nil, perr
+          init:
+            bind: perr
+            eval: decodeReqString(raw, "path", &c.Path)
+            to: decodeReqString
+          when: perr != nil
+      - opt:
+          do:
+            - return: nil, serr
+          init:
+            bind: serr
+            eval: decodeRotScalars(raw, &c)
+            to: decodeRotScalars
+          when: serr != nil
+      - eval: decodeRotateEvery(raw, &c.RotateEvery)
+        to: decodeRotateEvery
+      - opt:
+          do:
+            - set: c.MaxAgeDays
+              value: defaultRotateRetentionDays
+          when: c.RotateEvery > 0 && c.MaxAgeDays <= 0
+      - return: c, nil
+  - of: decodeRotScalars
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRotScalars
+        kind: self
+      - id: decodeInt64
+        kind: internal
+      - id: decodeInt
+        kind: internal
+      - id: decodeBool
+        kind: internal
+      - id: decodeRotMinLevel
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: berr
+          init:
+            bind: berr
+            eval: decodeInt64(raw, "max_bytes", &c.MaxBytes)
+            to: decodeInt64
+          when: berr != nil
+      - opt:
+          do:
+            - return: berr
+          init:
+            bind: berr
+            eval: decodeInt(raw, "max_backups", &c.MaxBackups)
+            to: decodeInt
+          when: berr != nil
+      - opt:
+          do:
+            - return: aerr
+          init:
+            bind: aerr
+            eval: decodeInt(raw, "max_age_days", &c.MaxAgeDays)
+            to: decodeInt
+          when: aerr != nil
+      - opt:
+          do:
+            - return: cerr
+          init:
+            bind: cerr
+            eval: decodeBool(raw, "compress", &c.Compress)
+            to: decodeBool
+          when: cerr != nil
+      - opt:
+          do:
+            - return: lerr
+          init:
+            bind: lerr
+            eval: decodeRotMinLevel(raw, &c.MinLevel)
+            to: decodeRotMinLevel
+          when: lerr != nil
+      - return: nil
+  - of: decodeReqString
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeReqString
+        kind: self
+      - id: decodeInvalid
+        kind: internal
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: "!ok || s == \"\""
+      - set: "*dst"
+        value: s
+      - return: nil
+  - of: decodeInt64
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeInt64
+        kind: self
+      - id: asInt64
+        kind: internal
+      - id: decodeInvalid
+        kind: internal
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: n, ok
+        eval: asInt64(v)
+        to: asInt64
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: "!ok"
+      - set: "*dst"
+        value: "n"
+      - return: nil
+  - of: decodeInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeInt
+        kind: self
+      - id: asInt64
+        kind: internal
+      - id: decodeInvalid
+        kind: internal
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: n, ok
+        eval: asInt64(v)
+        to: asInt64
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: "!ok"
+      - set: "*dst"
+        value: int(n)
+      - return: nil
+  - of: decodeBool
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeBool
+        kind: self
+      - id: decodeInvalid
+        kind: internal
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: b, ok
+        eval: v.(bool)
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: "!ok"
+      - set: "*dst"
+        value: b
+      - return: nil
+  - of: decodeRotMinLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRotMinLevel
+        kind: self
+      - id: decodeInvalid
+        kind: internal
+      - id: level
+        kind: package
+    steps:
+      - bind: v, present
+        eval: raw["min_level"]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: "!ok"
+      - bind: lvl, perr
+        eval: level.ParseLevel(s)
+        to: level
+      - opt:
+          do:
+            - return: decodeInvalid()
+              to: decodeInvalid
+          when: perr != nil
+      - set: "*dst"
+        value: lvl
+      - return: nil
+  - of: decodeRotateEvery
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRotateEvery
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: v, present
+        eval: raw["rotate_every"]
+      - opt:
+          do:
+            - return: ""
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: dur, perr
+        eval: time.ParseDuration(s)
+        to: time
+      - opt:
+          do:
+            - return: ""
+          when: perr != nil || dur <= 0
+      - set: "*dst"
+        value: dur
+  - of: asInt64
+    steps:
+      - typeswitch:
+          bind: t
+          cases:
+            - do:
+                - return: int64(t), true
+              types: int
+            - do:
+                - return: t, true
+              types: int64
+            - do:
+                - return: int64(t), true
+              types: uint64
+            - do:
+                - return: int64(t), true
+              types: float64
+            - default: true
+              do:
+                - return: 0, false
+          "on": v
+  - of: decodeInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corerotfile.RotFileDecodeFailed, errs.WrapParams{}, errs.String("writer", "rotfile"))
+        to: errs
+  - of: (*rotatingSink).pruneByAge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).pruneByAge
+        kind: self
+      - id: s.clk.Now().AddDate
+        kind: value
+      - id: s.pruneSlotByAge
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.cfg.MaxAgeDays <= 0
+      - bind: cutoff
+        eval: s.clk.Now().AddDate(0, 0, -s.cfg.MaxAgeDays)
+        to: s.clk.Now().AddDate
+      - loop:
+          do:
+            - bind: more, perr
+              eval: s.pruneSlotByAge(n, cutoff)
+              to: s.pruneSlotByAge
+            - opt:
+                do:
+                  - return: perr
+                when: perr != nil
+            - opt:
+                do:
+                  - return: nil
+                when: "!more"
+          init: n := 1
+          post: n++
+  - of: (*rotatingSink).pruneSlotByAge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).pruneSlotByAge
+        kind: self
+      - id: s.backupName
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: name
+        eval: s.backupName(n)
+        to: s.backupName
+      - bind: fi, serr
+        eval: os.Lstat(name)
+        to: os
+      - opt:
+          do:
+            - return: false, nil
+          when: serr != nil
+      - opt:
+          do:
+            - return: true, nil
+          when: "!fi.ModTime().Before(cutoff)"
+      - opt:
+          do:
+            - return: "false, wrapRotate(rerr, \"service/observe/logger/writer/rotfile.pruneSlotByAge: removing aged backup\")"
+          init:
+            bind: rerr
+            eval: os.Remove(name)
+            to: os
+          when: rerr != nil && !os.IsNotExist(rerr)
+      - return: true, nil
+  - of: (*rotatingSink).maybeRotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).maybeRotate
+        kind: self
+      - id: s.rotate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.cfg.MaxBytes <= 0 || s.size == 0 || s.size+incoming <= s.cfg.MaxBytes
+      - return: s.rotate()
+        to: s.rotate
+  - of: (*rotatingSink).rotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).rotate
+        kind: self
+      - id: s.f.Close
+        kind: value
+      - id: wrapRotate
+        kind: internal
+      - id: s.shiftBackups
+        kind: internal
+      - id: s.reopenAfterFailure
+        kind: internal
+      - id: openHardened
+        kind: internal
+      - id: s.pruneByAge
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "wrapRotate(cerr, \"service/observe/logger/writer/rotfile.rotate: closing active file\")"
+              to: wrapRotate
+          init:
+            bind: cerr
+            eval: s.f.Close()
+            to: s.f.Close
+          when: cerr != nil
+      - opt:
+          do:
+            - eval: s.reopenAfterFailure()
+              to: s.reopenAfterFailure
+            - return: serr
+          init:
+            bind: serr
+            eval: s.shiftBackups()
+            to: s.shiftBackups
+          when: serr != nil
+      - bind: f, oerr
+        eval: openHardened(s.cfg.Path)
+        to: openHardened
+      - opt:
+          do:
+            - eval: s.reopenAfterFailure()
+              to: s.reopenAfterFailure
+            - return: oerr
+          when: oerr != nil
+      - set: s.f
+        value: f
+      - set: s.size
+        value: "0"
+      - return: s.pruneByAge()
+        to: s.pruneByAge
+  - of: (*rotatingSink).reopenAfterFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).reopenAfterFailure
+        kind: self
+      - id: openHardened
+        kind: internal
+      - id: f.Stat
+        kind: value
+      - id: fi.Size
+        kind: value
+    steps:
+      - bind: f, oerr
+        eval: openHardened(s.cfg.Path)
+        to: openHardened
+      - opt:
+          do:
+            - set: s.size
+              value: "0"
+            - return: ""
+          when: oerr != nil
+      - set: s.f
+        value: f
+      - set: s.size
+        value: "0"
+      - opt:
+          do:
+            - set: s.size
+              to: fi.Size
+              value: fi.Size()
+          init:
+            bind: fi, serr
+            eval: f.Stat()
+            to: f.Stat
+          when: serr == nil
+  - of: (*rotatingSink).shiftBackups
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).shiftBackups
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: wrapRotate
+        kind: internal
+      - id: s.shiftExisting
+        kind: internal
+      - id: s.promoteActive
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "wrapRotate(rerr, \"service/observe/logger/writer/rotfile.shiftBackups: dropping oldest backup\")"
+                    to: wrapRotate
+                init:
+                  bind: rerr
+                  eval: os.Remove(s.backupName(s.cfg.MaxBackups))
+                  to: os
+                when: rerr != nil && !os.IsNotExist(rerr)
+          when: s.cfg.MaxBackups > 0
+      - opt:
+          do:
+            - return: serr
+          init:
+            bind: serr
+            eval: s.shiftExisting()
+            to: s.shiftExisting
+          when: serr != nil
+      - return: s.promoteActive()
+        to: s.promoteActive
+  - of: (*rotatingSink).tickRotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).tickRotate
+        kind: self
+      - id: s.Rotate
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - bind: rerr
+        eval: s.Rotate()
+        to: s.Rotate
+      - opt:
+          do:
+            - return: ""
+          when: rerr == nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - opt:
+          do:
+            - set: s.tickErr
+              value: rerr
+          when: s.tickErr == nil
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+  - of: (*rotatingSink).Rotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).Rotate
+        kind: self
+      - id: s.pruneByAge
+        kind: internal
+      - id: s.rotate
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: s.pruneByAge()
+              to: s.pruneByAge
+          when: s.size == 0
+      - return: s.rotate()
+        to: s.rotate
+  - of: openHardened
+    participants:
+      - id: caller
+        kind: actor
+      - id: openHardened
+        kind: self
+      - id: logfile
+        kind: package
+    steps:
+      - return: logfile.Open(path, defaultFilePerm, &openRefusals)
+        to: logfile
+  - of: newRotatingSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: newRotatingSink
+        kind: self
+      - id: openHardened
+        kind: internal
+      - id: f.Stat
+        kind: value
+      - id: fi.Size
+        kind: value
+      - id: worker
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileOpenFailed,
+                			Reason:  "ROT_FILE_OPEN_FAILED",
+                			Public:  "Rotating file sink requires a non-empty path",
+                			Private: "service/observe/logger/writer/rotfile.newRotatingSink: empty path",
+                		})
+          when: cfg.Path == ""
+      - bind: f, oerr
+        eval: openHardened(cfg.Path)
+        to: openHardened
+      - opt:
+          do:
+            - return: nil, oerr
+          when: oerr != nil
+      - var:
+          name: size
+          type: int64
+      - opt:
+          do:
+            - set: size
+              to: fi.Size
+              value: fi.Size()
+          init:
+            bind: fi, serr
+            eval: f.Stat()
+            to: f.Stat
+          when: serr == nil
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - bind: s
+        eval: "&rotatingSink{cfg: *cfg, f: f, size: size, clk: clk}"
+      - opt:
+          do:
+            - set: s.daemon
+              to: worker
+              value: worker.Every(cfg.RotateEvery, s.tickRotate)
+          when: cfg.RotateEvery > 0
+      - return: s, nil
+  - of: (*rotatingSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).Write
+        kind: self
+      - id: s.maybeRotate
+        kind: internal
+      - id: s.f.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file write failed",
+                			Private: "service/observe/logger/writer/rotfile.Write saw a cancelled context",
+                		}, errs.Int("level", int(r.Level)))
+          when: ctx != nil && ctx.Err() != nil
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - bind: terr
+              eval: s.tickErr
+            - set: s.tickErr
+              value: nil
+            - opt:
+                do:
+                  - eval: s.cfg.OnError(terr)
+                when: s.cfg.OnError != nil
+          when: s.tickErr != nil
+      - opt:
+          do:
+            - return: 0, rerr
+          init:
+            bind: rerr
+            eval: s.maybeRotate(int64(len(p)))
+            to: s.maybeRotate
+          when: rerr != nil
+      - bind: written, werr
+        eval: s.f.Write(p)
+        to: s.f.Write
+      - op: +=
+        set: s.size
+        value: int64(written)
+      - opt:
+          do:
+            - return: |-
+                written, errs.Wrap(werr, errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file write failed",
+                			Private: "service/observe/logger/writer/rotfile.Write underlying *os.File returned an error",
+                		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
+          when: werr != nil
+      - return: written, nil
+  - of: (*rotatingSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).Flush
+        kind: self
+      - id: errs
+        kind: package
+      - id: s.mu.Lock
+        kind: value
+      - id: s.f.Sync
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file flush failed",
+                			Private: "service/observe/logger/writer/rotfile.Flush saw a cancelled context",
+                		})
+              to: errs
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: serr
+        eval: s.f.Sync()
+        to: s.f.Sync
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(serr, errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file flush failed",
+                			Private: "service/observe/logger/writer/rotfile.Flush underlying *os.File.Sync returned an error",
+                		})
+              to: errs
+          when: serr != nil
+      - return: nil
+  - of: (*rotatingSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).Close
+        kind: self
+      - id: s.daemon.Stop
+        kind: value
+      - id: s.mu.Lock
+        kind: value
+      - id: s.f.Close
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - eval: s.daemon.Stop()
+              to: s.daemon.Stop
+          when: s.daemon != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: cerr
+        eval: s.f.Close()
+        to: s.f.Close
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(cerr, errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file close failed",
+                			Private: "service/observe/logger/writer/rotfile.Close underlying *os.File.Close returned an error",
+                		})
+              to: errs
+          when: cerr != nil
+      - return: nil
+  - of: (*rotFileFactory).Name
+    steps:
+      - return: "\"rotfile\""
+  - of: (*rotFileFactory).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotFileFactory).Open
+        kind: self
+      - id: newRotatingSink
+        kind: internal
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: c, ok
+        eval: cfg.(Config)
+      - opt:
+          do:
+            - return: nil, writer.WriterConfigInvalid
+          when: "!ok"
+      - bind: base, oerr
+        eval: newRotatingSink(&c)
+        to: newRotatingSink
+      - opt:
+          do:
+            - return: nil, oerr
+          when: oerr != nil
+      - return: levelgate.New(base, c.MinLevel), nil
+        to: levelgate
+  - of: wrapRotate
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapRotate
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corerotfile.CodeRotFileRotateFailed,
+          		Reason:  "ROT_FILE_ROTATE_FAILED",
+          		Public:  "Rotating file sink failed to rotate the destination file",
+          		Private: private,
+          	})
+        to: errs

@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile
+  name: rotfile
+  purpose: "Package rotfile declares the codes and sentinels of the rotating-file log writer, internal/service/observe/logger/writer/rotfile: range 0.3.27.*, allocated to that engine (ADR 0014 service slot 0x1b) and declared here since ADR 0160, so the engine declares none."
+types: []

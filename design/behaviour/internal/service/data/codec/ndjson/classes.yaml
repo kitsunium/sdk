@@ -1,0 +1,216 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      scannerMaxCapacity caps a single NDJSON record at 10 MiB; beyond that the
+      record likely represents a consumer bug or a corrupt stream. Enforced
+      directly by the line splitter — no scanner buffer involved.
+    items:
+      - name: scannerMaxCapacity
+        type: int
+        value: 10 * 1024 * 1024
+    name: scannerMaxCapacity
+files:
+  - decls:
+      - scannerMaxCapacity
+      - Codec
+      - ndjsonCodec
+      - New
+      - (*ndjsonCodec).Name
+      - (*ndjsonCodec).MIMETypes
+      - (*ndjsonCodec).Extensions
+      - (*ndjsonCodec).Marshal
+      - encodeSliceInto
+      - marshalRawSliceTo
+      - rawMessageView
+      - appendNDJSONRaw
+      - (*ndjsonCodec).Unmarshal
+      - decodeLines
+      - countNDJSONRecords
+      - (*ndjsonCodec).Append
+      - elemForMarshal
+      - asSlice
+      - asSlicePointer
+    name: codec.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: |-
+      encodeSliceInto runs the per-record stdjson.Marshal loop and appends
+      each encoded record + '\n' separator onto buf. The getElem closure
+      produces one any-typed element at a time so the helper stays free of
+      reflect.Value at the API boundary. Stops at the first per-record
+      failure, returning the raw stdlib error so the caller can wrap it.
+    name: encodeSliceInto
+    params: buf *bytes.Buffer, n int, getElem func(int) any
+    results: error
+  - doc: |-
+      marshalRawSliceTo writes a pre-encoded slice (one of []json.RawMessage
+      or [][]byte) into dst as NDJSON. Returns (dst', true) on success;
+      (nil, false) when v isn't a recognised raw shape OR any element
+      contains an embedded '\n' (which would shred the line-delimited
+      invariant, so falling back to the stdjson path is the safe choice).
+      Used by both Marshal (dst=nil) and Append (dst=caller buffer).
+    name: marshalRawSliceTo
+    params: dst []byte, v any
+    results: encoded []byte, ok bool
+  - doc: |-
+      rawMessageView re-types a []json.RawMessage as [][]byte with a
+      zero-copy unsafe pointer-cast. stdjson.RawMessage is defined as
+      `type RawMessage []byte` upstream, so the slice headers are
+      bit-identical at the runtime representation level — the cast
+      just reinterprets the same memory through a different element
+      type. Saves the make([][]byte, len(rows)) allocation + the N
+      per-element header copies the safe loop used to pay.
+
+      Lifetime safety: the returned view aliases the caller's rows
+      slice. appendNDJSONRaw consumes the view synchronously and never
+      retains the slice header beyond its own stack frame.
+    name: rawMessageView
+    params: rows []stdjson.RawMessage
+    results: "[][]byte"
+  - doc: |-
+      appendNDJSONRaw appends rows + '\n' separators onto dst. Refuses any
+      row carrying an embedded '\n' (returns ok=false) so the slow path
+      can re-encode it via json.Marshal (which always emits compact JSON
+      with escaped newlines).
+    name: appendNDJSONRaw
+    params: dst []byte, rows [][]byte
+    results: appended []byte, ok bool
+  - doc: |-
+      decodeLines walks data line-by-line and decodes each non-empty line
+      in place into a pre-sized slice of sliceType. Avoids bufio.Scanner
+      (which would copy each line into its internal buffer) by indexing on
+      '\n' directly into the input slice — every produced sub-slice aliases
+      data so no per-line copy occurs before stdjson.Unmarshal reads it.
+      Pre-counts records so the output slice is sized once instead of
+      re-grown via reflect.Append on every line.
+    name: decodeLines
+    params: data []byte, sliceType reflect.Type
+    results: result reflect.Value, err error
+  - doc: |-
+      countNDJSONRecords estimates the number of decodable records in data
+      by counting '\n' bytes plus one for a possible trailing line that has
+      no terminator. Conservative upper bound — actual decode skips empty /
+      whitespace-only lines, but over-allocating once is much cheaper than
+      re-growing the result slice on every record via reflect.Append.
+    name: countNDJSONRecords
+    params: data []byte
+    results: int
+  - doc: |-
+      elemForMarshal hands element i of slice to encoding/json in the form that
+      costs the fewest allocations AND matches what the stdlib itself emits for
+      that element inside a JSON array.
+
+      It returns a POINTER to the element whenever the element is addressable
+      (always true for a slice; true for an array only when the array value is
+      itself addressable, i.e. reached through a pointer). Two independent reasons,
+      both measured:
+
+        - Allocation. Since Go 1.27 `encoding/json` is the json/v2 implementation
+          (GOEXPERIMENT=jsonv2 joined the baseline in internal/buildcfg/exp.go), and
+          json/v2's marshalEncode shallow-copies any NON-pointer argument through
+          reflect.New to obtain an addressable value — "It is beneficial to
+          performance to always pass pointers to avoid this", says the stdlib
+          comment at encoding/json/v2/arshal.go. Handing it a pointer skips that
+          copy. Boxing a pointer into `any` is also free, where boxing a multi-word
+          struct is not. Measured over the 3-record budget batch: 12 -> 6 allocs on
+          go1.27.0, 9 -> 6 on go1.26.8 — i.e. the figure stops depending on the
+          toolchain at all.
+
+        - Correctness. reflect.Value.Interface() strips addressability, so a
+          MarshalJSON/MarshalText declared on *T was silently NOT called for a
+          []T record, even though stdjson.Marshal of the whole []T does call it.
+          ndjson emitted {"v":1} where the stdlib emits "PTR-JSON". Passing the
+          address restores parity. Pinned by TestStdlibSliceParity, and measured
+          identical on go1.26.8 and go1.27.0 — this divergence was ndjson's own,
+          not a toolchain behaviour change.
+
+      The non-addressable fallback (a bare [N]T array value) keeps the old
+      by-value form, which is the only thing reflect permits there.
+    name: elemForMarshal
+    params: slice reflect.Value, i int
+    results: any
+  - doc: asSlice reports whether v resolves to a slice or array reflect.Value.
+    name: asSlice
+    params: v any
+    results: slice reflect.Value, ok bool
+  - doc: asSlicePointer reports whether v is a non-nil *[]T.
+    name: asSlicePointer
+    params: v any
+    results: ptr reflect.Value, ok bool
+imports:
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corendjson: github.com/kitsunium/sdk/internal/core/data/codec/ndjson
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  stdjson: encoding/json
+  unsafe: unsafe
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/ndjson
+  name: ndjson
+  purpose: Package ndjson implements newline-delimited JSON as a codec.Codec.
+types:
+  - doc: ndjsonCodec is the concrete Codec implementation for NDJSON.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*ndjsonCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*ndjsonCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*ndjsonCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal encodes a slice v as NDJSON bytes. Pre-encoded raw payloads
+          (`[]json.RawMessage` or `[][]byte` — the exact shape the promotion
+          path in pkg/v1/data/codec/promote.go produces, and the natural shape for
+          callers proxying already-JSON records) take a fast-path that bypasses
+          the per-element stdjson.Marshal reflect walk.
+        name: Marshal
+        params: v any
+        recv: "*ndjsonCodec"
+        results: encoded []byte, err error
+      - doc: Unmarshal parses NDJSON data into v, which must be a pointer to a slice.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*ndjsonCodec"
+        results: error
+      - doc: |-
+          Append encodes the slice v as NDJSON and appends the bytes to dst.
+          Implements the optional codec.Appender interface so hot-path callers
+          can stream records into a recycled buffer (one '\n'-terminated line per
+          element). Shares the same pre-encoded fast-path as Marshal.
+        name: Append
+        params: dst []byte, v any
+        recv: "*ndjsonCodec"
+        results: appended []byte, err error
+    name: ndjsonCodec
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME /
+      extension tables (hoisted).
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&ndjsonCodec{})
+      - doc: ": MIME table hoisted."
+        name: mimeTypes
+        value: "[]string{\"application/x-ndjson\", \"application/jsonl\"}"
+      - doc: ": extension table hoisted for the same reason."
+        name: extensions
+        value: "[]string{\".ndjson\", \".jsonl\"}"
+    name: Codec

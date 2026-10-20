@@ -1,0 +1,17 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: register
+    participants:
+      - id: caller
+        kind: actor
+      - id: register
+        kind: self
+      - id: iapp
+        kind: package
+    steps:
+      - eval: iapp.RegisterConfigFormat("yaml", yamlcodec.Format)
+        to: iapp
+      - eval: iapp.RegisterConfigFormat("yml", yamlcodec.Format)
+        to: iapp
+      - return: "true"

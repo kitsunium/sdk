@@ -1,0 +1,153 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Codec
+      - xmlCodec
+      - New
+      - (*xmlCodec).Name
+      - (*xmlCodec).MIMETypes
+      - (*xmlCodec).Extensions
+      - (*xmlCodec).Marshal
+      - (*xmlCodec).Unmarshal
+      - (*xmlCodec).Append
+      - (*xmlCodec).NewEncoder
+      - (*xmlCodec).NewDecoder
+    name: codec.go
+  - decls:
+      - xmlDecoder
+      - (*xmlDecoder).Decode
+      - (*xmlDecoder).More
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - xmlEncoder
+      - (*xmlEncoder).Encode
+      - (*xmlEncoder).Close
+    name: encoder.go
+functions:
+  - name: New
+    results: codec.Codec
+imports:
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corexml: github.com/kitsunium/sdk/internal/core/data/codec/xml
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  stdxml: encoding/xml
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/xml
+  name: xml
+  purpose: Package xml wraps encoding/xml as a codec.Codec implementation registered under Format("xml").
+types:
+  - doc: xmlCodec is the concrete Codec implementation for XML.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*xmlCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*xmlCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*xmlCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal serialises v as XML bytes. Routes through a pooled
+          *bytes.Buffer + xml.NewEncoder so the per-call buffer allocation
+          stdxml.Marshal pays internally is amortised across calls.
+        name: Marshal
+        params: v any
+        recv: "*xmlCodec"
+        results: encoded []byte, err error
+      - doc: Unmarshal parses data as XML into v.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*xmlCodec"
+        results: error
+      - doc: |-
+          Append encodes v as XML and appends the bytes to dst. Implements the
+          optional codec.Appender interface so hot-path callers can stream
+          records into a recycled buffer. Encodes directly into the pooled
+          *bytes.Buffer + appends onto dst — saves the slices.Clone the
+          Marshal-delegation shape paid.
+        name: Append
+        params: dst []byte, v any
+        recv: "*xmlCodec"
+        results: appended []byte, err error
+      - doc: NewEncoder wraps w in a streaming codec.Encoder.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*xmlCodec"
+        results: codec.Encoder
+      - doc: NewDecoder wraps r in a streaming codec.Decoder.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*xmlCodec"
+        results: codec.Decoder
+    name: xmlCodec
+  - doc: |-
+      xmlDecoder wraps *encoding/xml.Decoder so it satisfies codec.Decoder.
+      A sticky done latch mirrors the contract of the other streaming codecs:
+      More() returns false once Decode has surfaced io.EOF, without consuming
+      any additional tokens from the underlying stream.
+    fields:
+      - name: inner
+        type: "*stdxml.Decoder"
+      - doc: ": sticky EOF flag so More() returns false after the stream drains."
+        name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode reads the next value from the wrapped stdlib decoder.
+          (unwrapped) once the stream is drained; nil otherwise.
+        name: Decode
+        params: v any
+        recv: d *xmlDecoder
+        results: error
+      - doc: More reports whether another XML element can be decoded.
+        name: More
+        recv: d *xmlDecoder
+        results: bool
+    name: xmlDecoder
+  - doc: xmlEncoder wraps *encoding/xml.Encoder so it satisfies codec.Encoder.
+    fields:
+      - name: inner
+        type: "*stdxml.Encoder"
+    kind: struct
+    methods:
+      - doc: Encode serialises v through the wrapped stdlib encoder.
+        name: Encode
+        params: v any
+        recv: e *xmlEncoder
+        results: error
+      - doc: Close flushes the buffered stdlib encoder state.
+        name: Close
+        recv: e *xmlEncoder
+        results: error
+    name: xmlEncoder
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME /
+      extension tables.
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&xmlCodec{})
+      - doc: ": the canonical IETF-registered type is application/xml."
+        name: mimeTypes
+        value: "[]string{\"application/xml\", \"text/xml\"}"
+      - doc: ": canonical extension."
+        name: extensions
+        value: "[]string{\".xml\"}"
+    name: Codec

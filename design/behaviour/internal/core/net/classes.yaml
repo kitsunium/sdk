@@ -1,0 +1,1051 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: decimalBase is the radix used to read a bare nanosecond count.
+        name: decimalBase
+        type: int
+        value: "10"
+      - doc: bitSize64 is the width a nanosecond count must fit, matching time.Duration.
+        name: bitSize64
+        type: int
+        value: "64"
+      - doc: "minQuotedLen is the shortest possible quoted JSON token: the two quotes."
+        name: minQuotedLen
+        type: int
+        value: "2"
+    name: decimalBase
+  - doc: |-
+      defaultMinVersion is the floor applied when IdentityParams.MinVersion is zero.
+      TLS 1.3 is the default rather than 1.2 because a new deployment has no legacy
+      peer to accommodate; a caller that genuinely needs 1.2 must say so explicitly.
+    items:
+      - comment: tls.VersionTLS13
+        name: defaultMinVersion
+        type: uint16
+        value: tls.VersionTLS12 + 1
+    name: defaultMinVersion
+  - doc: |-
+      minAcceptedVersion is the oldest TLS version the domain will serve or dial.
+      TLS 1.0 and 1.1 are deprecated by RFC 8996 and are refused, not warned about.
+    items:
+      - name: minAcceptedVersion
+        type: uint16
+        value: tls.VersionTLS12
+    name: minAcceptedVersion
+  - doc: The lifecycle phases, in the order a server passes through them.
+    grouped: true
+    items:
+      - doc: PhaseNew is a constructed server that has not bound anything yet.
+        name: PhaseNew
+        type: Phase
+        value: iota
+      - doc: PhaseStarting is binding listeners; some may already be up.
+        name: PhaseStarting
+      - doc: PhaseServing is bound and accepting.
+        name: PhaseServing
+      - doc: PhaseDraining has stopped accepting and is waiting for in-flight work.
+        name: PhaseDraining
+      - doc: PhaseStopped has released every listener.
+        name: PhaseStopped
+    name: PhaseNew
+  - doc: |-
+      SSEContentType is the media type an event stream must be served under. A
+      client that receives anything else does not start an EventSource at all.
+    items:
+      - name: SSEContentType
+        type: string
+        value: "\"text/event-stream\""
+    name: SSEContentType
+  - doc: |-
+      SSEMinRetry is the smallest reconnection hint the wire can carry. The retry
+      field is an integer MILLISECOND count, so anything shorter rounds to zero —
+      and zero does not mean "a very short delay", it means "reconnect at once".
+    items:
+      - name: SSEMinRetry
+        type: time.Duration
+        value: time.Millisecond
+    name: SSEMinRetry
+  - doc: |-
+      SSELastEventIDHeader is the request header a reconnecting client sends,
+      carrying the id of the last event it processed.
+    items:
+      - name: SSELastEventIDHeader
+        type: string
+        value: "\"Last-Event-ID\""
+    name: SSELastEventIDHeader
+  - doc: |-
+      WSGUID is the fixed string RFC 6455 §1.3 concatenates to Sec-WebSocket-Key
+      before hashing. It is a constant of the protocol, not a secret and not a
+      parameter: its only job is to make the accept value impossible to produce by
+      echoing the request, so a cache or a naive proxy cannot fake an upgrade.
+    items:
+      - name: WSGUID
+        type: string
+        value: "\"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\""
+    name: WSGUID
+  - doc: |-
+      WSVersion is the only protocol version this domain speaks (RFC 6455 §4.1).
+      A request naming any other version is refused WITH this value advertised
+      back, which is what lets a client renegotiate instead of guessing.
+    items:
+      - name: WSVersion
+        type: string
+        value: "\"13\""
+    name: WSVersion
+  - doc: |-
+      WSKeyLen is how many bytes Sec-WebSocket-Key decodes to (RFC 6455 §4.1).
+      A key of any other length is not a WebSocket handshake, whatever it decodes.
+    items:
+      - name: WSKeyLen
+        type: int
+        value: "16"
+    name: WSKeyLen
+  - doc: |-
+      The handshake headers, spelled once so no caller mistypes one into a silent
+      miss.
+    grouped: true
+    items:
+      - doc: WSKeyHeader carries the client's 16 random bytes, base64-encoded.
+        name: WSKeyHeader
+        type: string
+        value: "\"Sec-WebSocket-Key\""
+      - doc: WSAcceptHeader carries the server's proof it understood the handshake.
+        name: WSAcceptHeader
+        type: string
+        value: "\"Sec-WebSocket-Accept\""
+      - doc: |-
+          WSVersionHeader carries the client's version, and the server's
+          counter-offer when it refuses one.
+        name: WSVersionHeader
+        type: string
+        value: "\"Sec-WebSocket-Version\""
+      - doc: WSProtocolHeader carries the subprotocol list, then the single choice.
+        name: WSProtocolHeader
+        type: string
+        value: "\"Sec-WebSocket-Protocol\""
+      - doc: |-
+          WSExtensionsHeader carries the extension offer. This domain negotiates
+          none, so it is never echoed — see the package CLAUDE.md.
+        name: WSExtensionsHeader
+        type: string
+        value: "\"Sec-WebSocket-Extensions\""
+      - doc: WSUpgradeToken is the token both Upgrade headers must carry.
+        name: WSUpgradeToken
+        type: string
+        value: "\"websocket\""
+    name: WSKeyHeader
+  - doc: |-
+      WSMaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's
+      payload. It exists so an endpoint can answer a Ping without buffering: a
+      control frame is answered inline, between the fragments of a message, so it
+      must fit in a fixed buffer that is always available.
+    items:
+      - name: WSMaxControlPayload
+        type: int
+        value: "125"
+    name: WSMaxControlPayload
+  - doc: |-
+      The close codes RFC 6455 §7.4.1 defines. Three of them — WSCloseNoStatus,
+      WSCloseAbnormal and WSCloseTLSHandshake — are values an application may
+      OBSERVE but that MUST NOT appear on the wire: they describe the absence of a
+      close frame, so sending one would be a statement contradicted by its own
+      delivery.
+    grouped: true
+    items:
+      - doc: WSCloseNormal is a completed purpose, on either side.
+        name: WSCloseNormal
+        type: WSCloseCode
+        value: "1000"
+      - doc: |-
+          WSCloseGoingAway is a server shutting down or a browser navigating away.
+          It is what a drain sends.
+        name: WSCloseGoingAway
+        type: WSCloseCode
+        value: "1001"
+      - doc: WSCloseProtocolError is a frame the RFC forbids.
+        name: WSCloseProtocolError
+        type: WSCloseCode
+        value: "1002"
+      - doc: |-
+          WSCloseUnsupportedData is a well-formed frame carrying data this endpoint
+          cannot accept — binary to a text-only peer, for instance.
+        name: WSCloseUnsupportedData
+        type: WSCloseCode
+        value: "1003"
+      - doc: |-
+          WSCloseNoStatus means the peer's Close frame carried no code. It is
+          reported to the application and never sent.
+        name: WSCloseNoStatus
+        type: WSCloseCode
+        value: "1005"
+      - doc: |-
+          WSCloseAbnormal means the connection died without a Close frame. It is
+          reported to the application and never sent.
+        name: WSCloseAbnormal
+        type: WSCloseCode
+        value: "1006"
+      - doc: |-
+          WSCloseInvalidPayload is a text frame that is not valid UTF-8, or a close
+          reason that is not.
+        name: WSCloseInvalidPayload
+        type: WSCloseCode
+        value: "1007"
+      - doc: WSClosePolicyViolation is the generic refusal when no other code fits.
+        name: WSClosePolicyViolation
+        type: WSCloseCode
+        value: "1008"
+      - doc: WSCloseTooLarge is a message beyond what this endpoint accepts.
+        name: WSCloseTooLarge
+        type: WSCloseCode
+        value: "1009"
+      - doc: |-
+          WSCloseExtensionRequired is a client giving up because the server did not
+          negotiate an extension it needs. A server never sends it.
+        name: WSCloseExtensionRequired
+        type: WSCloseCode
+        value: "1010"
+      - doc: WSCloseInternalError is an unexpected condition on this side.
+        name: WSCloseInternalError
+        type: WSCloseCode
+        value: "1011"
+      - doc: |-
+          WSCloseTLSHandshake means the TLS handshake failed. It is reported to the
+          application and never sent — there is no connection to send it on.
+        name: WSCloseTLSHandshake
+        type: WSCloseCode
+        value: "1015"
+    name: WSCloseNormal
+  - doc: The boundaries of the close-code ranges RFC 6455 §7.4.2 reserves.
+    grouped: true
+    items:
+      - doc: wsCloseProtocolLow is the first code the protocol itself may define.
+        name: wsCloseProtocolLow
+        type: WSCloseCode
+        value: "1000"
+      - doc: |-
+          wsCloseRegisteredHigh is the last code registered with IANA today
+          (1012 Service Restart, 1013 Try Again Later and 1014 Bad Gateway are
+          later registrations against the same range). Everything between here and
+          wsCloseLibraryLow is reserved-but-unallocated, so it is refused.
+        name: wsCloseRegisteredHigh
+        type: WSCloseCode
+        value: "1014"
+      - doc: |-
+          wsCloseUndefined is the one hole inside the assigned block: 1004 was
+          reserved and never given a meaning, so it must not be sent.
+        name: wsCloseUndefined
+        type: WSCloseCode
+        value: "1004"
+      - doc: |-
+          wsCloseLibraryLow opens the range libraries and frameworks register
+          first-come-first-served, which runs contiguously into the private range.
+        name: wsCloseLibraryLow
+        type: WSCloseCode
+        value: "3000"
+      - doc: |-
+          wsClosePrivateHigh closes the range applications may use without
+          registering anything.
+        name: wsClosePrivateHigh
+        type: WSCloseCode
+        value: "4999"
+    name: wsCloseProtocolLow
+  - doc: |-
+      wsControlBit is set on every control opcode (0x8..0xF) and clear on every
+      data opcode (0x0..0x7), which is the whole reason the opcode space is split
+      at 8 — an endpoint can classify an opcode it does not know.
+    items:
+      - name: wsControlBit
+        type: byte
+        value: "0x08"
+    name: wsControlBit
+  - doc: |-
+      The opcodes RFC 6455 defines. Everything else in the four-bit space is
+      reserved, and a reserved opcode fails the connection rather than being
+      skipped: an endpoint that ignored it would be desynchronised from a peer that
+      believes the frame meant something.
+    grouped: true
+    items:
+      - doc: WSContinuation continues the message the previous frame began.
+        name: WSContinuation
+        type: WSOpCode
+        value: "0x0"
+      - doc: WSText carries a UTF-8 payload, validated on both sides.
+        name: WSText
+        type: WSOpCode
+        value: "0x1"
+      - doc: WSBinary carries opaque bytes.
+        name: WSBinary
+        type: WSOpCode
+        value: "0x2"
+      - doc: WSClose begins or completes the closing handshake.
+        name: WSClose
+        type: WSOpCode
+        value: "0x8"
+      - doc: WSPing asks the peer to answer with a Pong carrying the same payload.
+        name: WSPing
+        type: WSOpCode
+        value: "0x9"
+      - doc: WSPong answers a Ping, or is sent unsolicited as a one-way heartbeat.
+        name: WSPong
+        type: WSOpCode
+        value: "0xA"
+    name: WSContinuation
+files:
+  - decls:
+      - AddressValue
+      - AddressValue.String
+    name: address.go
+  - decls:
+      - CallValue
+      - CallHook
+    name: call.go
+  - decls:
+      - ClientConfig
+    name: client_config.go
+  - decls:
+      - ConnHandlerFunc
+      - ConnHandlerFunc.ServeConn
+    name: conn.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - drainSignalKey
+      - WithDrainSignal
+      - DrainSignal
+    name: drain.go
+  - decls:
+      - decimalBase
+      - DurationValue
+      - DurationValue.Duration
+      - DurationValue.String
+      - DurationValue.MarshalJSON
+      - (*DurationValue).UnmarshalJSON
+      - (*DurationValue).parseString
+    name: duration.go
+  - decls:
+      - _
+    name: handler_compliance.go
+  - decls:
+      - defaultMinVersion
+      - IdentityValue
+      - IdentityValue.String
+      - IdentityValue.GoString
+      - IdentityValue.IsZero
+      - IdentityValue.ClientConfig
+      - IdentityValue.ServerConfig
+      - IdentityValue.clonedRoots
+      - IdentityValue.clonedClientCAs
+      - IdentityValue.resolvedMinVersion
+      - NewIdentityValue
+    name: identity.go
+  - decls:
+      - IdentityFileParams
+    name: identity_file_params.go
+  - decls:
+      - IdentityParams
+    name: identity_params.go
+  - decls:
+      - LimitsValue
+    name: limits.go
+  - decls:
+      - minAcceptedVersion
+      - parseKeyPair
+      - parsePool
+      - resolveMinVersion
+    name: material.go
+  - decls:
+      - Middleware
+      - Chain
+    name: middleware.go
+  - decls:
+      - PacketHandlerFunc
+      - PacketHandlerFunc.ServePacket
+    name: packet.go
+  - decls:
+      - Phase
+      - PhaseNew
+      - Phase.String
+    name: phase.go
+  - decls:
+      - PolicyFunc
+      - PolicyFunc.Allow
+    name: policy.go
+  - decls:
+      - _#2
+    name: policy_compliance.go
+  - decls:
+      - ResponseValue
+      - RequestValue
+    name: response.go
+  - decls:
+      - SSEContentType
+      - SSEMinRetry
+      - SSELastEventIDHeader
+      - SSEEventValue
+      - SSEEventValue.IsZero
+      - SSEEventValue.Validate
+      - validateSSELine
+      - validateSSERetry
+    name: sse.go
+  - decls:
+      - StateValue
+      - StateValue.Degraded
+      - ListenerStateValue
+    name: state.go
+  - decls:
+      - TimeoutsValue
+    name: timeouts.go
+  - decls:
+      - WSGUID
+      - WSVersion
+      - WSKeyLen
+      - WSKeyHeader
+      - WSMaxControlPayload
+    name: websocket.go
+  - decls:
+      - WSCloseNormal
+      - wsCloseProtocolLow
+      - WSCloseCode
+      - WSCloseCode.Sendable
+      - WSCloseCode.Echoable
+    name: websocket_close.go
+  - decls:
+      - WSMessageValue
+      - WSMessageValue.OpCode
+    name: websocket_message.go
+  - decls:
+      - wsControlBit
+      - WSContinuation
+      - WSOpCode
+      - WSOpCode.IsControl
+      - WSOpCode.Defined
+      - WSOpCode.String
+    name: websocket_opcode.go
+  - decls:
+      - wrapAs
+    name: wrap.go
+functions:
+  - name: WithDrainSignal
+    params: ctx context.Context, draining <-chan struct{}
+    results: context.Context
+  - name: DrainSignal
+    params: ctx context.Context
+    results: <-chan struct{}
+  - name: NewIdentityValue
+    params: p IdentityParams
+    results: id IdentityValue, err error
+  - doc: |-
+      parseKeyPair turns a PEM certificate chain and key into a tls.Certificate.
+      Both halves empty is legitimate — a client that only verifies the server holds
+      no identity of its own — but supplying one without the other is a mistake that
+      would otherwise surface as a confusing handshake failure much later.
+    name: parseKeyPair
+    params: certPEM, keyPEM []byte
+    results: certs []tls.Certificate, err error
+  - doc: |-
+      parsePool builds a certificate pool from a PEM bundle.
+
+      This is the trap the domain exists to close. x509.CertPool.AppendCertsFromPEM
+      reports success through a boolean that is almost universally discarded, so a
+      bundle that is empty, truncated, or accidentally a private key produces a pool
+      that parses fine and verifies nothing — the failure then shows up as a trusted
+      connection to an untrusted peer. Here a bundle that yields no certificate is a
+      typed error, and an absent bundle is distinct from an unusable one.
+    name: parsePool
+    params: bundlePEM []byte, field string
+    results: pool *x509.CertPool, err error
+  - doc: resolveMinVersion applies the domain default and refuses deprecated versions.
+    name: resolveMinVersion
+    params: v uint16
+    results: version uint16, err error
+  - name: Chain
+    params: h H, middlewares ...Middleware[H]
+    results: H
+    typeParams: H any
+  - doc: validateSSELine refuses a line terminator in a field the format cannot split.
+    name: validateSSELine
+    params: field, value string
+    results: error
+  - doc: |-
+      validateSSERetry refuses a reconnection hint the millisecond field cannot
+      carry honestly.
+    name: validateSSERetry
+    params: retry time.Duration
+    results: error
+  - doc: |-
+      wrapAs returns the given net sentinel as the error origin (its code, reason
+      and public message win), attaching the cause's message and any extra fields as
+      structured metadata. Wrapping the sentinel rather than the cause is what keeps
+      the domain code intact: origin-wins would otherwise let an *errs.Error cause
+      hijack it. A nil cause yields the sentinel carrying only the extra fields.
+    name: wrapAs
+    params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
+    results: error
+imports:
+  context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  slices: slices
+  strconv: strconv
+  strings: strings
+  time: time
+  tls: crypto/tls
+  x509: crypto/x509
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/net
+  name: net
+  purpose: Package net — the listen address value.
+types:
+  - fields:
+      - doc: |-
+          Network is the socket family: tcp, tcp4, tcp6, udp, udp4, udp6, unix,
+          unixgram or unixpacket.
+        name: Network
+        type: string
+      - doc: |-
+          Addr is the bind target: "host:port" for the IP families, a filesystem
+          path for the unix families.
+        name: Addr
+        type: string
+    kind: struct
+    methods:
+      - name: String
+        recv: a AddressValue
+        results: string
+    name: AddressValue
+  - fields:
+      - doc: Method is the uppercase HTTP method.
+        name: Method
+        type: string
+      - doc: Host is the authority the call was sent to.
+        name: Host
+        type: string
+      - doc: Path is the request path.
+        name: Path
+        type: string
+      - doc: Status is the HTTP status code, or zero when the call produced no response.
+        name: Status
+        type: int
+      - doc: Bytes is the number of response body bytes read.
+        name: Bytes
+        type: int64
+      - doc: |-
+          Duration is the wall-clock time from request start to response headers.
+          It deliberately excludes the body: the record is emitted once the body is
+          done with, but this field measures the upstream's time to first answer,
+          which is the one a slow upstream and a large payload do not share.
+        name: Duration
+        type: time.Duration
+      - doc: |-
+          Err is what ended the call: a policy refusal, a transport failure, the
+          response ceiling, or a failed close. Nil when the body was read in full.
+        name: Err
+        type: error
+    kind: struct
+    name: CallValue
+  - kind: named
+    name: CallHook
+    underlying: func(call CallValue)
+  - fields:
+      - doc: BaseURL is the origin every relative path resolves against.
+        name: BaseURL
+        type: string
+      - doc: DialTimeout bounds establishing the TCP connection.
+        name: DialTimeout
+        type: DurationValue
+      - doc: HandshakeTimeout bounds the TLS handshake.
+        name: HandshakeTimeout
+        type: DurationValue
+      - doc: |-
+          ResponseTimeout bounds the wait for response headers after the request
+          has been written. It is separate from TotalTimeout so a slow upstream is
+          distinguishable from a large body.
+        name: ResponseTimeout
+        type: DurationValue
+      - doc: TotalTimeout bounds the whole call, body included.
+        name: TotalTimeout
+        type: DurationValue
+      - doc: |-
+          MaxResponseSize caps the response body in bytes. A body of exactly this
+          size is admitted; only one past it fails the call, and the body is never
+          truncated.
+        name: MaxResponseSize
+        type: int64
+      - doc: |-
+          MaxRedirects caps the redirect chain. Every hop is re-authorised by the
+          policy, so a redirect cannot walk out of the allowed surface.
+        name: MaxRedirects
+        type: int
+      - doc: DefaultHeaders are added to every request that does not already set them.
+        name: DefaultHeaders
+        type: map[string]string
+    kind: struct
+    name: ClientConfig
+  - kind: named
+    methods:
+      - name: ServeConn
+        params: ctx context.Context, c Conn
+        recv: f ConnHandlerFunc
+        results: error
+    name: ConnHandlerFunc
+    underlying: func(ctx context.Context, c Conn) error
+  - doc: |-
+      drainSignalKey types the context key so no other package can collide with it
+      and no string constant can be typo'd into a silent miss.
+    kind: struct
+    name: drainSignalKey
+  - kind: named
+    methods:
+      - name: Duration
+        recv: d DurationValue
+        results: time.Duration
+      - name: String
+        recv: d DurationValue
+        results: string
+      - name: MarshalJSON
+        recv: d DurationValue
+        results: encoded []byte, err error
+      - name: UnmarshalJSON
+        params: data []byte
+        recv: d *DurationValue
+        results: error
+      - doc: parseString decodes the unquoted body of a JSON duration token.
+        name: parseString
+        params: token string
+        recv: d *DurationValue
+        results: error
+    name: DurationValue
+    underlying: time.Duration
+  - fields:
+      - doc: certs holds the parsed keypair; empty for a client that only verifies.
+        name: certs
+        type: "[]tls.Certificate"
+      - doc: roots verifies the peer; nil means "use the platform trust store".
+        name: roots
+        type: "*x509.CertPool"
+      - doc: clientCAs verifies client certificates on a server identity.
+        name: clientCAs
+        type: "*x509.CertPool"
+      - doc: serverName overrides the verified peer name.
+        name: serverName
+        type: string
+      - doc: minVersion is the resolved TLS floor, never zero after construction.
+        name: minVersion
+        type: uint16
+      - doc: nextProtos is the ALPN list.
+        name: nextProtos
+        type: "[]string"
+      - doc: requireClientCert promotes a server identity to mutual TLS.
+        name: requireClientCert
+        type: bool
+    kind: struct
+    methods:
+      - name: String
+        recv: i IdentityValue
+        results: string
+      - name: GoString
+        recv: i IdentityValue
+        results: string
+      - name: IsZero
+        recv: i IdentityValue
+        results: bool
+      - name: ClientConfig
+        recv: i IdentityValue
+        results: "*tls.Config"
+      - name: ServerConfig
+        recv: i IdentityValue
+        results: "*tls.Config"
+      - doc: |-
+          clonedRoots copies the peer-verification pool so one configuration's AddCert
+          cannot reach another's. A nil pool means "use the platform trust store" and
+          stays nil, which is deliberately distinct from an empty pool trusting nothing.
+        name: clonedRoots
+        recv: i IdentityValue
+        results: "*x509.CertPool"
+      - doc: clonedClientCAs copies the client-certificate pool for the same reason.
+        name: clonedClientCAs
+        recv: i IdentityValue
+        results: "*x509.CertPool"
+      - doc: |-
+          resolvedMinVersion never returns zero, so a zero-value identity still pins a
+          modern floor instead of inheriting the stdlib default.
+        name: resolvedMinVersion
+        recv: i IdentityValue
+        results: uint16
+    name: IdentityValue
+  - fields:
+      - doc: |-
+          CertFile is the PEM leaf certificate followed by any intermediates.
+          Supplying it without KeyFile is always a configuration slip, never an
+          intention, and is refused: an mTLS client that silently degrades to plain
+          TLS is a security hole that reports nothing.
+        name: CertFile
+        type: string
+      - doc: KeyFile is the PEM private key matching CertFile.
+        name: KeyFile
+        type: string
+      - doc: |-
+          RootsFile is the PEM CA bundle used to verify the peer. Leaving it empty
+          selects the platform trust store, which is right for a public endpoint and
+          wrong for a private PKI.
+        name: RootsFile
+        type: string
+      - doc: |-
+          ClientCAFile is the PEM CA bundle a server accepts client certificates
+          from. Required whenever RequireClientCert is set.
+        name: ClientCAFile
+        type: string
+      - doc: |-
+          ServerName overrides the name verified against the peer certificate.
+
+          This is far more often required than its "optional" typing suggests. Any
+          deployment reached through a port forward or a tunnel connects to
+          127.0.0.1 while the peer certificate names the real service, and the
+          handshake then fails every single time until ServerName is set. Treat it
+          as mandatory whenever the dial address is not the certificate's name.
+        name: ServerName
+        type: string
+      - doc: |-
+          MinVersion is the lowest accepted TLS version. Zero selects TLS 1.3;
+          anything below TLS 1.2 is refused.
+        name: MinVersion
+        type: uint16
+      - doc: NextProtos is the ALPN protocol list, e.g. {"h2", "http/1.1"}.
+        name: NextProtos
+        type: "[]string"
+      - doc: RequireClientCert turns a server identity into mutual TLS.
+        name: RequireClientCert
+        type: bool
+    kind: struct
+    name: IdentityFileParams
+  - fields:
+      - doc: |-
+          CertPEM is the PEM-encoded leaf certificate followed by any intermediates.
+          Paired with KeyPEM; supplying one without the other is an error.
+        name: CertPEM
+        type: "[]byte"
+      - doc: KeyPEM is the PEM-encoded private key matching CertPEM.
+        name: KeyPEM
+        type: "[]byte"
+      - doc: |-
+          RootsPEM is the PEM-encoded CA bundle used to verify the peer. When empty
+          the platform trust store is used, which is the right default for a public
+          endpoint and the wrong one for a private PKI.
+        name: RootsPEM
+        type: "[]byte"
+      - doc: |-
+          ClientCAPEM is the PEM-encoded CA bundle a server accepts client
+          certificates from. It is meaningless on a client identity.
+        name: ClientCAPEM
+        type: "[]byte"
+      - doc: |-
+          ServerName overrides the name verified against the peer certificate. It is
+          required when connecting to a host by IP whose certificate names a DNS name.
+        name: ServerName
+        type: string
+      - doc: |-
+          MinVersion is the lowest accepted TLS version. Zero selects TLS 1.3;
+          anything below TLS 1.2 is refused outright.
+        name: MinVersion
+        type: uint16
+      - doc: NextProtos is the ALPN protocol list, e.g. {"h2", "http/1.1"}.
+        name: NextProtos
+        type: "[]string"
+      - doc: |-
+          RequireClientCert turns a server identity into mutual TLS: the peer must
+          present a certificate that chains to ClientCAPEM.
+        name: RequireClientCert
+        type: bool
+    kind: struct
+    name: IdentityParams
+  - fields:
+      - doc: |-
+          MaxConns caps concurrent connections in the group. Beyond it, a new
+          connection is accepted and immediately closed with ConnLimitReached, which
+          is kinder than letting the accept queue silently overflow.
+        name: MaxConns
+        type: int
+      - doc: |-
+          ReadBufferSize sizes the per-connection scratch buffer returned by
+          Conn.Buffer.
+        name: ReadBufferSize
+        type: int
+      - doc: |-
+          MaxPacketSize is the largest datagram accepted. A larger one is DROPPED
+          and counted in StateValue.OversizedPackets, never delivered truncated:
+          the kernel discards the tail, so the prefix that survives reads exactly
+          like a complete message and the handler cannot tell the difference.
+        name: MaxPacketSize
+        type: int
+      - doc: Backlog is the listen backlog depth where the platform honours it.
+        name: Backlog
+        type: int
+      - doc: |-
+          Shards is the number of independent listeners to open on one address with
+          SO_REUSEPORT, each with its own accept loop, to remove accept contention.
+          Zero selects the platform default.
+        name: Shards
+        type: int
+      - doc: |-
+          BatchSize is how many datagrams to read per syscall. Zero selects the
+          default; one disables batching.
+        name: BatchSize
+        type: int
+    kind: struct
+    name: LimitsValue
+  - kind: named
+    name: Middleware
+    typeParams: H any
+    underlying: func(next H) H
+  - kind: named
+    methods:
+      - name: ServePacket
+        params: ctx context.Context, p Packet
+        recv: f PacketHandlerFunc
+        results: error
+    name: PacketHandlerFunc
+    underlying: func(ctx context.Context, p Packet) error
+  - kind: named
+    methods:
+      - name: String
+        recv: p Phase
+        results: string
+    name: Phase
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: Allow
+        params: req RequestValue
+        recv: f PolicyFunc
+        results: error
+    name: PolicyFunc
+    underlying: func(req RequestValue) error
+  - fields:
+      - doc: |-
+          Status is the HTTP status code. It is set even when the call also returns
+          an error, so a caller can tolerate a specific status deliberately.
+        name: Status
+        type: int
+      - doc: Header is the response header set.
+        name: Header
+        type: http.Header
+      - doc: |-
+          Body is the fully-read response body, already bounded by the client's
+          size cap. It is nil for a status that carries no body, such as 204.
+        name: Body
+        type: "[]byte"
+    kind: struct
+    name: ResponseValue
+  - fields:
+      - doc: Method is the uppercase HTTP method, e.g. "GET".
+        name: Method
+        type: string
+      - doc: Scheme is the URL scheme, e.g. "https".
+        name: Scheme
+        type: string
+      - doc: |-
+          Host is the authority, host[:port]. It is carried because a policy that
+          sees only the path cannot defend against a redirect that keeps the path
+          and swaps the origin.
+        name: Host
+        type: string
+      - doc: |-
+          EscapedPath is the percent-encoded path exactly as it will be sent. It is
+          never the decoded form — see the type comment.
+        name: EscapedPath
+        type: string
+      - doc: RawQuery is the encoded query string, without the leading "?".
+        name: RawQuery
+        type: string
+    kind: struct
+    name: RequestValue
+  - fields:
+      - doc: |-
+          ID is the frame's "id" field. A client stores the last non-empty id it
+          saw and sends it back as Last-Event-ID when it reconnects, so this is the
+          resume token — and it is the CALLER's to mint, because only the caller
+          knows what it means. Empty emits no id field, which leaves the client's
+          stored id untouched; that is the format's own behaviour, not an omission.
+        name: ID
+        type: string
+      - doc: |-
+          Name is the frame's "event" field — the event type the client dispatches
+          under. Empty means the default type, "message".
+        name: Name
+        type: string
+      - doc: |-
+          Data is the payload. Every line terminator it carries (LF, CR or CRLF)
+          becomes a separate "data:" line, which the client rejoins with "\n". A
+          payload that mixed terminators therefore arrives normalised to LF: the
+          value is preserved, its byte spelling is not.
+        name: Data
+        type: string
+      - doc: |-
+          Retry is the reconnection delay hint, emitted as an integer millisecond
+          count. Zero emits no retry field.
+        name: Retry
+        type: DurationValue
+    kind: struct
+    methods:
+      - name: IsZero
+        recv: e SSEEventValue
+        results: bool
+      - name: Validate
+        recv: e SSEEventValue
+        results: error
+    name: SSEEventValue
+  - fields:
+      - doc: Phase is where the server sits in its lifecycle.
+        name: Phase
+        type: Phase
+      - doc: Listeners describes every bound listener, including any degradation.
+        name: Listeners
+        type: "[]ListenerStateValue"
+      - doc: ActiveConns is the number of connections currently being served.
+        name: ActiveConns
+        type: int64
+      - doc: TotalConns is the number accepted since the server started.
+        name: TotalConns
+        type: uint64
+      - doc: RejectedConns is the number turned away by the connection ceiling.
+        name: RejectedConns
+        type: uint64
+      - doc: |-
+          OversizedPackets is the number of datagrams dropped for passing their
+          group's MaxPacketSize. They are counted rather than delivered because the
+          kernel has already discarded the tail, and the prefix that survives is
+          indistinguishable from a complete message to the handler receiving it. A
+          read loop has nobody to return an error to, so this counter is the report.
+        name: OversizedPackets
+        type: uint64
+      - doc: |-
+          AcceptBackoffs is the number of times an accept loop waited after Accept
+          failed with anything but its listener closing — the process out of file
+          descriptors, typically, with connections still queued. Retrying at once
+          would spin a core per listener while the condition lasts; each wait is
+          5 ms, doubling to 1 s, and the next accepted connection starts the curve
+          over. A count that keeps rising is a server that cannot accept.
+        name: AcceptBackoffs
+        type: uint64
+    kind: struct
+    methods:
+      - name: Degraded
+        recv: s StateValue
+        results: bool
+    name: StateValue
+  - fields:
+      - doc: Group is the listener group's name.
+        name: Group
+        type: string
+      - doc: |-
+          Address is the address actually bound, which for a port of zero is the
+          one the kernel chose rather than the one requested.
+        name: Address
+        type: string
+      - doc: Network is the socket family.
+        name: Network
+        type: string
+      - doc: Shards is how many listeners were actually opened on this address.
+        name: Shards
+        type: int
+      - doc: |-
+          Degraded reports that a requested optimisation was unavailable and the
+          server fell back. It is surfaced rather than logged once at startup,
+          because a silent fallback is indistinguishable from a working one and
+          nobody re-reads yesterday's logs to find out.
+        name: Degraded
+        type: bool
+      - doc: DegradedReason names the fallback in plain words when Degraded is set.
+        name: DegradedReason
+        type: string
+      - doc: |-
+          Adopted reports a listener inherited from a supervisor rather than bound
+          by this process.
+        name: Adopted
+        type: bool
+    kind: struct
+    name: ListenerStateValue
+  - fields:
+      - doc: Read bounds one read from the peer.
+        name: Read
+        type: DurationValue
+      - doc: Write bounds one write to the peer.
+        name: Write
+        type: DurationValue
+      - doc: Idle bounds how long a connection may sit with no traffic at all.
+        name: Idle
+        type: DurationValue
+      - doc: |-
+          Handshake bounds the TLS handshake, which is the phase a hostile peer can
+          most cheaply stall. Unlike the others, zero here does NOT mean unbounded:
+          the negotiation happens before any handler exists to notice it, so it
+          falls back to the domain's default instead.
+        name: Handshake
+        type: DurationValue
+    kind: struct
+    name: TimeoutsValue
+  - kind: named
+    methods:
+      - name: Sendable
+        recv: c WSCloseCode
+        results: bool
+      - name: Echoable
+        recv: c WSCloseCode
+        results: WSCloseCode
+    name: WSCloseCode
+    underlying: uint16
+  - fields:
+      - doc: |-
+          Binary reports whether the payload is opaque bytes (opcode 0x2) rather
+          than UTF-8 text (opcode 0x1). The zero value is text, which is the
+          opcode a zero-valued frame would carry anyway.
+        name: Binary
+        type: bool
+      - doc: |-
+          Data is the reassembled payload. For a text message it is valid UTF-8,
+          which the engine verifies on both the receiving and the sending side.
+        name: Data
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: OpCode
+        recv: m WSMessageValue
+        results: WSOpCode
+    name: WSMessageValue
+  - kind: named
+    methods:
+      - name: IsControl
+        recv: o WSOpCode
+        results: bool
+      - name: Defined
+        recv: o WSOpCode
+        results: bool
+      - name: String
+        recv: o WSOpCode
+        results: string
+    name: WSOpCode
+    underlying: byte
+vars:
+  - doc: |-
+      The func adapters must satisfy the ports they exist to adapt; an adapter that
+      drifts from its interface is useless and the drift is silent until call time.
+    grouped: true
+    items:
+      - name: _
+        type: ConnHandler
+        value: ConnHandlerFunc(nil)
+      - name: _
+        type: PacketHandler
+        value: PacketHandlerFunc(nil)
+    name: _
+  - doc: |-
+      PolicyFunc must satisfy Policy: the adapter is useless if it drifts from the
+      port it exists to adapt.
+    items:
+      - name: _
+        type: Policy
+        value: PolicyFunc(nil)
+    name: _#2

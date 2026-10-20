@@ -1,0 +1,15 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: OpOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: Op(i)
+                when: n == name && i > 0
+          key: i
+          range: OpNames
+          value: "n"
+      - return: OpNone

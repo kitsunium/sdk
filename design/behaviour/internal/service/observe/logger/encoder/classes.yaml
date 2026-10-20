@@ -1,0 +1,502 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      ReservedPrefix is what a TOP-LEVEL attribute whose key the SDK reserves is
+      rendered under, so the two never collide on one line. The whole namespace
+      under it is reserved with it — see [ReservesKey].
+    items:
+      - name: ReservedPrefix
+        type: string
+        value: "\"attr.\""
+    name: ReservedPrefix
+  - doc: jsonEncoderName is the canonical identifier returned by jsonEncoder.Name.
+    items:
+      - name: jsonEncoderName
+        type: string
+        value: "\"json\""
+    name: jsonEncoderName
+  - doc: |-
+      jsonGroupSeparator joins the active group stack with the attribute key so a
+      grouped attr renders flat as "g1.g2.key" — matching the text encoder's
+      dotted convention rather than nesting objects.
+    items:
+      - name: jsonGroupSeparator
+        type: byte
+        value: "'.'"
+    name: jsonGroupSeparator
+  - doc: |-
+      jsonHexDigits maps a nibble to its lowercase hexadecimal rune for the
+      \u00XX escape of control bytes.
+    items:
+      - name: jsonHexDigits
+        type: string
+        value: "\"0123456789abcdef\""
+    name: jsonHexDigits
+  - doc: jsonDecimalBase is the radix passed to strconv.Append* for JSON numbers.
+    items:
+      - name: jsonDecimalBase
+        type: int
+        value: "10"
+    name: jsonDecimalBase
+  - doc: |-
+      jsonFloatPrec is the -1 sentinel asking strconv for the shortest
+      round-trippable float64 representation.
+    items:
+      - name: jsonFloatPrec
+        type: int
+        value: "-1"
+    name: jsonFloatPrec
+  - doc: jsonFloatBitSize tells strconv.AppendFloat we are formatting a 64-bit float.
+    items:
+      - name: jsonFloatBitSize
+        type: int
+        value: "64"
+    name: jsonFloatBitSize
+  - doc: |-
+      jsonFloatFormat is the byte verb ('g') selecting strconv's
+      exponent-or-decimal float64 mode.
+    items:
+      - name: jsonFloatFormat
+        type: byte
+        value: "'g'"
+    name: jsonFloatFormat
+  - doc: |-
+      jsonControlCeiling is the exclusive upper bound of the bytes the JSON grammar
+      forbids unescaped inside a string literal (everything below U+0020).
+    items:
+      - name: jsonControlCeiling
+        type: byte
+        value: "0x20"
+    name: jsonControlCeiling
+  - doc: |-
+      jsonNibbleShift is the bit-shift that isolates the high nibble of a byte for
+      the \u00XX escape.
+    items:
+      - name: jsonNibbleShift
+        type: byte
+        value: "4"
+    name: jsonNibbleShift
+  - doc: jsonNibbleMask isolates the low nibble of a byte for the \u00XX escape.
+    items:
+      - name: jsonNibbleMask
+        type: byte
+        value: "0x0f"
+    name: jsonNibbleMask
+  - doc: decimalBase is the radix passed to strconv.Append* for human-readable ints.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: |-
+      floatPrec is the -1 sentinel that asks strconv to emit the shortest
+      round-trippable representation for a float64.
+    items:
+      - name: floatPrec
+        type: int
+        value: "-1"
+    name: floatPrec
+  - doc: floatBitSize tells strconv.AppendFloat we are formatting a 64-bit float.
+    items:
+      - name: floatBitSize
+        type: int
+        value: "64"
+    name: floatBitSize
+  - doc: |-
+      floatFormat is the byte verb ('g') selecting strconv's exponent-or-decimal
+      mode for float64 rendering.
+    items:
+      - name: floatFormat
+        type: byte
+        value: "'g'"
+    name: floatFormat
+  - doc: |-
+      groupSeparator is the rune inserted between successive group names AND
+      between a group prefix and an attribute key in textual output ("a.b.k=v").
+    items:
+      - name: groupSeparator
+        type: byte
+        value: "'.'"
+    name: groupSeparator
+  - doc: textEncoderName is the canonical identifier returned by TextEncoder.Name.
+    items:
+      - name: textEncoderName
+        type: string
+        value: "\"text\""
+    name: textEncoderName
+  - doc: |-
+      quoteSafeFloor and quoteSafeCeiling bound the byte range strconv.AppendQuote
+      copies into its output verbatim: an ASCII byte for which strconv.IsPrint
+      reports true is exactly one in [0x20, 0x7E]. Outside that range AppendQuote
+      either escapes the byte or decodes a multi-byte rune, so appendQuotedString
+      hands the whole string back to it.
+    grouped: true
+    items:
+      - doc: quoteSafeFloor is the lowest byte AppendQuote emits unescaped (space).
+        name: quoteSafeFloor
+        type: byte
+        value: "0x20"
+      - doc: quoteSafeCeiling is the highest such byte (tilde).
+        name: quoteSafeCeiling
+        type: byte
+        value: "0x7e"
+    name: quoteSafeFloor
+  - grouped: true
+    items:
+      - doc: |-
+          timestampLayout is the RFC3339-with-milliseconds format every encoded
+          record timestamp carries — BOTH encoders, and every KindTime attribute.
+          It lives beside appendTimestamp rather than in text.go or json.go
+          because appendTimestamp is what renders it and is the only code that can
+          go wrong about it; it used to be declared twice, once per encoder, with
+          identical values that nothing stopped from drifting apart.
+        name: timestampLayout
+        type: string
+        value: "\"2006-01-02T15:04:05.000Z07:00\""
+      - doc: |-
+          timestampMinYear and timestampMaxYear bound the years the fixed-width
+          four-digit path can render. Outside them the "2006" layout verb emits
+          a different WIDTH — five digits past 9999, a leading minus before year
+          zero — so those instants go to the stdlib formatter instead of being
+          silently truncated into a wrong but well-formed date.
+        name: timestampMinYear
+        type: int
+        value: "0"
+      - doc: timestampMaxYear is the last year the four-digit form can spell.
+        name: timestampMaxYear
+        type: int
+        value: "9999"
+      - doc: |-
+          secondsPerHour and secondsPerMinute split a zone offset, which time.Zone
+          reports in seconds east of UTC.
+        name: secondsPerHour
+        type: int
+        value: "3600"
+      - doc: |-
+          secondsPerMinute is the divisor that drops the sub-minute part of an
+          offset, exactly as the "Z07:00" verb does.
+        name: secondsPerMinute
+        type: int
+        value: "60"
+      - doc: minutesPerHour closes the offset split.
+        name: minutesPerHour
+        type: int
+        value: "60"
+      - doc: |-
+          nanosPerMilli converts the nanosecond field to the milliseconds the
+          ".000" verb renders.
+        name: nanosPerMilli
+        type: int
+        value: "1_000_000"
+      - doc: asciiZero is the byte the digit helpers count up from.
+        name: asciiZero
+        type: byte
+        value: "'0'"
+      - doc: |-
+          decimalRadix, hundreds and thousands are the place-value divisors the
+          fixed-width digit helpers use. Named rather than inline because every
+          one of them is a POSITION in a format whose widths are fixed by the
+          layout above — not a tunable, and not a number anyone should change
+          without changing timestampLayout in the same edit.
+        name: decimalRadix
+        type: int
+        value: "10"
+      - doc: hundreds isolates the third decimal place (year centuries, millis).
+        name: hundreds
+        type: int
+        value: "100"
+      - doc: thousands isolates the fourth decimal place (year millennia).
+        name: thousands
+        type: int
+        value: "1000"
+    name: timestampLayout
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - ReservedPrefix
+      - Encoder
+      - ReservesKey
+    name: encoder.go
+  - decls:
+      - jsonEncoderName
+      - jsonGroupSeparator
+      - jsonHexDigits
+      - jsonDecimalBase
+      - jsonFloatPrec
+      - jsonFloatBitSize
+      - jsonFloatFormat
+      - jsonControlCeiling
+      - jsonNibbleShift
+      - jsonNibbleMask
+      - jsonEncoder
+      - NewJSON
+      - (*jsonEncoder).Name
+      - (*jsonEncoder).Append
+      - appendJSONHeader
+      - appendJSONTraceContext
+      - appendJSONAttr
+      - appendJSONValue
+      - appendJSONFloat
+      - appendJSONString
+      - appendJSONEscaped
+    name: json.go
+  - decls:
+      - decimalBase
+      - floatPrec
+      - floatBitSize
+      - floatFormat
+      - groupSeparator
+      - textEncoderName
+      - quoteSafeFloor
+      - textEncoder
+      - NewText
+      - (*textEncoder).Name
+      - (*textEncoder).Append
+      - appendHeader
+      - appendTraceContext
+      - AppendSanitized
+      - appendAttrWithGroups
+      - appendQuotedString
+      - quoteSafe
+      - appendValueOnly
+    name: text.go
+  - decls:
+      - timestampLayout
+      - appendTimestamp
+      - appendYear
+      - appendPad2
+      - appendMillis
+      - appendZoneOffset
+    name: timestamp.go
+functions:
+  - name: ReservesKey
+    params: key string
+    results: bool
+  - name: NewJSON
+    params: clk clock.Clock
+    results: Encoder
+  - doc: appendJSONHeader writes the fixed-order "ts","level","msg" members into dst.
+    name: appendJSONHeader
+    params: dst []byte, r corelogger.RecordEvent
+    results: "[]byte"
+  - doc: |-
+      appendJSONTraceContext writes the two correlation members
+      ,"trace_id":"<32 hex>","span_id":"<16 hex>" into dst, and writes NOTHING
+      when tc is the invalid zero value.
+
+      They are TOP-LEVEL keys of the log object rather than attributes, which is
+      what "includes trace context fields as top-level keys within the JSON log
+      object" prescribes (specification/compatibility/logging_trace_context.md).
+      An attribute could not have satisfied it: WithGroup would render the key as
+      "g1.trace_id" and no ingestion pipeline would recognise it.
+
+      The absent case emits nothing at all — not "" and not the all-zero id, both
+      of which are invalid under W3C Trace Context §3.2.2.3/§3.2.2.4 and would
+      otherwise appear on every line a service logs outside a request.
+    name: appendJSONTraceContext
+    params: dst []byte, r corelogger.RecordEvent
+    results: "[]byte"
+  - doc: appendJSONAttr writes one attribute as a "g1.g2.key":value JSON member.
+    name: appendJSONAttr
+    params: dst []byte, groups []string, a corelogger.AttrValue
+    results: "[]byte"
+  - doc: |-
+      appendJSONValue renders the value of a as its JSON-correct token, dispatching
+      on the typed Kind discriminant so there is no boxing on the hot path.
+    name: appendJSONValue
+    params: dst []byte, a corelogger.AttrValue
+    results: "[]byte"
+  - doc: |-
+      appendJSONFloat renders f as a bare JSON number, degrading NaN and ±Inf to
+      the null literal because the JSON grammar has no representation for them.
+    name: appendJSONFloat
+    params: dst []byte, f float64
+    results: "[]byte"
+  - doc: appendJSONString writes s as a quoted, JSON-escaped string token onto dst.
+    name: appendJSONString
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendJSONEscaped writes the JSON-escaped body of s onto dst without the
+      surrounding quotes, so callers can compose multi-part keys before quoting.
+    name: appendJSONEscaped
+    params: dst []byte, s string
+    results: "[]byte"
+  - name: NewText
+    params: clk clock.Clock
+    results: Encoder
+  - doc: appendHeader writes the leading "TIME LEVEL msg" prefix into dst.
+    name: appendHeader
+    params: dst []byte, r corelogger.RecordEvent
+    results: "[]byte"
+  - doc: |-
+      appendTraceContext writes the two top-level correlation fields
+      "trace_id=<32 hex> span_id=<16 hex>" into dst, and writes NOTHING when tc is
+      the invalid zero value.
+
+      Emitting nothing is the whole point: an all-zero identifier is invalid under
+      W3C Trace Context §3.2.2.3/§3.2.2.4, so rendering trace_id= or
+      trace_id=000…0 would put a field no query can join on onto every line a
+      service logs outside a request — which is most of them.
+
+      The values are NOT quoted, unlike string attribute values. They are record
+      fields rather than attributes, they are fixed-length lowercase hex and can
+      therefore contain nothing that needs quoting, and an operator pasting an id
+      from a tracing backend greps for `trace_id=<id>` exactly as it appears there.
+    name: appendTraceContext
+    params: dst []byte, r corelogger.RecordEvent
+    results: "[]byte"
+  - name: AppendSanitized
+    params: dst []byte, text string
+    results: "[]byte"
+  - doc: |-
+      appendAttrWithGroups prepends the active group prefix stack to the
+      attribute key before delegating value rendering to appendValueOnly.
+    name: appendAttrWithGroups
+    params: dst []byte, groups []string, a corelogger.AttrValue
+    results: "[]byte"
+  - doc: |-
+      appendQuotedString appends s as a double-quoted token, producing byte-for-
+      byte what strconv.AppendQuote produces — but skipping it when it has nothing
+      to do.
+
+      AppendQuote is the single most expensive call in this encoder: a CPU profile
+      of a four-string-attribute record attributed 70 % of the whole encode to it,
+      and half of THAT to utf8.DecodeRuneInString plus strconv.IsPrint — a full
+      Unicode printability analysis of every rune, run on every value, to discover
+      that a log message made of ASCII needs no escaping at all. The scan below
+      answers the same question with a byte-range comparison and then copies the
+      string with one memmove. Measured in internal/service/observe/logger/encoder/BENCH.md.
+
+      Correctness is not a judgement call: AppendQuote emits a byte verbatim
+      exactly when the rune is ASCII, strconv.IsPrint reports true (which for
+      ASCII is precisely [0x20, 0x7E]), and it is neither the delimiter '"' nor
+      the escape '\\'. quoteSafe accepts that set and nothing else, so the fast
+      path is a strict subset of the slow path's identity cases — pinned by
+      TestAppendQuotedStringMatchesStrconv, which sweeps every byte value.
+    name: appendQuotedString
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      quoteSafe reports whether every byte of s is one strconv.AppendQuote would
+      copy into its output unchanged. A byte outside the printable-ASCII range is
+      rejected without inspecting it further, which also rejects every byte of
+      every multi-byte UTF-8 rune (all of them are >= 0x80).
+    name: quoteSafe
+    params: s string
+    results: bool
+  - doc: appendValueOnly renders only the value part of an AttrValue.
+    name: appendValueOnly
+    params: dst []byte, a corelogger.AttrValue
+    results: "[]byte"
+  - doc: |-
+      appendTimestamp writes t onto dst in the layout both encoders share —
+      "2006-01-02T15:04:05.000Z07:00" — producing byte-for-byte what
+      t.AppendFormat(dst, timestampLayout) produces.
+
+      The equivalence is the contract, not an aspiration: a year the four-digit
+      form cannot spell falls back to the stdlib rather than being truncated, and
+      the zone offset is split the same way the "Z07:00" verb splits it — to
+      whole minutes, dropping any sub-minute part, which historical zones can
+      carry.
+    name: appendTimestamp
+    params: dst []byte, t time.Time
+    results: "[]byte"
+  - doc: |-
+      appendYear writes a year in the fixed four-digit form the "2006" verb uses.
+      The caller has already established that year is in [0, 9999].
+    name: appendYear
+    params: dst []byte, year int
+    results: "[]byte"
+  - doc: |-
+      appendPad2 writes v as exactly two digits, zero-padded, matching every
+      two-digit verb in the layout ("01", "02", "15", "04", "05").
+    name: appendPad2
+    params: dst []byte, v int
+    results: "[]byte"
+  - doc: |-
+      appendMillis writes ms as exactly three digits, matching the ".000" verb —
+      which pads rather than truncating, so 7 ms renders as "007".
+    name: appendMillis
+    params: dst []byte, ms int
+    results: "[]byte"
+  - doc: |-
+      appendZoneOffset writes the "Z07:00" verb's rendering of offset seconds:
+      the literal 'Z' at UTC, otherwise a signed ±HH:MM.
+
+      The offset is reduced to whole MINUTES before being split, which is what the
+      verb does: a historical zone carrying seconds of offset (LMT entries in the
+      tz database do) renders without them rather than rounding into the next
+      minute.
+    name: appendZoneOffset
+    params: dst []byte, offset int
+    results: "[]byte"
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  math: math
+  strconv: strconv
+  strings: strings
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
+  name: encoder
+  purpose: Package encoder provides concrete Encoder implementations (Text today; NDJSON and JSON to land in follow-up commits).
+types:
+  - alias: true
+    doc: |-
+      Encoder is the format-side port now rooted in internal/core/observe/logger.
+      Kept as an alias here so consumers that import service/observe/logger/encoder
+      for the interface type keep compiling. New code should import the
+      canonical type from core/observe/logger directly.
+    kind: alias
+    name: Encoder
+    underlying: corelogger.Encoder
+  - doc: |-
+      jsonEncoder renders records as a single structured JSON object line.
+      Unexported so the public surface is the Encoder interface returned by
+      NewJSON.
+    fields:
+      - doc: clk sources the timestamp when RecordEvent.Time is the zero value.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: Name returns the canonical encoder identifier.
+        name: Name
+        recv: e *jsonEncoder
+        results: string
+      - doc: |-
+          Append serialises r onto dst as one JSON object line and returns the
+          (possibly re-allocated) buffer including the trailing newline. groups is
+          rendered as a dotted prefix on each attribute key ("g1.g2.key").
+        name: Append
+        params: dst []byte, groups []string, r corelogger.RecordEvent
+        recv: e *jsonEncoder
+        results: "[]byte"
+    name: jsonEncoder
+  - doc: |-
+      textEncoder renders records as a single plain-text line. Unexported so the
+      public surface is the Encoder interface returned by NewText.
+    fields:
+      - doc: clk sources the timestamp when RecordEvent.Time is the zero value.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: Name returns the canonical encoder identifier.
+        name: Name
+        recv: e *textEncoder
+        results: string
+      - doc: |-
+          Append serialises r onto dst, prefixing every attribute key with the
+          active group stack ("g1.g2.key=val"). Returns the (possibly re-allocated)
+          buffer with the encoded line including the trailing newline.
+        name: Append
+        params: dst []byte, groups []string, r corelogger.RecordEvent
+        recv: e *textEncoder
+        results: "[]byte"
+    name: textEncoder

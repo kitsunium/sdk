@@ -1,0 +1,44 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: checkLimits
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: coreproc.UnknownResource
+                init:
+                  bind: _, ok
+                  eval: resourceLimits[res]
+                when: "!ok"
+          key: res
+          range: spec.Rlimits
+      - return: nil
+  - of: lookPath
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dir
+                    value: "\".\""
+                when: dir == ""
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - continue: true
+                      when: "!isExecutable(candidate)"
+                  - opt:
+                      do:
+                        - return: "\"\", &osexec.Error{Name: name, Err: osexec.ErrDot}"
+                      when: "!filepath.IsAbs(candidate)"
+                  - return: candidate, nil
+                key: _
+                range: candidates(dir, name, env)
+                value: candidate
+          key: _
+          range: filepath.SplitList(searchPath)
+          value: dir
+      - return: "\"\", &osexec.Error{Name: name, Err: osexec.ErrNotFound}"

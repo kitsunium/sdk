@@ -1,0 +1,268 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          OutcomeAllow runs the invocation. Either it was exempt, or the
+          entitlement verified and no floor stood in the way.
+        name: OutcomeAllow
+        type: Outcome
+        value: iota + 1
+      - doc: |-
+          OutcomeRefuse stops the invocation. DecisionValue.Cause carries the
+          refusal the verifier produced, so the caller maps it to an exit status
+          and an operator-facing sentence with errs.CodeOf or errors.Is.
+        name: OutcomeRefuse
+      - doc: |-
+          OutcomeUpgrade asks the caller to upgrade and re-run this invocation.
+
+          Reached only when the entitlement verified, the vendor mandates a newer
+          build, and the policy said UpdateApply. A caller that cannot upgrade
+          treats it as OutcomeRefuse with the same Cause.
+        name: OutcomeUpgrade
+    name: OutcomeAllow
+  - doc: |-
+      pathSeparator joins a command path for comparison. A space cannot appear in a
+      command name — the cli domain refuses one — so joining is lossless and a
+      joined path can be compared by byte equality.
+    items:
+      - name: pathSeparator
+        type: string
+        value: "\" \""
+    name: pathSeparator
+  - grouped: true
+    items:
+      - doc: |-
+          UpdateRefuse stops the invocation and reports the floor. The caller
+          tells the operator which version is required; nothing is downloaded and
+          nothing is replaced.
+
+          This is the conservative answer and the right one when the binary may be
+          running somewhere the operator did not put it.
+        name: UpdateRefuse
+        type: UpdateAction
+        value: iota + 1
+      - doc: |-
+          UpdateApply asks the caller to upgrade and re-run the invocation.
+
+          The gate does NOT perform the upgrade — see the package doc. It reports
+          that the caller should, which keeps the network access, the signature
+          verification and the process replacement in the caller's own control
+          flow where they can be refused, logged or tested.
+
+          A caller acting on it must upgrade AT MOST ONCE per invocation: a floor
+          no published release satisfies — a roster asking for v9.9.9 while the
+          mirror serves v1.5.10 — otherwise upgrades to no effect, re-runs, is
+          refused again and loops forever.
+        name: UpdateApply
+      - doc: |-
+          UpdateWarn runs the invocation anyway and reports the floor alongside it.
+
+          It trades enforcement for availability on purpose, and it is the only
+          action here that lets an out-of-date build keep working. Choose it when
+          the floor is advice; choose UpdateRefuse when it is a requirement.
+        name: UpdateWarn
+    name: UpdateRefuse
+files:
+  - decls:
+      - Outcome
+      - OutcomeAllow
+      - Outcome.String
+      - DecisionValue
+    name: decision.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - misconfigured
+    name: errors.go
+  - decls:
+      - pathSeparator
+      - PolicyValue
+      - (*PolicyValue).Exempt
+      - (*PolicyValue).Validate
+      - (*PolicyValue).unreachableEntries
+      - (*PolicyValue).lockouts
+      - unmatchable
+      - strayWhitespace
+      - quote
+    name: policy.go
+  - decls:
+      - UpdateAction
+      - UpdateRefuse
+      - UpdateAction.Valid
+      - UpdateAction.String
+    name: update_action.go
+functions:
+  - doc: |-
+      misconfigured builds the refusal every Validate fault carries, so the code,
+      reason and public text are written once.
+
+      It takes detail — what is wrong, for the operator's own log, naming no value
+      a caller supplied beyond the command path already in their policy — and
+      returns the typed refusal.
+    name: misconfigured
+    params: detail string
+    results: error
+  - doc: |-
+      unmatchable reports every entry in a path list that no real command path can
+      equal, so a policy carrying one is refused rather than quietly not applying.
+
+      A path is built by joining command names with a single space, and a command
+      name contains no whitespace at all — the cli domain refuses a name with a
+      space in it, and a tab or a newline could not be typed as one either. So an
+      entry carrying stray whitespace of ANY kind cannot be produced by any
+      invocation, and the exemption it was written for never fires. Nothing about
+      the policy looks wrong; the command it names is simply still gated.
+
+      It takes field for the message and paths to check, and returns one message
+      per unmatchable entry.
+    name: unmatchable
+    params: field string, paths []string
+    results: "[]string"
+  - doc: |-
+      strayWhitespace reports whether path carries whitespace no command path can.
+
+      It takes the space-joined path and returns true when the path is unreachable.
+    name: strayWhitespace
+    params: path string
+    results: bool
+  - doc: |-
+      quote renders a path for a message, spelling the bare root invocation as
+      something an operator can recognise rather than as an empty pair of quotes.
+
+      It takes the space-joined command path and returns it in quotes, or a phrase
+      for the bare root.
+    name: quote
+    params: path string
+    results: string
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
+  strings: strings
+  unicode: unicode
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/core/gate
+  name: gate
+  purpose: Package gate — the dotted-quad code range this domain owns.
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: o Outcome
+        results: string
+    name: Outcome
+    underlying: uint8
+  - fields:
+      - doc: Outcome is what to do.
+        name: Outcome
+        type: Outcome
+      - doc: |-
+          Cause is the refusal the verifier produced, or nil.
+
+          It is carried rather than re-labelled so the caller keeps everything the
+          domain said: errors.Is answers on entitlement's sentinels and
+          errs.CodeOf on its codes, through this field, exactly as if the caller
+          had held the verifier's error itself. A gate that summarised the cause
+          would force every consumer to match on text.
+
+          Non-nil with OutcomeUpgrade too: the floor refusal is what SAYS which
+          version is required, and a caller that upgrades needs to read it.
+        name: Cause
+        type: error
+      - doc: |-
+          Exempt records that this invocation was never checked, as opposed to
+          checked and allowed.
+
+          The two are the same Outcome and a very different fact. A daemon that
+          seeds a watchdog from a verification must not seed it from an exemption:
+          no verification happened, so there is no grant, no deadline and nothing
+          to age against.
+        name: Exempt
+        type: bool
+      - doc: |-
+          FloorUnmet records that the vendor mandates a newer build, whatever the
+          policy decided to do about it.
+
+          It is separate from Outcome because UpdateWarn allows the invocation and
+          the caller still has to say so. Reading Outcome alone would lose that.
+        name: FloorUnmet
+        type: bool
+    kind: struct
+    name: DecisionValue
+  - fields:
+      - doc: |-
+          ExemptExact lists command paths, relative to the root, that run without
+          the check — matched WHOLE, so a same-named command elsewhere in the tree
+          is not silently exempted with them.
+
+          The empty string is the bare root invocation: a binary run with no
+          subcommand shows its help, and showing help must not require an
+          entitlement any more than `help` itself does.
+
+          Paths are space-joined, e.g. "skill install". A command name cannot
+          contain a space, so the joining is lossless.
+        name: ExemptExact
+        type: "[]string"
+      - doc: |-
+          ExemptSubtree lists command paths whose whole subtree runs without the
+          check — the path itself and every command under it.
+
+          Use it when the exemption is about a CAPABILITY rather than a command:
+          everything under `license` repairs the licence, so gating any of it would
+          be gating the repair. Use ExemptExact when a parent and its children
+          differ, which they usually do.
+        name: ExemptSubtree
+        type: "[]string"
+      - doc: |-
+          RecoveryPaths lists the commands an operator runs to repair a refused
+          entitlement. Every one of them MUST be exempt, and Validate refuses a
+          policy where one is not.
+
+          It exists because the failure it prevents is silent and total: a policy
+          that gates its own repair command leaves a machine whose licence lapsed
+          with no path back short of reinstalling the binary, and nothing about the
+          policy LOOKS wrong — the exemption list is simply missing an entry.
+          Naming them separately turns that into a construction-time refusal.
+        name: RecoveryPaths
+        type: "[]string"
+      - doc: |-
+          OnUpdateRequired is what happens when the entitlement verifies but the
+          vendor mandates a newer build than this one.
+
+          It has no default. See UpdateAction.
+        name: OnUpdateRequired
+        type: UpdateAction
+    kind: struct
+    methods:
+      - name: Exempt
+        params: path []string
+        recv: p *PolicyValue
+        results: bool
+      - name: Validate
+        recv: p *PolicyValue
+        results: error
+      - doc: |-
+          unreachableEntries reports every list entry no command path can equal, so a
+          policy carrying one is refused rather than quietly not applying it.
+        name: unreachableEntries
+        recv: p *PolicyValue
+        results: "[]string"
+      - doc: |-
+          lockouts reports the ways this policy would leave a machine with no path back
+          — plus the one field that has no safe default.
+        name: lockouts
+        recv: p *PolicyValue
+        results: "[]string"
+    name: PolicyValue
+  - kind: named
+    methods:
+      - name: Valid
+        recv: a UpdateAction
+        results: bool
+      - name: String
+        recv: a UpdateAction
+        results: string
+    name: UpdateAction
+    underlying: uint8

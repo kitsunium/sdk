@@ -1,0 +1,13 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: CommandValue.IsGroup
+    steps:
+      - return: len(c.Commands) > 0
+  - of: InvocationValue.Leaf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(i.Flags) == 0
+      - return: i.Flags[len(i.Flags)-1]

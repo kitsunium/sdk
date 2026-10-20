@@ -1,0 +1,14 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Hash
+    participants:
+      - id: caller
+        kind: actor
+      - id: Hash
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.HashPassword(corecrypto.Algorithm(a), password)
+        to: corecrypto

@@ -1,0 +1,61 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: x25519Agreement.Algorithm
+    steps:
+      - return: algorithm
+  - of: x25519Agreement.GenerateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: x25519Agreement.GenerateKey
+        kind: self
+      - id: ecdh.X25519().GenerateKey
+        kind: value
+      - id: sk.PublicKey().Bytes
+        kind: value
+    steps:
+      - bind: sk, gerr
+        eval: ecdh.X25519().GenerateKey(nil)
+        to: ecdh.X25519().GenerateKey
+      - opt:
+          do:
+            - return: |-
+                nil, nil, errs.Wrap(gerr, errs.WrapParams{
+                			Code:    corecrypto.CodeKeyGenerationFailed,
+                			Reason:  "KEY_GENERATION_FAILED",
+                			Public:  "Could not gather entropy for key generation",
+                			Private: "service/crypto/agree/x25519.GenerateKey: crypto/rand failed in ecdh.X25519().GenerateKey",
+                		})
+          when: gerr != nil
+      - return: sk.PublicKey().Bytes(), sk.Bytes(), nil
+        to: sk.PublicKey().Bytes
+  - of: x25519Agreement.Shared
+    participants:
+      - id: caller
+        kind: actor
+      - id: x25519Agreement.Shared
+        kind: self
+      - id: ecdh.X25519().NewPrivateKey
+        kind: value
+      - id: ecdh.X25519().NewPublicKey
+        kind: value
+      - id: sk.ECDH
+        kind: value
+    steps:
+      - bind: sk, perr
+        eval: ecdh.X25519().NewPrivateKey(priv)
+        to: ecdh.X25519().NewPrivateKey
+      - opt:
+          do:
+            - return: nil, perr
+          when: perr != nil
+      - bind: pk, kerr
+        eval: ecdh.X25519().NewPublicKey(peerPub)
+        to: ecdh.X25519().NewPublicKey
+      - opt:
+          do:
+            - return: nil, kerr
+          when: kerr != nil
+      - return: sk.ECDH(pk)
+        to: sk.ECDH

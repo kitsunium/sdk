@@ -1,0 +1,382 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: stateStarted marks that the header has been read + verified.
+        name: stateStarted
+        type: uint8
+        value: 1 << iota
+      - doc: statePeeked marks that peek holds a valid look-ahead byte.
+        name: statePeeked
+      - doc: stateDone marks that the final-flag chunk verified (EOF reached).
+        name: stateDone
+    name: stateStarted
+  - grouped: true
+    items:
+      - doc: algorithm is the canonical registry key for the streaming AES-256-GCM scheme.
+        name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"aes-256-gcm-stream\""
+      - doc: |-
+          streamVersion is the frozen leading byte of every stream header. It is
+          disjoint from the whole-buffer box Version (0x01) so Open/OpenStream can
+          reject the other format's lead byte.
+        name: streamVersion
+        type: byte
+        value: "0x02"
+      - doc: algID is the frozen 1-byte algorithm id for this scheme in the header.
+        name: algID
+        type: byte
+        value: "0x01"
+      - doc: versionFieldLen is the [version][algID] prefix width before the salt.
+        name: versionFieldLen
+        type: int
+        value: "2"
+      - doc: saltLen is the random per-stream HKDF salt length in bytes.
+        name: saltLen
+        type: int
+        value: "16"
+      - doc: "headerLen is the fixed header length: version + algID + salt."
+        name: headerLen
+        type: int
+        value: versionFieldLen + saltLen
+      - doc: |-
+          chunkSize is the fixed plaintext chunk size (64 KiB); the final chunk may
+          be shorter (0..chunkSize). It is part of the frozen format.
+        name: chunkSize
+        type: int
+        value: 64 * 1024
+      - doc: flagLen is the 1-byte flag suffix of the nonce (final vs non-final).
+        name: flagLen
+        type: int
+        value: "1"
+      - doc: "nonceLen is GCM's 96-bit nonce: a counterLen counter || a flagLen flag."
+        name: nonceLen
+        type: int
+        value: "12"
+      - doc: counterLen is the big-endian chunk counter width inside the nonce.
+        name: counterLen
+        type: int
+        value: nonceLen - flagLen
+      - doc: counterUint64Bytes is the width of the uint64 written into the counter field.
+        name: counterUint64Bytes
+        type: int
+        value: "8"
+      - doc: |-
+          counterBE64Offset positions the counterUint64Bytes-wide big-endian counter
+          in the low bytes of the counter field, leaving the high bytes zero.
+        name: counterBE64Offset
+        type: int
+        value: counterLen - counterUint64Bytes
+      - doc: gcmTagLen is the GCM authentication tag appended to each chunk's ciphertext.
+        name: gcmTagLen
+        type: int
+        value: "16"
+      - doc: flagFinal marks the final chunk's nonce; truncation resistance rides on it.
+        name: flagFinal
+        type: byte
+        value: "0x01"
+      - doc: flagMore marks every non-final chunk's nonce.
+        name: flagMore
+        type: byte
+        value: "0x00"
+      - doc: |-
+          hkdfInfo is the frozen, SDK-owned HKDF info string binding the derived
+          stream key to this construction.
+        name: hkdfInfo
+        type: string
+        value: "\"kitsunium/stream-aead/v1\""
+    name: algorithm
+  - grouped: true
+    items:
+      - doc: writerHeaderDone marks that the header has been written to dst.
+        name: writerHeaderDone
+        type: uint8
+        value: 1 << iota
+      - doc: writerClosed marks that Close has already sealed the final chunk.
+        name: writerClosed
+    name: writerHeaderDone
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - stateStarted
+      - streamReader
+      - newReader
+      - (*streamReader).Read
+      - (*streamReader).readHeader
+      - (*streamReader).nextChunk
+      - (*streamReader).openChunk
+      - (*streamReader).readWire
+      - (*streamReader).fillWire
+      - (*streamReader).peekNext
+    name: reader.go
+  - decls:
+      - algorithm
+      - StreamSealer
+      - streamAEAD
+      - streamAEAD.Algorithm
+      - streamAEAD.Writer
+      - streamAEAD.Reader
+      - newGCM
+      - chunkNonce
+    name: streamaead.go
+  - decls:
+      - writerHeaderDone
+      - streamWriter
+      - newWriterWithSalt
+      - (*streamWriter).Write
+      - (*streamWriter).Close
+      - writeAll
+      - (*streamWriter).ensureHeader
+      - (*streamWriter).sealChunk
+    name: writer.go
+functions:
+  - doc: |-
+      newReader constructs a lazily-initialised streamReader; the header is read on
+      the first Read so a wrong-format lead byte or missing data surfaces at use.
+    name: newReader
+    params: key corecrypto.Key, src io.Reader, aad []byte
+    results: "*streamReader"
+  - doc: |-
+      newGCM builds the GCM cipher.AEAD from the HKDF-derived 32-byte stream key. A
+      derivation or cipher fault surfaces as DecryptionFailed on the read path and
+      is impossible on the write path (the salt + key are always well-formed).
+    name: newGCM
+    params: keyBytes, salt []byte
+    results: mode cipher.AEAD, err error
+  - doc: |-
+      chunkNonce builds the 12-byte nonce for chunk counter with the given flag: a
+      counterLen-byte big-endian counter (the high counterLen-counterUint64Bytes
+      bytes stay zero) followed by the 1-byte flag. Counter overflow is structurally
+      impossible: a uint64 counter occupies only the low counterUint64Bytes of the
+      counterLen-byte field, so it can never wrap into the flag or reuse a nonce —
+      the ADR's "overflow is a hard error, never a silent wrap" holds by construction.
+    name: chunkNonce
+    params: counter uint64, flag byte
+    results: "[nonceLen]byte"
+  - doc: |-
+      newWriterWithSalt constructs a streamWriter with a caller-supplied salt. It is
+      the shared constructor for the production Writer (random salt) and the
+      test-only deterministic-salt seam; it stays UNEXPORTED so no consumer can pin
+      a salt in production.
+    name: newWriterWithSalt
+    params: key corecrypto.Key, dst io.Writer, aad []byte, salt [saltLen]byte
+    results: sealed io.WriteCloser, err error
+  - doc: |-
+      writeAll writes b to dst in full, returning io.ErrShortWrite when the sink
+      accepts fewer than len(b) bytes without reporting an error. A conformant
+      io.Writer never short-writes with a nil error, but the frozen stream framing
+      cannot tolerate even a non-conformant sink silently truncating the header or a
+      sealed chunk — so the byte count is checked explicitly.
+    name: writeAll
+    params: dst io.Writer, b []byte
+    results: error
+imports:
+  aes: crypto/aes
+  binary: encoding/binary
+  cipher: crypto/cipher
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hkdf: crypto/hkdf
+  io: io
+  rand: crypto/rand
+  sha256: crypto/sha256
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/aead/streamaead
+  name: streamaead
+  purpose: "Package streamaead (reader.go) — the streaming-AEAD read path: header verify, chunk-by-chunk decrypt with hold-back, and one-byte EOF look-ahead."
+types:
+  - doc: |-
+      streamReader is the io.Reader returned by streamAEAD.Reader. It reads + verifies
+      the header lazily on the first Read, then decrypts chunk-by-chunk, holding back
+      each chunk's plaintext until its GCM tag verifies. EOF is returned only after
+      the flag=0x01 final chunk verifies; a stream cut short surfaces as
+      StreamTruncated.
+    fields:
+      - doc: key is the caller's master key; the per-stream key derives from it + salt.
+        name: key
+        type: corecrypto.Key
+      - doc: src is the wire source the header and sealed chunks are read from.
+        name: src
+        type: io.Reader
+      - doc: |-
+          gcm is the AES-256-GCM mode keyed by the HKDF-derived per-stream key; nil
+          until the header is read.
+        name: gcm
+        type: |-
+          interface {
+          		Open(dst, nonce, ciphertext, aad []byte) ([]byte, error)
+          	}
+      - doc: aad is the associated data bound into every chunk's tag.
+        name: aad
+        type: "[]byte"
+      - doc: |-
+          wire is the single reusable wire buffer; every chunk's ct||tag is read in
+          place into it, so the read path holds one chunk-sized buffer for the stream.
+        name: wire
+        type: "[chunkSize + gcmTagLen]byte"
+      - doc: plain holds verified-but-not-yet-returned plaintext from the current chunk.
+        name: plain
+        type: "[]byte"
+      - doc: counter is the per-chunk nonce counter, incremented after each open.
+        name: counter
+        type: uint64
+      - doc: |-
+          peek holds the single look-ahead byte read past a full wire chunk; valid
+          only when the statePeeked bit is set.
+        name: peek
+        type: "[1]byte"
+      - doc: state packs the started / peeked / done lifecycle bits (stateStarted, …).
+        name: state
+        type: uint8
+    kind: struct
+    methods:
+      - doc: |-
+          Read fills p with verified plaintext, decrypting further chunks as needed. It
+          returns io.EOF only after the final-flag chunk verifies; a truncated stream
+          returns StreamTruncated, and any authentication fault returns DecryptionFailed.
+        name: Read
+        params: p []byte
+        recv: r *streamReader
+        results: n int, err error
+      - doc: |-
+          readHeader reads the fixed header, rejects the wrong-format lead byte and a bad
+          algID, and derives the per-stream GCM mode from the master key + header salt.
+        name: readHeader
+        recv: r *streamReader
+        results: error
+      - doc: |-
+          nextChunk reads one wire chunk into the reusable buffer, decides final vs
+          non-final via a one-byte look-ahead, opens it under the correct flag, and
+          stores the plaintext. It sets the done bit when the final-flag chunk verifies.
+        name: nextChunk
+        recv: r *streamReader
+        results: error
+      - doc: |-
+          openChunk builds the nonce, opens the wire chunk, and on success stores the
+          plaintext and advances the counter; the done bit is set on the final chunk.
+        name: openChunk
+        params: wire []byte, flag byte, atEOF bool
+        recv: r *streamReader
+        results: error
+      - doc: |-
+          readWire fills the reusable wire buffer with the next chunk and reports how
+          many bytes are valid plus whether it is the last one. It uses a one-byte
+          look-ahead: a full chunk followed by more data is non-final; a short read or an
+          immediate EOF after a full chunk marks the final chunk.
+        name: readWire
+        recv: r *streamReader
+        results: n int, atEOF bool, err error
+      - doc: |-
+          fillWire reads into the reusable wire buffer past the seeded offset until it is
+          full or src is exhausted, then peeks one further byte to distinguish a
+          non-final chunk (more data follows) from the final chunk (EOF). A read error
+          below EOF is a truncated stream.
+        name: fillWire
+        params: off int
+        recv: r *streamReader
+        results: n int, atEOF bool, err error
+      - doc: |-
+          peekNext reads a single look-ahead byte after a full wire chunk: its presence
+          means another chunk follows (non-final); EOF means this was the final chunk.
+        name: peekNext
+        params: n int
+        recv: r *streamReader
+        results: valid int, atEOF bool, err error
+    name: streamReader
+  - doc: |-
+      streamAEAD implements core/crypto.StreamSealer over stdlib AES-256-GCM with an
+      HKDF-derived per-stream key.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: streamAEAD
+        results: corecrypto.Algorithm
+      - doc: |-
+          Writer wraps dst so writes are sealed under key with aad. It draws a fresh
+          random salt, derives the per-stream key, and constructs the writer with that
+          salt; Close writes the final authenticated chunk. A host entropy fault
+          surfaces as EntropyFailed.
+        name: Writer
+        params: key corecrypto.Key, dst io.Writer, aad []byte
+        recv: streamAEAD
+        results: sealed io.WriteCloser, err error
+      - doc: |-
+          Reader wraps src so reads are opened under key with aad. It reads + verifies
+          the header, derives the per-stream key, and enforces the hold-back contract: a
+          chunk's plaintext is never surfaced before its GCM tag verifies, and a stream
+          cut short before its final-flag chunk surfaces as StreamTruncated.
+        name: Reader
+        params: key corecrypto.Key, src io.Reader, aad []byte
+        recv: streamAEAD
+        results: opened io.Reader, err error
+    name: streamAEAD
+  - doc: |-
+      streamWriter is the io.WriteCloser returned by streamAEAD.Writer. It buffers
+      plaintext into fixed 64 KiB chunks, seals each non-final chunk on overflow,
+      and seals the final (possibly short, possibly empty) chunk on Close.
+    fields:
+      - doc: dst is the sink the header and sealed chunks are written to.
+        name: dst
+        type: io.Writer
+      - doc: gcm is the AES-256-GCM mode keyed by the HKDF-derived per-stream key.
+        name: gcm
+        type: |-
+          interface {
+          		Seal(dst, nonce, plaintext, aad []byte) []byte
+          	}
+      - doc: aad is the associated data bound into every chunk's tag.
+        name: aad
+        type: "[]byte"
+      - doc: buf holds plaintext not yet sealed; it never exceeds chunkSize.
+        name: buf
+        type: "[]byte"
+      - doc: counter is the per-chunk nonce counter, incremented after each seal.
+        name: counter
+        type: uint64
+      - doc: salt is the random per-stream HKDF salt written into the header.
+        name: salt
+        type: "[saltLen]byte"
+      - doc: state packs the headerDone / closed lifecycle bits.
+        name: state
+        type: uint8
+    kind: struct
+    methods:
+      - doc: |-
+          Write buffers p into fixed-size chunks, sealing each full non-final chunk as
+          it fills. It writes the header lazily on the first call. After Close it
+          returns ErrClosedPipe.
+        name: Write
+        params: p []byte
+        recv: w *streamWriter
+        results: n int, err error
+      - doc: |-
+          Close seals the final (possibly short, possibly empty) chunk with the final
+          flag and writes it. It is idempotent: a second Close is a no-op.
+        name: Close
+        recv: w *streamWriter
+        results: error
+      - doc: ensureHeader writes the [version][algID][salt] header to dst exactly once.
+        name: ensureHeader
+        recv: w *streamWriter
+        results: error
+      - doc: |-
+          sealChunk seals the buffered plaintext under the next counter nonce with flag,
+          writes ct||tag to dst, advances the counter, and clears the buffer.
+        name: sealChunk
+        params: flag byte
+        recv: w *streamWriter
+        results: error
+    name: streamWriter
+vars:
+  - doc: |-
+      StreamSealer is the registered streaming AES-256-GCM scheme singleton (no
+      init(); package-level var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: StreamSealer
+        value: corecrypto.RegisterStreamSealer(streamAEAD{})
+    name: StreamSealer

@@ -1,0 +1,247 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: countVoters
+    steps:
+      - bind: voters
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: voters
+                when: m.Voter
+          key: _
+          range: members
+          value: m
+      - return: voters
+  - of: sharedKey
+    steps:
+      - var:
+          name: noPin
+          type: "[32]byte"
+      - bind: seen
+        eval: make(map[[32]byte]bool, len(members))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: m.SPKI == noPin
+            - opt:
+                do:
+                  - return: "true"
+                when: seen[m.SPKI]
+            - set: seen[m.SPKI]
+              value: "true"
+          key: _
+          range: members
+          value: m
+      - return: "false"
+  - of: (*fileLog).markerPaths
+    steps:
+      - bind: paths
+        eval: "[]string{l.runtimeMarker(\"STORAGE_FAILED\")}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: paths
+                    value: append(paths, filepath.Join(l.dir, e.Name()))
+                when: strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp")
+          key: _
+          range: ents
+          value: e
+      - return: paths
+  - of: judgeAfterHole
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "\"valid record of another batch after a hole\""
+                when: r.batch != torn
+            - opt:
+                do:
+                  - return: "\"damage inside a batch whose end record is valid\""
+                when: r.end
+          key: _
+          range: after
+          value: r
+      - return: "\"\""
+  - of: allZero
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: x != 0
+          key: _
+          range: b
+          value: x
+      - return: "true"
+  - of: (*fileLog).retainsEntryIn
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: s.seg == seg
+          key: _
+          range: l.slots
+          value: s
+      - return: "false"
+  - of: validSlot
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) == 0 || len(s) > maxSlotLen
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - return: "false"
+                when: (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-'
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: (*Node).slotTaken
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: m.Slot == slot
+          key: _
+          range: n.Membership().Members
+          value: m
+      - return: "false"
+  - of: (*MemoryLog).Entries
+    steps:
+      - lock:
+          mutex: l.mu
+          read: true
+      - opt:
+          do:
+            - return: dst, compacted(lo, l.first)
+          when: lo < l.first
+      - bind: last
+        eval: l.first + uint64(len(l.ents)) - 1
+      - opt:
+          do:
+            - return: dst, storageFailed("entries", errImpossible)
+          when: hi > last+1
+      - bind: size
+        eval: "0"
+      - loop:
+          cond: i < hi
+          do:
+            - bind: e
+              eval: l.ents[i-l.first]
+            - op: +=
+              set: size
+              value: len(e.Data)
+            - opt:
+                do:
+                  - break: true
+                when: i > lo && size > maxBytes
+            - set: dst
+              value: append(dst, e)
+          init: i := lo
+          post: i++
+      - return: dst, nil
+  - of: (*MemoryNetwork).othersThan
+    steps:
+      - lock:
+          mutex: n.mu
+      - var:
+          name: targets
+          type: "[]*MemoryTransport"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: targets
+                    value: append(targets, x)
+                when: id != self
+          key: id
+          range: n.nodes
+          value: x
+      - return: targets
+  - of: (*Node).finalWrites
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.hard.Load()
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: "!n.write(&q, synced)"
+          key: _
+          range: n.sq.take(reqs)
+          value: q
+  - of: (*Node).writeAll
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: n.hard.Load()
+            - opt:
+                do:
+                  - return: "false"
+                when: "!n.write(&q, synced)"
+          key: _
+          range: reqs
+          value: q
+      - return: "true"
+  - of: signedByEvery
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!slices.ContainsFunc(receipts, func(sig []byte) bool { return ed25519.Verify(k, msg, sig) })"
+          key: _
+          range: keys
+          value: k
+      - return: "true"
+  - of: alignedOffset
+    steps:
+      - var:
+          name: "off"
+          type: int64
+      - loop:
+          cond: int64(len(prefix))-off >= chunkHeaderLen
+          do:
+            - bind: "n"
+              eval: int64(binary.LittleEndian.Uint32(prefix[off:]))
+            - opt:
+                do:
+                  - break: true
+                when: n == 0
+            - bind: end
+              eval: off + chunkHeaderLen + n
+            - opt:
+                do:
+                  - break: true
+                when: end > int64(len(prefix))
+            - opt:
+                do:
+                  - break: true
+                when: crc32.Checksum(prefix[off+chunkHeaderLen:end], castagnoli) != binary.LittleEndian.Uint32(prefix[off+8:])
+            - set: "off"
+              value: end
+      - return: "off"

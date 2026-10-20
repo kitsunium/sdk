@@ -1,0 +1,1466 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Ask
+    participants:
+      - id: caller
+        kind: actor
+      - id: Ask
+        kind: self
+      - id: cfg.resolve
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: armAsk
+        kind: internal
+      - id: request.send
+        kind: internal
+    steps:
+      - bind: request, err
+        eval: cfg.resolve()
+        to: cfg.resolve
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - bind: askCtx, cancel
+        eval: context.WithCancelCause(ctx)
+        to: context
+      - defer: cancel(nil)
+      - bind: release
+        eval: armAsk(request.clk, request.budget, cancel)
+        to: armAsk
+      - defer: release()
+      - return: request.send(askCtx)
+        to: request.send
+  - of: AskConfig.resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: AskConfig.resolve
+        kind: self
+      - id: dialTarget
+        kind: internal
+      - id: absoluteURL
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: askRequest{}, askMisconfigured("timeout")
+          when: c.Timeout < 0
+      - bind: target, err
+        eval: dialTarget(c.Addr)
+        to: dialTarget
+      - opt:
+          do:
+            - return: askRequest{}, err
+          when: err != nil
+      - bind: requestURL, err
+        eval: absoluteURL(target, c.Path)
+        to: absoluteURL
+      - opt:
+          do:
+            - return: askRequest{}, err
+          when: err != nil
+      - bind: budget
+        eval: c.Timeout
+      - opt:
+          do:
+            - set: budget
+              value: DefaultAskTimeout
+          when: budget == 0
+      - bind: clk
+        eval: c.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "askRequest{url: requestURL, target: target, budget: budget, clk: clk}, nil"
+  - of: dialTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: dialTarget
+        kind: self
+      - id: net
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: host, port, err
+        eval: net.SplitHostPort(listen)
+        to: net
+      - opt:
+          do:
+            - return: "\"\", askMisconfigured(\"addr\")"
+          when: err != nil
+      - bind: number, err
+        eval: strconv.Atoi(port)
+        to: strconv
+      - opt:
+          do:
+            - return: "\"\", askMisconfigured(\"addr\")"
+          when: err != nil || number < 1 || number > highestPort
+      - return: net.JoinHostPort(loopbackFor(host), port), nil
+        to: net
+  - of: loopbackFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: loopbackFor
+        kind: self
+      - id: netip
+        kind: stdlib
+      - id: addr.WithZone("").Unmap
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"127.0.0.1\""
+          when: host == ""
+      - bind: addr, err
+        eval: netip.ParseAddr(host)
+        to: netip
+      - opt:
+          do:
+            - return: host
+          when: err != nil
+      - bind: unzoned
+        eval: addr.WithZone("").Unmap()
+        to: addr.WithZone("").Unmap
+      - opt:
+          do:
+            - return: host
+          when: "!unzoned.IsUnspecified()"
+      - opt:
+          do:
+            - return: "\"127.0.0.1\""
+          when: unzoned.Is4()
+      - return: "\"::1\""
+  - of: absoluteURL
+    participants:
+      - id: caller
+        kind: actor
+      - id: absoluteURL
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: built.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"\", askMisconfigured(\"path\")"
+          when: "!strings.HasPrefix(path, \"/\")"
+      - bind: parsed, err
+        eval: url.ParseRequestURI(path)
+        to: url
+      - opt:
+          do:
+            - return: "\"\", askMisconfigured(\"path\")"
+          when: err != nil
+      - bind: built
+        eval: "url.URL{Scheme: \"http\", Host: target, Path: parsed.Path, RawPath: parsed.RawPath, RawQuery: parsed.RawQuery}"
+      - return: built.String(), nil
+        to: built.String
+  - of: armAsk
+    participants:
+      - id: caller
+        kind: actor
+      - id: armAsk
+        kind: self
+      - id: clk.NewTimer
+        kind: value
+    steps:
+      - bind: timer
+        eval: clk.NewTimer(budget)
+        to: clk.NewTimer
+      - bind: released
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		defer timer.Stop()
+          		//: whichever comes first: the budget, or the Ask returning.
+          		select {
+          		//: no answer within the budget.
+          		case <-timer.C():
+          			//: end the exchange, and say why.
+          			cancel(corehealth.AskTimeout)
+          		//: the Ask returned first.
+          		case <-released:
+          			//: nothing to end.
+          		}
+          	}()
+      - return:
+          closure:
+            steps:
+              - eval: close(released)
+  - of: askClient
+    steps:
+      - bind: transport
+        eval: |-
+          &http.Transport{
+          		// Proxy is left nil on purpose: a probe of this machine must never
+          		// leave it through whatever HTTP_PROXY the environment names.
+          		DisableKeepAlives:      true,
+          		DisableCompression:     true,
+          		MaxResponseHeaderBytes: maxAskHeaderBytes,
+          	}
+      - return: "&http.Client{Transport: transport, CheckRedirect: keepRedirect}"
+  - of: askRequest.send
+    participants:
+      - id: caller
+        kind: actor
+      - id: askRequest.send
+        kind: self
+      - id: askClient
+        kind: internal
+      - id: client.CloseIdleConnections
+        kind: value
+      - id: r.exchange
+        kind: internal
+    steps:
+      - bind: client
+        eval: askClient()
+        to: askClient
+      - defer: client.CloseIdleConnections()
+        to: client.CloseIdleConnections
+      - return: r.exchange(ctx, client)
+        to: r.exchange
+  - of: askRequest.exchange
+    participants:
+      - id: caller
+        kind: actor
+      - id: askRequest.exchange
+        kind: self
+      - id: http
+        kind: stdlib
+      - id: client.Do
+        kind: value
+      - id: discard
+        kind: internal
+    steps:
+      - bind: request, err
+        eval: http.NewRequestWithContext(ctx, http.MethodGet, r.url, nil)
+        to: http
+      - opt:
+          do:
+            - return: 0, askMisconfigured("path")
+          when: err != nil
+      - bind: response, err
+        eval: client.Do(request)
+        to: client.Do
+      - opt:
+          do:
+            - return: 0, r.unanswered(ctx, err)
+          when: err != nil
+      - bind: drainErr
+        eval: discard(response.Body)
+        to: discard
+      - opt:
+          do:
+            - return: 0, r.unanswered(ctx, drainErr)
+          when: drainErr != nil && ctx.Err() != nil
+      - opt:
+          do:
+            - return: |-
+                response.StatusCode, kerrs.Wrap(corehealth.AskNotReady, kerrs.WrapParams{},
+                			kerrs.String(fieldTarget, r.target), kerrs.Int(fieldStatus, response.StatusCode))
+          when: response.StatusCode != http.StatusOK
+      - return: http.StatusOK, nil
+  - of: keepRedirect
+    steps:
+      - return: http.ErrUseLastResponse
+  - of: discard
+    participants:
+      - id: caller
+        kind: actor
+      - id: discard
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: body.Close
+        kind: value
+    steps:
+      - bind: _, drainErr
+        eval: io.CopyN(io.Discard, body, MaxAskDrainBytes)
+        to: io
+      - opt:
+          do: null
+          init:
+            bind: closeErr
+            eval: body.Close()
+            to: body.Close
+          when: closeErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: errors.Is(drainErr, io.EOF)
+      - return: drainErr
+  - of: askRequest.unanswered
+    participants:
+      - id: caller
+        kind: actor
+      - id: askRequest.unanswered
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: target
+        eval: kerrs.String(fieldTarget, r.target)
+        to: kerrs
+      - opt:
+          do:
+            - return: kerrs.Wrap(corehealth.AskTimeout, kerrs.WrapParams{}, target, kerrs.String(fieldBudget, r.budget.String()))
+              to: kerrs
+          when: errors.Is(context.Cause(ctx), corehealth.AskTimeout)
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(context.Cause(ctx), paramsOf(corehealth.AskTimeout,
+                			"service/app/health: the caller's context ended before the process answered"), target)
+              to: kerrs
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(doErr, paramsOf(corehealth.AskTimeout,
+                			"service/app/health: the network timed out before the process answered"), target)
+              to: kerrs
+          init:
+            bind: netErr, isNet
+            eval: errors.AsType[net.Error](doErr)
+          when: isNet && netErr.Timeout()
+      - return: kerrs.Wrap(doErr, paramsOf(corehealth.AskUnreachable, corehealth.AskUnreachable.Private()), target)
+        to: kerrs
+  - of: paramsOf
+    steps:
+      - return: |-
+          kerrs.WrapParams{
+          		Code:     sentinel.Code(),
+          		Reason:   sentinel.Reason(),
+          		Public:   sentinel.Public(),
+          		Private:  private,
+          		ExitCode: sentinel.ExitCode(),
+          	}
+  - of: askMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: askMisconfigured
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.Wrap(corehealth.AskMisconfigured, kerrs.WrapParams{}, kerrs.String(fieldArgument, argument))
+        to: kerrs
+  - of: Component
+    steps:
+      - return: |-
+          corelc.ComponentValue{
+          		Name:  name,
+          		Start: startupGate(registry),
+          		Stop:  drainGate(registry),
+          	}
+  - of: startupGate
+    participants:
+      - id: caller
+        kind: actor
+      - id: startupGate
+        kind: self
+      - id: registry.Probe
+        kind: value
+      - id: failures
+        kind: internal
+      - id: startupUnexplained
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - return:
+          closure:
+            params: ctx context.Context
+            results: error
+            steps:
+              - bind: report
+                eval: registry.Probe(ctx, corehealth.ProbeStartup)
+                to: registry.Probe
+              - opt:
+                  do:
+                    - return: nil
+                  when: report.Status.Serving()
+              - bind: failed
+                eval: failures(report)
+                to: failures
+              - opt:
+                  do:
+                    - return: startupUnexplained(report.Status.String())
+                      to: startupUnexplained
+                  when: len(failed) == 0
+              - return: errors.Join(failed...)
+                to: errors
+  - of: startupUnexplained
+    participants:
+      - id: caller
+        kind: actor
+      - id: startupUnexplained
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(nil, kerrs.WrapParams{
+          		Code:     corehealth.StartupPending.Code(),
+          		Reason:   corehealth.StartupPending.Reason(),
+          		Public:   corehealth.StartupPending.Public(),
+          		Private:  "service/app/health: the startup probe did not report serving and no result carried an error; the field carries the status it reported",
+          		ExitCode: corehealth.StartupPending.ExitCode(),
+          	}, kerrs.String("probe", corehealth.ProbeStartup.String()), kerrs.String("status", status))
+        to: kerrs
+  - of: drainGate
+    participants:
+      - id: caller
+        kind: actor
+      - id: drainGate
+        kind: self
+      - id: registry.Drain
+        kind: value
+    steps:
+      - return:
+          closure:
+            params: _ context.Context
+            results: error
+            steps:
+              - eval: registry.Drain()
+                to: registry.Drain
+              - return: nil
+  - of: Config.checkBudget
+    steps:
+      - opt:
+          do:
+            - return: own
+          when: own > 0
+      - opt:
+          do:
+            - return: c.DefaultTimeout
+          when: c.DefaultTimeout > 0
+      - return: DefaultCheckTimeout
+  - of: Config.resolvedClock
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: (*entry).fresh
+    steps:
+      - lock:
+          mutex: e.mu
+          read: true
+      - opt:
+          do:
+            - return: corehealth.ResultValue{}, false
+          when: e.cached == nil
+      - bind: replay
+        eval: "*e.cached"
+      - opt:
+          do:
+            - set: replay.Cached
+              value: "true"
+            - return: replay, true
+          when: e.latching
+      - opt:
+          do:
+            - return: corehealth.ResultValue{}, false
+          when: e.maxAge <= 0 || replay.Age(now) > e.maxAge
+      - set: replay.Cached
+        value: "true"
+      - return: replay, true
+  - of: (*entry).claim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*entry).claim
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: e.mu
+      - opt:
+          do:
+            - return: e.active, false
+          when: e.active != nil
+      - bind: ctx, cancel
+        eval: context.WithCancel(context.WithoutCancel(parent))
+        to: context
+      - set: e.active
+        value: "&inflight{ctx: ctx, cancel: cancel, done: make(chan struct{})}"
+      - return: e.active, true
+  - of: (*entry).finish
+    steps:
+      - lock:
+          mutex: e.mu
+      - set: e.active
+        value: nil
+      - opt:
+          do:
+            - return: "false"
+          when: result.Status != corehealth.StatusHealthy || (!e.latching && e.maxAge <= 0)
+      - bind: stored
+        eval: result
+      - set: e.cached
+        value: "&stored"
+      - bind: latchedNow
+        eval: e.latching && !e.passed
+      - set: e.passed
+        value: e.latching || e.passed
+      - return: latchedNow
+  - of: NewStartupHandler
+    steps:
+      - return: "&handler{registry: registry, probe: corehealth.ProbeStartup, cfg: cfg}"
+  - of: NewReadinessHandler
+    steps:
+      - return: "&handler{registry: registry, probe: corehealth.ProbeReadiness, cfg: cfg}"
+  - of: NewLivenessHandler
+    steps:
+      - return: "&handler{registry: registry, probe: corehealth.ProbeLiveness, cfg: cfg}"
+  - of: (*handler).ServeHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handler).ServeHTTP
+        kind: self
+      - id: w.Header().Set
+        kind: value
+      - id: w.WriteHeader
+        kind: value
+      - id: h.registry.Probe
+        kind: value
+      - id: h.render
+        kind: internal
+      - id: w.Header
+        kind: value
+      - id: header.Set
+        kind: value
+      - id: w.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: w.Header().Set("Allow", "GET, HEAD")
+              to: w.Header().Set
+            - eval: w.WriteHeader(http.StatusMethodNotAllowed)
+              to: w.WriteHeader
+            - return: ""
+          when: r.Method != http.MethodGet && r.Method != http.MethodHead
+      - bind: report
+        eval: h.registry.Probe(r.Context(), h.probe)
+        to: h.registry.Probe
+      - bind: body
+        eval: h.render(report)
+        to: h.render
+      - bind: header
+        eval: w.Header()
+        to: w.Header
+      - eval: header.Set("Content-Type", "application/json; charset=utf-8")
+        to: header.Set
+      - eval: header.Set("Cache-Control", "no-store")
+        to: header.Set
+      - eval: header.Set("Content-Length", strconv.Itoa(len(body)))
+        to: header.Set
+      - eval: w.WriteHeader(statusCode(report.Status))
+        to: w.WriteHeader
+      - set: _, _
+        to: w.Write
+        value: w.Write(body)
+  - of: statusCode
+    steps:
+      - opt:
+          do:
+            - return: http.StatusOK
+          when: status.Serving()
+      - return: http.StatusServiceUnavailable
+  - of: (*handler).render
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handler).render
+        kind: self
+      - id: renderChecks
+        kind: internal
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: body
+        eval: "bodyValue{Status: report.Status.String()}"
+      - opt:
+          do:
+            - set: body.Checks
+              to: renderChecks
+              value: renderChecks(report)
+          when: h.cfg.Detail
+      - bind: encoded, err
+        eval: json.Marshal(body)
+        to: json
+      - opt:
+          do:
+            - return: fallbackBody
+          when: err != nil
+      - return: encoded
+  - of: renderChecks
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderChecks
+        kind: self
+      - id: publicReason
+        kind: internal
+    steps:
+      - bind: checks
+        eval: make([]checkValue, 0, len(report.Results))
+      - loop:
+          do:
+            - bind: check
+              eval: |-
+                checkValue{
+                			Name:     result.Name,
+                			Status:   result.Status.String(),
+                			TookMs:   result.Took.Milliseconds(),
+                			AgeMs:    result.Age(report.At).Milliseconds(),
+                			TimedOut: result.TimedOut,
+                			Cached:   result.Cached,
+                		}
+            - opt:
+                do:
+                  - set: check.Reason
+                    to: publicReason
+                    value: publicReason(result.Err)
+                when: result.Err != nil
+            - set: checks
+              value: append(checks, check)
+          key: _
+          range: report.Results
+          value: result
+      - return: checks
+  - of: publicReason
+    participants:
+      - id: caller
+        kind: actor
+      - id: publicReason
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: public
+          init:
+            bind: public
+            eval: kerrs.PublicOf(err)
+            to: kerrs
+          when: public != ""
+      - return: genericReason
+  - of: New
+    steps:
+      - return: |-
+          &health{
+          		cfg:    cfg,
+          		clk:    cfg.resolvedClock(),
+          		checks: map[corehealth.Probe][]*entry{},
+          		names:  map[corehealth.Probe]map[string]bool{},
+          		//: the aggregate nobody has announced yet is the conservative one.
+          		lastNotified: corehealth.StatusUnhealthy,
+          	}
+  - of: (*health).AddStartup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).AddStartup
+        kind: self
+      - id: h.add
+        kind: internal
+    steps:
+      - return: |-
+          h.add(&entry{
+          		name: check.Name, probe: corehealth.ProbeStartup, latching: true,
+          		budget: h.cfg.checkBudget(check.Timeout), run: check.Check,
+          	}, check.Check == nil)
+        to: h.add
+  - of: (*health).AddReadiness
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).AddReadiness
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: h.add
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corehealth.StaleCacheWindow, kerrs.WrapParams{},
+                			kerrs.String("check", check.Name),
+                			kerrs.String("max_age", check.MaxAge.String()),
+                			kerrs.String("ceiling", MaxCacheAge.String()))
+              to: kerrs
+          when: check.MaxAge > MaxCacheAge
+      - return: |-
+          h.add(&entry{
+          		name: check.Name, probe: corehealth.ProbeReadiness,
+          		budget: h.cfg.checkBudget(check.Timeout), run: check.Check,
+          		nonCritical: check.NonCritical, maxAge: check.MaxAge,
+          	}, check.Check == nil)
+        to: h.add
+  - of: (*health).AddLiveness
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).AddLiveness
+        kind: self
+      - id: h.add
+        kind: internal
+    steps:
+      - return: |-
+          h.add(&entry{
+          		name: check.Name, probe: corehealth.ProbeLiveness,
+          		budget: h.cfg.checkBudget(check.Timeout), runSelf: check.Check,
+          	}, check.Check == nil)
+        to: h.add
+  - of: (*health).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).add
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: h.register
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corehealth.InvalidCheck, kerrs.WrapParams{},
+                			kerrs.String("missing", "Name"), kerrs.String("probe", e.probe.String()))
+              to: kerrs
+          when: e.name == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corehealth.InvalidCheck, kerrs.WrapParams{},
+                			kerrs.String("missing", "Check"), kerrs.String("check", e.name),
+                			kerrs.String("probe", e.probe.String()))
+              to: kerrs
+          when: bodyMissing
+      - return: h.register(e)
+        to: h.register
+  - of: (*health).register
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).register
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - lock:
+          mutex: h.mu
+      - opt:
+          do:
+            - set: h.names[e.probe]
+              value: map[string]bool{}
+          when: h.names[e.probe] == nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corehealth.DuplicateCheck, kerrs.WrapParams{},
+                			kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
+              to: kerrs
+          when: h.names[e.probe][e.name]
+      - set: h.names[e.probe][e.name]
+        value: "true"
+      - set: h.checks[e.probe]
+        value: append(h.checks[e.probe], e)
+      - opt:
+          do:
+            - op: ++
+              set: h.startupPending
+          when: e.latching
+      - return: nil
+  - of: (*health).Drain
+    steps:
+      - lock:
+          mutex: h.mu
+      - set: h.draining
+        value: "true"
+  - of: (*health).startupPassed
+    steps:
+      - lock:
+          mutex: h.mu
+      - opt:
+          do:
+            - op: "--"
+              set: h.startupPending
+          when: h.startupPending > 0
+  - of: (*health).entriesFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).entriesFor
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: h.mu
+          read: true
+      - return: slices.Clone(h.checks[probe])
+        to: slices
+  - of: (*inflight).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*inflight).expire
+        kind: self
+      - id: r.expired.Store
+        kind: value
+    steps:
+      - eval: r.expired.Store(true)
+        to: r.expired.Store
+      - eval: r.cancel()
+  - of: (*health).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).announce
+        kind: self
+      - id: h.notify
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!h.cfg.Notify"
+      - bind: state, err
+        eval: h.notify(ctx, status)
+        to: h.notify
+      - opt:
+          do:
+            - return: ""
+          when: err == nil || h.cfg.OnNotifyError == nil
+      - eval: |-
+          h.cfg.OnNotifyError(errors.Join(kerrs.Wrap(corehealth.NotifyFailed, kerrs.WrapParams{},
+          		kerrs.String("state", state)), err))
+  - of: (*health).notify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).notify
+        kind: self
+      - id: h.owed
+        kind: internal
+      - id: h.sendBudget
+        kind: internal
+    steps:
+      - lock:
+          mutex: h.notifyMu
+      - opt:
+          do:
+            - return: "\"\", nil"
+          when: status.Serving() && h.phase() == phaseDraining
+      - bind: state, send
+        eval: h.owed(status)
+        to: h.owed
+      - opt:
+          do:
+            - return: "\"\", nil"
+          when: send == nil
+      - bind: sendCtx, release
+        eval: h.sendBudget(ctx)
+        to: h.sendBudget
+      - defer: release()
+      - opt:
+          do:
+            - return: state, serr
+          init:
+            bind: serr
+            eval: send(sendCtx)
+          when: serr != nil
+      - set: h.notified
+        value: "true"
+      - set: h.lastNotified
+        value: status
+      - return: state, nil
+  - of: (*health).sendBudget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).sendBudget
+        kind: self
+      - id: ctx.Deadline
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: h.clk.NewTimer
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ctx, func() {}
+          init:
+            bind: _, ok
+            eval: ctx.Deadline()
+            to: ctx.Deadline
+          when: ok
+      - bind: bounded, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - bind: timer
+        eval: h.clk.NewTimer(h.cfg.checkBudget(0))
+        to: h.clk.NewTimer
+      - go: |-
+          func() {
+          		defer timer.Stop()
+          		select {
+          		//: the supervisor had its budget and did not read.
+          		case <-timer.C():
+          			//: unblocks the write, which then reports what went wrong.
+          			cancel()
+          		//: the send finished, or the caller left first.
+          		case <-bounded.Done():
+          			//: nothing to do; the deferred Stop releases the timer.
+          		}
+          	}()
+      - return: bounded, cancel
+  - of: (*health).owed
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "\"\", nil"
+                when: "!status.Serving()"
+            - return: readyState, notify.ReadyContext
+          when: "!h.notified"
+      - opt:
+          do:
+            - return: "\"\", nil"
+          when: status == h.lastNotified
+      - return: |-
+          statusState, func(ctx context.Context) error {
+          		//: the aggregate's own words, bounded by the probe that measured it.
+          		return notify.StatusContext(ctx, "health: "+status.String())
+          	}
+  - of: (*health).phase
+    steps:
+      - lock:
+          mutex: h.mu
+          read: true
+      - opt:
+          do:
+            - return: phaseDraining
+          when: h.draining
+      - opt:
+          do:
+            - return: phaseStarting
+          when: h.startupPending > 0
+      - return: phaseServing
+  - of: (*health).Probe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).Probe
+        kind: self
+      - id: h.answer
+        kind: internal
+      - id: h.publish
+        kind: internal
+    steps:
+      - bind: report
+        eval: h.answer(ctx, probe)
+        to: h.answer
+      - eval: h.publish(report)
+        to: h.publish
+      - return: report
+  - of: (*health).answer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).answer
+        kind: self
+      - id: h.phase
+        kind: internal
+      - id: h.evaluateAll
+        kind: internal
+      - id: h.readiness
+        kind: internal
+      - id: h.liveness
+        kind: internal
+      - id: h.unknown
+        kind: internal
+    steps:
+      - bind: current
+        eval: h.phase()
+        to: h.phase
+      - switch:
+          cases:
+            - case: corehealth.ProbeStartup
+              do:
+                - return: h.evaluateAll(ctx, corehealth.ProbeStartup)
+                  to: h.evaluateAll
+            - case: corehealth.ProbeReadiness
+              do:
+                - return: h.readiness(ctx, current)
+                  to: h.readiness
+            - case: corehealth.ProbeLiveness
+              do:
+                - return: h.liveness(ctx, current)
+                  to: h.liveness
+            - default: true
+              do:
+                - return: h.unknown(probe)
+                  to: h.unknown
+          "on": probe
+  - of: (*health).readiness
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).readiness
+        kind: self
+      - id: h.announce
+        kind: internal
+      - id: h.shortCircuit
+        kind: internal
+      - id: h.evaluateAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: h.announce(ctx, corehealth.StatusUnhealthy)
+              to: h.announce
+            - return: |-
+                h.shortCircuit(corehealth.ProbeReadiness, "draining",
+                			corehealth.StatusUnhealthy, corehealth.Draining)
+              to: h.shortCircuit
+          when: current == phaseDraining
+      - opt:
+          do:
+            - return: |-
+                h.shortCircuit(corehealth.ProbeReadiness, "starting",
+                			corehealth.StatusUnhealthy, corehealth.StartupPending)
+              to: h.shortCircuit
+          when: current == phaseStarting
+      - bind: report
+        eval: h.evaluateAll(ctx, corehealth.ProbeReadiness)
+        to: h.evaluateAll
+      - eval: h.announce(ctx, report.Status)
+        to: h.announce
+      - return: report
+  - of: (*health).liveness
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).liveness
+        kind: self
+      - id: h.shortCircuit
+        kind: internal
+      - id: h.evaluateAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                h.shortCircuit(corehealth.ProbeLiveness, "starting",
+                			corehealth.StatusHealthy, nil)
+              to: h.shortCircuit
+          when: current == phaseStarting
+      - return: h.evaluateAll(ctx, corehealth.ProbeLiveness)
+        to: h.evaluateAll
+  - of: (*health).shortCircuit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).shortCircuit
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: h.clk.Now
+        kind: value
+    steps:
+      - var:
+          name: err
+          type: error
+      - opt:
+          do:
+            - set: err
+              to: kerrs
+              value: kerrs.Wrap(sentinel, kerrs.WrapParams{}, kerrs.String("probe", probe.String()))
+          when: sentinel != nil
+      - bind: now
+        eval: h.clk.Now()
+        to: h.clk.Now
+      - return: |-
+          corehealth.ReportValue{
+          		Probe: probe, Status: status, At: now,
+          		Results: []corehealth.ResultValue{{Name: name, Status: status, At: now, Err: err}},
+          	}
+  - of: (*health).unknown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).unknown
+        kind: self
+      - id: h.clk.Now
+        kind: value
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: now
+        eval: h.clk.Now()
+        to: h.clk.Now
+      - bind: err
+        eval: |-
+          kerrs.Wrap(corehealth.UnknownProbe, kerrs.WrapParams{},
+          		kerrs.String("probe", probe.String()))
+        to: kerrs
+      - return: |-
+          corehealth.ReportValue{
+          		Probe: probe, Status: corehealth.StatusUnhealthy, At: now,
+          		Results: []corehealth.ResultValue{{Name: "unknown", At: now, Err: err}},
+          	}
+  - of: (*health).evaluateAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).evaluateAll
+        kind: self
+      - id: h.entriesFor
+        kind: internal
+      - id: h.evaluate
+        kind: internal
+      - id: group
+        kind: package
+      - id: h.shortCircuit
+        kind: internal
+      - id: corehealth
+        kind: package
+    steps:
+      - bind: entries
+        eval: h.entriesFor(probe)
+        to: h.entriesFor
+      - bind: checks
+        eval: make([]func(context.Context) (corehealth.ResultValue, error), len(entries))
+      - loop:
+          do:
+            - set: checks[i]
+              value:
+                closure:
+                  params: ctx context.Context
+                  results: corehealth.ResultValue, error
+                  steps:
+                    - return: h.evaluate(ctx, e), nil
+                      to: h.evaluate
+          key: i
+          range: entries
+          value: e
+      - bind: results, err
+        eval: group.Collect(ctx, group.Unlimited, checks)
+        to: group
+      - opt:
+          do:
+            - return: |-
+                h.shortCircuit(probe, "collect", corehealth.StatusUnhealthy,
+                			kerrs.Wrap(corehealth.CheckFailed, kerrs.WrapParams{}, kerrs.String("cause", err.Error())))
+              to: h.shortCircuit
+          when: err != nil
+      - bind: status
+        eval: corehealth.StatusHealthy
+      - loop:
+          do:
+            - set: status
+              to: corehealth
+              value: corehealth.Worst(status, result.Status)
+          key: _
+          range: results
+          value: result
+      - return: "corehealth.ReportValue{Probe: probe, Status: status, At: h.clk.Now(), Results: results}"
+  - of: (*health).publish
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: h.cfg.OnReport == nil
+      - lock:
+          mutex: h.hookMu
+      - eval: h.cfg.OnReport(report)
+  - of: (*health).evaluate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).evaluate
+        kind: self
+      - id: e.fresh
+        kind: internal
+      - id: e.claim
+        kind: internal
+      - id: h.perform
+        kind: internal
+      - id: h.clk.Now
+        kind: value
+      - id: h.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: h.abandoned
+        kind: internal
+      - id: h.departed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: replay
+          init:
+            bind: replay, ok
+            eval: e.fresh(h.clk.Now())
+            to: e.fresh
+          when: ok
+      - bind: run, mine
+        eval: e.claim(ctx)
+        to: e.claim
+      - opt:
+          do:
+            - go: h.perform(e, run)
+              to: h.perform
+          when: mine
+      - bind: armed
+        eval: h.clk.Now()
+        to: h.clk.Now
+      - bind: timer
+        eval: h.clk.NewTimer(e.budget)
+        to: h.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-run.done
+              do:
+                - return: run.result
+            - comm: <-timer.C()
+              do:
+                - return: h.abandoned(e, run)
+                  to: h.abandoned
+            - comm: <-ctx.Done()
+              do:
+                - return: h.departed(ctx, e, h.clk.Since(armed))
+                  to: h.departed
+  - of: (*health).perform
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).perform
+        kind: self
+      - id: h.clk.Now
+        kind: value
+      - id: h.boundRun
+        kind: internal
+      - id: h.invoke
+        kind: internal
+      - id: h.outcome
+        kind: internal
+      - id: e.finish
+        kind: internal
+      - id: h.startupPassed
+        kind: internal
+    steps:
+      - bind: begun
+        eval: h.clk.Now()
+        to: h.clk.Now
+      - bind: release
+        eval: h.boundRun(e, run)
+        to: h.boundRun
+      - bind: err
+        eval: h.invoke(e, run)
+        to: h.invoke
+      - eval: release()
+      - bind: result
+        eval: h.outcome(e, run, err, begun)
+        to: h.outcome
+      - set: run.result
+        value: result
+      - bind: latched
+        eval: e.finish(result)
+        to: e.finish
+      - opt:
+          do:
+            - eval: h.startupPassed()
+              to: h.startupPassed
+          when: latched
+      - eval: close(run.done)
+  - of: (*health).outcome
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).outcome
+        kind: self
+      - id: h.abandoned
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                corehealth.ResultValue{
+                			Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
+                			Took: h.clk.Since(begun), Err: err,
+                		}
+          when: err == nil || !run.expired.Load()
+      - return: h.abandoned(e, run)
+        to: h.abandoned
+  - of: (*health).boundRun
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).boundRun
+        kind: self
+      - id: h.clk.NewTimer
+        kind: value
+    steps:
+      - bind: timer
+        eval: h.clk.NewTimer(e.budget)
+        to: h.clk.NewTimer
+      - bind: released
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		defer timer.Stop()
+          		select {
+          		//: the body had its budget and did not answer.
+          		case <-timer.C():
+          			//: tell it so, and record that a budget is why — a liveness body
+          			//: has no context and hears nothing either way.
+          			run.expire()
+          		//: the body answered first.
+          		case <-released:
+          			//: nothing to announce.
+          		}
+          	}()
+      - return:
+          closure:
+            steps:
+              - eval: close(released)
+  - of: (*health).invoke
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).invoke
+        kind: self
+      - id: h.wrapFailure
+        kind: internal
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: leave err as the check returned it.
+          			return
+          		}
+          		//: the recovered value travels as a FIELD, never as the wrap origin.
+          		//: A panic string routinely carries an address or a query, and as a
+          		//: cause it would become the Public a stranger reads.
+          		err = kerrs.Wrap(corehealth.CheckPanicked, kerrs.WrapParams{},
+          			kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
+          			kerrs.String("panic", fmt.Sprint(value)))
+          	}()
+      - return: h.wrapFailure(e, e.call(run))
+        to: h.wrapFailure
+  - of: (*entry).call
+    steps:
+      - opt:
+          do:
+            - return: e.runSelf()
+          when: e.runSelf != nil
+      - return: e.run(run.ctx)
+  - of: (*entry).verdict
+    steps:
+      - opt:
+          do:
+            - return: corehealth.StatusHealthy
+          when: err == nil
+      - opt:
+          do:
+            - return: corehealth.StatusDegraded
+          when: e.nonCritical
+      - return: corehealth.StatusUnhealthy
+  - of: (*health).wrapFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).wrapFailure
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          kerrs.Wrap(err, kerrs.WrapParams{
+          		Code:    corehealth.CheckFailed.Code(),
+          		Reason:  corehealth.CheckFailed.Reason(),
+          		Public:  corehealth.CheckFailed.Public(),
+          		Private: corehealth.CheckFailed.Private(),
+          	}, kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
+        to: kerrs
+  - of: (*health).abandoned
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).abandoned
+        kind: self
+      - id: run.expire
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - eval: run.expire()
+        to: run.expire
+      - bind: err
+        eval: |-
+          kerrs.Wrap(corehealth.CheckTimeout, kerrs.WrapParams{},
+          		kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
+          		kerrs.String("budget", e.budget.String()))
+        to: kerrs
+      - return: |-
+          corehealth.ResultValue{
+          		Name: e.name, Status: e.verdict(err), TimedOut: true,
+          		At: h.clk.Now(), Took: e.budget, Err: err,
+          	}
+  - of: (*health).departed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*health).departed
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: err
+        eval: |-
+          kerrs.Wrap(ctx.Err(), kerrs.WrapParams{
+          		Code:     corehealth.CheckTimeout.Code(),
+          		Reason:   corehealth.CheckTimeout.Reason(),
+          		Public:   corehealth.CheckTimeout.Public(),
+          		Private:  "service/app/health: the caller's context ended before the check answered; its run was left running for the next probe",
+          		ExitCode: corehealth.CheckTimeout.ExitCode(),
+          	}, kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
+        to: kerrs
+      - return: |-
+          corehealth.ResultValue{
+          		Name: e.name, Status: e.verdict(err), TimedOut: true,
+          		At: h.clk.Now(), Took: waited, Err: err,
+          	}

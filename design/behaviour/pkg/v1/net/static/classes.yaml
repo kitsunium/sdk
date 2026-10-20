@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/net/static
+  name: static
+  purpose: "Package static serves a tree of files — a single-page application, a documentation site, an embed.FS — over HTTP: what http.FileServerFS does, and what it does not (ADR 0130)."
+types: []

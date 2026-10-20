@@ -1,0 +1,36 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: hasEncodedSeparator
+    steps:
+      - loop:
+          cond: i+len(escapeSlash) <= len(escapedPath)
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: escapedPath[i] != '%'
+            - bind: triplet
+              eval: "escapedPath[i : i+len(escapeSlash)]"
+            - opt:
+                do:
+                  - return: "true"
+                when: foldsASCII(triplet, escapeSlash) || foldsASCII(triplet, escapeBackslash)
+          init: i := 0
+          post: i++
+      - return: "false"
+  - of: foldsASCII
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) != len(want)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: lowerASCII(s[i]) != want[i]
+          key: i
+          range: len(s)
+      - return: "true"

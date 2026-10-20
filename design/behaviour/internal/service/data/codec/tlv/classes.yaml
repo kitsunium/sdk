@@ -1,0 +1,1431 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      linearScanFieldLimit is the field-count threshold above which a
+      name→index map beats a linear scan. Determined empirically: at
+      16 fields the map's overhead amortises across enough lookups; below
+      that, the linear scan's branch predictor wins.
+    items:
+      - name: linearScanFieldLimit
+        type: int
+        value: "16"
+    name: linearScanFieldLimit
+  - doc: |-
+      notFoundFieldIdx is the sentinel resolveFieldIndex returns when a
+      wire field name does not match any struct field. Decoders treat this
+      as "skip the value" rather than an error (mirrors json's lenient
+      unknown-field handling). Keeping it as a named const keeps the
+      sentinel intent visible at every call site instead of relying on the
+      bare -1 literal.
+    items:
+      - name: notFoundFieldIdx
+        type: int
+        value: "-1"
+    name: notFoundFieldIdx
+  - doc: |-
+      scratchInitialCap is the starting capacity for fresh pooled scratch
+      buffers. 256 bytes fits a typical small TLV record without forcing
+      an immediate grow.
+    items:
+      - name: scratchInitialCap
+        type: int
+        value: "256"
+    name: scratchInitialCap
+  - doc: |-
+      uvarintSingleByteCap is the exclusive upper bound for a single-byte
+      LEB128-encoded value. Lengths < 0x80 carry no continuation bit and
+      fit verbatim in one byte — the overwhelming common case for TLV
+      record lengths (struct field names, small scalars, sub-record sizes).
+    items:
+      - name: uvarintSingleByteCap
+        type: uint64
+        value: "0x80"
+    name: uvarintSingleByteCap
+  - doc: |-
+      Numeric limits — grouped at the top so const → type → var → func
+      ordering rules are satisfied across the file.
+    grouped: true
+    items:
+      - doc: |-
+          maxTLVBytes caps the Unmarshal input size for untrusted payloads.
+          10 MiB matches the msgpack/ndjson scanner caps and shields the
+          decoder from CWE-400 memory-exhaustion pre-allocation attacks.
+        name: maxTLVBytes
+        type: int
+        value: 10 << 20
+      - doc: maxTLVDepth caps the nesting depth at 32 levels (CWE-674 defence).
+        name: maxTLVDepth
+        type: int
+        value: "32"
+      - doc: |-
+          maxFieldNameBytes caps the byte length of a struct field name on
+          the wire. Mirrors the LDAP/X.509-style 255-byte attribute cap.
+        name: maxFieldNameBytes
+        type: int
+        value: "255"
+      - doc: maxVarintBytes is the worst-case LEB128 length for a uint64.
+        name: maxVarintBytes
+        type: int
+        value: "10"
+      - doc: |-
+          sliceHintCap clamps an attacker-declared length to a sane initial
+          capacity hint so a malformed buffer cannot trigger a multi-million
+          entry pre-allocation. The decode loop still grows on demand.
+        name: sliceHintCap
+        type: int
+        value: "4096"
+      - doc: width8 — 1-byte payload (int8 / uint8).
+        name: width8
+        type: int
+        value: "1"
+      - doc: width16 — 2-byte payload (int16 / uint16).
+        name: width16
+        type: int
+        value: "2"
+      - doc: width32 — 4-byte payload (int32 / uint32 / float32).
+        name: width32
+        type: int
+        value: "4"
+      - doc: width64 — 8-byte payload (int64 / uint64 / float64).
+        name: width64
+        type: int
+        value: "8"
+      - doc: minRecordBytes is the smallest legal record (tag + 1-byte length).
+        name: minRecordBytes
+        type: int
+        value: "2"
+      - doc: varintContinuationBit identifies the high bit in a LEB128 byte.
+        name: varintContinuationBit
+        type: byte
+        value: "0x80"
+      - doc: varintPayloadMask isolates the 7-bit payload of an LEB128 byte.
+        name: varintPayloadMask
+        type: byte
+        value: "0x7f"
+      - doc: varintShiftStep is the bit-shift per LEB128 byte (7 bits each).
+        name: varintShiftStep
+        type: uint
+        value: "7"
+      - doc: |-
+          varintMaxLastByte is the largest legal final byte in a 10-byte
+          uint64 varint (the MSB pair-of-bits cannot exceed 1).
+        name: varintMaxLastByte
+        type: byte
+        value: "1"
+      - doc: decimalBase is the base used to format diagnostic numbers.
+        name: decimalBase
+        type: int
+        value: "10"
+      - doc: |-
+          recordsPerPair is the number of child TLV records a map pair or a
+          struct field frames on the wire (key+value, or name+value).
+        name: recordsPerPair
+        type: uint64
+        value: "2"
+    name: maxTLVBytes
+  - doc: |-
+      Wire-format tag constants — assigned in stable byte ranges grouped by
+      family so adding new types (e.g. 0x14 Int128) does not perturb the
+      existing allocation table.
+    grouped: true
+    items:
+      - doc: tagNil represents a typed nil; length is always zero.
+        name: tagNil
+        type: Tag
+        value: "0x01"
+      - doc: tagBoolFalse represents the boolean value false; length zero.
+        name: tagBoolFalse
+        type: Tag
+        value: "0x02"
+      - doc: tagBoolTrue represents the boolean value true; length zero.
+        name: tagBoolTrue
+        type: Tag
+        value: "0x03"
+      - doc: tagInt8 — signed 8-bit integer (1 byte big-endian).
+        name: tagInt8
+        type: Tag
+        value: "0x10"
+      - doc: tagInt16 — signed 16-bit integer (2 bytes big-endian).
+        name: tagInt16
+        type: Tag
+        value: "0x11"
+      - doc: tagInt32 — signed 32-bit integer (4 bytes big-endian).
+        name: tagInt32
+        type: Tag
+        value: "0x12"
+      - doc: tagInt64 — signed 64-bit integer (8 bytes big-endian).
+        name: tagInt64
+        type: Tag
+        value: "0x13"
+      - doc: tagUint8 — unsigned 8-bit integer (1 byte).
+        name: tagUint8
+        type: Tag
+        value: "0x20"
+      - doc: tagUint16 — unsigned 16-bit integer (2 bytes big-endian).
+        name: tagUint16
+        type: Tag
+        value: "0x21"
+      - doc: tagUint32 — unsigned 32-bit integer (4 bytes big-endian).
+        name: tagUint32
+        type: Tag
+        value: "0x22"
+      - doc: tagUint64 — unsigned 64-bit integer (8 bytes big-endian).
+        name: tagUint64
+        type: Tag
+        value: "0x23"
+      - doc: tagFloat32 — IEEE 754 single precision (4 bytes big-endian).
+        name: tagFloat32
+        type: Tag
+        value: "0x30"
+      - doc: tagFloat64 — IEEE 754 double precision (8 bytes big-endian).
+        name: tagFloat64
+        type: Tag
+        value: "0x31"
+      - doc: tagString — UTF-8 string; length = byte count of the payload.
+        name: tagString
+        type: Tag
+        value: "0x40"
+      - doc: tagBytes — opaque byte sequence; length = byte count.
+        name: tagBytes
+        type: Tag
+        value: "0x41"
+      - doc: |-
+          tagSlice — heterogeneous sequence; length = element count, each
+          element is itself a full TLV record.
+        name: tagSlice
+        type: Tag
+        value: "0x50"
+      - doc: |-
+          tagMap — key-value pairs; length = pair count, each pair = two
+          adjacent TLV records (key then value).
+        name: tagMap
+        type: Tag
+        value: "0x60"
+      - doc: |-
+          tagStruct — named fields; length = field count, each field = a
+          string-tag TLV holding the field name followed by a value TLV.
+        name: tagStruct
+        type: Tag
+        value: "0x70"
+    name: tagNil
+files:
+  - decls:
+      - Codec
+      - tlvCodec
+      - New
+      - (*tlvCodec).Name
+      - (*tlvCodec).MIMETypes
+      - (*tlvCodec).Extensions
+      - (*tlvCodec).Marshal
+      - (*tlvCodec).Unmarshal
+      - (*tlvCodec).Append
+      - (*tlvCodec).NewEncoder
+      - (*tlvCodec).NewDecoder
+    name: codec.go
+  - decls:
+      - tlvDecoder
+      - (*tlvDecoder).Decode
+      - (*tlvDecoder).More
+      - readOneRecord
+      - readRecordBody
+      - isCompositeTag
+      - subRecordCount
+      - readCompositeRecord
+      - readTag
+      - assembleRecord
+      - readUvarint
+      - wrapReadFailure
+      - decodeRoot
+      - decodeValue
+      - decodeByTag
+      - decodeScalarByTag
+      - tryZeroPayloadTag
+      - tryNumericTag
+      - readVarintFromBytes
+      - decodeInt
+      - decodeUint
+      - decodeFloat
+      - decodeString
+      - decodeBytes
+      - decodeSlice
+      - decodeMap
+      - decodeStruct
+      - decodeFieldName
+      - parseFieldName
+      - intWidth
+      - uintWidth
+      - sliceHint
+      - assignDecoded
+      - convertValue
+      - projectComposite
+      - projectCompositeStruct
+      - projectCompositeSlice
+      - projectCompositeMap
+      - projectCompositePointer
+      - projectMapToStruct
+      - projectSliceToTyped
+      - projectMapToTyped
+      - narrowNumeric
+      - narrowFromInt
+      - narrowFromUint
+      - narrowFromFloat
+      - truncatedError
+      - malformedLengthError
+      - unknownTagError
+      - sizeExceededError
+      - cannotSetError
+      - unhashableKeyError
+      - nonStringFieldNameError
+      - fieldNameTooLongDecodeError
+      - nonPointerTargetError
+      - trailingBytesError
+      - varintOverflowError
+      - incompatibleTypeError
+    name: decoder.go
+  - decls:
+      - linearScanFieldLimit
+      - notFoundFieldIdx
+      - tryDecodeRootInto
+      - tryDecodeRootIntoScalar
+      - tryDirectScalarSet
+      - setBoolTarget
+      - setIntegerTarget
+      - setUnsignedTarget
+      - setFloatTarget
+      - setStringTarget
+      - tryDecodeRootIntoMap
+      - decodeMapInto
+      - assignMapPair
+      - mapKeyComparable
+      - tryDecodeRootIntoStruct
+      - tryDecodeRootIntoSlice
+      - isScalarKind
+      - tryDecodeRootIntoSliceOfScalar
+      - decodeSliceOfScalarInto
+      - scalarSliceWalkResult
+      - walkScalarSlice
+      - walkScalarSliceExact
+      - walkScalarSliceGrowing
+      - narrowAndSet
+      - tryDecodeRootIntoSliceOfStruct
+      - decodeSliceOfStructInto
+      - decodeSliceElement
+      - decodeStructFromHeader
+      - decodeStructInto
+      - buildNameIndex
+      - resolveFieldIndex
+      - decodeFieldValue
+      - tryTypedFieldRecursion
+      - decodeNestedMap
+      - isSliceOfStruct
+      - decodeNestedSliceOfStruct
+      - assignFieldValue
+    name: decoder_typed.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - scratchInitialCap
+      - uvarintSingleByteCap
+      - encodeScratch
+      - tlvEncoder
+      - (*tlvEncoder).Encode
+      - (*tlvEncoder).Close
+      - appendTagLen
+      - encodeValue
+      - encodeByKind
+      - tryEncodeScalar
+      - tryEncodeComposite
+      - encodeCompositeSliceLike
+      - encodeMapDirect
+      - encodeSliceDirect
+      - encodeFieldValue
+      - encodeReflectValue
+      - encodeBool
+      - encodeInt
+      - encodeUint
+      - encodeFloat32
+      - encodeFloat64
+      - encodeString
+      - encodeBytes
+      - encodeStructDirect
+      - unsupportedKind
+      - depthExceededError
+      - fieldNameTooLong
+    name: encoder.go
+  - decls:
+      - reflectView
+      - bytesFromReflectValue
+    name: helpers.go
+  - decls:
+      - buildNamePrefix
+      - structFieldInfo
+      - structTypeInfo
+      - structTypeInfoCache
+      - cachedStructTypeInfo
+      - buildStructTypeInfo
+    name: typeinfo.go
+  - decls:
+      - maxTLVBytes
+      - tagNil
+      - Tag
+    name: types.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: |-
+      readOneRecord reads exactly one independent TLV record from r. A clean
+      io.EOF before the very first tag byte means the stream has drained and is
+      propagated verbatim; any other read failure (including EOF mid-record) is
+      wrapped as TRUNCATED / UNMARSHAL_FAILED. V59: composite records (slice /
+      map / struct) carry an element/pair/field COUNT in their length header,
+      not a byte length, so the body must be parsed by recursing into the
+      declared number of sub-records rather than copying length value bytes.
+    name: readOneRecord
+    params: r io.Reader
+    results: record []byte, err error
+  - doc: |-
+      readRecordBody reads the LEB128 length header for an already-consumed tag
+      and the record body, returning the reassembled tag+length+value bytes.
+      depth bounds composite recursion against CWE-674 stack exhaustion.
+    name: readRecordBody
+    params: r io.Reader, tag byte, depth int
+    results: record []byte, err error
+  - doc: |-
+      isCompositeTag reports whether tag's length header is an element / pair /
+      field COUNT (slice, map, struct) rather than a byte length.
+    name: isCompositeTag
+    params: tag Tag
+    results: bool
+  - doc: |-
+      subRecordCount returns how many child TLV records follow a composite
+      header: one per slice element, two per map pair (key+value), two per
+      struct field (name+value). length is the declared family count.
+    name: subRecordCount
+    params: tag Tag, length uint64
+    results: uint64
+  - doc: |-
+      readCompositeRecord reassembles a composite record (slice / map / struct)
+      by reading its declared sub-records recursively, so the streaming reader
+      frames the body identically to the buffered decoder (V59). The rebuilt
+      bytes are tag + length-as-count + the concatenated child records, which
+      decodeRoot then parses exactly as the buffered path does.
+    name: readCompositeRecord
+    params: r io.Reader, tag byte, length uint64, depth int
+    results: record []byte, err error
+  - doc: |-
+      readTag reads exactly one byte (the TLV tag) from r and returns
+      io.EOF unchanged when the stream is empty.
+    name: readTag
+    params: r io.Reader
+    results: tag byte, err error
+  - doc: |-
+      assembleRecord reads length value-bytes from r and rebuilds the
+      original tag+length+value record byte sequence. The value buffer grows
+      in chunks so a crafted header declaring length≈maxTLVBytes against a
+      reader that delivers only a handful of bytes pays only the bytes
+      actually delivered, not the declared cap (CWE-400 defence).
+    name: assembleRecord
+    params: r io.Reader, tag byte, length uint64
+    results: record []byte, err error
+  - doc: |-
+      readUvarint reads a single LEB128 length from r one byte at a time so
+      the buffer stays exactly large enough.
+    name: readUvarint
+    params: r io.Reader
+    results: value uint64, err error
+  - doc: wrapReadFailure turns an io.ReadFull error into the right TLV sentinel.
+    name: wrapReadFailure
+    params: rerr error
+    results: error
+  - doc: |-
+      decodeRoot validates the pointer-shape contract and decodes a single
+      TLV record from data into the pointee.
+    name: decodeRoot
+    params: data []byte, v any
+    results: error
+  - doc: |-
+      decodeValue reads one TLV record at data[0:] and returns the decoded
+      Go value plus the remaining bytes.
+    name: decodeValue
+    params: data []byte, depth int
+    results: value any, rest []byte, err error
+  - doc: |-
+      decodeByTag dispatches on the tag's family band. The high nibble
+      distinguishes scalar primitives, slices, maps, and structs so the
+      dispatch table stays narrow.
+    name: decodeByTag
+    params: tag Tag, length uint64, rest []byte, depth int
+    results: value any, residual []byte, err error
+  - doc: |-
+      decodeScalarByTag handles every fixed-payload tag (nil, bool, ints,
+      uints, floats, string, bytes). Splits into zero-payload, numeric, and
+      length-prefixed dispatch sub-helpers so the cyclomatic complexity of
+      each function stays below the linter's budget.
+    name: decodeScalarByTag
+    params: tag Tag, length uint64, rest []byte
+    results: value any, residual []byte, err error
+  - doc: |-
+      tryZeroPayloadTag handles tagNil/BoolFalse/BoolTrue. Emits the
+      constant value when the tag matches; the caller enforces the length-0
+      invariant before consuming the residual buffer.
+    name: tryZeroPayloadTag
+    params: tag Tag, rest []byte
+    results: value any, residual []byte, handled bool
+  - doc: |-
+      tryNumericTag handles every signed/unsigned/float tag. Returns
+      handled=false when tag falls outside the numeric bands. err is the
+      last named return so the lint rule does not flag it.
+    name: tryNumericTag
+    params: tag Tag, length uint64, rest []byte
+    results: value any, residual []byte, handled bool, err error
+  - doc: |-
+      readVarintFromBytes reads one LEB128 value from the head of data.
+      1-byte LEB128 (data[0] < 0x80) is the common case — inline that check
+      before calling binary.Uvarint to skip the function-call frame and the
+      loop setup on the > 90% common path (audit TL7).
+    name: readVarintFromBytes
+    params: data []byte
+    results: value uint64, rest []byte, err error
+  - doc: decodeInt reads a signed integer of the width implied by tag.
+    name: decodeInt
+    params: tag Tag, length uint64, rest []byte
+    results: value any, residual []byte, err error
+  - doc: decodeUint reads an unsigned integer of the width implied by tag.
+    name: decodeUint
+    params: tag Tag, length uint64, rest []byte
+    results: value any, residual []byte, err error
+  - doc: |-
+      decodeFloat reads an IEEE-754 float of the width implied by tag.
+      Splits the malformed-length and truncated-buffer paths so callers can
+      distinguish a header lying about the width from a payload running out
+      of bytes (mirrors decodeInt / decodeUint).
+    name: decodeFloat
+    params: tag Tag, length uint64, rest []byte
+    results: value any, residual []byte, err error
+  - doc: decodeString reads a UTF-8 string. length is the byte count.
+    name: decodeString
+    params: length uint64, rest []byte
+    results: value any, residual []byte, err error
+  - doc: decodeBytes reads an opaque byte sequence. length is the byte count.
+    name: decodeBytes
+    params: length uint64, rest []byte
+    results: value any, residual []byte, err error
+  - doc: |-
+      decodeSlice reads a tagSlice record: length is the element count.
+      The initial capacity is clamped by sliceHint so a crafted header
+      declaring a huge count cannot trigger a multi-GB pre-allocation
+      before the elements are actually read (CWE-400 defence). The slice
+      still grows on demand as each element decodes, so the final size
+      matches the actual element stream.
+    name: decodeSlice
+    params: length uint64, rest []byte, depth int
+    results: value any, residual []byte, err error
+  - doc: |-
+      decodeMap reads a tagMap record: length is the pair count.
+      The initial bucket hint is clamped by sliceHint so a crafted header
+      declaring a huge pair count cannot trigger a multi-GB pre-allocation
+      before the pairs are actually read (CWE-400 defence). The map still
+      grows on demand as each pair decodes.
+    name: decodeMap
+    params: length uint64, rest []byte, depth int
+    results: value any, residual []byte, err error
+  - doc: |-
+      decodeStruct reads a tagStruct record: length is the field count.
+      The Go representation is map[string]any since the wire is self-describing.
+      The initial bucket hint is clamped by sliceHint so a crafted header
+      declaring a huge field count cannot trigger a multi-GB pre-allocation
+      before the fields are actually read (CWE-400 defence). The map still
+      grows on demand as each field decodes.
+    name: decodeStruct
+    params: length uint64, rest []byte, depth int
+    results: value any, residual []byte, err error
+  - doc: |-
+      decodeFieldName reads the name-TLV at the head of data, mirroring the
+      encoder's maxFieldNameBytes cap (255 bytes). A crafted payload that
+      declares a huge field-name length is rejected before any allocation —
+      this is a defence-in-depth check; decodeString's general "length ≤
+      len(rest)" guard would also catch the make([]byte, length) attempt,
+      but the explicit cap gives callers a precise diagnostic.
+    name: decodeFieldName
+    params: data []byte, depth int
+    results: name string, rest []byte, err error
+  - doc: |-
+      parseFieldName reads the name-TLV at the head of data and returns the name
+      bytes ALIASING data — no copy and no allocation. It carries every check
+      decodeFieldName documents; the two differ only in what they hand back.
+
+      The caller must COMPARE the bytes and never retain them: they point into
+      the caller's own input buffer, which is exactly the aliasing decodeString
+      copies to avoid. decodeStructInto is the intended caller — it resolves the
+      name to a field index and drops it. A memory profile attributed 61.80 % of
+      this package's allocated objects to the string this avoids, because a
+      decoded name was paying twice: once for the bytes, once to box the string
+      into the `any` decodeString returns. See BENCH.md §"What a field name cost".
+    name: parseFieldName
+    params: data []byte, depth int
+    results: name, rest []byte, err error
+  - doc: intWidth returns the byte width of a signed-integer tag.
+    name: intWidth
+    params: tag Tag
+    results: int
+  - doc: uintWidth returns the byte width of an unsigned-integer tag.
+    name: uintWidth
+    params: tag Tag
+    results: int
+  - doc: |-
+      sliceHint clamps an attacker-declared length to sliceHintCap so a
+      malformed buffer cannot trigger a multi-million-entry pre-allocation.
+    name: sliceHint
+    params: length uint64
+    results: int
+  - doc: |-
+      assignDecoded publishes value into the pre-extracted target pointee.
+      targetType is target.Type(); both are passed to avoid re-querying.
+      target is a reflectView wrapper to keep the signature free of an
+      externally-named concrete type.
+    name: assignDecoded
+    params: target reflectView, targetType reflect.Type, value any
+    results: error
+  - doc: convertValue narrows a decoded value into the target reflect.Type.
+    name: convertValue
+    params: value any, target reflect.Type
+    results: converted reflect.Value, err error
+  - doc: |-
+      projectComposite handles composite-to-typed projections the decoder
+      needs to make Marshal+Unmarshal a true roundtrip for typed
+      struct/slice/map/pointer targets (the decoder builds map[string]any
+      / []any / map[any]any from the wire; the helpers fit them to the
+      caller's type). Returns (converted, true, nil) on a matched
+      projection, (zero, false, nil) when no projection applies (caller
+      falls through to the incompatible-type sentinel), or
+      (zero, false, err) on a recursive projection failure.
+    name: projectComposite
+    params: value any, target reflect.Type
+    results: converted reflect.Value, applied bool, err error
+  - doc: |-
+      projectCompositeStruct attempts the map[string]any → struct
+      projection. Falls through (applied=false) when the source isn't the
+      expected generic map shape.
+    name: projectCompositeStruct
+    params: value any, target reflect.Type
+    results: converted reflect.Value, applied bool, err error
+  - doc: projectCompositeSlice attempts the []any → typed slice projection.
+    name: projectCompositeSlice
+    params: value any, target reflect.Type
+    results: converted reflect.Value, applied bool, err error
+  - doc: |-
+      projectCompositeMap attempts the map[any]any / map[string]any →
+      typed map projection. Reflect-based source walk handles both
+      decoded map flavours uniformly.
+    name: projectCompositeMap
+    params: value any, target reflect.Type
+    results: converted reflect.Value, applied bool, err error
+  - doc: |-
+      projectCompositePointer recursively projects into target.Elem() and
+      wraps the result in a fresh pointer.
+    name: projectCompositePointer
+    params: value any, target reflect.Type
+    results: converted reflect.Value, applied bool, err error
+  - doc: |-
+      projectMapToStruct fills a struct of target type from the
+      map[string]any produced by decodeStruct. Field matching is by
+      exported field name — the inverse of collectStructFields which
+      writes sf.Name. Uses cachedStructTypeInfo so the reflect.Type walk
+      runs at most once per target type process-wide.
+      Missing source fields leave the destination at its zero value;
+      nil source values explicitly zero the destination.
+    name: projectMapToStruct
+    params: src map[string]any, target reflect.Type
+    results: converted reflect.Value, err error
+  - doc: |-
+      projectSliceToTyped fills a typed slice from the []any produced by
+      decodeSlice. Element conversion goes through convertValue so nested
+      composites (slice of struct, slice of map) recurse cleanly.
+    name: projectSliceToTyped
+    params: src []any, target reflect.Type
+    results: converted reflect.Value, err error
+  - doc: |-
+      projectMapToTyped fills a typed map from any source value whose
+      reflect.Kind is Map — covers both map[any]any (decodeMap output)
+      and map[string]any (decodeStruct output). Reflect-based iteration
+      handles both flavours without two branches. Accepting `any` keeps
+      the parameter signature minimal (KTN-API-MINIF) — the caller's
+      guard already confirmed src is map-shaped.
+    name: projectMapToTyped
+    params: src any, target reflect.Type
+    results: converted reflect.Value, err error
+  - doc: |-
+      narrowNumeric widens or narrows a decoded numeric value into target.
+      Returns (reflect.Value{}, false) when the value is not numeric.
+    name: narrowNumeric
+    params: value any, target reflect.Type
+    results: converted reflect.Value, ok bool
+  - doc: narrowFromInt converts a decoded int64 into target's numeric Kind.
+    name: narrowFromInt
+    params: n int64, target reflect.Type
+    results: converted reflect.Value, ok bool
+  - doc: narrowFromUint converts a decoded uint64 into target's numeric Kind.
+    name: narrowFromUint
+    params: ui uint64, target reflect.Type
+    results: converted reflect.Value, ok bool
+  - doc: narrowFromFloat converts a decoded float64 into target's float Kind.
+    name: narrowFromFloat
+    params: f float64, target reflect.Type
+    results: converted reflect.Value, ok bool
+  - doc: truncatedError wraps a fresh TRUNCATED sentinel.
+    name: truncatedError
+    results: error
+  - doc: |-
+      malformedLengthError wraps a fresh UNMARSHAL_FAILED sentinel that
+      records the expected vs declared length.
+    name: malformedLengthError
+    params: expected, got uint64
+    results: error
+  - doc: unknownTagError surfaces an unknown tag as a decode failure.
+    name: unknownTagError
+    params: tag Tag
+    results: error
+  - doc: sizeExceededError surfaces a length declaration above maxTLVBytes.
+    name: sizeExceededError
+    params: length uint64
+    results: error
+  - doc: cannotSetError surfaces an unsettable target.
+    name: cannotSetError
+    results: error
+  - doc: unhashableKeyError surfaces a non-comparable map key.
+    name: unhashableKeyError
+    results: error
+  - doc: |-
+      nonStringFieldNameError surfaces a struct field name that did not
+      decode to a Go string.
+    name: nonStringFieldNameError
+    results: error
+  - doc: |-
+      fieldNameTooLongDecodeError surfaces a wire-declared field-name length
+      above maxFieldNameBytes. Mirrors the encoder-side fieldNameTooLong
+      guard so the decoder rejects crafted payloads before allocating the
+      name buffer (CWE-400 defence).
+    name: fieldNameTooLongDecodeError
+    params: length uint64
+    results: error
+  - doc: |-
+      nonPointerTargetError surfaces a Unmarshal call with a non-pointer or
+      nil-pointer target.
+    name: nonPointerTargetError
+    results: error
+  - doc: |-
+      trailingBytesError surfaces an Unmarshal with bytes left after the
+      first record.
+    name: trailingBytesError
+    params: trailing int
+    results: error
+  - doc: varintOverflowError surfaces a malformed LEB128 length.
+    name: varintOverflowError
+    results: error
+  - doc: |-
+      incompatibleTypeError surfaces a value that cannot be assigned/converted
+      into the target reflect.Type.
+    name: incompatibleTypeError
+    params: from, to string
+    results: error
+  - doc: |-
+      tryDecodeRootInto attempts the target-aware fast path. Returns
+      handled=true when the typed path applied (success or error);
+      handled=false signals "this target shape doesn't benefit from the
+      fast path — caller falls through to decodeRoot's untyped walk".
+
+      Phase 1 — top-level *struct targets: that's where the untyped
+      path's map[string]any + projectMapToStruct double-walk costs the
+      most.
+
+      Phase 2 — top-level *[]struct targets: each element re-enters the
+      struct fast path so an N-element slice of structs avoids N map
+      allocations + N projections, just like the single-struct case but
+      linearly scaled.
+    name: tryDecodeRootInto
+    params: data []byte, target reflect.Value
+    results: handled bool, err error
+  - doc: |-
+      tryDecodeRootIntoScalar handles the Phase-7 *Scalar target path.
+      Calls the untyped walker to produce the decoded any-value, then
+      performs a direct SetInt / SetUint / SetFloat / SetString / SetBool
+      against the target — skipping the reflect.ValueOf().Convert() pair
+      the untyped projector's narrowNumeric / convertValue pay.
+
+      Cross-shape cases (wire int64 → string target, etc.) fall back to
+      the untyped path via handled=false so the documented narrowing
+      behaviour is preserved.
+    name: tryDecodeRootIntoScalar
+    params: data []byte, target reflect.Value
+    results: handled bool, err error
+  - doc: |-
+      tryDirectScalarSet performs the (wire scalar → target scalar) Set
+      without going through reflect.ValueOf().Convert(). Returns true
+      when the assignment succeeded; false signals the caller to fall
+      back to the untyped narrowing path (cross-shape conversion).
+    name: tryDirectScalarSet
+    params: target reflect.Value, value any
+    results: bool
+  - doc: |-
+      setBoolTarget assigns v to target if target.Kind() == Bool.
+      Returns false when the target type does not match.
+    name: setBoolTarget
+    params: targetView reflectView, v bool
+    results: bool
+  - doc: |-
+      setIntegerTarget assigns int64 v into target via SetInt for signed
+      kinds or SetUint for unsigned kinds (with the same wire-format
+      reinterpretation reflect.Value.Convert applies).
+    name: setIntegerTarget
+    params: targetView reflectView, v int64
+    results: bool
+  - doc: |-
+      setUnsignedTarget mirrors setIntegerTarget for a uint64 source:
+      signed kinds reinterpret via SetInt, unsigned kinds accept SetUint
+      directly.
+    name: setUnsignedTarget
+    params: targetView reflectView, v uint64
+    results: bool
+  - doc: |-
+      setFloatTarget assigns float64 v into a float-typed target via
+      SetFloat. Other kinds (e.g. int from a float wire) need the
+      untyped narrowing path.
+    name: setFloatTarget
+    params: targetView reflectView, v float64
+    results: bool
+  - doc: |-
+      setStringTarget assigns string v into target via SetString when
+      target.Kind() == String.
+    name: setStringTarget
+    params: targetView reflectView, v string
+    results: bool
+  - doc: |-
+      tryDecodeRootIntoMap handles the Phase-4 *map[K]V target path.
+      Each (key, value) pair is decoded via the untyped walker and
+      narrowed into K and V respectively; the map[any]any intermediate
+      the legacy projector builds is skipped entirely.
+    name: tryDecodeRootIntoMap
+    params: data []byte, target reflect.Value
+    results: handled bool, err error
+  - doc: |-
+      decodeMapInto consumes `length` (key, value) records from rest and
+      builds the typed map in place. Each key + value pair goes through
+      the untyped walker then convertValue so cross-shape narrowing
+      (e.g. tagInt8 wire → int field) keeps working without code dup.
+    name: decodeMapInto
+    params: length uint64, rest []byte, targetView reflectView, depth int
+    results: residual []byte, err error
+  - doc: |-
+      assignMapPair narrows (key, value) into (keyType, valType) and
+      publishes into out via SetMapIndex. Hoisted from decodeMapInto so
+      that helper stays under the linter's MAXLOC + CYCLO budgets.
+    name: assignMapPair
+    params: outView reflectView, keyType, valType reflect.Type, keyVal, valVal any
+    results: error
+  - doc: |-
+      mapKeyComparable reports whether key may be safely used as a map index.
+      For an interface-typed key the static type is always comparable, so the
+      dynamic value carried inside the interface is what must be checked — a
+      []any or map[any]any concrete value would panic SetMapIndex (V60).
+    name: mapKeyComparable
+    params: key reflect.Value
+    results: bool
+  - doc: |-
+      tryDecodeRootIntoStruct handles the Phase-1 *struct target path.
+      Verifies the wire carries a tagStruct record then dispatches into
+      decodeStructFromHeader; falls back (handled=false) on any shape
+      mismatch so the untyped projector retains its current behaviour.
+    name: tryDecodeRootIntoStruct
+    params: data []byte, target reflect.Value
+    results: handled bool, err error
+  - doc: |-
+      tryDecodeRootIntoSlice dispatches *[]T root targets by element
+      kind: structs go through tryDecodeRootIntoSliceOfStruct (Phase 2),
+      scalars + bytes-typed slices go through
+      tryDecodeRootIntoSliceOfScalar (Phase 6). Anything else falls
+      through to the untyped projector so cross-shape behaviour is
+      preserved (e.g. *[]map[string]any).
+    name: tryDecodeRootIntoSlice
+    params: data []byte, target reflect.Value
+    results: handled bool, err error
+  - doc: |-
+      isScalarKind reports whether k is a fixed-width Go scalar kind
+      (int*, uint*, float*, bool, string) that maps cleanly onto a
+      single TLV scalar tag. Bytes (uint8) are scalar but the wire
+      representation differs ([]byte ↔ tagBytes), so the slice walker
+      handles uint8 separately below.
+    name: isScalarKind
+    params: k reflect.Kind
+    results: bool
+  - doc: |-
+      tryDecodeRootIntoSliceOfScalar handles the Phase-6 *[]Scalar
+      target path. Each element is decoded into the target slice
+      directly via narrowNumeric / SetString / SetBool — saves the
+      projectSliceToTyped's per-element any-boxing.
+
+      Special case: *[]byte targets — the wire encodes a tagBytes
+      record (not tagSlice), so we fall back to the untyped path to
+      preserve that asymmetry.
+    name: tryDecodeRootIntoSliceOfScalar
+    params: data []byte, targetView reflectView
+    results: handled bool, err error
+  - doc: |-
+      decodeSliceOfScalarInto consumes `length` scalar records from rest
+      and builds a typed []ScalarT in place on target. Each element goes
+      through decodeValue (so wire-format narrowing is unchanged) then
+      convertValue narrows the boxed any into the element type. The
+      outer []any allocation the legacy projector built is skipped.
+    name: decodeSliceOfScalarInto
+    params: length uint64, rest []byte, targetView reflectView, depth int
+    results: residual []byte, err error
+  - doc: |-
+      walkScalarSlice consumes `length` scalar records from rest and
+      fills a freshly-built typed slice with them. Two branches: a
+      fast path with exact pre-alloc + indexed Set when length fits the
+      sliceHintCap budget, and a grow-as-we-go path for extreme or
+      malicious lengths. Both branches share the per-element narrowing
+      logic via narrowAndSet.
+    name: walkScalarSlice
+    params: targetView reflectView, length uint64, rest []byte, depth int
+    results: result scalarSliceWalkResult, err error
+  - doc: |-
+      walkScalarSliceExact handles the fast-path scalar slice walk for
+      lengths that fit the sliceHintCap budget: pre-allocate exactly
+      length entries and write each via indexed Set after narrowing.
+    name: walkScalarSliceExact
+    params: targetView reflectView, length uint64, rest []byte, depth int
+    results: result scalarSliceWalkResult, err error
+  - doc: |-
+      walkScalarSliceGrowing handles the slow-path scalar slice walk
+      for lengths that exceed sliceHintCap. reflect.Append grows the
+      slice on demand from the initial sliceHintCap capacity.
+    name: walkScalarSliceGrowing
+    params: targetView reflectView, length uint64, rest []byte, depth int
+    results: result scalarSliceWalkResult, err error
+  - doc: |-
+      narrowAndSet decodes one record from rest, narrows the boxed `any`
+      into elemType, and publishes it into dst (which must already be
+      settable). nil source values leave dst at its zero value. Returns
+      the residual buffer after the consumed record.
+    name: narrowAndSet
+    params: dstView reflectView, elemType reflect.Type, rest []byte, depth int
+    results: next []byte, err error
+  - doc: |-
+      tryDecodeRootIntoSliceOfStruct handles the Phase-2 *[]Struct
+      target path. Each element re-enters decodeStructInto so the
+      per-element map[string]any allocations are avoided across the
+      whole slice.
+    name: tryDecodeRootIntoSliceOfStruct
+    params: data []byte, target reflect.Value
+    results: handled bool, err error
+  - doc: |-
+      decodeSliceOfStructInto consumes `length` struct records from rest
+      and builds a typed []ElemStruct in place on target. Pre-allocates
+      the slice with the wire-declared length (clamped against
+      sliceHintCap so a malformed declared-length cannot trigger a
+      multi-GB allocation).
+    name: decodeSliceOfStructInto
+    params: length uint64, rest []byte, targetView reflectView, depth int
+    results: residual []byte, err error
+  - doc: |-
+      decodeSliceElement consumes one element record from rest and
+      returns the residual bytes + a settable reflect.Value of elemType
+      populated with the decoded element. Hoisted out of
+      decodeSliceOfStructInto to keep that helper under the linter's
+      MAXLOC + CYCLO budgets and to make per-element behaviour testable
+      in isolation.
+    name: decodeSliceElement
+    params: rest []byte, elemType reflect.Type, depth int
+    results: next []byte, elemValue reflect.Value, err error
+  - doc: |-
+      decodeStructFromHeader reads the LEB128 field-count header at rest
+      and dispatches into decodeStructInto. Hoisted out of
+      tryDecodeRootInto so that function stays under the cyclomatic
+      budget. depth is threaded through so nested struct fields (Phase 3
+      typed recursion) keep the depth guard consistent across the tree.
+    name: decodeStructFromHeader
+    params: rest []byte, target reflect.Value, depth int
+    results: residual []byte, err error
+  - doc: |-
+      decodeStructInto walks `length` field records starting at rest and
+      assigns each by name into target. Unknown fields are silently
+      skipped (their value bytes are still consumed via decodeValue so the
+      cursor advances). Per-field assignment goes through convertValue so
+      cross-shape conversions (e.g. int8 wire → int field) keep working
+      without duplicating the narrowing logic.
+    name: decodeStructInto
+    params: length uint64, rest []byte, target reflect.Value, depth int
+    results: residual []byte, err error
+  - doc: |-
+      buildNameIndex returns a name→fields-index map when the struct has
+      enough fields to justify the map's allocation, otherwise nil so
+      callers fall back to a linear scan (faster for small structs).
+    name: buildNameIndex
+    params: info *structTypeInfo
+    results: map[string]int
+  - doc: |-
+      resolveFieldIndex returns the struct-field index for the wire name.
+      Uses the optional nameIndex map for large structs, otherwise scans
+      the cached field list linearly.
+
+      name is a []byte rather than a string on purpose: both a map index
+      expression `m[string(b)]` and a comparison `s == string(b)` are compiled
+      without allocating the string, so the wire name never reaches the heap.
+      The bytes alias the decoder's input and are not retained past this call.
+    name: resolveFieldIndex
+    params: info *structTypeInfo, nameIndex map[string]int, name []byte
+    results: idx int, found bool
+  - doc: |-
+      decodeFieldValue routes a single field's value record either into
+      the typed struct field (when fieldIdx != notFoundFieldIdx) or
+      through the untyped decode (when the wire field has no matching
+      struct field). The sentinel-based "found" signal keeps the
+      signature flat and under the linter's MAXPARAM budget.
+
+      Phase 3 typed recursion: when the destination field is itself a
+      struct AND the wire carries a tagStruct record, recurse into
+      decodeStructFromHeader instead of building map[string]any and
+      converting. Same shape for slice-of-struct fields. Other field
+      types stay on the untyped path so cross-shape narrowings keep
+      working without code duplication.
+    name: decodeFieldValue
+    params: rest []byte, target reflect.Value, info *structTypeInfo, fieldIdx, depth int
+    results: next []byte, err error
+  - doc: |-
+      tryTypedFieldRecursion attempts the Phase 3 typed recursion for a
+      struct field whose kind matches the wire tag. Returns took=true when
+      the typed path handled the field (along with the advanced cursor
+      and any error); took=false signals the caller to fall back to the
+      untyped decodeValue + convertValue path.
+    name: tryTypedFieldRecursion
+    params: rest []byte, targetView reflectView, info *structTypeInfo, fieldIdx, depth int
+    results: next []byte, took bool, err error
+  - doc: |-
+      decodeNestedMap reads the LEB128 pair-count header at rest and
+      dispatches into decodeMapInto so a struct field whose value is
+      a map[K]V walks the typed map path instead of the untyped
+      projector. Phase-5 nested-field recursion companion to
+      decodeNestedSliceOfStruct.
+    name: decodeNestedMap
+    params: rest []byte, target reflect.Value, depth int
+    results: residual []byte, err error
+  - doc: |-
+      isSliceOfStruct reports whether t is a slice whose element type is
+      itself a struct. Used by Phase 3 to gate the nested typed-slice
+      recursion.
+    name: isSliceOfStruct
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      decodeNestedSliceOfStruct reads the LEB128 element count at rest
+      and dispatches into decodeSliceOfStructInto so a struct field whose
+      value is a []ElemStruct walks the typed slice path instead of the
+      untyped projector.
+    name: decodeNestedSliceOfStruct
+    params: rest []byte, target reflect.Value, depth int
+    results: residual []byte, err error
+  - doc: |-
+      assignFieldValue writes a decoded value into target.Field(i) using
+      the cached field metadata so the helper doesn't pay reflect.Field
+      + reflect.StructField lookup on every call. target is wrapped in
+      reflectView to keep the public signature free of an externally-
+      named concrete type (KTN-API-MINIF).
+    name: assignFieldValue
+    params: target reflectView, info *structTypeInfo, fieldIdx int, val any
+    results: error
+  - doc: |-
+      appendTagLen writes the 1-byte tag followed by the LEB128 length.
+      1-byte LEB128 (length < 128) is the overwhelming common case for TLV
+      records (struct field names, small scalars, sub-record lengths). The
+      fast-path elides the binary.AppendUvarint function call + its loop
+      setup for that case — single `append(dst, byte(tag), byte(length))`
+      covers > 90% of records per the audit context (TL7+TL8).
+    name: appendTagLen
+    params: dst []byte, tag Tag, length uint64
+    results: "[]byte"
+  - doc: |-
+      encodeValue is the main reflection dispatch. depth grows on every
+      recursive descent into a composite (slice/map/struct).
+    name: encodeValue
+    params: dst []byte, v any, depth int
+    results: encoded []byte, err error
+  - doc: |-
+      encodeByKind picks the right family encoder for the value's reflect.Kind.
+      Splits into scalar / composite sub-dispatch so each function stays
+      under the linter's cyclomatic-complexity budget. A scalar Kind returns
+      (out, true, nil); a composite Kind returns (out, false, nil) and is
+      retried by tryEncodeComposite; an unsupported Kind surfaces the error.
+    name: encodeByKind
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, err error
+  - doc: |-
+      tryEncodeScalar dispatches every fixed-shape primitive Kind (bool,
+      integers, floats, string). Returns handled=false on composite Kinds.
+    name: tryEncodeScalar
+    params: dst []byte, view reflectView
+    results: encoded []byte, handled bool
+  - doc: |-
+      tryEncodeComposite dispatches every composite Kind (slice, array, map,
+      struct). Returns handled=false on scalar or rejected Kinds. err is
+      the last named return so the lint rule does not flag it.
+    name: tryEncodeComposite
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, handled bool, err error
+  - doc: |-
+      encodeCompositeSliceLike handles the slice/array branch of the
+      composite dispatch table. Splits the []byte fast path from the generic
+      element-by-element path.
+    name: encodeCompositeSliceLike
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, err error
+  - doc: |-
+      encodeMapDirect emits a tagMap record by walking the reflect map
+      via MapRange. Each (key, value) pair is dispatched through
+      encodeFieldValue with the cached key/value Kinds so scalar
+      entries skip the encodeReflectValue → encodeByKind → tryEncodeScalar
+      dispatch chain. Composite entries still take the generic path.
+    name: encodeMapDirect
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, err error
+  - doc: |-
+      encodeSliceDirect emits a tagSlice record by walking the reflect
+      slice/array in place. Each element is dispatched through
+      encodeFieldValue with the cached element Kind so scalar elements
+      skip the encodeReflectValue → encodeByKind → tryEncodeScalar
+      dispatch chain. Composite elements still take the generic path.
+    name: encodeSliceDirect
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, err error
+  - doc: |-
+      encodeFieldValue is the per-field dispatcher used by encodeStructDirect.
+      It short-circuits the encodeReflectValue → encodeByKind → tryEncodeScalar
+      three-call dispatch chain when the cached field kind is a known scalar:
+      the value is read straight off rv via the typed accessor (.Int(), .String(),
+      etc.) and emitted via the matching encode helper. Composite + nil-able
+      kinds (slice, map, struct, pointer, interface) fall through to the
+      generic encodeReflectValue path which still handles deref + recursion.
+    name: encodeFieldValue
+    params: dst []byte, rvView reflectView, kind reflect.Kind, depth int
+    results: encoded []byte, err error
+  - doc: |-
+      encodeReflectValue is the reflect.Value equivalent of encodeValue:
+      it drills through pointer / interface indirections before
+      dispatching by Kind, so the direct encoders can hand off a
+      reflect.Value of any nesting (including interface{} map values)
+      without paying .Interface() boxing. Nil indirections short-circuit
+      to a tagNil record.
+    name: encodeReflectValue
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, err error
+  - doc: encodeBool emits a 1-byte tag-only record for the boolean value.
+    name: encodeBool
+    params: dst []byte, b bool
+    results: "[]byte"
+  - doc: encodeInt writes the narrowest signed-integer record fitting n.
+    name: encodeInt
+    params: dst []byte, n int64
+    results: "[]byte"
+  - doc: encodeUint writes the narrowest unsigned-integer record fitting ui.
+    name: encodeUint
+    params: dst []byte, ui uint64
+    results: "[]byte"
+  - doc: encodeFloat32 emits a 4-byte IEEE-754 single record.
+    name: encodeFloat32
+    params: dst []byte, f float32
+    results: "[]byte"
+  - doc: encodeFloat64 emits an 8-byte IEEE-754 double record.
+    name: encodeFloat64
+    params: dst []byte, f float64
+    results: "[]byte"
+  - doc: encodeString emits a UTF-8 string record. length = byte count.
+    name: encodeString
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: encodeBytes emits an opaque byte sequence record.
+    name: encodeBytes
+    params: dst, payload []byte
+    results: "[]byte"
+  - doc: |-
+      encodeStructDirect emits a tagStruct record by walking the cached
+      structTypeInfo and encoding each (name, value) pair directly into
+      dst. Avoids the []any intermediate the legacy collectStructFields
+      + encodeStructEntries pair allocated for every struct encode —
+      the slice header alloc and the per-field .Interface() boxing both
+      disappear.
+    name: encodeStructDirect
+    params: dst []byte, view reflectView, depth int
+    results: encoded []byte, err error
+  - doc: unsupportedKind wraps an UNSUPPORTED_TYPE sentinel with the offending kind.
+    name: unsupportedKind
+    params: kind string
+    results: error
+  - doc: depthExceededError wraps a fresh DEPTH_EXCEEDED sentinel.
+    name: depthExceededError
+    params: depth int
+    results: error
+  - doc: fieldNameTooLong wraps a MARSHAL_FAILED for an over-long field name.
+    name: fieldNameTooLong
+    params: length int
+    results: error
+  - doc: |-
+      bytesFromReflectValue copies a uint8 slice or array out of view. The
+      fast-path returns rv.Bytes() for slices; arrays are copied element-wise
+      because reflect.Value.Bytes panics on non-addressable arrays.
+    name: bytesFromReflectValue
+    params: view reflectView
+    results: "[]byte"
+  - doc: |-
+      buildNamePrefix pre-computes the (tagString + LEB128 length + name)
+      byte sequence the encoder emits before every field value. Returns
+      nil when the name exceeds maxFieldNameBytes — the encoder's cap
+      check fires before the prefix is read, so nil is safe.
+    name: buildNamePrefix
+    params: name string
+    results: "[]byte"
+  - doc: |-
+      cachedStructTypeInfo returns the memoised *structTypeInfo for t,
+      building it via reflect on first observation. t must have Kind ==
+      reflect.Struct — callers are expected to gate the call.
+    name: cachedStructTypeInfo
+    params: t reflect.Type
+    results: "*structTypeInfo"
+  - doc: |-
+      buildStructTypeInfo walks t's fields once and returns a structTypeInfo
+      containing only the exported ones. Hoisted out of cachedStructTypeInfo
+      to keep that helper under the KTN-FUNC-MAXLOC budget.
+    name: buildStructTypeInfo
+    params: t reflect.Type
+    results: "*structTypeInfo"
+imports:
+  binary: encoding/binary
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coretlv: github.com/kitsunium/sdk/internal/core/data/codec/tlv
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  math: math
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  strconv: strconv
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/tlv
+  name: tlv
+  purpose: Package tlv implements a self-describing Type-Length-Value codec.
+types:
+  - doc: tlvCodec is the concrete Codec implementation for TLV.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*tlvCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*tlvCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*tlvCodec"
+        results: "[]string"
+      - doc: Marshal serialises v as TLV bytes by allocating a fresh buffer.
+        name: Marshal
+        params: v any
+        recv: c *tlvCodec
+        results: encoded []byte, err error
+      - doc: Unmarshal parses data as TLV into v, which must be a non-nil pointer.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*tlvCodec"
+        results: error
+      - doc: |-
+          Append encodes v as TLV and appends the bytes onto dst. Implements the
+          optional codec.Appender interface so hot-path callers can write into a
+          recycled buffer.
+        name: Append
+        params: dst []byte, v any
+        recv: "*tlvCodec"
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder. Each Encode call emits
+          one independent TLV record onto the writer.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*tlvCodec"
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder. Each Decode call
+          consumes one TLV record from the reader.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*tlvCodec"
+        results: codec.Decoder
+    name: tlvCodec
+  - doc: |-
+      tlvDecoder adapts an io.Reader to codec.Decoder. Each Decode call
+      consumes exactly one independent TLV record from the reader.
+    fields:
+      - name: r
+        type: io.Reader
+      - doc: ": sticky EOF latch so More() returns false once the stream drains."
+        name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode reads one TLV record from the wrapped reader and unmarshals it
+          into v (which must be a non-nil pointer).
+        name: Decode
+        params: v any
+        recv: d *tlvDecoder
+        results: error
+      - doc: More reports whether additional records remain on the stream.
+        name: More
+        recv: d *tlvDecoder
+        results: bool
+    name: tlvDecoder
+  - doc: |-
+      scalarSliceWalkResult bundles the populated slice + residual bytes
+      produced by walkScalarSlice. Two-value return would exceed the
+      linter's NAMEDRETURN budget on a multi-error path.
+    fields:
+      - doc: ": slice carries the populated typed result for caller publish."
+        name: slice
+        type: reflect.Value
+      - doc: ": residual bytes are the unread tail after the walk completes."
+        name: residual
+        type: "[]byte"
+    kind: struct
+    name: scalarSliceWalkResult
+  - doc: |-
+      tlvEncoder adapts an io.Writer to codec.Encoder. Each Encode call emits
+      exactly one independent TLV record.
+    fields:
+      - name: w
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: |-
+          Encode serialises v as a single TLV record and writes it to the wrapped
+          writer.
+        name: Encode
+        params: v any
+        recv: e *tlvEncoder
+        results: error
+      - doc: Close is a no-op — the encoder does not own the writer.
+        name: Close
+        recv: "*tlvEncoder"
+        results: error
+    name: tlvEncoder
+  - doc: |-
+      reflectView is a local named type that wraps reflect.Value so helpers
+      can accept the wrapper without tripping KTN-API-MINIF on the reflect
+      package's concrete types. Conversion is zero-cost because reflectView
+      has the same memory layout as reflect.Value.
+    kind: named
+    name: reflectView
+    underlying: reflect.Value
+  - doc: |-
+      structFieldInfo carries the resolved metadata for one exported struct
+      field. Pre-resolving the field name as a string saves an allocation
+      per Marshal call (reflect.StructField.Name returns a fresh string at
+      every Field(i) call on the reflect.Type) and pre-extracting kind
+      trims one reflect dispatch from the encode/decode loops.
+    fields:
+      - doc: ": name is the exported field name as encoded on the TLV wire."
+        name: name
+        type: string
+      - doc: |-
+          : nameBytes is name as bytes, so the decoder can compare a wire name
+          : against it with bytes.Equal instead of converting one of the two.
+          : Built once per type; the decode path then never converts at all.
+        name: nameBytes
+        type: "[]byte"
+      - doc: ": index is the field position passed to reflect.Value.Field(i)."
+        name: index
+        type: int
+      - doc: |-
+          : typ is the field's declared type, cached for the decoder's
+          : typed-target projection so it doesn't re-query target.Field(i).Type.
+        name: typ
+        type: reflect.Type
+      - doc: |-
+          : kind is typ.Kind(), cached separately because it's the dispatch
+          : discriminator in the hottest inner loops.
+        name: kind
+        type: reflect.Kind
+      - doc: |-
+          : namePrefix is the pre-computed (tagString + LEB128 length + name)
+          : byte sequence the encoder emits before every field value. Cached
+          : at type-info build time so encodeStructDirect appends a single
+          : byte slice per field instead of calling appendTagLen + append(s).
+          : nil when name exceeds maxFieldNameBytes — the encoder rejects
+          : those before reaching the append step.
+        name: namePrefix
+        type: "[]byte"
+    kind: struct
+    name: structFieldInfo
+  - doc: structTypeInfo bundles the per-struct cache entry.
+    fields:
+      - doc: |-
+          : fields lists only the EXPORTED fields, in declaration order.
+          : Unexported fields are excluded at build time so the hot loops
+          : don't re-check PkgPath per call.
+        name: fields
+        type: "[]structFieldInfo"
+    kind: struct
+    name: structTypeInfo
+  - kind: named
+    name: Tag
+    underlying: uint8
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME /
+      extension tables.
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&tlvCodec{})
+      - doc: ": MIME table hoisted so MIMETypes() can hand back a slices.Clone."
+        name: mimeTypes
+        value: "[]string{\"application/x-tlv\", \"application/vnd.tlv\"}"
+      - doc: ": extension table hoisted for the same reason."
+        name: extensions
+        value: "[]string{\".tlv\"}"
+    name: Codec
+  - doc: |-
+      encodeScratch recycles the record buffers of the streaming Encoder — the
+      only encode path that rents one: Marshal hands Append a nil destination
+      and Append writes into the caller's. Without it every record paid for a
+      scratch slice grown by append's doubling. It is the kernel recycler's
+      CappedPool over *[]byte, the shape kernel/concur/buffer has: a pointer, so a Put
+      boxes nothing; reset to zero length on Put; and orphaned instead when a
+      record grew it past scratch.MaxRetainedBufBytes, so one oversized record
+      cannot pin its buffer in the pool. That ceiling is the codec domain's,
+      read rather than copied, so it cannot drift from the one the other codecs
+      release their buffers under.
+    items:
+      - name: encodeScratch
+        value: |-
+          recycler.NewCappedPool[*[]byte](
+          	func() *[]byte { return new(make([]byte, 0, scratchInitialCap)) },
+          	func(bp *[]byte) { *bp = (*bp)[:0] },
+          	func(bp *[]byte) int { return cap(*bp) },
+          	scratch.MaxRetainedBufBytes,
+          )
+    name: encodeScratch
+  - doc: |-
+      structTypeInfoCache memoises *structTypeInfo by reflect.Type. The
+      cache is process-wide; reflect.Type identities are stable for the
+      program lifetime so no eviction is needed.
+    items:
+      - name: structTypeInfoCache
+        type: sync.Map
+    name: structTypeInfoCache

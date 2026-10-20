@@ -1,0 +1,20 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - New
+    name: redact.go
+functions:
+  - name: New
+    params: cfg Config
+    results: Redactor
+imports:
+  svcredact: github.com/kitsunium/sdk/internal/service/security/redact
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/security/redact
+  name: redact
+  purpose: Package redact renders values, JSON documents, text and log attributes for DISPLAY with their secrets replaced, within a byte bound, never touching what it is given.
+types: []

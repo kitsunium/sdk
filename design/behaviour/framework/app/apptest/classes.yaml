@@ -1,0 +1,80 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      secretsDir is where kit keeps the secrets that follow the data, in the
+      data directory: never searched for words, since that is what it keeps.
+    items:
+      - name: secretsDir
+        type: string
+        value: "\".secrets\""
+    name: secretsDir
+files:
+  - decls:
+      - secretsDir
+      - Disk
+      - NewDisk
+      - (*Disk).Holding
+      - scanner
+      - (*scanner).visit
+    name: apptest.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: NewDisk
+    params: t testing.TB
+    results: "*Disk"
+imports:
+  app: github.com/kitsunium/sdk/framework/app
+  bytes: bytes
+  errors: errors
+  fs: io/fs
+  io: io
+  os: os
+  path: path
+  proc: github.com/kitsunium/sdk/pkg/v1/proc
+  runtime: runtime
+  slices: slices
+  testing: testing
+  vfs: github.com/kitsunium/sdk/pkg/v1/data/vfs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/app/apptest
+  name: apptest
+  purpose: "Package apptest runs a product in its own tests as production runs it: on a data directory, where the framework seals what it keeps at rest, a transaction writes files and a rollback writes them back, a store's retention erases and folds what it overwrote, and a restart reads everything back — none of which a product kept in memory (app.InMemory) ever meets: the framework seals nothing in memory."
+types:
+  - fields:
+      - doc: AppOption keeps an app's data in Dir.
+        name: ""
+        role: embedded
+        type: app.AppOption
+      - doc: Dir is the data directory, removed once the test and its subtests end.
+        name: Dir
+        type: string
+    kind: struct
+    methods:
+      - name: Holding
+        params: t testing.TB, words ...string
+        recv: d *Disk
+        results: "[]string"
+    name: Disk
+  - doc: |-
+      scanner is Holding's walk over the data directory: the words it looks
+      for, as bytes, and the files found holding one.
+    fields:
+      - name: fsys
+        type: fs.FS
+      - name: needles
+        type: "[][]byte"
+      - name: found
+        type: "[]string"
+    kind: struct
+    methods:
+      - doc: |-
+          visit is the walk's step over one entry: kit's secrets are skipped, a
+          directory is walked into, and a file holding one of the needles is found.
+        name: visit
+        params: name string, entry fs.DirEntry, walkErr error
+        recv: s *scanner
+        results: error
+    name: scanner

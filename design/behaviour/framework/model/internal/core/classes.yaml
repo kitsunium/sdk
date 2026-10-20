@@ -1,0 +1,4932 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Container kinds.
+    grouped: true
+    items:
+      - comment: "the Go binary: every service, one process"
+        name: ContainerProcess
+        value: "\"process\""
+      - comment: "a frontend: served by the process, run by a browser"
+        name: ContainerSPA
+        value: "\"spa\""
+      - comment: "the data directory: store files, queue files"
+        name: ContainerVolume
+        value: "\"volume\""
+      - comment: data kept in the process's memory only
+        name: ContainerMemory
+        value: "\"memory\""
+      - doc: |-
+          ContainerDatabase is a database the app declares (app.Database):
+          "container:database:<name>", drawn as a cylinder.
+        name: ContainerDatabase
+        value: "\"database\""
+    name: ContainerProcess
+  - doc: Whose a port is.
+    grouped: true
+    items:
+      - doc: |-
+          PortOwnerApp is the framework's own listener: the health probes, the Studio in
+          dev, and the product's HTTP when it declares any.
+        name: PortOwnerApp
+        value: "\"app\""
+    name: PortOwnerApp
+  - doc: What a port serves.
+    grouped: true
+    items:
+      - comment: the liveness and readiness probes
+        name: ServesHealth
+        value: "\"health\""
+      - comment: the Studio and its API, in dev
+        name: ServesStudio
+        value: "\"studio\""
+      - comment: the product's own HTTP entry points
+        name: ServesHTTP
+        value: "\"http\""
+    name: ServesHealth
+  - doc: The kinds of [CodeBlockMessage].
+    grouped: true
+    items:
+      - comment: an if's first branch
+        name: BlockIf
+        value: "\"if\""
+      - comment: an if's else-if branch
+        name: BlockElseIf
+        value: "\"else-if\""
+      - comment: an if's last branch
+        name: BlockElse
+        value: "\"else\""
+      - comment: a switch's or a select's case
+        name: BlockCase
+        value: "\"case\""
+      - comment: a for or range loop's body
+        name: BlockLoop
+        value: "\"loop\""
+      - comment: "a go statement: runs beside the caller"
+        name: BlockGo
+        value: "\"go\""
+      - comment: "a defer statement: runs when the function returns"
+        name: BlockDefer
+        value: "\"defer\""
+      - comment: "a function literal: runs when it is called"
+        name: BlockFunc
+        value: "\"func\""
+      - doc: |-
+          BlockTransaction is the function an app.Transact runs: its steps run in
+          one transaction, and the effects they make leave at its commit.
+        name: BlockTransaction
+        value: "\"transaction\""
+    name: BlockIf
+  - doc: The kinds of connectors.
+    grouped: true
+    items:
+      - doc: "ConnectorTransport is how the product is reached: HTTP."
+        name: ConnectorTransport
+        type: ConnectorKind
+        value: "\"transport\""
+      - doc: "ConnectorMessaging is what it sends and receives: mail, queues."
+        name: ConnectorMessaging
+        type: ConnectorKind
+        value: "\"messaging\""
+      - doc: "ConnectorData is where it keeps its data: stores, databases."
+        name: ConnectorData
+        type: ConnectorKind
+        value: "\"data\""
+    name: ConnectorTransport
+  - doc: The roles of a connector, against the process boundary.
+    grouped: true
+    items:
+      - name: RoleInbound
+        value: "\"inbound\""
+      - name: RoleOutbound
+        value: "\"outbound\""
+      - name: RoleStorage
+        value: "\"storage\""
+    name: RoleInbound
+  - doc: The connectors kit ships.
+    grouped: true
+    items:
+      - name: ConnectorHTTP
+        value: "\"http\""
+      - name: ConnectorMail
+        value: "\"mail\""
+      - name: ConnectorStore
+        value: "\"store\""
+      - name: ConnectorQueue
+        value: "\"queue\""
+      - doc: |-
+          ConnectorDatabase is brought by a store a database keeps (ADR 0004):
+          app.Database declares the database, an engine module reaches it.
+        name: ConnectorDatabase
+        value: "\"database\""
+    name: ConnectorHTTP
+  - doc: |-
+      The engines a database runs on (ADR 0004): one module each in kit's
+      repository, the only code that imports its driver.
+    grouped: true
+    items:
+      - name: EnginePostgres
+        value: "\"postgres\""
+      - name: EngineMySQL
+        value: "\"mysql\""
+      - name: EngineSQLite
+        value: "\"sqlite\""
+    name: EnginePostgres
+  - doc: Mail statuses.
+    grouped: true
+    items:
+      - comment: in the outbox, not yet handed to the transport
+        name: MailQueued
+        value: "\"queued\""
+      - comment: "the transport accepted it (capture: kept for the mailbox)"
+        name: MailSent
+        value: "\"sent\""
+      - comment: the last attempt failed; another is scheduled
+        name: MailRetrying
+        value: "\"retrying\""
+      - comment: abandoned after its last attempt
+        name: MailDead
+        value: "\"dead\""
+    name: MailQueued
+  - doc: |-
+      MockReplace is the one mode a [MockMessage] has: a test's app.Replace, a typed
+      function run in place of an operation's handler — or of what a port calls —
+      while the rest of its pipeline still runs. The Studio sets none (D13): it
+      shows the application, it does not act on it, so the respond, fail and
+      delay modes of the platform's kit have no representation here.
+    items:
+      - name: MockReplace
+        value: "\"replace\""
+    name: MockReplace
+  - doc: The edge kinds.
+    grouped: true
+    items:
+      - doc: |-
+          EdgeCalls targets an endpoint or a port. From a port, it is the port's
+          binding — what the port calls — and it is declared.
+        name: EdgeCalls
+        type: EdgeKind
+        value: "\"calls\""
+      - doc: EdgeReads targets a store the source reads from.
+        name: EdgeReads
+        type: EdgeKind
+        value: "\"reads\""
+      - doc: EdgeWrites targets a store the source writes to.
+        name: EdgeWrites
+        type: EdgeKind
+        value: "\"writes\""
+      - doc: EdgePublishes targets a topic.
+        name: EdgePublishes
+        type: EdgeKind
+        value: "\"publishes\""
+      - doc: |-
+          EdgeDelivers goes from a topic to each of its subscriptions, and from a
+          store to each watch it feeds (ADR 0008). Declared.
+        name: EdgeDelivers
+        type: EdgeKind
+        value: "\"delivers\""
+      - doc: EdgeTransitions targets a workflow; Label carries the event.
+        name: EdgeTransitions
+        type: EdgeKind
+        value: "\"transitions\""
+      - doc: EdgePersists goes from a workflow to the store it lives in. Declared.
+        name: EdgePersists
+        type: EdgeKind
+        value: "\"persists\""
+      - doc: "EdgeSends targets a mailer: the source puts a message in its outbox."
+        name: EdgeSends
+        type: EdgeKind
+        value: "\"sends\""
+      - doc: EdgeWakes goes from a topic to a declared loop it wakes. Declared.
+        name: EdgeWakes
+        type: EdgeKind
+        value: "\"wakes\""
+      - doc: EdgeUses targets a secret whose value or keys the source uses.
+        name: EdgeUses
+        type: EdgeKind
+        value: "\"uses\""
+      - doc: |-
+          EdgeDispatches targets a command: the source dispatches it. From an
+          endpoint that exposes the command, or from a port bound to it, it is
+          declared.
+        name: EdgeDispatches
+        type: EdgeKind
+        value: "\"dispatches\""
+      - doc: |-
+          EdgeAsks targets a query: the source asks it. From an endpoint that
+          exposes the query, or from a port bound to it, it is declared.
+        name: EdgeAsks
+        type: EdgeKind
+        value: "\"asks\""
+      - doc: |-
+          EdgeContracts goes from one process role to another it talks to —
+          through a socket, a pipe, a command line —, and names the versioned
+          contract they share in [EdgeMessage.Contract]. It is the only edge between two
+          roles (D22). Declared.
+        name: EdgeContracts
+        type: EdgeKind
+        value: "\"contracts\""
+      - doc: |-
+          EdgeRuns goes from a role to what it runs: a CLI command, a listener,
+          an endpoint's server, a loop. Declared.
+        name: EdgeRuns
+        type: EdgeKind
+        value: "\"runs\""
+      - doc: |-
+          EdgeImports goes from a component to a library it may import (D19).
+          Declared.
+        name: EdgeImports
+        type: EdgeKind
+        value: "\"imports\""
+      - doc: EdgeRenders goes from a presentation to what it renders. Declared.
+        name: EdgeRenders
+        type: EdgeKind
+        value: "\"renders\""
+    name: EdgeCalls
+  - doc: The live event types.
+    grouped: true
+    items:
+      - doc: EventHello opens every stream and carries the graph revision.
+        name: EventHello
+        type: EventType
+        value: "\"hello\""
+      - doc: EventSpan reports one unit of work that finished on a node.
+        name: EventSpan
+        type: EventType
+        value: "\"span\""
+      - doc: EventTransition reports a workflow instance changing state.
+        name: EventTransition
+        type: EventType
+        value: "\"transition\""
+      - doc: |-
+          EventLifecycle reports a lifecycle component moving, or the process
+          changing phase.
+        name: EventLifecycle
+        type: EventType
+        value: "\"lifecycle\""
+      - doc: EventLoop reports a loop run.
+        name: EventLoop
+        type: EventType
+        value: "\"loop\""
+      - doc: EventCensus reports a workflow's population per state.
+        name: EventCensus
+        type: EventType
+        value: "\"census\""
+      - doc: EventGraph reports that the graph structure changed.
+        name: EventGraph
+        type: EventType
+        value: "\"graph\""
+      - doc: EventLog reports a log record written by product code, in dev.
+        name: EventLog
+        type: EventType
+        value: "\"log\""
+      - doc: EventMail reports a mail entering the outbox or changing status.
+        name: EventMail
+        type: EventType
+        value: "\"mail\""
+    name: EventHello
+  - doc: |-
+      The grammar of every ID a graph carries, written once. The runtime, the
+      analyzer, the design files' JSON Schema and the Studio all read it from
+      here: a second copy is how two sides come to derive different names for the
+      same declaration (invariant 1 of the platform's kit).
+
+      	id       = "external"
+      	         | service
+      	         | service "/" kind "/" name
+      	         | "binary:" segment
+      	         | "binary:" segment "/role/" segment
+      	         | "library:" segment
+      	service  = [ segment "." ] segment        ; "<module>.<service>"
+      	segment  = [a-z][a-z0-9-]{0,62}
+      	name     = [A-Za-z][A-Za-z0-9_.-]{0,62}
+      	         | method " " path                 ; an endpoint named by its route
+
+      A module's service named like the module is the module's name alone
+      ([QualifiedService]); every other service of a module is qualified.
+    grouped: true
+    items:
+      - doc: SegmentPattern is a service, module, binary, role or library name.
+        name: SegmentPattern
+        value: "`[a-z][a-z0-9-]{0,62}`"
+      - doc: NamePattern is a node's name within its service and kind.
+        name: NamePattern
+        value: "`[A-Za-z][A-Za-z0-9_.-]{0,62}`"
+      - doc: |-
+          RoutePattern is the name of an endpoint declared without one: its
+          route, "GET /tasks/{id}".
+        name: RoutePattern
+        value: "`[A-Z]+ /[^\\s]*`"
+      - doc: |-
+          ContractPattern is the versioned contract an [EdgeContracts] edge
+          carries: "render/v1".
+        name: ContractPattern
+        value: "`[a-z][a-z0-9-]{0,62}/v[1-9][0-9]{0,3}`"
+      - doc: BinaryScope prefixes the ID of a binary and of its roles.
+        name: BinaryScope
+        value: "\"binary:\""
+      - doc: LibraryScope prefixes the ID of a library.
+        name: LibraryScope
+        value: "\"library:\""
+    name: SegmentPattern
+  - doc: The patterns' bounds, which the matchers below apply.
+    grouped: true
+    items:
+      - doc: |-
+          maxWord is a segment's or a name's length at most: one first byte and
+          {0,62} more.
+        name: maxWord
+        type: int
+        value: "63"
+      - doc: "maxVersionDigits is a contract version's length at most: [1-9][0-9]{0,3}."
+        name: maxVersionDigits
+        type: int
+        value: "4"
+      - doc: routeWhitespace is what \s matches in RE2, which a route's path excludes.
+        name: routeWhitespace
+        value: "\"\\t\\n\\f\\r \""
+    name: maxWord
+  - doc: |-
+      Version is the schema version of every document in this package.
+
+      Version 2 adds the auth, mailer and loop kinds, the sends and wakes edges,
+      the code level of every node ([CodeResult]), the C4 context and containers
+      ([ArchitectureMessage]) and the daemon's own machinery ([RuntimeMessage]).
+
+      Version 3 adds the secret kind ([SecretSpec]), the uses edge, the secret
+      span operation, the rotation loop and the store origin of a setting.
+
+      Version 4 is the one bump the decisions of issue #17 share. It adds the
+      port kind ([PortSpec]) and its binding, a declared edge from the port to
+      what it calls; the endpoint that implements a port
+      ([EndpointSpec.Implements]), which has no method and no path; and the
+      replace mock mode ([MockReplace]). ADR 0004 adds the databases: the store's
+      database ([StoreSpec.Database]), the database container, the database
+      connector and its adapters, [RuntimeMessage.Databases] and [SettingMessage.Database].
+      ADR 0008 adds the modules the app mounts ([GraphMessage.Modules]), the module of a
+      node ([NodeEntity.Module]) and the Go module of a position outside the product's
+      ([SourceMessage.GoModule]); and the watch, a subscription fed by stores: its mark
+      and the stores that feed it ([SubscriptionSpec.Mark],
+      [SubscriptionSpec.Stores]), each drawing a declared delivers edge to it.
+      ADR 0005 adds the command and query kinds ([CommandSpec], [QuerySpec]),
+      the dispatches and asks edges, the endpoint that exposes one
+      ([EndpointSpec.Exposes]), the read model ([StoreSpec.ReadModel]), the
+      dispatch, ask and handle span operations and the dispatch and ask
+      controls.
+
+      Version 5 is the first the SDK's framework publishes (ADR 0147). It
+      adds what a product is made of beyond its services: the binary
+      ([KindBinary]) and its process roles ([KindRole]), the short CLI command
+      ([KindCLI]), the listener that is not HTTP ([KindListener]), the library
+      shared between components ([KindLibrary]) and the presentation
+      ([KindPresentation]); the edge between two roles of a product, which
+      carries a versioned contract ([EdgeContracts], [EdgeMessage.Contract]); and the
+      grammar every ID follows, written once ([IDValue], [ParseID]). It removes what
+      the Studio no longer does (D13): the respond, fail and delay mock modes,
+      the control event and its payload — a [MockMessage] is a test's replacement only.
+
+      Version 6 renames the runtime framework (ADR 0180): its packages are
+      framework/app and framework/internal/app, so a source position the
+      document gives in the framework's code names those paths, and the
+      constants of the framework's own provenance, port owner and setting
+      origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+      ADR 0180's step 4 their values are "app" and "appdev", the build's
+      and the graph's version of the framework are their field "app", and
+      the variable a framework setting names carries the product's prefix.
+    items:
+      - name: Version
+        type: int
+        value: "6"
+    name: Version
+  - doc: ExternalID is the id of the node standing for the outside world.
+    items:
+      - name: ExternalID
+        value: "\"external\""
+    name: ExternalID
+  - doc: Exposure says who may reach an endpoint.
+    grouped: true
+    items:
+      - doc: ExposePublic endpoints are routed on the product's HTTP listener.
+        name: ExposePublic
+        value: "\"public\""
+      - doc: |-
+          ExposePrivate endpoints have no route: the implementation of a port
+          (Service.Implement), reached in process through its port. A graph kit
+          made before its operations were internal by default also marks so an
+          endpoint it kept off the listener.
+        name: ExposePrivate
+        value: "\"private\""
+    name: ExposePublic
+  - doc: |-
+      How an exposure says it is open on purpose, when its operation declares
+      no permission and no rule (EndpointInfo.Access).
+    grouped: true
+    items:
+      - doc: |-
+          AccessAnyone is app.Anyone(): whoever reaches the route may run the
+          operation.
+        name: AccessAnyone
+        value: "\"anyone\""
+      - doc: |-
+          AccessAnyUser is app.AnyUser(): any signed-in user may run it — the
+          operation asks for one.
+        name: AccessAnyUser
+        value: "\"any-user\""
+    name: AccessAnyone
+  - doc: Authentication an endpoint asks for.
+    grouped: true
+    items:
+      - doc: |-
+          AuthRequired endpoints run only for an authenticated caller; the others
+          are answered 401 before the handler runs.
+        name: AuthRequired
+        value: "\"required\""
+      - doc: |-
+          AuthOptional endpoints run the auth handler when credentials are
+          present, and serve anonymous callers too.
+        name: AuthOptional
+        value: "\"optional\""
+    name: AuthRequired
+  - doc: Transition triggers.
+    grouped: true
+    items:
+      - doc: TriggerEvent is a transition fired by code, naming an event.
+        name: TriggerEvent
+        value: "\"event\""
+      - doc: |-
+          TriggerTimer is a transition fired after a duration in a state, or at
+          an instant the entity carries.
+        name: TriggerTimer
+        value: "\"timer\""
+      - doc: |-
+          TriggerGuard is a transition fired when a condition on the entity
+          holds, checked each time the entity is written.
+        name: TriggerGuard
+        value: "\"guard\""
+      - doc: TriggerCreate is the entry of a new instance into the initial state.
+        name: TriggerCreate
+        value: "\"create\""
+    name: TriggerEvent
+  - doc: |-
+      How the start chose what a port calls: app.Bind, else the one
+      Service.Implement among the services the app mounts, else the port's
+      fallback — or a test replaced the port.
+    grouped: true
+    items:
+      - doc: ViaBind is the app's app.Bind.
+        name: ViaBind
+        value: "\"bind\""
+      - doc: ViaImplement is the one Service.Implement among the mounted services.
+        name: ViaImplement
+        value: "\"implement\""
+      - doc: ViaFallback is the port's own app.Fallback.
+        name: ViaFallback
+        value: "\"fallback\""
+      - doc: |-
+          ViaReplace is a test's app.Replace: a function answers in place of
+          whatever the port would call, and nothing is bound.
+        name: ViaReplace
+        value: "\"replace\""
+    name: ViaBind
+  - doc: How a command is handled.
+    grouped: true
+    items:
+      - doc: |-
+          ModeSync is handled on its caller's goroutine: Dispatch returns the
+          handler's result.
+        name: ModeSync
+        value: "\"sync\""
+      - doc: |-
+          ModeQueued is sent to the background (app.Queued): Dispatch returns
+          once the command's own queue accepted it, and a consumer handles it,
+          retried and dead-lettered.
+        name: ModeQueued
+        value: "\"queued\""
+    name: ModeSync
+  - doc: Mail transports.
+    grouped: true
+    items:
+      - doc: TransportSMTP delivers to an SMTP relay.
+        name: TransportSMTP
+        value: "\"smtp\""
+      - doc: |-
+          TransportCapture keeps every message for the Studio's mailbox and
+          delivers nothing: the transport of dev and tests.
+        name: TransportCapture
+        value: "\"capture\""
+    name: TransportSMTP
+  - doc: How a secret is made.
+    grouped: true
+    items:
+      - doc: "SecretProvided is given by the operator: an SMTP URL, an API token."
+        name: SecretProvided
+        value: "\"provided\""
+      - doc: |-
+          SecretGenerated is made by kit and rotated on a schedule: a signing or
+          sealing key.
+        name: SecretGenerated
+        value: "\"generated\""
+    name: SecretProvided
+  - doc: Where a running app found a secret.
+    grouped: true
+    items:
+      - doc: |-
+          SecretFromEnv is the environment: the variable, or the file its _FILE
+          form names.
+        name: SecretFromEnv
+        value: "\"env\""
+      - doc: |-
+          SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
+          or the data directory's .secrets in dev.
+        name: SecretFromFile
+        value: "\"file\""
+      - doc: |-
+          SecretFromMemory is a store in the process's memory: a test, or
+          <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
+        name: SecretFromMemory
+        value: "\"memory\""
+      - doc: SecretFromStore is a store the product's code gave kit.
+        name: SecretFromStore
+        value: "\"store\""
+    name: SecretFromEnv
+  - doc: Loop styles.
+    grouped: true
+    items:
+      - doc: |-
+          LoopDeclared is Service.Loop: kit owns the wait — the wake sources are
+          data, so the diagram draws them — and the product owns the work.
+        name: LoopDeclared
+        value: "\"declared\""
+      - doc: |-
+          LoopGoroutine is Service.Go: the product wrote the whole loop; kit
+          starts it, stops it, restarts it after a failure, and reads its select
+          statements to draw what it waits on.
+        name: LoopGoroutine
+        value: "\"goroutine\""
+    name: LoopDeclared
+  - doc: Wake source kinds of a declared loop, and why a loop of kit's ran.
+    grouped: true
+    items:
+      - comment: a fixed period
+        name: WakeInterval
+        value: "\"interval\""
+      - comment: a time the product computes after every run
+        name: WakeDeadline
+        value: "\"deadline\""
+      - comment: any publish on a topic
+        name: WakeTopic
+        value: "\"topic\""
+      - comment: once, when the app starts
+        name: WakeStart
+        value: "\"start\""
+      - comment: Loop.Nudge, or the Studio
+        name: WakeManual
+        value: "\"manual\""
+      - comment: a write of the store a workflow runs over, or of one a watch hears
+        name: WakeChange
+        value: "\"change\""
+    name: WakeInterval
+  - doc: Select case kinds.
+    grouped: true
+    items:
+      - comment: a timer, ticker or time.After channel
+        name: SelectTimer
+        value: "\"timer\""
+      - comment: "ctx.Done(): the loop's way out"
+        name: SelectDone
+        value: "\"done\""
+      - comment: any other receive
+        name: SelectReceive
+        value: "\"receive\""
+      - comment: a send
+        name: SelectSend
+        value: "\"send\""
+      - comment: "the default case: the select never blocks"
+        name: SelectDefault
+        value: "\"default\""
+    name: SelectTimer
+  - doc: "What a field holds: the classes of an app tag (ADR 0006)."
+    grouped: true
+    items:
+      - doc: |-
+          ClassPublic holds nothing personal and nothing secret: the question
+          was asked.
+        name: ClassPublic
+        value: "\"public\""
+      - doc: |-
+          ClassPersonal holds data about an identifiable person: a name, an
+          address, a message a person wrote.
+        name: ClassPersonal
+        value: "\"personal\""
+      - doc: |-
+          ClassSpecial holds the special categories of GDPR art. 9(1), or
+          criminal convictions (art. 10).
+        name: ClassSpecial
+        value: "\"special\""
+      - doc: "ClassSecret holds a credential: a password's hash, a token's digest."
+        name: ClassSecret
+        value: "\"secret\""
+    name: ClassPublic
+  - doc: The node kinds.
+    grouped: true
+    items:
+      - doc: KindService groups the nodes of one bounded context.
+        name: KindService
+        type: NodeKind
+        value: "\"service\""
+      - doc: KindEndpoint is an HTTP endpoint with typed request and response.
+        name: KindEndpoint
+        type: NodeKind
+        value: "\"endpoint\""
+      - doc: KindStore is a typed, keyed collection of entities.
+        name: KindStore
+        type: NodeKind
+        value: "\"store\""
+      - doc: KindTopic is an asynchronous, at-least-once message channel.
+        name: KindTopic
+        type: NodeKind
+        value: "\"topic\""
+      - doc: KindSubscription consumes one topic.
+        name: KindSubscription
+        type: NodeKind
+        value: "\"subscription\""
+      - doc: KindWorkflow is a state machine over the entities of one store.
+        name: KindWorkflow
+        type: NodeKind
+        value: "\"workflow\""
+      - doc: "KindJob is scheduled work: a fixed interval or a cron expression."
+        name: KindJob
+        type: NodeKind
+        value: "\"job\""
+      - doc: KindFrontend is static assets served by the product.
+        name: KindFrontend
+        type: NodeKind
+        value: "\"frontend\""
+      - doc: KindExternal stands for everything outside the product.
+        name: KindExternal
+        type: NodeKind
+        value: "\"external\""
+      - doc: |-
+          KindAuth is the app's authentication handler: it turns a request's
+          credentials into a user, in front of every endpoint that asks for one.
+        name: KindAuth
+        type: NodeKind
+        value: "\"auth\""
+      - doc: |-
+          KindMailer is outbound mail: a durable outbox, and the transport that
+          empties it — SMTP, or the capture of dev and tests.
+        name: KindMailer
+        type: NodeKind
+        value: "\"mailer\""
+      - doc: |-
+          KindLoop is a long-running loop of the daemon: declared (kit owns the
+          wait, the product the work) or hand-written (a goroutine kit supervises).
+        name: KindLoop
+        type: NodeKind
+        value: "\"loop\""
+      - doc: |-
+          KindSecret is a secret the product declares: provided by the operator,
+          or generated by kit and rotated on a schedule. Its value is never in a
+          graph.
+        name: KindSecret
+        type: NodeKind
+        value: "\"secret\""
+      - doc: |-
+          KindPort is an operation a service needs and does not implement: a
+          typed request, a typed response, a name. What it calls — another
+          service's endpoint, the app's binding, its own fallback — is decided
+          when the app starts, and drawn as a declared edge from the port.
+        name: KindPort
+        type: NodeKind
+        value: "\"port\""
+      - doc: |-
+          KindCommand is an operation that changes something: a typed input, a
+          typed result, one handler, the pipeline of its kind. It is dispatched,
+          on its caller's goroutine or through its own queue.
+        name: KindCommand
+        type: NodeKind
+        value: "\"command\""
+      - doc: |-
+          KindQuery is an operation that reads and changes nothing: a typed
+          input, a typed result, one handler. It is asked.
+        name: KindQuery
+        type: NodeKind
+        value: "\"query\""
+      - doc: |-
+          KindBinary is one executable the product ships. It holds process
+          roles; its ID is "binary:<name>".
+        name: KindBinary
+        type: NodeKind
+        value: "\"binary\""
+      - doc: |-
+          KindRole is one process role of a binary — "statusline" and
+          "statusline daemon" are two roles of one binary. Its root package is
+          generated wiring; two roles talk through their contract only. Its ID
+          is "binary:<binary>/role/<name>".
+        name: KindRole
+        type: NodeKind
+        value: "\"role\""
+      - doc: |-
+          KindCLI is a short command-line command: it parses its arguments,
+          runs once and exits with a typed status.
+        name: KindCLI
+        type: NodeKind
+        value: "\"cli\""
+      - doc: |-
+          KindListener accepts connections that are not HTTP: a private Unix
+          socket, a named pipe. It is an inbound port like an endpoint.
+        name: KindListener
+        type: NodeKind
+        value: "\"listener\""
+      - doc: |-
+          KindLibrary is a package shared between components, declared so the
+          components that use it are allowed to import it. Its ID is
+          "library:<name>".
+        name: KindLibrary
+        type: NodeKind
+        value: "\"library\""
+      - doc: |-
+          KindPresentation turns a service's results into what a reader sees:
+          a rendered line, a page, a report.
+        name: KindPresentation
+        type: NodeKind
+        value: "\"presentation\""
+    name: KindService
+  - doc: "Process profiles: what a role does with its process."
+    grouped: true
+    items:
+      - doc: |-
+          ProfileServer serves HTTP until it is stopped: the platform's kit
+          product, and the only profile that opens a TCP listener.
+        name: ProfileServer
+        value: "\"server\""
+      - doc: |-
+          ProfileCLI parses its arguments, runs once and exits with a typed
+          status. It starts no listener and no loop outlives it.
+        name: ProfileCLI
+        value: "\"cli\""
+      - doc: |-
+          ProfileDaemon runs until it is stopped, or until it has been idle for
+          its declared time, and serves no HTTP: it answers on its listeners —
+          a private socket, a pipe — and runs its loops.
+        name: ProfileDaemon
+        value: "\"daemon\""
+    name: ProfileServer
+  - doc: Listener networks.
+    grouped: true
+    items:
+      - doc: NetworkUnix is a Unix-domain socket, private to its owner.
+        name: NetworkUnix
+        value: "\"unix\""
+      - doc: NetworkPipe is a Windows named pipe, its DACL granting its owner only.
+        name: NetworkPipe
+        value: "\"pipe\""
+      - doc: |-
+          NetworkLocal is NetworkUnix where there is one, NetworkPipe on
+          Windows: what a product declares when it does not care which.
+        name: NetworkLocal
+        value: "\"local\""
+    name: NetworkUnix
+  - doc: The modes of <PRODUCT>_RETENTION.
+    grouped: true
+    items:
+      - doc: "RetentionOn erases and deletes what is due: the default."
+        name: RetentionOn
+        value: "\"on\""
+      - doc: |-
+          RetentionDryRun journals what the retention would do and changes
+          nothing: how a new retention is deployed over old data.
+        name: RetentionDryRun
+        value: "\"dry-run\""
+      - doc: RetentionOff runs no retention, warned of at every start outside dev.
+        name: RetentionOff
+        value: "\"off\""
+    name: RetentionOn
+  - doc: The gaps a register lists for a store that keeps personal data.
+    grouped: true
+    items:
+      - comment: no app.Purpose
+        name: GapPurpose
+        value: "\"purpose\""
+      - comment: "no retention, kit's or the product's: its personal data is kept forever"
+        name: GapRetention
+        value: "\"retention\""
+      - comment: "no subject field: no person can have their records"
+        name: GapSubject
+        value: "\"subject\""
+    name: GapPurpose
+  - doc: The security measures a register lists (point g).
+    grouped: true
+    items:
+      - doc: |-
+          MeasureRedacted: the Studio, the spans and the logs never show a
+          personal, special or secret value.
+        name: MeasureRedacted
+        value: "\"redacted\""
+      - doc: "MeasureHolds: a legal hold stops erasure and deletion."
+        name: MeasureHolds
+        value: "\"legal-holds\""
+      - doc: |-
+          MeasureJournal: every export, erasure, deletion and hold is journaled,
+          each entry chained to the previous one by SHA-256.
+        name: MeasureJournal
+        value: "\"journal\""
+      - doc: |-
+          MeasureNotSealed: the store's classified members are in clear: it is
+          kept in memory, where nothing is at rest, or its members are plain.
+        name: MeasureNotSealed
+        value: "\"not-sealed\""
+      - doc: |-
+          MeasureSealed: its classified members are sealed at rest, AES-256-GCM
+          under per-subject data keys a person's erasure destroys (ADR 0006 §4).
+        name: MeasureSealed
+        value: "\"sealed\""
+    name: MeasureRedacted
+  - doc: |-
+      SealedPlaceholder is what the Studio receives in place of a value kit
+      keeps sealed at rest — a record's member in the data browser, a former
+      value —: never the value, nor its box (ADR 0006 §9). A value it opens and
+      may not show is "[redacted]".
+    items:
+      - name: SealedPlaceholder
+        value: "\"[sealed]\""
+    name: SealedPlaceholder
+  - doc: The operations of the privacy journal.
+    grouped: true
+    items:
+      - comment: a person's records exported
+        name: JournalExport
+        value: "\"export\""
+      - comment: a record read by a module, through app.Records
+        name: JournalRead
+        value: "\"read\""
+      - comment: a store's keys listed by a module that watches it, through app.Records
+        name: JournalList
+        value: "\"list\""
+      - comment: a record's personal data cleared
+        name: JournalErase
+        value: "\"erase\""
+      - comment: a record removed
+        name: JournalDelete
+        value: "\"delete\""
+      - comment: some fields of a record cleared, by a module
+        name: JournalEraseFields
+        value: "\"erase-fields\""
+      - comment: a hold placed on a record
+        name: JournalHold
+        value: "\"hold\""
+      - comment: a hold lifted
+        name: JournalRelease
+        value: "\"release\""
+      - comment: a subject's data key destroyed (ADR 0006, step 3)
+        name: JournalShred
+        value: "\"shred\""
+      - comment: a journal opened after the one before it closed, naming its last hash (ADR 0180 step 5c)
+        name: JournalContinue
+        value: "\"continue\""
+    name: JournalExport
+  - doc: Profile kinds.
+    grouped: true
+    items:
+      - comment: where CPU time went, sampled for a duration
+        name: ProfileCPU
+        value: "\"cpu\""
+      - comment: where the live heap was allocated
+        name: ProfileHeap
+        value: "\"heap\""
+    name: ProfileCPU
+  - doc: Process phases, in the order a process goes through them.
+    grouped: true
+    items:
+      - name: PhaseStarting
+        value: "\"starting\""
+      - name: PhaseServing
+        value: "\"serving\""
+      - name: PhaseDraining
+        value: "\"draining\""
+      - name: PhaseStopped
+        value: "\"stopped\""
+      - name: PhaseFailed
+        value: "\"failed\""
+    name: PhaseStarting
+  - doc: Database states.
+    grouped: true
+    items:
+      - doc: |-
+          DatabaseUnset: no URL, in dev. Its stores stay in the data directory
+          and nothing is opened.
+        name: DatabaseUnset
+        value: "\"unset\""
+      - doc: |-
+          DatabaseMemory: the app keeps its data in memory (app.InMemory):
+          nothing is opened, no URL is read.
+        name: DatabaseMemory
+        value: "\"memory\""
+      - doc: |-
+          DatabaseOpen: the pool is open, its migrations ran, it answered its
+          check at start.
+        name: DatabaseOpen
+        value: "\"open\""
+      - doc: "DatabaseFailed: the start could not open it, migrate it or reach it."
+        name: DatabaseFailed
+        value: "\"failed\""
+      - doc: "DatabaseClosed: not opened yet, or closed by the stop."
+        name: DatabaseClosed
+        value: "\"closed\""
+    name: DatabaseUnset
+  - doc: Where a setting's value comes from.
+    grouped: true
+    items:
+      - comment: an environment variable
+        name: SettingEnv
+        value: "\"env\""
+      - comment: "the product's code: an AppOption"
+        name: SettingOption
+        value: "\"option\""
+      - comment: kit's default for the environment
+        name: SettingDefault
+        value: "\"default\""
+      - comment: the environment's secret store (a secret)
+        name: SettingStore
+        value: "\"store\""
+      - comment: kit dev set the variable, for this launch
+        name: SettingAppDev
+        value: "\"appdev\""
+      - comment: a configuration file of the product (Detail)
+        name: SettingFile
+        value: "\"file\""
+    name: SettingEnv
+  - doc: |-
+      The settings the framework reads, by the variable that sets each. The
+      framework's own are named under the product's prefix — its name
+      upper-cased, every other character an underscore —, so a constant holds
+      the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+      (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+      the tool's, set by it and read whole by the Studio subsystem alone.
+    grouped: true
+    items:
+      - name: VarEnv
+        value: "\"ENV\""
+      - name: VarAddr
+        value: "\"ADDR\""
+      - name: VarDataDir
+        value: "\"DATA_DIR\""
+      - name: VarStudio
+        value: "\"KIT_STUDIO\""
+      - name: VarStudioRemote
+        value: "\"KIT_STUDIO_REMOTE\""
+      - name: VarAnalyze
+        value: "\"KIT_ANALYZE\""
+      - name: VarTrustProxy
+        value: "\"TRUST_PROXY\""
+      - name: VarAllowedHosts
+        value: "\"ALLOWED_HOSTS\""
+      - name: VarLogLevel
+        value: "\"LOG_LEVEL\""
+      - name: VarSMTPURL
+        value: "\"SMTP_URL\""
+      - doc: |-
+          VarRetention sets what the stores' retention loops do: on, dry-run
+          or off (ADR 0006).
+        name: VarRetention
+        value: "\"RETENTION\""
+      - doc: |-
+          VarDevForced is how kit dev tells the product which of the variables
+          above it set itself for this launch: their origin is kit dev.
+        name: VarDevForced
+        value: "\"KIT_DEV_FORCED\""
+    name: VarEnv
+  - doc: Boot steps, in the order kit takes them.
+    grouped: true
+    items:
+      - comment: the environment and the options, read
+        name: BootConfig
+        value: "\"config\""
+      - comment: what the services declare, checked
+        name: BootDeclarations
+        value: "\"declarations\""
+      - comment: the services bound to the app
+        name: BootMount
+        value: "\"mount\""
+      - comment: the routes of endpoints and frontends
+        name: BootRoutes
+        value: "\"routes\""
+      - comment: the data directory, opened
+        name: BootData
+        value: "\"data\""
+      - comment: health, the Studio, protection, observation
+        name: BootHandler
+        value: "\"handler\""
+      - comment: the lifecycle components, started in order
+        name: BootComponents
+        value: "\"components\""
+      - comment: "ready: the phase is serving"
+        name: BootServing
+        value: "\"serving\""
+    name: BootConfig
+  - doc: Component states.
+    grouped: true
+    items:
+      - name: ComponentPending
+        value: "\"pending\""
+      - name: ComponentStarting
+        value: "\"starting\""
+      - name: ComponentUp
+        value: "\"up\""
+      - name: ComponentStopping
+        value: "\"stopping\""
+      - name: ComponentDown
+        value: "\"down\""
+      - name: ComponentFailed
+        value: "\"failed\""
+    name: ComponentPending
+  - doc: Loop kinds.
+    grouped: true
+    items:
+      - comment: a job, fired by the scheduler
+        name: LoopJob
+        value: "\"job\""
+      - comment: "a workflow's own loop: its timers and guards, when due"
+        name: LoopTimer
+        value: "\"timer\""
+      - comment: a subscription's consumer, a queued command's, or a mailer's outbox
+        name: LoopConsumer
+        value: "\"consumer\""
+      - comment: the HTTP server's accept loop
+        name: LoopHTTP
+        value: "\"http\""
+      - comment: the scheduler's own loop, which fires the jobs
+        name: LoopScheduler
+        value: "\"scheduler\""
+      - comment: a declared loop's wake cycle (Service.Loop)
+        name: LoopWake
+        value: "\"wake\""
+      - comment: a hand-written loop (Service.Go)
+        name: LoopRoutine
+        value: "\"goroutine\""
+      - comment: a generated secret's rotation, on its schedule
+        name: LoopRotation
+        value: "\"rotation\""
+      - comment: "a store's retention: erases and deletes what is due (ADR 0006)"
+        name: LoopRetention
+        value: "\"retention\""
+    name: LoopJob
+  - doc: "Loop provenances: who wrote the code that loops."
+    grouped: true
+    items:
+      - doc: |-
+          ProvenanceLibrary loops are written by a library: net/http's accept
+          loop, the SDK scheduler, the SDK queue consumer.
+        name: ProvenanceLibrary
+        value: "\"library\""
+      - doc: |-
+          ProvenanceApp loops are written by the framework for a declaration: a workflow's
+          sweep, a declared loop's wake cycle.
+        name: ProvenanceApp
+        value: "\"app\""
+      - doc: "ProvenanceProduct loops are written by hand in the product: Service.Go."
+        name: ProvenanceProduct
+        value: "\"product\""
+    name: ProvenanceLibrary
+  - doc: Loop states.
+    grouped: true
+    items:
+      - comment: blocked until its next wake
+        name: LoopWaiting
+        value: "\"waiting\""
+      - comment: doing a run
+        name: LoopRunning
+        value: "\"running\""
+      - comment: failed, waiting out its backoff
+        name: LoopRestarting
+        value: "\"restarting\""
+      - name: LoopStopped
+        value: "\"stopped\""
+    name: LoopWaiting
+  - doc: Span operations.
+    grouped: true
+    items:
+      - comment: an HTTP request served by an endpoint
+        name: OpRequest
+        value: "\"request\""
+      - comment: an in-process call of an endpoint, or of a port
+        name: OpCall
+        value: "\"call\""
+      - comment: a store read
+        name: OpRead
+        value: "\"read\""
+      - comment: a store write
+        name: OpWrite
+        value: "\"write\""
+      - comment: a topic publish
+        name: OpPublish
+        value: "\"publish\""
+      - comment: a subscription handling one message
+        name: OpDeliver
+        value: "\"deliver\""
+      - comment: a workflow transition
+        name: OpTransition
+        value: "\"transition\""
+      - comment: a job run, a loop run
+        name: OpRun
+        value: "\"run\""
+      - comment: the auth handler, in front of an endpoint
+        name: OpAuth
+        value: "\"auth\""
+      - comment: a mail put in the outbox
+        name: OpSend
+        value: "\"send\""
+      - comment: the outbox handing one mail to the transport
+        name: OpDeliverMail
+        value: "\"deliver-mail\""
+      - comment: "a secret's value or keys used: Value, Seal, Open, Sign, Verify"
+        name: OpSecret
+        value: "\"secret\""
+      - comment: "a command dispatched: its run, or its queuing for a queued one"
+        name: OpDispatch
+        value: "\"dispatch\""
+      - comment: a query asked
+        name: OpAsk
+        value: "\"ask\""
+      - comment: a queued command handled by its consumer, in the dispatcher's trace
+        name: OpHandle
+        value: "\"handle\""
+      - comment: a connection a listener accepted, handled until it closes
+        name: OpConnect
+        value: "\"connect\""
+      - comment: a short command-line command, run once
+        name: OpCLI
+        value: "\"cli\""
+      - doc: |-
+          OpTransaction is a unit of work (app.Transact, a command's, a
+          workflow's transition): its attrs say the database it belongs to —
+          "database", and "backend" as a store says it —, its "outcome", the
+          effects it held ("effects"), and "savepoint" for one nested in
+          another.
+        name: OpTransaction
+        value: "\"transaction\""
+    name: OpRequest
+  - doc: The outcomes of a transaction, as its span's "outcome" attribute says them.
+    grouped: true
+    items:
+      - doc: "OutcomeCommit is a transaction that committed: its effects left."
+        name: OutcomeCommit
+        value: "\"commit\""
+      - doc: |-
+          OutcomeRollback is a transaction whose writes were undone: its effects
+          were dropped.
+        name: OutcomeRollback
+        value: "\"rollback\""
+    name: OutcomeCommit
+  - doc: Span statuses.
+    grouped: true
+    items:
+      - name: StatusOK
+        value: "\"ok\""
+      - name: StatusError
+        value: "\"error\""
+    name: StatusOK
+  - doc: |-
+      MaxTableLen is the longest table name a store on a database takes, in
+      bytes: the SDK's document store over SQL keeps its index rows in the table
+      named after it with "___ix", within PostgreSQL's 63.
+    items:
+      - name: MaxTableLen
+        type: int
+        value: "58"
+    name: MaxTableLen
+files:
+  - decls:
+      - ContainerProcess
+      - PortOwnerApp
+      - ServesHealth
+      - ArchitectureMessage
+      - PersonMessage
+      - SystemMessage
+      - ContainerMessage
+      - PortMessage
+      - LinkMessage
+    name: architecture.go
+  - decls:
+      - BlockIf
+      - CodeResult
+      - CodeFuncMessage
+      - CodeStepMessage
+      - CodeBlockMessage
+      - CodeEffectMessage
+      - CodeUseMessage
+    name: code.go
+  - decls:
+      - ConnectorTransport
+      - RoleInbound
+      - ConnectorHTTP
+      - EnginePostgres
+      - engines
+      - ConnectorMessage
+      - ConnectorKind
+      - ConnectorSpec
+      - AdapterMessage
+      - IsEngine
+      - queued
+      - ConnectorCatalog
+      - connectorsFor
+      - detailOf
+      - ConnectorsOf
+    name: connector.go
+  - decls:
+      - MailQueued
+      - MockReplace
+      - MailSummary
+      - MailMessage
+    name: devtools.go
+  - decls:
+      - docTag
+      - taggedLines
+      - SplitDoc
+      - splitTagged
+      - (*taggedLines).add
+      - joinLines
+    name: doc.go
+  - decls:
+      - EdgeCalls
+      - EdgeKind
+    name: edge_kind.go
+  - decls:
+      - EventHello
+      - EventType
+    name: event_type.go
+  - decls:
+      - NodeID
+      - EdgeID
+      - (*GraphMessage).Node
+      - (*GraphMessage).Edge
+      - (*GraphMessage).Files
+      - (*GraphMessage).graphSources
+      - nodeSources
+      - storeSources
+      - workflowSources
+      - codeSources
+      - (*GraphMessage).Normalize
+      - CompareSource
+      - structuralNode
+      - (*GraphMessage).structureHash
+      - Merge
+      - mergeNodes
+      - mergeEdges
+      - indexEdges
+      - chosenByBase
+      - mergedDiagnostics
+      - mergeNode
+      - mergeDocs
+      - mergeLoop
+      - mergeSources
+      - wider
+      - mergeTransitions
+      - transitionSource
+      - mergeAuthorize
+      - widerRange
+      - linkCallers
+      - ServiceOf
+    name: graph.go
+  - decls:
+      - StoreHistoryMessage
+      - PasswordPolicyMessage
+      - FormerMessage
+      - RecordHistoryMessage
+      - RecordVersionMessage
+      - EditMessage
+      - RecordVersionsMessage
+      - TrashedRecordMessage
+      - StoreTrashMessage
+      - (*StoreHistoryMessage).sources
+      - (*StoreHistoryMessage).structure
+    name: history.go
+  - decls:
+      - SegmentPattern
+      - IDPattern
+      - IDValue
+      - kindAlternatives
+      - ValidSegment
+      - ValidName
+      - ValidContract
+      - ParseID
+      - parseScoped
+      - parseNodeID
+      - parseBinary
+      - parseService
+      - (*IDValue).QualifiedServiceName
+      - (*IDValue).String
+      - BinaryID
+      - RoleID
+      - LibraryID
+      - invalidID
+    name: id.go
+  - decls:
+      - maxWord
+      - wordOf
+      - validRoute
+      - isLower
+      - isLetter
+      - isDigit
+      - isSegmentByte
+      - isNameByte
+      - notDigit
+      - notUpper
+    name: id_grammar.go
+  - decls:
+      - simpleShapes
+      - Mermaid
+      - groupNodes
+      - edgeLabel
+      - writeServices
+      - fallbackBinding
+      - shape
+      - endpointShape
+      - loopShape
+      - subscriptionShape
+      - operationShape
+      - mermaidText
+    name: mermaid.go
+  - decls:
+      - Version
+      - ExternalID
+      - GraphMessage
+      - AppMessage
+      - BuildMessage
+      - ModuleVersionMessage
+      - SourceMessage
+      - EdgeMessage
+      - StatsMessage
+      - DiagnosticMessage
+      - AnalysisResult
+    name: model.go
+  - decls:
+      - ModuleMessage
+      - FileMessage
+      - (*GraphMessage).ModuleOf
+      - QualifiedService
+      - ModulePrefix
+      - UnderPrefix
+      - compareFiles
+      - normalizeModules
+      - unmountedNodes
+    name: module.go
+  - decls:
+      - NodeEntity
+    name: node.go
+  - decls:
+      - ExposePublic
+      - AccessAnyone
+      - AuthRequired
+      - TriggerEvent
+      - ViaBind
+      - ModeSync
+      - TransportSMTP
+      - SecretProvided
+      - SecretFromEnv
+      - LoopDeclared
+      - WakeInterval
+      - SelectTimer
+      - ClassPublic
+      - EndpointSpec
+      - PortSpec
+      - CommandSpec
+      - QuerySpec
+      - PermissionMessage
+      - StoreSpec
+      - StorePrivacyMessage
+      - ProductRetentionSpec
+      - RetentionSpec
+      - HeldUntilSpec
+      - IndexSpec
+      - TopicSpec
+      - SubscriptionSpec
+      - WorkflowSpec
+      - StateSpec
+      - TransitionSpec
+      - JobSpec
+      - FrontendSpec
+      - AuthSpec
+      - MailerSpec
+      - SecretSpec
+      - LoopSpec
+      - WakeSourceMessage
+      - SelectCaseMessage
+      - MechanicMessage
+      - SchemaMessage
+      - FieldMessage
+      - (*NodeEntity).authorization
+    name: node_info.go
+  - decls:
+      - KindService
+      - NodeKind
+    name: node_kind.go
+  - decls:
+      - ProfileServer
+      - NetworkUnix
+      - BinarySpec
+      - RoleSpec
+      - CLISpec
+      - ListenerSpec
+      - LibrarySpec
+      - PresentationSpec
+    name: node_process.go
+  - decls:
+      - RetentionOn
+      - GapPurpose
+      - MeasureRedacted
+      - SealedPlaceholder
+      - JournalExport
+      - PersonalDataMessage
+      - StoreDataMessage
+      - ExportedVersionsMessage
+      - ErasureMessage
+      - StoreErasureMessage
+      - PrivacyMessage
+      - RegisterMessage
+      - RegisterStoreMessage
+      - HoldEvent
+      - JournalEntryEvent
+      - JournalCheckMessage
+      - RecordFormerMessage
+      - (*StorePrivacyMessage).sources
+      - (*StorePrivacyMessage).structure
+    name: privacy.go
+  - decls:
+      - ProfileCPU
+      - ProfileResult
+      - NodeCostMessage
+      - FuncCostMessage
+      - FlameNodeMessage
+      - GoroutinesResult
+      - GoroutineGroup
+    name: profile.go
+  - decls:
+      - PhaseStarting
+      - DatabaseUnset
+      - SettingEnv
+      - VarEnv
+      - BootConfig
+      - ComponentPending
+      - LoopJob
+      - ProvenanceLibrary
+      - LoopWaiting
+      - OpRequest
+      - OutcomeCommit
+      - StatusOK
+      - RuntimeMessage
+      - DatabaseMessage
+      - Pool
+      - MigrationSetMessage
+      - MigrationMessage
+      - SettingMessage
+      - BootStepMessage
+      - DevBuildMessage
+      - PhaseChangeEvent
+      - ProcessSpec
+      - HTTPServer
+      - ComponentMessage
+      - LoopMessage
+      - Event
+      - SpanMessage
+      - Payload
+      - TransitionEvent
+      - CensusMessage
+      - TraceMessage
+      - SnippetMessage
+      - InstanceMessage
+      - StepEvent
+      - LogRecordMessage
+      - MockMessage
+      - MailSummaryMessage
+    name: runtime.go
+  - decls:
+      - MaxTableLen
+      - TableName
+    name: table.go
+functions:
+  - name: IsEngine
+    params: backend string
+    results: bool
+  - doc: queued reports whether n is a command that waits in its own queue.
+    name: queued
+    params: n *NodeEntity
+    results: bool
+  - name: ConnectorCatalog
+    results: "[]ConnectorSpec"
+  - doc: |-
+      connectorsFor are the built-in connectors a node brings: those that
+      declare its kind, and whose predicate, when they have one, holds.
+    name: connectorsFor
+    params: n *NodeEntity
+    results: "[]*ConnectorSpec"
+  - doc: |-
+      detailOf is what a node says of a connector it brings, in kit's words;
+      ok is false when the connector has nothing to say or the node says
+      nothing.
+    name: detailOf
+    params: c *ConnectorSpec, n *NodeEntity
+    results: detail string, ok bool
+  - name: ConnectorsOf
+    params: nodes []NodeEntity
+    results: "[]ConnectorMessage"
+  - name: SplitDoc
+    params: text string
+    results: string, map[string]string
+  - doc: |-
+      splitTagged sorts a comment's lines: those before the first tag are the
+      default text, each tagged paragraph and what follows it its language's.
+    name: splitTagged
+    params: text string
+    results: def []string, docs map[string][]string
+  - doc: joinLines joins lines into one, every run of white space one space.
+    name: joinLines
+    params: lines []string
+    results: string
+  - name: NodeID
+    params: service string, kind NodeKind, name string
+    results: string
+  - name: EdgeID
+    params: from string, kind EdgeKind, to, label string
+    results: string
+  - doc: nodeSources hands add every position a node carries.
+    name: nodeSources
+    params: n *NodeEntity, add func(*SourceMessage)
+  - doc: |-
+      storeSources hands add every position of a store: its privacy's options
+      (ADR 0006) and its password policies (ADR 0007).
+    name: storeSources
+    params: st *StoreSpec, add func(*SourceMessage)
+  - doc: |-
+      workflowSources hands add every position of a workflow: its states'
+      entry hooks, its transitions and their guards.
+    name: workflowSources
+    params: w *WorkflowSpec, add func(*SourceMessage)
+  - doc: codeSources hands add every position of a node's code level.
+    name: codeSources
+    params: c *CodeResult, add func(*SourceMessage)
+  - name: CompareSource
+    params: a, b SourceMessage
+    results: int
+  - doc: |-
+      structuralNode is n without what changes while the product runs: its
+      counters, a store's count, privacy counters and what its history weighs,
+      a subscription's and a queued command's dead letters, a mailer's tallies,
+      a workflow's census.
+    name: structuralNode
+    params: in *NodeEntity
+    results: NodeEntity
+  - name: Merge
+    params: base, extra *GraphMessage
+    results: "*GraphMessage"
+  - doc: |-
+      mergeNodes enriches each of the base's nodes with what extra knows of it,
+      and returns the IDs of the base's nodes: the only ones the merge keeps.
+    name: mergeNodes
+    params: nodes []NodeEntity, extra *GraphMessage
+    results: map[string]bool
+  - doc: |-
+      mergeEdges adds to the base's edges what extra found between two known
+      nodes: the evidence of an edge the base has, or an edge the base does not
+      have and did not rule out by its own choice.
+    name: mergeEdges
+    params: edges, extra []EdgeMessage, known map[string]bool, chosen func(EdgeMessage) bool
+    results: "[]EdgeMessage"
+  - doc: |-
+      indexEdges gives each edge its derived ID when it has none, and indexes
+      it: an unnormalized base would otherwise index every edge under "" and
+      the merge append the extra graph's copy of an edge instead of enriching
+      it.
+    name: indexEdges
+    params: edges []EdgeMessage
+    results: map[string]int
+  - doc: |-
+      chosenByBase reports whether a declared edge is one the base alone says: a
+      port's binding, a store feeding a watch — what the app chose at its start.
+    name: chosenByBase
+    params: nodes []NodeEntity
+    results: func(EdgeMessage) bool
+  - doc: |-
+      mergedDiagnostics are what extra says of the nodes base knows, or of no
+      node — and of the nodes it finds on a mounted module's service that base
+      lacks.
+    name: mergedDiagnostics
+    params: known map[string]bool, extra *GraphMessage
+    results: "[]DiagnosticMessage"
+  - doc: mergeNode copies into n what x knows and n does not.
+    name: mergeNode
+    params: n, x *NodeEntity
+  - doc: mergeDocs takes x's documentation and code level where n has none.
+    name: mergeDocs
+    params: n, x *NodeEntity
+  - doc: mergeLoop takes the select cases x read in a hand-written loop's body.
+    name: mergeLoop
+    params: n, x *NodeEntity
+  - doc: mergeSources takes x's ranges where n knows a first line only.
+    name: mergeSources
+    params: n, x *NodeEntity
+  - doc: |-
+      wider reports whether read is a range where have is none or a first
+      line only.
+    name: wider
+    params: have, read *SourceMessage
+    results: bool
+  - doc: |-
+      mergeTransitions gives each of a workflow's transitions the position x
+      found for it, where n has none. n shares its pointers with the base
+      graph: copy, then change.
+    name: mergeTransitions
+    params: n, x *NodeEntity
+  - doc: transitionSource is the position of the transition of found that is t.
+    name: transitionSource
+    params: found []TransitionSpec, t *TransitionSpec
+    results: "*SourceMessage"
+  - doc: |-
+      mergeAuthorize gives the authorization function of a command or a query
+      the range the analysis read, where the runtime knows its first line only.
+      n shares its pointers with the base graph: copy, then change.
+    name: mergeAuthorize
+    params: n, x *NodeEntity
+  - doc: |-
+      widerRange reports whether read is a whole range where have is none or a
+      first line only.
+    name: widerRange
+    params: have, read *SourceMessage
+    results: bool
+  - doc: |-
+      linkCallers fills each workflow transition's Callers from the transitions
+      edges that name its event.
+    name: linkCallers
+    params: g *GraphMessage
+  - name: ServiceOf
+    params: id string
+    results: string
+  - doc: |-
+      kindAlternatives is the service kinds as a regular-expression alternation,
+      sorted so the pattern is the same string on every run.
+    name: kindAlternatives
+    results: string
+  - name: ValidSegment
+    params: s string
+    results: bool
+  - name: ValidName
+    params: s string
+    results: bool
+  - name: ValidContract
+    params: s string
+    results: bool
+  - name: ParseID
+    params: s string
+    results: IDValue, error
+  - doc: |-
+      parseScoped reads the IDs outside every service — the outside world, a
+      binary or one of its roles, a library —; scoped is false for any other
+      string.
+    name: parseScoped
+    params: s string
+    results: id IDValue, scoped bool, err error
+  - doc: |-
+      parseNodeID reads a service's ID, or one of its nodes':
+      "<service>/<kind>/<name>".
+    name: parseNodeID
+    params: s string
+    results: IDValue, error
+  - doc: "parseBinary reads what follows \"binary:\": a binary, or one of its roles."
+    name: parseBinary
+    params: rest string
+    results: IDValue, error
+  - doc: parseService splits "<module>.<service>" and checks both halves.
+    name: parseService
+    params: s string
+    results: module, service string, err error
+  - name: BinaryID
+    params: binary string
+    results: string
+  - name: RoleID
+    params: binary, role string
+    results: string
+  - name: LibraryID
+    params: library string
+    results: string
+  - doc: |-
+      invalidID is the refusal of ParseID, naming the part that failed — never
+      the input.
+    name: invalidID
+    params: part string
+    results: error
+  - doc: |-
+      wordOf reports whether s is one byte first accepts, then up to maxWord-1
+      bytes rest accepts: a segment or a name.
+    name: wordOf
+    params: s string, first, rest func(byte) bool
+    results: bool
+  - doc: |-
+      validRoute reports whether s is a route an endpoint is named by:
+      RoutePattern, "[A-Z]+ /[^\s]*".
+    name: validRoute
+    params: s string
+    results: bool
+  - doc: isLower is [a-z].
+    name: isLower
+    params: c byte
+    results: bool
+  - doc: isLetter is [A-Za-z].
+    name: isLetter
+    params: c byte
+    results: bool
+  - doc: isDigit is [0-9].
+    name: isDigit
+    params: c byte
+    results: bool
+  - doc: isSegmentByte is a segment's [a-z0-9-].
+    name: isSegmentByte
+    params: c byte
+    results: bool
+  - doc: isNameByte is a name's [A-Za-z0-9_.-].
+    name: isNameByte
+    params: c byte
+    results: bool
+  - doc: notDigit is any rune but [0-9].
+    name: notDigit
+    params: r rune
+    results: bool
+  - doc: notUpper is any rune but [A-Z].
+    name: notUpper
+    params: r rune
+    results: bool
+  - name: Mermaid
+    params: g *GraphMessage
+    results: string
+  - doc: |-
+      groupNodes sorts the nodes into the services and each service's nodes,
+      and draws the outside world as it meets it.
+    name: groupNodes
+    params: chart *strings.Builder, nodes []NodeEntity, mid func(string) string
+    results: services []NodeEntity, byService map[string][]NodeEntity
+  - doc: "edgeLabel is what an arrow says: its kind, and its label when it has one."
+    name: edgeLabel
+    params: e *EdgeMessage
+    results: string
+  - doc: |-
+      writeServices draws each service as a subgraph around its nodes — a
+      module's inside the module's own.
+    name: writeServices
+    params: b *strings.Builder, g *GraphMessage, services []NodeEntity, byService map[string][]NodeEntity, mid func(string) string
+  - doc: fallbackBinding reports whether e is a port's binding to its own fallback.
+    name: fallbackBinding
+    params: g *GraphMessage, e *EdgeMessage
+    results: bool
+  - doc: shape draws each kind of node with its own Mermaid shape.
+    name: shape
+    params: n *NodeEntity
+    results: string
+  - doc: |-
+      endpointShape draws an endpoint by its method and path, and says when it
+      asks for a user.
+    name: endpointShape
+    params: n *NodeEntity
+    results: string
+  - doc: |-
+      loopShape draws a hand-written loop with a double circle, a declared one
+      with a circle.
+    name: loopShape
+    params: n *NodeEntity
+    results: string
+  - doc: |-
+      subscriptionShape draws a subscription as a parallelogram — a watch
+      (ADR 0008) marked with the mark it watches.
+    name: subscriptionShape
+    params: n *NodeEntity, label string
+    results: string
+  - doc: |-
+      operationShape draws a command as a parallelogram leaning back — a
+      subscription's leans forward —, marked when it waits in its queue, and a
+      query as a rhombus, a question.
+    name: operationShape
+    params: n *NodeEntity, label string
+    results: string
+  - doc: |-
+      mermaidText makes s safe inside a Mermaid edge label: a pipe would end
+      the label, a double quote the string.
+    name: mermaidText
+    params: s string
+    results: string
+  - name: QualifiedService
+    params: module, service string
+    results: string
+  - name: ModulePrefix
+    params: name string
+    results: string
+  - name: UnderPrefix
+    params: prefix, path string
+    results: string
+  - doc: compareFiles orders files by root, then path.
+    name: compareFiles
+    params: a, b FileMessage
+    results: int
+  - doc: |-
+      normalizeModules sorts the modules by name, and what each lists that has
+      no order of its own. A module's services are a list, never null: a
+      module that lists none serves an empty one.
+    name: normalizeModules
+    params: modules []ModuleMessage
+  - doc: |-
+      unmountedNodes are the nodes extra finds on a module's service that base
+      mounts and lacks: declared by a package the binary does not link — one
+      no module or product imports. The merge says so rather than dropping them
+      unsaid.
+    name: unmountedNodes
+    params: known map[string]bool, extra *GraphMessage
+    results: "[]DiagnosticMessage"
+  - name: TableName
+    params: service, node, suffix string
+    results: string
+imports:
+  cmp: cmp
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  hex: encoding/hex
+  json: encoding/json
+  maps: maps
+  regexp: regexp
+  sha256: crypto/sha256
+  slices: slices
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/model/internal/core
+  name: core
+  purpose: "Package core is the Product Graph under the names the role rule asks for: every struct carries its role (NodeEntity, GraphMessage, EndpointSpec, …)."
+types:
+  - fields:
+      - doc: People are the humans the product serves.
+        name: People
+        type: "[]PersonMessage"
+      - doc: |-
+          Systems are the software systems outside the product it talks to, or
+          that talk to it.
+        name: Systems
+        type: "[]SystemMessage"
+      - doc: Containers are the product's runnable and storage units.
+        name: Containers
+        type: "[]ContainerMessage"
+      - doc: Links are the relationships between people, systems and containers.
+        name: Links
+        type: "[]LinkMessage"
+    kind: struct
+    name: ArchitectureMessage
+  - fields:
+      - doc: "ID is unique in the architecture: \"person:user\"."
+        name: ID
+        type: string
+      - doc: "Name is what the diagram prints: \"User\"."
+        name: Name
+        type: string
+      - doc: Doc says who they are and what they do with the product.
+        name: Doc
+        type: string
+    kind: struct
+    name: PersonMessage
+  - fields:
+      - doc: "ID is unique in the architecture: \"system:smtp\"."
+        name: ID
+        type: string
+      - doc: "Name is what the diagram prints: \"SMTP relay\"."
+        name: Name
+        type: string
+      - doc: Doc says what it is to the product.
+        name: Doc
+        type: string
+      - doc: "Technology names how it is reached: \"SMTP · STARTTLS\"."
+        name: Technology
+        type: string
+      - doc: "Location says where, when it is known and not secret: \"smtp.example.com:587\"."
+        name: Location
+        type: string
+      - doc: Nodes are the nodes of the product that talk to it.
+        name: Nodes
+        type: "[]string"
+    kind: struct
+    name: SystemMessage
+  - fields:
+      - doc: "ID is unique in the architecture: \"container:process\"."
+        name: ID
+        type: string
+      - doc: Name is what the diagram prints.
+        name: Name
+        type: string
+      - doc: Kind is one of the Container constants.
+        name: Kind
+        type: string
+      - doc: "Technology names what it is built with: \"Go 1.27 · kit · net/http\"."
+        name: Technology
+        type: string
+      - doc: Doc says what it does.
+        name: Doc
+        type: string
+      - doc: |-
+          Location is where it runs or lives: the listen address, the data
+          directory. Present in dev only.
+        name: Location
+        type: string
+      - doc: |-
+          Nodes are the nodes it hosts: services for the process, stores and
+          subscriptions for the volume, frontends for an SPA.
+        name: Nodes
+        type: "[]string"
+      - doc: Ports are what the process listens on, and whose each port is.
+        name: Ports
+        type: "[]PortMessage"
+      - doc: |-
+          Settings are the settings that configure it: TODO_DATA_DIR for the
+          data directory; a database's URL and tuning variables for a database.
+        name: Settings
+        type: "[]string"
+      - doc: "Engine is a database's engine: \"postgres\", \"mysql\", \"sqlite\"."
+        name: Engine
+        type: string
+      - doc: |-
+          Source is where the code declares the container, when it does: the
+          app for the process, a frontend for its SPA, app.Database for a
+          database. [GraphMessage.Files] allows it.
+        name: Source
+        type: "*SourceMessage"
+    kind: struct
+    name: ContainerMessage
+  - fields:
+      - doc: |-
+          Address is the listen address: "127.0.0.1:4000", ":4000". Present in
+          dev only, like every location.
+        name: Address
+        type: string
+      - doc: Owner is [PortOwnerApp], or the ID of the connector that opened it.
+        name: Owner
+        type: string
+      - doc: "Serves says what it answers: the Serves constants."
+        name: Serves
+        type: "[]string"
+      - doc: Settings are the settings that configure it.
+        name: Settings
+        type: "[]string"
+    kind: struct
+    name: PortMessage
+  - fields:
+      - doc: From is the ID of a person, system or container.
+        name: From
+        type: string
+      - doc: To is the ID of a person, system or container.
+        name: To
+        type: string
+      - doc: "Label says what the relationship is: \"Reads and writes\"."
+        name: Label
+        type: string
+      - doc: "Technology says how: \"JSON over HTTP\", \"SMTP\", \"file I/O\"."
+        name: Technology
+        type: string
+      - doc: Nodes are the nodes whose edges make the link true.
+        name: Nodes
+        type: "[]string"
+      - doc: |-
+          Connectors are the connectors the link is made of: one link from the
+          process to the data directory carries the stores, the queues and the
+          mail outbox.
+        name: Connectors
+        type: "[]string"
+    kind: struct
+    name: LinkMessage
+  - fields:
+      - doc: Entry is the qualified name of the function the node runs first.
+        name: Entry
+        type: string
+      - doc: |-
+          Funcs are the module's functions reachable from the entry, entry
+          first, then in the order the walk met them.
+        name: Funcs
+        type: "[]CodeFuncMessage"
+      - doc: |-
+          Uses are the SDK functions the code calls: the mechanics it composes
+          rather than implements.
+        name: Uses
+        type: "[]CodeUseMessage"
+      - doc: Truncated is set when the walk stopped at its depth or size bound.
+        name: Truncated
+        type: bool
+    kind: struct
+    name: CodeResult
+  - fields:
+      - doc: "Func is the qualified name: \"github.com/kitsunium/todo/tasks.Create\"."
+        name: Func
+        type: string
+      - doc: "Name is the short name a developer reads: \"Create\", \"(*Store).visible\"."
+        name: Name
+        type: string
+      - doc: Source is the function's range.
+        name: Source
+        type: "*SourceMessage"
+      - doc: |-
+          Calls are the qualified names of the module functions it calls, in
+          source order, deduplicated.
+        name: Calls
+        type: "[]string"
+      - doc: Effects are its calls on building blocks, in source order.
+        name: Effects
+        type: "[]CodeEffectMessage"
+      - doc: |-
+          Steps are what it does, in the order it does it: its calls to module
+          functions, on building blocks and into the SDK, arguments before the
+          call they are passed to. A sequence diagram is drawn from them.
+        name: Steps
+        type: "[]CodeStepMessage"
+      - doc: |-
+          Blocks are its blocks that decide whether, or how many times, the
+          steps under them run: an if's branches, a switch's cases, a loop.
+        name: Blocks
+        type: "[]CodeBlockMessage"
+    kind: struct
+    name: CodeFuncMessage
+  - fields:
+      - doc: Line is the 1-based line of the call, in the function's file.
+        name: Line
+        type: int
+      - doc: Call is the qualified name of the module function it calls.
+        name: Call
+        type: string
+      - doc: "Effect is its call on a building block: the index in Effects, plus one."
+        name: Effect
+        type: int
+      - doc: |-
+          Use is the SDK function it calls, from the SDK's version directory:
+          "crypto/password.Hash".
+        name: Use
+        type: string
+      - doc: |-
+          Block is the innermost block guarding it: the index in Blocks, plus
+          one; 0 for the function's body.
+        name: Block
+        type: int
+    kind: struct
+    name: CodeStepMessage
+  - fields:
+      - doc: Kind is one of the Block constants.
+        name: Kind
+        type: string
+      - doc: |-
+          Label is the condition or the clause, as written: "err != nil",
+          `case "done"`, "range ids"; bounded.
+        name: Label
+        type: string
+      - doc: Line is the 1-based line where the block starts.
+        name: Line
+        type: int
+      - doc: |-
+          Group is the line of the statement the block is a branch of: an
+          if/else chain, a switch, a select. Blocks with one group are its
+          alternatives.
+        name: Group
+        type: int
+      - doc: |-
+          Parent is the enclosing block: its index in Blocks, plus one; 0 for
+          the function's body.
+        name: Parent
+        type: int
+    kind: struct
+    name: CodeBlockMessage
+  - fields:
+      - doc: "Kind is the edge the call makes: reads, writes, publishes…"
+        name: Kind
+        type: EdgeKind
+      - doc: Target is the node the call reaches.
+        name: Target
+        type: string
+      - doc: "Label refines Kind like an edge's label: the event of a transition."
+        name: Label
+        type: string
+      - doc: "Op is the method called: \"Get\", \"Insert\", \"Fire\", \"Send\"."
+        name: Op
+        type: string
+      - doc: Line is the 1-based line of the call, in the function's file.
+        name: Line
+        type: int
+    kind: struct
+    name: CodeEffectMessage
+  - fields:
+      - doc: "Package is the SDK package: \"github.com/kitsunium/sdk/pkg/v1/crypto/password\"."
+        name: Package
+        type: string
+      - doc: "Func is the function or method: \"Hash\", \"(*Composer).Compose\"."
+        name: Func
+        type: string
+      - doc: Sites are the call sites, sorted.
+        name: Sites
+        type: "[]SourceMessage"
+    kind: struct
+    name: CodeUseMessage
+  - fields:
+      - doc: |-
+          ID names the connector: [ConnectorHTTP], [ConnectorMail],
+          [ConnectorStore], [ConnectorQueue], [ConnectorDatabase].
+        name: ID
+        type: string
+      - doc: |-
+          Kind groups connectors by what they are for; kept for older readers,
+          Roles says more.
+        name: Kind
+        type: ConnectorKind
+      - doc: |-
+          Roles place it against the process boundary: [RoleInbound] (the
+          product is reached through it), [RoleOutbound] (the product reaches out
+          through it), [RoleStorage] (the product keeps data in it). kit's
+          built-in queues run inside the process: storage only.
+        name: Roles
+        type: "[]string"
+      - doc: "Protocol is the wire protocol the code fixes, when it does: \"http\"."
+        name: Protocol
+        type: string
+      - doc: |-
+          Detail is what the product uses, in kit's words: the stores'
+          backends, the mail transport, the queues' brokers.
+        name: Detail
+        type: string
+      - doc: |-
+          Settings are the settings the connector owns — the ones its page shows
+          with their value. A setting of a resource it uses (the data directory,
+          kit's port) belongs to that resource: [ContainerMessage].
+        name: Settings
+        type: "[]string"
+      - doc: Nodes are the nodes the connector brings to the graph, sorted.
+        name: Nodes
+        type: "[]string"
+    kind: struct
+    name: ConnectorMessage
+  - kind: named
+    name: ConnectorKind
+    underlying: string
+  - fields:
+      - doc: "ID is the connector's: [ConnectorHTTP]…"
+        name: ID
+        type: string
+      - doc: Kind groups it, as [ConnectorMessage.Kind].
+        name: Kind
+        type: ConnectorKind
+      - doc: Roles place it against the process boundary.
+        name: Roles
+        type: "[]string"
+      - doc: Protocol is the wire protocol the code fixes, when it does.
+        name: Protocol
+        type: string
+      - doc: Settings are the settings it owns.
+        name: Settings
+        type: "[]string"
+      - doc: |-
+          Declares are the building blocks whose declaration brings it: a
+          command brings the queue connector only when it is queued.
+        name: Declares
+        type: "[]NodeKind"
+      - doc: |-
+          Adapters are the modules a product imports to plug it into what it
+          reaches: the engines of the database connector.
+        name: Adapters
+        type: "[]AdapterMessage"
+      - doc: |-
+          brings narrows Declares: a node of a declared kind brings the
+          connector only when it holds. nil: every such node does.
+        name: brings
+        type: func(*NodeEntity) bool
+      - doc: "detail is what a node that brings it says of it; nil: nothing."
+        name: detail
+        type: func(*NodeEntity) string
+    kind: struct
+    name: ConnectorSpec
+  - fields:
+      - doc: "ID names it as the graph does: \"postgres\"."
+        name: ID
+        type: string
+      - doc: "Name is what a reader calls what it reaches: \"PostgreSQL\"."
+        name: Name
+        type: string
+      - doc: |-
+          Import is the package the product's main imports:
+          "github.com/kitsunium/sdk/framework/connectors/postgres".
+        name: Import
+        type: string
+      - doc: "Driver is the Go driver it links: \"github.com/jackc/pgx/v5\"."
+        name: Driver
+        type: string
+    kind: struct
+    name: AdapterMessage
+  - alias: true
+    doc: |-
+      MailSummary is the name [MailMessage] embeds its summary under: the field
+      a caller sets and reads is MailMessage.MailSummary, its JSON members
+      promoted beside the body's.
+    kind: alias
+    name: MailSummary
+    underlying: MailSummaryMessage
+  - fields:
+      - name: ""
+        role: embedded
+        type: MailSummary
+      - doc: Text is the plain text body.
+        name: Text
+        type: string
+      - doc: |-
+          HTML is the HTML body. The Studio renders it in a sandboxed frame
+          that runs no script.
+        name: HTML
+        type: string
+      - doc: Headers are the extra headers, rendered.
+        name: Headers
+        type: map[string]string
+      - doc: Raw is the composed message, as the transport received it.
+        name: Raw
+        type: string
+    kind: struct
+    name: MailMessage
+  - doc: |-
+      taggedLines gathers a comment's lines by language as [splitTagged] reads
+      them: lang is the tag in force, "" before the first one.
+    fields:
+      - name: lang
+        type: string
+      - name: def
+        type: "[]string"
+      - name: docs
+        type: map[string][]string
+    kind: struct
+    methods:
+      - doc: add files one line under the tag in force, or under the tag it opens.
+        name: add
+        params: line string
+        recv: p *taggedLines
+    name: taggedLines
+  - kind: named
+    name: EdgeKind
+    underlying: string
+  - kind: named
+    name: EventType
+    underlying: string
+  - fields:
+      - doc: |-
+          Revisions is how many former versions each record keeps
+          (app.Revisions, ADR 0007 §3); zero when it keeps none.
+        name: Revisions
+        type: int
+      - doc: |-
+          Fields are the JSON pointers of the fields that keep their former
+          values: tagged history=N — the schema's Field.History says how many —
+          or read by a password policy that refuses former passwords.
+        name: Fields
+        type: "[]string"
+      - doc: Passwords are the store's password policies.
+        name: Passwords
+        type: "[]PasswordPolicyMessage"
+      - doc: |-
+          Kept is how many former values the store keeps, and Bytes what its
+          histories weigh, on a runtime graph.
+        name: Kept
+        type: "*int"
+      - name: Bytes
+        type: "*int64"
+      - doc: |-
+          Versions is how many former versions the store's records keep,
+          Trashed how many records are in its trash, and VersionBytes what both
+          weigh — the JSON they hold —, on a runtime graph of a store that keeps
+          revisions (ADR 0007 §5), as the SDK's document store counts them. A
+          record's current version is the record, and counts in none of them.
+        name: Versions
+        type: "*int"
+      - name: Trashed
+        type: "*int"
+      - name: VersionBytes
+        type: "*int64"
+    kind: struct
+    methods:
+      - doc: |-
+          sources are the declarations a store's history names — its password
+          policies —, for Files.
+        name: sources
+        recv: h *StoreHistoryMessage
+        results: "[]*SourceMessage"
+      - doc: |-
+          structure is what a store's history says of the product's structure, for
+          the revision: without what a run counts — kept, bytes, and what the
+          versions weigh.
+        name: structure
+        recv: h *StoreHistoryMessage
+        results: "*StoreHistoryMessage"
+    name: StoreHistoryMessage
+  - fields:
+      - doc: "Field is the field's JSON pointer: \"/password\"."
+        name: Field
+        type: string
+      - doc: MinLength is the fewest characters a password may have.
+        name: MinLength
+        type: int
+      - doc: |-
+          NotReused is how many former passwords it refuses; zero when it
+          refuses none.
+        name: NotReused
+        type: int
+      - doc: |-
+          NotCommon says it refuses the most common passwords (app.NotCommon),
+          as every policy does.
+        name: NotCommon
+        type: bool
+      - doc: Source is where the policy is declared.
+        name: Source
+        type: "*SourceMessage"
+    kind: struct
+    name: PasswordPolicyMessage
+  - fields:
+      - doc: |-
+          Value is the field's value then, as JSON; absent for a secret field,
+          whose former values are never given.
+        name: Value
+        type: json.RawMessage
+      - doc: Until is when it was replaced, on the app's clock.
+        name: Until
+        type: time.Time
+      - doc: |-
+          By is the user who replaced it — app.UserID —, empty for a write
+          with no user: a job's, a loop's, kit's own.
+        name: By
+        type: string
+    kind: struct
+    name: FormerMessage
+  - fields:
+      - name: Fields
+        type: map[string][]FormerMessage
+    kind: struct
+    name: RecordHistoryMessage
+  - fields:
+      - name: Number
+        type: uint64
+      - doc: At is when the write that made it ran, on the app's clock.
+        name: At
+        type: time.Time
+      - doc: |-
+          By is the user who made it — app.UserID —, empty for a write with no
+          user.
+        name: By
+        type: string
+      - doc: |-
+          Command is the node ID of the command that made it, empty outside
+          one.
+        name: Command
+        type: string
+      - doc: |-
+          Value is the record as it was: in an export, its secret members left
+          out; in the Studio, as the data browser shows a record.
+        name: Value
+        type: json.RawMessage
+    kind: struct
+    name: RecordVersionMessage
+  - fields:
+      - name: Op
+        type: string
+      - name: Path
+        type: string
+      - name: From
+        type: json.RawMessage
+      - name: To
+        type: json.RawMessage
+    kind: struct
+    name: EditMessage
+  - fields:
+      - name: Versions
+        type: "[]RecordVersionMessage"
+      - doc: |-
+          From and To are the two versions compared, when asked for; Edits what
+          changed between them.
+        name: From
+        type: uint64
+      - name: To
+        type: uint64
+      - name: Edits
+        type: "[]EditMessage"
+    kind: struct
+    name: RecordVersionsMessage
+  - fields:
+      - doc: Key is the record's key; empty when Hidden.
+        name: Key
+        type: string
+      - doc: |-
+          Hidden says the key reads a personal, special or secret member, or
+          the record no longer opens to tell: the Studio is not given it.
+        name: Hidden
+        type: bool
+      - doc: At is when the product deleted it.
+        name: At
+        type: time.Time
+      - doc: |-
+          PurgeAt is when kit purges it: its trash's length after At, or its
+          retention's instant when that comes first.
+        name: PurgeAt
+        type: time.Time
+    kind: struct
+    name: TrashedRecordMessage
+  - fields:
+      - doc: Store is the store's node ID.
+        name: Store
+        type: string
+      - name: Total
+        type: int
+      - name: Records
+        type: "[]TrashedRecordMessage"
+      - name: Next
+        type: int
+    kind: struct
+    name: StoreTrashMessage
+  - fields:
+      - doc: |-
+          Module qualifies Service when a module lists it; empty for the
+          product's own services, and for a module's service named like it.
+        name: Module
+        type: string
+      - doc: |-
+          Service is the service's own name, unqualified; empty for a binary, a
+          role, a library and [ExternalID].
+        name: Service
+        type: string
+      - doc: |-
+          Scope is the name of the binary of a binary or a role, or of the
+          library of a library; empty otherwise.
+        name: Scope
+        type: string
+      - doc: Kind is the node's kind.
+        name: Kind
+        type: NodeKind
+      - doc: |-
+          Name is the node's name: the service's for a service, the binary's for
+          a binary.
+        name: Name
+        type: string
+    kind: struct
+    methods:
+      - name: QualifiedServiceName
+        recv: id *IDValue
+        results: string
+      - name: String
+        recv: id *IDValue
+        results: string
+    name: IDValue
+  - fields:
+      - doc: Version is always [Version] for a document this package produced.
+        name: Version
+        type: int
+      - doc: |-
+          Revision changes whenever the structure changes (nodes, edges, sources),
+          never when only observed statistics move. A reader caches layout on it.
+        name: Revision
+        type: string
+      - doc: App identifies the product.
+        name: App
+        type: AppMessage
+      - doc: Nodes are sorted by ID.
+        name: Nodes
+        type: "[]NodeEntity"
+      - doc: Edges are sorted by ID.
+        name: Edges
+        type: "[]EdgeMessage"
+      - doc: Catalog lists the generic mechanics this kit version offers.
+        name: Catalog
+        type: "[]MechanicMessage"
+      - doc: Diagnostics are problems found while building the graph.
+        name: Diagnostics
+        type: "[]DiagnosticMessage"
+      - doc: Runtime is present when a running process describes itself.
+        name: Runtime
+        type: "*RuntimeMessage"
+      - doc: Analysis reports the static analysis that enriched this graph.
+        name: Analysis
+        type: "*AnalysisResult"
+      - doc: |-
+          Architecture is the product at C4's two outer levels: who uses it and
+          what it depends on, and what it is deployed as.
+        name: Architecture
+        type: "*ArchitectureMessage"
+      - doc: |-
+          Connectors are what the product plugs into, derived from its nodes by
+          [GraphMessage.Normalize]: the Studio shows their pages and widgets only.
+        name: Connectors
+        type: "[]ConnectorMessage"
+      - doc: |-
+          ConnectorCatalog is every connector this kit version ships, used or
+          not: what the product may plug into, and what brings each.
+        name: ConnectorCatalog
+        type: "[]ConnectorSpec"
+      - doc: Modules are the modules the app mounts (ADR 0008), sorted by name.
+        name: Modules
+        type: "[]ModuleMessage"
+    kind: struct
+    methods:
+      - name: Node
+        params: id string
+        recv: g *GraphMessage
+        results: "*NodeEntity"
+      - name: Edge
+        params: id string
+        recv: g *GraphMessage
+        results: "*EdgeMessage"
+      - name: Files
+        recv: g *GraphMessage
+        results: "[]FileMessage"
+      - doc: |-
+          graphSources hands add every position the graph carries outside its
+          nodes: containers, the code behind static edges, diagnostics, modules.
+        name: graphSources
+        params: add func(*SourceMessage)
+        recv: g *GraphMessage
+      - name: Normalize
+        recv: g *GraphMessage
+      - doc: |-
+          structureHash hashes what the graph IS, leaving out what it has observed.
+          Layout is cached on it, so a counter ticking must not invalidate it.
+        name: structureHash
+        recv: g *GraphMessage
+        results: string
+      - name: ModuleOf
+        params: name string
+        recv: g *GraphMessage
+        results: "*ModuleMessage"
+    name: GraphMessage
+  - fields:
+      - doc: Name is the product name given to app.NewApp.
+        name: Name
+        type: string
+      - doc: Module is the Go module path of the product.
+        name: Module
+        type: string
+      - doc: |-
+          Root is the absolute module root on the machine that produced the
+          graph. Present in dev only: it is what an editor link needs, and what a
+          production graph must not leak.
+        name: Root
+        type: string
+      - doc: Env is "dev" or "production".
+        name: Env
+        type: string
+      - doc: App is the version of the framework that produced the graph.
+        name: App
+        type: string
+      - doc: Go is the Go version the product was built with.
+        name: Go
+        type: string
+      - doc: StartedAt is when the process started, for a runtime graph.
+        name: StartedAt
+        type: "*time.Time"
+      - doc: |-
+          Build says what the binary was built from: the product, the framework
+          and the SDK the framework depends on.
+        name: Build
+        type: "*BuildMessage"
+    kind: struct
+    name: AppMessage
+  - fields:
+      - doc: Product is the product's own module.
+        name: Product
+        type: ModuleVersionMessage
+      - doc: |-
+          App is the framework: since ADR 0162 the SDK module,
+          github.com/kitsunium/sdk, which holds it.
+        name: App
+        type: ModuleVersionMessage
+      - doc: |-
+          SDK is the SDK the framework is built on — the same module as App
+          since ADR 0162, so the two say the same version.
+        name: SDK
+        type: ModuleVersionMessage
+    kind: struct
+    name: BuildMessage
+  - fields:
+      - doc: Module is the module path.
+        name: Module
+        type: string
+      - doc: |-
+          Version is the published module version, "v0.4.6"; empty for a local
+          directory or a build without module version.
+        name: Version
+        type: string
+      - doc: Revision is the VCS commit the module was built from, when known.
+        name: Revision
+        type: string
+      - doc: Time is that commit's time.
+        name: Time
+        type: "*time.Time"
+      - doc: Modified is set when the build included uncommitted changes.
+        name: Modified
+        type: bool
+      - doc: |-
+          Local is set when the module came from a local directory (a replace
+          or a workspace) rather than a published version.
+        name: Local
+        type: bool
+    kind: struct
+    name: ModuleVersionMessage
+  - fields:
+      - doc: |-
+          File is relative to App.Root, slash-separated — or, when GoModule is
+          set, to the root of that Go module.
+        name: File
+        type: string
+      - doc: Line is 1-based.
+        name: Line
+        type: int
+      - doc: EndLine, when set, closes the range [Line, EndLine].
+        name: EndLine
+        type: int
+      - doc: Func is the qualified Go function, when the range is a function.
+        name: Func
+        type: string
+      - doc: |-
+          GoModule is set on a position outside the product's Go module — a
+          module's (ADR 0008), a library's —: that Go module, "path@version", or
+          its path alone when it is built from a local directory.
+        name: GoModule
+        type: string
+    kind: struct
+    name: SourceMessage
+  - fields:
+      - doc: ID is "<from>|<kind>|<to>" or "<from>|<kind>|<to>|<label>".
+        name: ID
+        type: string
+      - doc: From is the source node ID.
+        name: From
+        type: string
+      - doc: To is the target node ID.
+        name: To
+        type: string
+      - doc: Kind says how the two relate.
+        name: Kind
+        type: EdgeKind
+      - doc: |-
+          Label refines the kind: the event of a transition ("create" for a new
+          instance), or "direct" for a call that bypasses an endpoint.
+        name: Label
+        type: string
+      - doc: |-
+          Contract names the versioned contract of an [EdgeContracts] edge:
+          "<name>/v<major>", "render/v1".
+        name: Contract
+        type: string
+      - doc: Declared is set when the edge exists by construction.
+        name: Declared
+        type: bool
+      - doc: Static lists the call sites the analyzer found, sorted.
+        name: Static
+        type: "[]SourceMessage"
+      - doc: Observed is present once the edge was seen at runtime.
+        name: Observed
+        type: "*StatsMessage"
+    kind: struct
+    name: EdgeMessage
+  - fields:
+      - doc: Count is how many times it ran.
+        name: Count
+        type: int64
+      - doc: Errors is how many of those failed.
+        name: Errors
+        type: int64
+      - doc: LastAt is when it last ran.
+        name: LastAt
+        type: "*time.Time"
+      - doc: AvgMs is the mean duration in milliseconds.
+        name: AvgMs
+        type: float64
+      - doc: MaxMs is the longest duration in milliseconds.
+        name: MaxMs
+        type: float64
+    kind: struct
+    name: StatsMessage
+  - fields:
+      - doc: Severity is "error" or "warning". An error refuses to start the app.
+        name: Severity
+        type: string
+      - doc: Message says what is wrong and how to fix it, in English.
+        name: Message
+        type: string
+      - doc: |-
+          Texts is the message in each language kit speaks, by language: "en",
+          and "fr" when the program imports framework/app/studio. The Studio
+          shows its reader's.
+        name: Texts
+        type: map[string]string
+      - doc: Node is the node concerned, when there is one.
+        name: Node
+        type: string
+      - doc: Source is where the problem is.
+        name: Source
+        type: "*SourceMessage"
+    kind: struct
+    name: DiagnosticMessage
+  - fields:
+      - doc: Status is "pending", "running", "ok", "failed" or "unavailable".
+        name: Status
+        type: string
+      - doc: Error explains a failed or unavailable analysis.
+        name: Error
+        type: string
+      - doc: At is when the analysis finished.
+        name: At
+        type: "*time.Time"
+      - doc: Packages is how many packages were analyzed.
+        name: Packages
+        type: int
+      - doc: TookMs is how long it took.
+        name: TookMs
+        type: float64
+    kind: struct
+    name: AnalysisResult
+  - fields:
+      - doc: Name is the name app.NewModule gives it.
+        name: Name
+        type: string
+      - doc: |-
+          Doc is its description in the product's default language; Docs the
+          same in other languages, by tag, as a node's.
+        name: Doc
+        type: string
+      - name: Docs
+        type: map[string]string
+      - doc: "Package is the Go package that declares it: the one a product imports."
+        name: Package
+        type: string
+      - doc: Build is the Go module it comes from, and its version.
+        name: Build
+        type: "*ModuleVersionMessage"
+      - doc: Services are its services' IDs, in the order it lists them.
+        name: Services
+        type: "[]string"
+      - doc: Requires are the modules it requires (app.Requires), by name.
+        name: Requires
+        type: "[]string"
+      - doc: RequiredBy are the mounted modules that require it, by name, sorted.
+        name: RequiredBy
+        type: "[]string"
+      - doc: |-
+          Prefix is where its routes are served: "/<name>/" unless the mount
+          says otherwise (app.Prefix); "/" shares the product's route space.
+        name: Prefix
+        type: string
+      - doc: Source is where app.NewModule declares it.
+        name: Source
+        type: "*SourceMessage"
+      - doc: |-
+          Mount is where the app mounts it — App.With or app.Mount —; absent
+          when only another module's app.Requires mounted it, at its defaults.
+        name: Mount
+        type: "*SourceMessage"
+      - doc: |-
+          Only are the environments its mounts hold in (app.Only), sorted:
+          present when every mount the app gives it names its environments,
+          absent when one holds in every environment, or when only another
+          module's app.Requires mounted it. Added at Version 5: a reader
+          that does not know it reads the graph as before.
+        name: Only
+        type: "[]string"
+    kind: struct
+    name: ModuleMessage
+  - fields:
+      - doc: GoModule is empty for a file of the product's own module.
+        name: GoModule
+        type: string
+      - name: File
+        type: string
+    kind: struct
+    name: FileMessage
+  - fields:
+      - doc: |-
+          ID is "<service>/<kind>/<name>", "<service>" for a service,
+          "binary:<name>" for a binary, "binary:<binary>/role/<name>" for a
+          role, "library:<name>" for a library, or [ExternalID]: the grammar of
+          [IDValue].
+        name: ID
+        type: string
+      - doc: Kind says which building block this is.
+        name: Kind
+        type: NodeKind
+      - doc: Name is unique among the nodes of one kind in one service.
+        name: Name
+        type: string
+      - doc: Service is the owning service ID. Empty for services and external.
+        name: Service
+        type: string
+      - doc: |-
+          Module is the module the node belongs to — a module's service and
+          every node of it —; empty for the product's own.
+        name: Module
+        type: string
+      - doc: |-
+          Doc is the Go doc comment of the declaration or of its handler, in
+          the product's default language.
+        name: Doc
+        type: string
+      - doc: |-
+          Docs are the same description in other languages, by tag ("fr"),
+          from the comment's tagged paragraphs: see [SplitDoc].
+        name: Docs
+        type: map[string]string
+      - doc: Source is where the node is declared.
+        name: Source
+        type: "*SourceMessage"
+      - doc: Handler is the body of the function the node runs, when it has one.
+        name: Handler
+        type: "*SourceMessage"
+      - name: Endpoint
+        type: "*EndpointSpec"
+      - name: Store
+        type: "*StoreSpec"
+      - name: Topic
+        type: "*TopicSpec"
+      - name: Subscription
+        type: "*SubscriptionSpec"
+      - name: Workflow
+        type: "*WorkflowSpec"
+      - name: Job
+        type: "*JobSpec"
+      - name: Frontend
+        type: "*FrontendSpec"
+      - name: Auth
+        type: "*AuthSpec"
+      - name: Mailer
+        type: "*MailerSpec"
+      - name: Loop
+        type: "*LoopSpec"
+      - name: Secret
+        type: "*SecretSpec"
+      - name: Port
+        type: "*PortSpec"
+      - name: Command
+        type: "*CommandSpec"
+      - name: Query
+        type: "*QuerySpec"
+      - name: Binary
+        type: "*BinarySpec"
+      - name: Role
+        type: "*RoleSpec"
+      - name: CLI
+        type: "*CLISpec"
+      - name: Listener
+        type: "*ListenerSpec"
+      - name: Library
+        type: "*LibrarySpec"
+      - name: Presentation
+        type: "*PresentationSpec"
+      - doc: |-
+          Code is the code the node runs, as the static analysis read it: C4's
+          code level.
+        name: Code
+        type: "*CodeResult"
+      - doc: Stats are runtime counters, present on a runtime graph.
+        name: Stats
+        type: "*StatsMessage"
+    kind: struct
+    methods:
+      - doc: |-
+          authorization locates the function of a command's or a query's
+          Authorize; nil for any other node, or one without.
+        name: authorization
+        recv: n *NodeEntity
+        results: "*SourceMessage"
+    name: NodeEntity
+  - fields:
+      - doc: Method is the HTTP method, upper case; empty for an implementation.
+        name: Method
+        type: string
+      - doc: |-
+          Path is the route pattern, with {wildcards}; empty for an
+          implementation.
+        name: Path
+        type: string
+      - doc: Expose is [ExposePublic] or [ExposePrivate].
+        name: Expose
+        type: string
+      - doc: |-
+          Auth is [AuthRequired], [AuthOptional], or empty when the endpoint
+          ignores authentication.
+        name: Auth
+        type: string
+      - doc: Request is the input type.
+        name: Request
+        type: "*SchemaMessage"
+      - doc: Response is the output type.
+        name: Response
+        type: "*SchemaMessage"
+      - doc: |-
+          Pipeline lists the mechanics a request goes through before the
+          handler, in order.
+        name: Pipeline
+        type: "[]MechanicMessage"
+      - doc: |-
+          Implements is the node ID of the port this endpoint implements
+          (Service.Implement): an endpoint with no route, reached through the
+          port.
+        name: Implements
+        type: string
+      - doc: |-
+          Exposes is the node ID of the command this endpoint dispatches, or of
+          the query it asks (Command.Expose, Query.Expose): its authentication
+          is the operation's, and the rest of its pipeline — validation, key,
+          authorization — the operation's own.
+        name: Exposes
+        type: string
+      - doc: |-
+          Access is how an exposure says its operation is open on purpose —
+          [AccessAnyone] or [AccessAnyUser] —; empty when the operation says who
+          may run it (a permission, a rule), and on any other endpoint.
+        name: Access
+        type: string
+    kind: struct
+    name: EndpointSpec
+  - fields:
+      - doc: Request is the type the port is called with.
+        name: Request
+        type: "*SchemaMessage"
+      - doc: Response is the type it answers.
+        name: Response
+        type: "*SchemaMessage"
+      - doc: |-
+          Fallback is the node ID of the operation the port declares for when
+          the app binds nothing else (app.Fallback).
+        name: Fallback
+        type: string
+      - doc: |-
+          Bound is the node ID of the operation the port calls, as the start
+          chose it — on a static graph, as the analysis reads the same rule;
+          empty when nothing is bound or a test replaced the port. The graph
+          draws it as a declared edge from the port.
+        name: Bound
+        type: string
+      - doc: "Via is how it was chosen: one of the Via constants."
+        name: Via
+        type: string
+    kind: struct
+    name: PortSpec
+  - fields:
+      - doc: Input is the type it is dispatched with.
+        name: Input
+        type: "*SchemaMessage"
+      - doc: Result is the type it answers; Empty for a queued command.
+        name: Result
+        type: "*SchemaMessage"
+      - doc: Mode is [ModeSync] or [ModeQueued].
+        name: Mode
+        type: string
+      - doc: |-
+          Auth is [AuthRequired] — implied by a permission —, [AuthOptional],
+          or empty when the command ignores authentication.
+        name: Auth
+        type: string
+      - doc: |-
+          Pipeline lists the mechanics a dispatch goes through before the
+          handler, in the order they run.
+        name: Pipeline
+        type: "[]MechanicMessage"
+      - doc: Permissions are the permissions a caller needs (Allow).
+        name: Permissions
+        type: "[]PermissionMessage"
+      - doc: |-
+          Authorize locates the function of its Authorize: a rule that needs
+          the data.
+        name: Authorize
+        type: "*SourceMessage"
+      - doc: |-
+          Key is set when the command names the entity it is about (Key): two
+          runs with one key never overlap.
+        name: Key
+        type: bool
+      - doc: |-
+          MaxDeliveries is how many attempts a queued command gets before it is
+          dead-lettered.
+        name: MaxDeliveries
+        type: int
+      - doc: |-
+          Parallelism is how many dispatches of a queued command are handled at
+          once.
+        name: Parallelism
+        type: int
+      - doc: |-
+          Queue is "memory", "file" or "sql": where a queued command waits — "sql"
+          on the database that keeps its service.
+        name: Queue
+        type: string
+      - doc: |-
+          DeadLetters is how many dispatches of a queued command were
+          abandoned, on a runtime graph.
+        name: DeadLetters
+        type: "*int"
+    kind: struct
+    name: CommandSpec
+  - fields:
+      - doc: Input is the type it is asked with.
+        name: Input
+        type: "*SchemaMessage"
+      - doc: Result is the type it answers.
+        name: Result
+        type: "*SchemaMessage"
+      - doc: |-
+          Auth is [AuthRequired] — implied by a permission —, [AuthOptional],
+          or empty when the query ignores authentication.
+        name: Auth
+        type: string
+      - doc: |-
+          Pipeline lists the mechanics a question goes through before the
+          handler, in the order they run.
+        name: Pipeline
+        type: "[]MechanicMessage"
+      - doc: Permissions are the permissions a caller needs (Allow).
+        name: Permissions
+        type: "[]PermissionMessage"
+      - doc: |-
+          Authorize locates the function of its Authorize: a rule that needs
+          the data.
+        name: Authorize
+        type: "*SourceMessage"
+    kind: struct
+    name: QuerySpec
+  - fields:
+      - doc: "Action is what the caller does: \"place\"."
+        name: Action
+        type: string
+      - doc: "Resource is the kind of thing it does it to: \"order\"."
+        name: Resource
+        type: string
+    kind: struct
+    name: PermissionMessage
+  - fields:
+      - doc: Entity is the stored type.
+        name: Entity
+        type: "*SchemaMessage"
+      - doc: |-
+          Backend is where the store's data is: "memory", "file", or the engine
+          of the database that keeps it (ADR 0004): "postgres", "mysql",
+          "sqlite".
+        name: Backend
+        type: string
+      - doc: |-
+          Location is where a file backend keeps its data, relative to the data
+          directory.
+        name: Location
+        type: string
+      - doc: |-
+          Database names the database that keeps the store, as the app declares
+          it (app.Database, app.Keeps) — present even while the store's data
+          stays in the data directory, in dev without the database's URL. Its
+          container is "container:database:<name>".
+        name: Database
+        type: string
+      - doc: |-
+          Table is the table the database keeps the store's entities in —
+          "<service>__<store>", '-' and '.' written '_', a digest past the
+          engine's limit —, beside its index rows in "<table>___ix". Present
+          with Database.
+        name: Table
+        type: string
+      - doc: Count is how many entities the store holds, on a runtime graph.
+        name: Count
+        type: "*int"
+      - doc: |-
+          Indexes are the secondary indexes the store maintains, in declaration
+          order.
+        name: Indexes
+        type: "[]IndexSpec"
+      - doc: |-
+          Privacy says what the store does with personal data (ADR 0006): whom
+          its records are about, why it keeps them and for how long. Absent when
+          its entity holds nothing personal and it declares no retention.
+        name: Privacy
+        type: "*StorePrivacyMessage"
+      - doc: |-
+          History says what the store remembers of its records (ADR 0007): the
+          fields that keep their former values, its password policies. Absent
+          when it remembers nothing and has no policy.
+        name: History
+        type: "*StoreHistoryMessage"
+      - doc: |-
+          ReadModel is set on a store derived from others (app.ReadModel):
+          written by projections — subscriptions —, read by queries.
+        name: ReadModel
+        type: bool
+    kind: struct
+    name: StoreSpec
+  - fields:
+      - doc: |-
+          Subject is the JSON pointer of the field that says whom each record is
+          about: "/email". Empty when the entity has no subject field.
+        name: Subject
+        type: string
+      - doc: Purpose is why the store keeps its records, as app.Purpose says it.
+        name: Purpose
+        type: string
+      - doc: |-
+          Erase says when kit clears a record's personal data; Delete when it
+          removes the record.
+        name: Erase
+        type: "*RetentionSpec"
+      - name: Delete
+        type: "*RetentionSpec"
+      - doc: |-
+          ByProduct is set when the product keeps the store's retention itself
+          (app.RetentionByProduct): kit runs none — Erase and Delete are then
+          absent — and asks for neither a retention nor a subject.
+        name: ByProduct
+        type: "*ProductRetentionSpec"
+      - doc: |-
+          HeldUntil holds each record until an instant it carries: the law's
+          own retention (app.HeldUntil).
+        name: HeldUntil
+        type: "*HeldUntilSpec"
+      - doc: |-
+          Anonymise locates the function that says what an erased record keeps,
+          generalised (app.Anonymise).
+        name: Anonymise
+        type: "*SourceMessage"
+      - doc: |-
+          DeleteOnErasure: a person's erasure deletes the record instead of
+          clearing it (app.DeleteOnErasure).
+        name: DeleteOnErasure
+        type: bool
+      - doc: Held is how many records a hold keeps, on a runtime graph.
+        name: Held
+        type: "*int"
+      - doc: |-
+          Due is when the next record is due to be erased or deleted, on a
+          runtime graph; absent when none is.
+        name: Due
+        type: "*time.Time"
+      - doc: |-
+          Erased and Deleted count what this run erased and deleted, on a
+          runtime graph.
+        name: Erased
+        type: "*int"
+      - name: Deleted
+        type: "*int"
+    kind: struct
+    methods:
+      - doc: |-
+          sources are the functions a store's privacy names — its retention's
+          instants, its HeldUntil, its Anonymise —, for Files.
+        name: sources
+        recv: pv *StorePrivacyMessage
+        results: "[]*SourceMessage"
+      - doc: |-
+          structure is what a store's privacy says of the product's structure, for
+          the revision: without what a run counts — held, due, erased, deleted.
+        name: structure
+        recv: pv *StorePrivacyMessage
+        results: "*StorePrivacyMessage"
+    name: StorePrivacyMessage
+  - fields:
+      - doc: |-
+          Limits says, in the product's words, how long the records keep their
+          personal data and how they go — the register's time limits, GDPR
+          art. 30(1)(f); empty when it gave none.
+        name: Limits
+        type: string
+    kind: struct
+    name: ProductRetentionSpec
+  - fields:
+      - doc: |-
+          After is the delay, as a Go duration: the declared one, or the
+          setting's value when the graph describes a running app.
+        name: After
+        type: string
+      - doc: |-
+          Setting names the setting of the store's service the delay is read
+          from, when the environment gives it.
+        name: Setting
+        type: string
+      - doc: |-
+          Since locates the function that gives the instant the delay counts
+          from: a record's closing, say.
+        name: Since
+        type: "*SourceMessage"
+      - doc: At locates the function that gives the instant itself.
+        name: At
+        type: "*SourceMessage"
+    kind: struct
+    name: RetentionSpec
+  - fields:
+      - doc: At locates the function that gives the instant.
+        name: At
+        type: "*SourceMessage"
+      - doc: |-
+          Reason is the legal ground the declaration gives: "commercial code:
+          10 years".
+        name: Reason
+        type: string
+    kind: struct
+    name: HeldUntilSpec
+  - fields:
+      - doc: "Name is how code asks for the index: Store.Lookup(ctx, name, key)."
+        name: Name
+        type: string
+      - doc: |-
+          Unique is set when two entities may not share a key: a write that
+          would is refused with a conflict.
+        name: Unique
+        type: bool
+    kind: struct
+    name: IndexSpec
+  - fields:
+      - doc: Message is the published type.
+        name: Message
+        type: "*SchemaMessage"
+      - doc: "Delivery is the guarantee: \"at-least-once\"."
+        name: Delivery
+        type: string
+      - doc: |-
+          Broker is "memory", "file" or "sql": where a subscription of the topic's
+          own service waits — "sql" on the database that keeps it.
+        name: Broker
+        type: string
+    kind: struct
+    name: TopicSpec
+  - fields:
+      - doc: Topic is the node ID of the consumed topic; empty for a watch.
+        name: Topic
+        type: string
+      - doc: |-
+          Mark is what a watch hears the writes of: "personal", "special" or
+          "moderated", ADR 0006's marks. Empty for a subscription.
+        name: Mark
+        type: string
+      - doc: |-
+          OwnStores: the watch hears its own module's stores too — the
+          product's own, for a watch of the product's (app.OwnStores) —, never
+          the writes its own handler makes.
+        name: OwnStores
+        type: bool
+      - doc: |-
+          Stores are the node IDs of the stores that feed a watch, sorted: those
+          whose entity holds a field with its mark, but its own module's — the
+          product's own, for a watch of the product's — unless OwnStores. Each
+          draws a declared delivers edge to it.
+        name: Stores
+        type: "[]string"
+      - doc: |-
+          MaxDeliveries is how many attempts a message gets before it is
+          dead-lettered.
+        name: MaxDeliveries
+        type: int
+      - doc: Parallelism is how many messages are handled concurrently.
+        name: Parallelism
+        type: int
+      - doc: DeadLetters is how many messages were abandoned, on a runtime graph.
+        name: DeadLetters
+        type: "*int"
+    kind: struct
+    name: SubscriptionSpec
+  - fields:
+      - doc: Store is the node ID of the store holding the instances.
+        name: Store
+        type: string
+      - doc: |-
+          Field is the wire name of the entity field holding the state, when the
+          state function points at a field of the entity.
+        name: Field
+        type: string
+      - doc: Initial is the state a new instance enters.
+        name: Initial
+        type: string
+      - doc: States are in declaration order.
+        name: States
+        type: "[]StateSpec"
+      - doc: Transitions are in declaration order.
+        name: Transitions
+        type: "[]TransitionSpec"
+    kind: struct
+    name: WorkflowSpec
+  - fields:
+      - doc: Name is the state value, as text.
+        name: Name
+        type: string
+      - doc: Terminal is set when no transition leaves the state.
+        name: Terminal
+        type: bool
+      - doc: Count is how many instances are in the state, on a runtime graph.
+        name: Count
+        type: "*int"
+      - doc: OnEnter lists the hooks run when an instance enters the state.
+        name: OnEnter
+        type: "[]SourceMessage"
+    kind: struct
+    name: StateSpec
+  - fields:
+      - doc: Event names the transition. Timer and guard transitions have one too.
+        name: Event
+        type: string
+      - doc: From is the source state.
+        name: From
+        type: string
+      - doc: To is the target state.
+        name: To
+        type: string
+      - doc: Trigger is [TriggerEvent], [TriggerTimer] or [TriggerGuard].
+        name: Trigger
+        type: string
+      - doc: After is the delay of a timer transition, as a Go duration string.
+        name: After
+        type: string
+      - doc: |-
+          Setting names the setting of the service the delay is read from, when
+          the environment gives it: "archive-after".
+        name: Setting
+        type: string
+      - doc: |-
+          At locates the function that says when a timer transition declared at
+          an instant is due — a due date, a deadline the entity carries.
+        name: At
+        type: "*SourceMessage"
+      - doc: Guard locates the condition of a guard transition.
+        name: Guard
+        type: "*SourceMessage"
+      - doc: Source is where the transition is declared.
+        name: Source
+        type: "*SourceMessage"
+      - doc: Callers are the node IDs found to fire this event.
+        name: Callers
+        type: "[]string"
+    kind: struct
+    name: TransitionSpec
+  - fields:
+      - doc: Schedule is "every 10s" or a five-field cron expression.
+        name: Schedule
+        type: string
+      - doc: Kind is "interval" or "cron".
+        name: Kind
+        type: string
+    kind: struct
+    name: JobSpec
+  - fields:
+      - doc: Prefix is the URL path the assets are served under.
+        name: Prefix
+        type: string
+      - doc: Files is how many files are served.
+        name: Files
+        type: int
+    kind: struct
+    name: FrontendSpec
+  - fields:
+      - doc: |-
+          Credentials is the type the handler reads: its fields are tagged
+          cookie:"…" or header:"…".
+        name: Credentials
+        type: "*SchemaMessage"
+      - doc: |-
+          Data is the type of what the handler says about the caller, which
+          endpoints read with app.AuthData.
+        name: Data
+        type: "*SchemaMessage"
+      - doc: Endpoints counts the endpoints that ask for authentication.
+        name: Endpoints
+        type: int
+    kind: struct
+    name: AuthSpec
+  - fields:
+      - doc: Transport is [TransportSMTP] or [TransportCapture].
+        name: Transport
+        type: string
+      - doc: Server is the relay's host:port. Credentials never appear.
+        name: Server
+        type: string
+      - doc: TLS is "starttls", "implicit" or "none", for SMTP.
+        name: TLS
+        type: string
+      - doc: From is the default sender.
+        name: From
+        type: string
+      - doc: |-
+          MaxAttempts is how many deliveries a message gets before it is
+          dead-lettered.
+        name: MaxAttempts
+        type: int
+      - doc: |-
+          Outbox is "memory", "file" or "sql": where queued messages wait — "sql"
+          on the database that keeps the mailer's service, each message sealed.
+        name: Outbox
+        type: string
+      - doc: Queued is how many messages wait in the outbox, on a runtime graph.
+        name: Queued
+        type: "*int"
+      - doc: Sent is how many messages the transport accepted, on a runtime graph.
+        name: Sent
+        type: "*int"
+      - doc: DeadLetters is how many messages were abandoned, on a runtime graph.
+        name: DeadLetters
+        type: "*int"
+    kind: struct
+    name: MailerSpec
+  - fields:
+      - doc: Origin is [SecretProvided] or [SecretGenerated].
+        name: Origin
+        type: string
+      - doc: |-
+          Variable is the environment variable that provides it, or — for a
+          generated secret — pins it: TODO_SMTP_URL, or TODO_SMTP_URL_FILE naming
+          a file.
+        name: Variable
+        type: string
+      - doc: Bytes is the size of each version of a generated secret.
+        name: Bytes
+        type: int
+      - doc: |-
+          RotateEvery is how often kit makes a new version of a generated
+          secret, as a Go duration.
+        name: RotateEvery
+        type: string
+      - doc: Keep is how many versions a rotation leaves, the new one included.
+        name: Keep
+        type: int
+      - doc: |-
+          Optional: a provided secret the product can do without
+          (app.Optional) — found nowhere, it is absent, and the start goes on.
+        name: Optional
+        type: bool
+      - doc: |-
+          From is where the running app found it: one of the SecretFrom
+          constants, on a runtime graph. Empty when it is found nowhere — for an
+          optional secret, absent.
+        name: From
+        type: string
+      - doc: Version is the number of its current version, from 1.
+        name: Version
+        type: int
+      - doc: |-
+          Created is when the current version was made; the environment does
+          not say when a variable was set.
+        name: Created
+        type: "*time.Time"
+      - doc: Versions is how many versions are kept.
+        name: Versions
+        type: int
+      - doc: |-
+          NextRotation is when kit rotates it next. Absent when kit does not
+          rotate it: provided, pinned by the environment, or in a store kit
+          cannot write.
+        name: NextRotation
+        type: "*time.Time"
+      - doc: |-
+          Pinned: a generated secret the environment provides — kit uses it and
+          does not rotate it.
+        name: Pinned
+        type: bool
+      - doc: Rotations counts the rotations this process made.
+        name: Rotations
+        type: int
+      - doc: Problem says why it cannot be used, on a runtime graph.
+        name: Problem
+        type: string
+    kind: struct
+    name: SecretSpec
+  - fields:
+      - doc: Style is [LoopDeclared] or [LoopGoroutine].
+        name: Style
+        type: string
+      - doc: Wakes are what wakes a declared loop.
+        name: Wakes
+        type: "[]WakeSourceMessage"
+      - doc: |-
+          Selects are the cases of the select statements a hand-written loop
+          waits in, as the static analysis read them.
+        name: Selects
+        type: "[]SelectCaseMessage"
+      - doc: Restart is the supervision policy, as text.
+        name: Restart
+        type: string
+    kind: struct
+    name: LoopSpec
+  - fields:
+      - doc: Kind is one of the Wake constants.
+        name: Kind
+        type: string
+      - doc: Every is the period of an interval wake, as a Go duration.
+        name: Every
+        type: string
+      - doc: Topic is the node ID of a topic wake.
+        name: Topic
+        type: string
+      - doc: Func locates the function computing a deadline wake.
+        name: Func
+        type: "*SourceMessage"
+    kind: struct
+    name: WakeSourceMessage
+  - fields:
+      - doc: "Text is the case as written: \"<-ticker.C\", \"job := <-jobs\"."
+        name: Text
+        type: string
+      - doc: Kind is one of the Select constants.
+        name: Kind
+        type: string
+      - doc: Source is where the case is.
+        name: Source
+        type: "*SourceMessage"
+    kind: struct
+    name: SelectCaseMessage
+  - fields:
+      - doc: "Kind is the stable identifier: \"validate\", \"ratelimit\", \"timeout\"…"
+        name: Kind
+        type: string
+      - doc: "Label is a short human rendering of the configuration: \"5/s\"."
+        name: Label
+        type: string
+      - doc: Package is the SDK package that implements it.
+        name: Package
+        type: string
+      - doc: Doc says what it does, for a catalog.
+        name: Doc
+        type: string
+      - doc: Snippet is the Go code that adds it, for a catalog.
+        name: Snippet
+        type: string
+      - doc: Config is the configuration, as text.
+        name: Config
+        type: map[string]string
+    kind: struct
+    name: MechanicMessage
+  - fields:
+      - doc: |-
+          Type is "object", "array", "map", "string", "integer", "number",
+          "boolean" or "any".
+        name: Type
+        type: string
+      - doc: Name is the qualified Go type name, for named types.
+        name: Name
+        type: string
+      - doc: "Format refines a scalar: \"date-time\", \"duration\", \"int64\"…"
+        name: Format
+        type: string
+      - doc: Fields are the members of an object.
+        name: Fields
+        type: "[]FieldMessage"
+      - doc: Items is the element type of an array.
+        name: Items
+        type: "*SchemaMessage"
+      - doc: Values is the value type of a map.
+        name: Values
+        type: "*SchemaMessage"
+      - doc: Enum lists the allowed values, when they are known.
+        name: Enum
+        type: "[]string"
+      - doc: Ref names a type already described higher up, to break a cycle.
+        name: Ref
+        type: string
+      - doc: |-
+          Nullable says a nil value is written null: a pointer, a slice, a map,
+          an interface — unless its member leaves it out (omitempty, omitzero).
+        name: Nullable
+        type: bool
+    kind: struct
+    name: SchemaMessage
+  - fields:
+      - doc: Name is the wire name.
+        name: Name
+        type: string
+      - doc: |-
+          In is where a request field is read from: "body", "path", "query",
+          "header" or "cookie". Empty outside requests.
+        name: In
+        type: string
+      - doc: Type is the member's schema.
+        name: Type
+        type: "*SchemaMessage"
+      - doc: Optional is set when the member may be absent.
+        name: Optional
+        type: bool
+      - doc: Rules are the validation rules, as written in the validate tag.
+        name: Rules
+        type: string
+      - doc: Doc is the field's comment, when the analyzer found one.
+        name: Doc
+        type: string
+      - doc: |-
+          Class is what the field holds, as its app tag says (ADR 0006): one of
+          the Class constants, or empty when the field is unclassified. A
+          subject field is personal unless it is special.
+        name: Class
+        type: string
+      - doc: Subject marks the field that says whom a record is about.
+        name: Subject
+        type: bool
+      - doc: Moderated marks content others see and a moderator may act on.
+        name: Moderated
+        type: bool
+      - doc: |-
+          Sealed is set when kit keeps the field sealed at rest (ADR 0006 §4):
+          a personal, special or secret field, or the subject, not plain, of
+          what kit keeps on disk — a store's entity, a topic's message, a queued
+          command's input. A store in memory seals nothing.
+        name: Sealed
+        type: bool
+      - doc: Erased marks the time kit stamps when it erases the record.
+        name: Erased
+        type: bool
+      - doc: History is how many former values kit keeps of the field (ADR 0007).
+        name: History
+        type: int
+    kind: struct
+    name: FieldMessage
+  - kind: named
+    name: NodeKind
+    underlying: string
+  - fields:
+      - doc: Package is the Go package of its main.
+        name: Package
+        type: string
+      - doc: |-
+          Roles are the IDs of its process roles, in declaration order; the
+          first is the one it runs with no role argument.
+        name: Roles
+        type: "[]string"
+    kind: struct
+    name: BinarySpec
+  - fields:
+      - doc: Binary is the ID of the binary that holds it.
+        name: Binary
+        type: string
+      - doc: Profile is one of the Profile constants.
+        name: Profile
+        type: string
+      - doc: |-
+          Args are the leading arguments that select it — ["daemon"] for
+          "statusline daemon" —; empty for the binary's default role.
+        name: Args
+        type: "[]string"
+      - doc: |-
+          Singleton, when set, is the scope of the lock that keeps one process of
+          this role alive at a time: what the lock's name is derived from.
+        name: Singleton
+        type: string
+      - doc: |-
+          IdleMs is how long a daemon waits without a client before it stops
+          itself; zero means it runs until stopped.
+        name: IdleMs
+        type: int64
+    kind: struct
+    name: RoleSpec
+  - fields:
+      - doc: |-
+          Path is the command's words after the binary's name: ["status"],
+          ["daemon", "stop"].
+        name: Path
+        type: "[]string"
+      - doc: Role is the ID of the role that runs it.
+        name: Role
+        type: string
+    kind: struct
+    name: CLISpec
+  - fields:
+      - doc: Network is one of the Network constants.
+        name: Network
+        type: string
+      - doc: "Contract is the versioned contract spoken on it: \"render/v1\"."
+        name: Contract
+        type: string
+      - doc: |-
+          Peer says who may connect: "owner" (the process's own user), or the
+          declared list, never "anyone".
+        name: Peer
+        type: string
+      - doc: Role is the ID of the role that runs it.
+        name: Role
+        type: string
+    kind: struct
+    name: ListenerSpec
+  - fields:
+      - doc: Package is its Go import path.
+        name: Package
+        type: string
+    kind: struct
+    name: LibrarySpec
+  - fields:
+      - doc: "Media is what it renders: \"text\", \"ansi\", \"html\", \"json\"."
+        name: Media
+        type: string
+    kind: struct
+    name: PresentationSpec
+  - fields:
+      - doc: Stores are the stores that keep records about the person.
+        name: Stores
+        type: "[]StoreDataMessage"
+    kind: struct
+    name: PersonalDataMessage
+  - fields:
+      - doc: Store is the store's node ID.
+        name: Store
+        type: string
+      - doc: Purpose is why the store keeps them.
+        name: Purpose
+        type: string
+      - doc: Retention says, in words, how long they keep their personal data.
+        name: Retention
+        type: string
+      - doc: |-
+          Recipients are who inside the product reads them, as far as the
+          running app knows.
+        name: Recipients
+        type: "[]string"
+      - doc: |-
+          Records are the records, their secret members left out. They hold the
+          person's data, which the Studio and the logs never show.
+        name: Records
+        type: "[]json.RawMessage"
+      - doc: |-
+          Former are the former values of the records' fields that keep them
+          (ADR 0007), record by record; a secret field's are left out.
+        name: Former
+        type: "[]RecordFormerMessage"
+      - doc: |-
+          Versions are the versions of the records a store with revisions keeps
+          (ADR 0007 §3), record by record, their secret members left out.
+        name: Versions
+        type: "[]ExportedVersionsMessage"
+    kind: struct
+    name: StoreDataMessage
+  - fields:
+      - doc: Record is the record's position in its StoreData's Records.
+        name: Record
+        type: int
+      - doc: |-
+          Versions are its versions, newest first — the record as it is now
+          first —, each without its secret members.
+        name: Versions
+        type: "[]RecordVersionMessage"
+    kind: struct
+    name: ExportedVersionsMessage
+  - fields:
+      - doc: Stores are the stores that kept records about the person.
+        name: Stores
+        type: "[]StoreErasureMessage"
+    kind: struct
+    name: ErasureMessage
+  - fields:
+      - doc: Store is the store's node ID.
+        name: Store
+        type: string
+      - doc: Erased are the records whose personal data was cleared.
+        name: Erased
+        type: "[]string"
+      - doc: Deleted are the records removed.
+        name: Deleted
+        type: "[]string"
+      - doc: Held are the records a hold keeps, untouched.
+        name: Held
+        type: "[]string"
+    kind: struct
+    name: StoreErasureMessage
+  - fields:
+      - doc: "Retention is <PRODUCT>_RETENTION: one of the Retention constants."
+        name: Retention
+        type: string
+      - doc: Register is the record of processing, as far as the code knows it.
+        name: Register
+        type: RegisterMessage
+      - doc: Holds are the records a legal hold keeps, newest first.
+        name: Holds
+        type: "[]HoldEvent"
+      - doc: Journal is the privacy journal's latest entries, newest first.
+        name: Journal
+        type: "[]JournalEntryEvent"
+      - doc: Chain says whether the journal's chain holds.
+        name: Chain
+        type: JournalCheckMessage
+    kind: struct
+    name: PrivacyMessage
+  - fields:
+      - doc: App is the product.
+        name: App
+        type: string
+      - doc: |-
+          ToComplete are the points the code cannot know, for a person to
+          write: "a" (the controller and its representatives), "e" (the
+          transfers).
+        name: ToComplete
+        type: "[]string"
+      - doc: Stores are the stores that keep personal data, by node ID.
+        name: Stores
+        type: "[]RegisterStoreMessage"
+    kind: struct
+    name: RegisterMessage
+  - fields:
+      - doc: Store is the store's node ID.
+        name: Store
+        type: string
+      - doc: "Purpose is point (b): why the store keeps its records."
+        name: Purpose
+        type: string
+      - doc: |-
+          Subject is point (c)'s category of data subjects: the pointer of the
+          field that says whom each record is about.
+        name: Subject
+        type: string
+      - doc: SubjectDoc is that field's comment, when the analyzer read it.
+        name: SubjectDoc
+        type: string
+      - doc: |-
+          Personal, Special and Secret are point (c)'s categories of personal
+          data: the fields of each class, as JSON pointers. Special fields are
+          art. 9 data; secret ones are credentials.
+        name: Personal
+        type: "[]string"
+      - name: Special
+        type: "[]string"
+      - name: Secret
+        type: "[]string"
+      - doc: |-
+          Recipients are point (d) inside the product: the nodes the graph
+          shows reading the store, and the connectors that carry its data out.
+        name: Recipients
+        type: "[]string"
+      - doc: Erase, Delete and HeldUntil are point (f), the time limits, in words.
+        name: Erase
+        type: string
+      - name: Delete
+        type: string
+      - name: HeldUntil
+        type: string
+      - doc: |-
+          ByProduct is point (f) when the product keeps the store's retention
+          itself (app.RetentionByProduct), in its own words: no retention gap,
+          and no subject gap either.
+        name: ByProduct
+        type: "*ProductRetentionSpec"
+      - doc: "Security is point (g): the measures kit takes."
+        name: Security
+        type: "[]string"
+      - doc: Gaps are the Gap constants the store lacks.
+        name: Gaps
+        type: "[]string"
+    kind: struct
+    name: RegisterStoreMessage
+  - fields:
+      - doc: Store is the store's node ID.
+        name: Store
+        type: string
+      - doc: Record is the record's reference.
+        name: Record
+        type: string
+      - doc: |-
+          Subject is the reference of the person the record is about, when it
+          has one.
+        name: Subject
+        type: string
+      - doc: "By is who placed it: a user's ID, \"cli\" or \"studio\"."
+        name: By
+        type: string
+      - doc: At is when.
+        name: At
+        type: time.Time
+    kind: struct
+    name: HoldEvent
+  - fields:
+      - doc: Seq numbers the entries from 1, with no gap.
+        name: Seq
+        type: int64
+      - doc: At is when, on the app's clock.
+        name: At
+        type: time.Time
+      - doc: Op is one of the Journal constants.
+        name: Op
+        type: string
+      - doc: |-
+          DryRun marks what the retention would have done under
+          <PRODUCT>_RETENTION=dry-run: nothing changed.
+        name: DryRun
+        type: bool
+      - doc: Store is the store's node ID.
+        name: Store
+        type: string
+      - doc: Record is the record's reference; Subject its subject's.
+        name: Record
+        type: string
+      - name: Subject
+        type: string
+      - doc: |-
+          By is who: a user's ID, the node that called, "retention", "cli" or
+          "studio".
+        name: By
+        type: string
+      - doc: |-
+          Follows is set on a JournalContinue entry alone: the hash of the
+          last entry of the journal it continues, which closed there. Its
+          own chain starts again from it (ADR 0180 step 5c).
+        name: Follows
+        type: string
+      - doc: |-
+          Hash is the entry's link in the chain: SHA-256 of the previous
+          entry's hash and this entry — of nothing and this entry for a
+          JournalContinue entry, which opens a chain.
+        name: Hash
+        type: string
+    kind: struct
+    name: JournalEntryEvent
+  - fields:
+      - doc: Entries is how many entries the journal holds.
+        name: Entries
+        type: int
+      - doc: |-
+          BrokenAt is the sequence number where the chain breaks: an entry
+          changed, or one removed before it, or a JournalContinue entry
+          that does not name the hash of the entry before it. Zero when the
+          chain holds.
+        name: BrokenAt
+        type: int64
+      - doc: |-
+          Closed are the last entries of the journals the journal closed,
+          each followed by the JournalContinue entry that names its hash:
+          the chain holds across them, journal after journal.
+        name: Closed
+        type: "[]int64"
+    kind: struct
+    name: JournalCheckMessage
+  - fields:
+      - doc: Record is the record's position in its StoreData's Records.
+        name: Record
+        type: int
+      - doc: |-
+          Fields are each field's former values, newest first, by the field's
+          JSON pointer. A secret field's are left out.
+        name: Fields
+        type: map[string][]FormerMessage
+    kind: struct
+    name: RecordFormerMessage
+  - fields:
+      - doc: Kind is one of the Profile constants.
+        name: Kind
+        type: string
+      - doc: At is when the profile ended.
+        name: At
+        type: time.Time
+      - doc: DurationMs is how long a CPU profile sampled.
+        name: DurationMs
+        type: float64
+      - doc: "Unit is what the values count: \"ms\" of CPU, \"bytes\" of heap."
+        name: Unit
+        type: string
+      - doc: Total is the sum of every sample.
+        name: Total
+        type: float64
+      - doc: Nodes are the costs attributed to nodes, highest first.
+        name: Nodes
+        type: "[]NodeCostMessage"
+      - doc: |-
+          Unattributed is the cost outside any node's code: the runtime, the
+          garbage collector, kit itself, idle loops.
+        name: Unattributed
+        type: float64
+      - doc: Top are the costliest functions, by flat cost.
+        name: Top
+        type: "[]FuncCostMessage"
+      - doc: Flame is the call tree, root first, pruned below 0.5% of Total.
+        name: Flame
+        type: "*FlameNodeMessage"
+    kind: struct
+    name: ProfileResult
+  - fields:
+      - doc: Node is the node ID.
+        name: Node
+        type: string
+      - doc: Value is the cost, in the profile's unit.
+        name: Value
+        type: float64
+      - doc: Share is Value over Total, from 0 to 1.
+        name: Share
+        type: float64
+      - doc: Top are the node's costliest functions.
+        name: Top
+        type: "[]FuncCostMessage"
+    kind: struct
+    name: NodeCostMessage
+  - fields:
+      - doc: Func is the qualified function name.
+        name: Func
+        type: string
+      - doc: Source locates it, when it is in the product's module.
+        name: Source
+        type: "*SourceMessage"
+      - doc: Flat is the cost of the function's own code; Cum includes its callees.
+        name: Flat
+        type: float64
+      - name: Cum
+        type: float64
+      - doc: Node is the node it was attributed to, when one.
+        name: Node
+        type: string
+    kind: struct
+    name: FuncCostMessage
+  - fields:
+      - doc: Name is the function.
+        name: Name
+        type: string
+      - doc: Value is its cumulative cost.
+        name: Value
+        type: float64
+      - doc: Node is the node the frame belongs to, when it is a node's code.
+        name: Node
+        type: string
+      - doc: Children are its callees, highest first.
+        name: Children
+        type: "[]*FlameNodeMessage"
+    kind: struct
+    name: FlameNodeMessage
+  - fields:
+      - doc: At is when they were counted.
+        name: At
+        type: time.Time
+      - doc: Total is how many goroutines exist.
+        name: Total
+        type: int
+      - doc: |-
+          Groups are goroutines sharing a node or loop, a state and a top frame,
+          largest first.
+        name: Groups
+        type: "[]GoroutineGroup"
+    kind: struct
+    name: GoroutinesResult
+  - fields:
+      - doc: Node is the node they run for, from their pprof label, when any.
+        name: Node
+        type: string
+      - doc: "Loop is the loop they are, when kit knows: \"http accept\", a consumer."
+        name: Loop
+        type: string
+      - doc: |-
+          State is the runtime's word for what they wait on: "running",
+          "select", "chan receive", "IO wait", "sleep", "semacquire"…
+        name: State
+        type: string
+      - doc: Count is how many goroutines are in the group.
+        name: Count
+        type: int
+      - doc: Top is the innermost frame that is not the runtime's.
+        name: Top
+        type: string
+      - doc: Stack is the group's stack, innermost first, capped.
+        name: Stack
+        type: "[]string"
+    kind: struct
+    name: GoroutineGroup
+  - fields:
+      - doc: Phase is one of the Phase constants.
+        name: Phase
+        type: string
+      - doc: StartedAt is when the process started.
+        name: StartedAt
+        type: time.Time
+      - doc: Components are the lifecycle components, in start order.
+        name: Components
+        type: "[]ComponentMessage"
+      - doc: Loops are the recurring pieces of the internal loop.
+        name: Loops
+        type: "[]LoopMessage"
+      - doc: |-
+          History lists the phases the process went through, oldest first: the
+          daemon's own state machine, as it ran.
+        name: History
+        type: "[]PhaseChangeEvent"
+      - doc: |-
+          Process is the Go process, sampled when the graph was built; nil when
+          the product imports no framework/app/server, which plugs the sampler
+          in (ADR 0172).
+        name: Process
+        type: "*ProcessSpec"
+      - doc: HTTP is the product's HTTP server.
+        name: HTTP
+        type: "*HTTPServer"
+      - doc: Mocks are the replacements a test gave the app (app.Replace).
+        name: Mocks
+        type: "[]MockMessage"
+      - doc: Dev describes the build `kit dev` made of this process, when it did.
+        name: Dev
+        type: "*DevBuildMessage"
+      - doc: |-
+          Config is how the product was configured when it started: every
+          setting kit read, the value it uses — never a secret's — and where
+          that value came from.
+        name: Config
+        type: "[]SettingMessage"
+      - doc: |-
+          Boot is what kit did to start the product, step by step, as it ran;
+          the lifecycle components it then started are Components.
+        name: Boot
+        type: "[]BootStepMessage"
+      - doc: |-
+          Databases are the databases the app declares, as this run found them:
+          each one's state, readiness, pool and migrations.
+        name: Databases
+        type: "[]DatabaseMessage"
+    kind: struct
+    name: RuntimeMessage
+  - fields:
+      - doc: Name is the database's, as the app declares it.
+        name: Name
+        type: string
+      - doc: "Engine is the engine it runs on: \"postgres\", \"mysql\", \"sqlite\"."
+        name: Engine
+        type: string
+      - doc: State is one of the Database constants.
+        name: State
+        type: string
+      - doc: Ready says whether it answered its last check; CheckedAt says when.
+        name: Ready
+        type: bool
+      - name: CheckedAt
+        type: "*time.Time"
+      - doc: |-
+          Problem is the public text of its last failure: a start that failed,
+          a check it did not answer.
+        name: Problem
+        type: string
+      - doc: |-
+          URLFrom is where its URL was found — a Setting constant: env, store,
+          or default for a SQLite file beside the data —, empty when it is set
+          nowhere.
+        name: URLFrom
+        type: string
+      - doc: |-
+          TLS is the TLS mode its URL writes: "verify-full"; "none" when it is
+          written off; empty when the URL leaves it to the driver, or when the
+          database is a file.
+        name: TLS
+        type: string
+      - doc: |-
+          Pool is database/sql's own count of its connections, sampled when the
+          graph was built.
+        name: Pool
+        type: "*Pool"
+      - doc: |-
+          Migrations are its sets of migrations, kit's first, as the start —
+          or the last sample — found them.
+        name: Migrations
+        type: "[]MigrationSetMessage"
+    kind: struct
+    name: DatabaseMessage
+  - fields:
+      - doc: MaxOpen is its ceiling.
+        name: MaxOpen
+        type: int
+      - doc: "Open is how many connections are open: InUse and Idle."
+        name: Open
+        type: int
+      - name: InUse
+        type: int
+      - name: Idle
+        type: int
+      - doc: |-
+          Waits counts the calls that waited for a connection, and WaitMs how
+          long they waited in all.
+        name: Waits
+        type: int64
+      - name: WaitMs
+        type: float64
+      - doc: |-
+          Closed counts the connections closed for being idle too many, idle
+          too long, or too old.
+        name: Closed
+        type: int64
+    kind: struct
+    name: Pool
+  - fields:
+      - doc: "Name is the set's origin: \"app\", \"product\", or a module's name."
+        name: Name
+        type: string
+      - doc: "Table is its version table: \"app_migrations\", \"schema_migrations\"."
+        name: Table
+        type: string
+      - doc: |-
+          Applied are the migrations the database records, and Pending those
+          this build carries that it does not, oldest first.
+        name: Applied
+        type: "[]MigrationMessage"
+      - name: Pending
+        type: "[]MigrationMessage"
+      - doc: Problem is why the set could not be read or applied.
+        name: Problem
+        type: string
+    kind: struct
+    name: MigrationSetMessage
+  - fields:
+      - doc: "Version orders it: a UTC timestamp by convention, 20260910143000."
+        name: Version
+        type: uint64
+      - doc: Name says what it does; empty for a version this build does not carry.
+        name: Name
+        type: string
+    kind: struct
+    name: MigrationMessage
+  - fields:
+      - doc: |-
+          Name is the environment variable that sets it: "TODO_ADDR",
+          "TODO_BASE_URL".
+        name: Name
+        type: string
+      - doc: "Value is what kit uses. A secret's is left out: Secret says so."
+        name: Value
+        type: string
+      - doc: From is one of the Setting constants.
+        name: From
+        type: string
+      - doc: Service declared it; empty for kit's own.
+        name: Service
+        type: string
+      - doc: |-
+          Key is a declared setting's name, its key in a configuration file:
+          "base-url". A module's is qualified with the module's name,
+          "moderation.tdb-url": app.Set's key, and in a file "tdb-url" under
+          "moderation:" (ADR 0008).
+        name: Key
+        type: string
+      - doc: |-
+          Type is what a declared setting holds: text, bool, int, number,
+          duration or list.
+        name: Type
+        type: string
+      - doc: |-
+          Detail is the configuration file that gave the value, when From is
+          SettingFile: "config/production.yaml".
+        name: Detail
+        type: string
+      - doc: "Secret: the value is withheld."
+        name: Secret
+        type: bool
+      - doc: |-
+          Option is the AppOption that sets it in code, when there is one:
+          "app.Listen". Code wins over the environment.
+        name: Option
+        type: string
+      - doc: |-
+          Flag is the kit dev flag that sets it in dev, when there is one:
+          "-addr".
+        name: Flag
+        type: string
+      - doc: |-
+          Database is the database the setting configures, when kit declares it
+          for one (app.Database): its URL, its pool, its timeouts.
+        name: Database
+        type: string
+    kind: struct
+    name: SettingMessage
+  - fields:
+      - doc: Name is one of the Boot constants.
+        name: Name
+        type: string
+      - doc: |-
+          Count is how many it went through: settings, warnings, services,
+          routes, components.
+        name: Count
+        type: int
+      - doc: "Value is what it used: the data directory, in dev."
+        name: Value
+        type: string
+      - doc: Begun is when it began.
+        name: Begun
+        type: time.Time
+      - doc: TookMs is how long it took.
+        name: TookMs
+        type: float64
+      - doc: Error is the public message of a failure.
+        name: Error
+        type: string
+    kind: struct
+    name: BootStepMessage
+  - fields:
+      - doc: BuiltAt is when the build finished.
+        name: BuiltAt
+        type: "*time.Time"
+      - doc: BuildMs is how long it took.
+        name: BuildMs
+        type: float64
+      - doc: |-
+          Rebuilds counts the builds of this kit dev session, this one
+          included: 1 is the first start.
+        name: Rebuilds
+        type: int
+      - doc: |-
+          Changed are the files whose change triggered this build, relative to
+          the module root, at most 20.
+        name: Changed
+        type: "[]string"
+      - doc: More counts the changed files beyond Changed.
+        name: More
+        type: int
+    kind: struct
+    name: DevBuildMessage
+  - fields:
+      - doc: "Phase is the phase entered: one of the Phase constants."
+        name: Phase
+        type: string
+      - doc: At is when.
+        name: At
+        type: time.Time
+      - doc: |-
+          Reason says why, when it is not the natural next step: "SIGTERM",
+          "a component failed".
+        name: Reason
+        type: string
+    kind: struct
+    name: PhaseChangeEvent
+  - fields:
+      - doc: PID is the process ID.
+        name: PID
+        type: int
+      - doc: Go is the Go version the binary was built with.
+        name: Go
+        type: string
+      - doc: OS and Arch are GOOS and GOARCH.
+        name: OS
+        type: string
+      - name: Arch
+        type: string
+      - doc: MaxProcs is GOMAXPROCS; CPUs the logical CPUs the process sees.
+        name: MaxProcs
+        type: int
+      - name: CPUs
+        type: int
+      - doc: Goroutines is how many goroutines exist.
+        name: Goroutines
+        type: int
+      - doc: HeapBytes is the live heap; HeapObjects its object count.
+        name: HeapBytes
+        type: uint64
+      - name: HeapObjects
+        type: uint64
+      - doc: HeapGoalBytes is the heap size at which the next collection starts.
+        name: HeapGoalBytes
+        type: uint64
+      - doc: |-
+          MemoryBytes is all the memory the Go runtime holds from the system:
+          the heap, the stacks, the runtime's own structures.
+        name: MemoryBytes
+        type: uint64
+      - doc: TotalAllocBytes is every byte ever allocated on the heap.
+        name: TotalAllocBytes
+        type: uint64
+      - doc: GCCycles counts completed garbage collections.
+        name: GCCycles
+        type: uint64
+      - doc: LastGC is when the last collection ended; absent before the first.
+        name: LastGC
+        type: "*time.Time"
+      - doc: GCPauseP99Ms is the 99th percentile stop-the-world pause.
+        name: GCPauseP99Ms
+        type: float64
+      - doc: SchedLatencyP99Ms is the 99th percentile time a goroutine waited to run.
+        name: SchedLatencyP99Ms
+        type: float64
+      - doc: CPUSeconds is the CPU time the process consumed, user and system.
+        name: CPUSeconds
+        type: float64
+      - doc: UptimeMs is how long the process has run.
+        name: UptimeMs
+        type: float64
+      - doc: At is when the sample was taken.
+        name: At
+        type: time.Time
+    kind: struct
+    name: ProcessSpec
+  - fields:
+      - doc: |-
+          Library is the implementation: "sdk/v1/net/server" — the SDK's engine
+          accepting and draining the connections, net/http speaking the protocol.
+        name: Library
+        type: string
+      - doc: |-
+          Loop says how it serves: one accept loop, one goroutine per
+          connection, written by the library rather than the product.
+        name: Loop
+        type: string
+      - doc: Addr is the listening address.
+        name: Addr
+        type: string
+      - doc: |-
+          Middleware is the chain every request goes through before its route,
+          outermost first.
+        name: Middleware
+        type: "[]MechanicMessage"
+      - doc: |-
+          Timeouts are the server's timeouts, as Go durations: "readHeader",
+          "read", "write", "idle".
+        name: Timeouts
+        type: map[string]string
+      - doc: |-
+          Conns counts connections: "active" now, "total" ever accepted,
+          "rejected" by the listener's ceiling. Older graphs carry "new", "idle"
+          and "hijacked" too.
+        name: Conns
+        type: map[string]int64
+      - doc: InFlight is how many requests are being served.
+        name: InFlight
+        type: int64
+      - doc: Served counts the requests served since start.
+        name: Served
+        type: int64
+    kind: struct
+    name: HTTPServer
+  - fields:
+      - doc: "Name is the lifecycle name: \"store:todos/store/todos\", \"http\"…"
+        name: Name
+        type: string
+      - doc: Node is the node the component belongs to, when there is one.
+        name: Node
+        type: string
+      - doc: State is one of the Component constants.
+        name: State
+        type: string
+      - doc: Begun is when the last start or stop call began.
+        name: Begun
+        type: "*time.Time"
+      - doc: TookMs is how long that call took.
+        name: TookMs
+        type: float64
+      - doc: Error is the public message of a failure.
+        name: Error
+        type: string
+    kind: struct
+    name: ComponentMessage
+  - fields:
+      - doc: Name identifies the loop.
+        name: Name
+        type: string
+      - doc: Node is the node the loop drives.
+        name: Node
+        type: string
+      - doc: Kind is one of the Loop constants.
+        name: Kind
+        type: string
+      - doc: Provenance is one of the Provenance constants.
+        name: Provenance
+        type: string
+      - doc: |-
+          Library names the code that loops, for a library or kit loop:
+          "net/http", "sdk/v1/app/scheduler", "sdk/v1/data/queue",
+          "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "app".
+        name: Library
+        type: string
+      - doc: State is one of the Loop state constants.
+        name: State
+        type: string
+      - doc: |-
+          LastWake is why the last run started: "interval", "topic",
+          "deadline", "manual", "start".
+        name: LastWake
+        type: string
+      - doc: Restarts counts supervised restarts, for a hand-written loop.
+        name: Restarts
+        type: int64
+      - doc: "Schedule is human text: \"every 10s\", \"*/5 * * * *\", \"on publish · poll 5s\"."
+        name: Schedule
+        type: string
+      - doc: Runs counts completed runs.
+        name: Runs
+        type: int64
+      - doc: Errors counts failed runs.
+        name: Errors
+        type: int64
+      - doc: Missed counts due instants dropped because they had already passed.
+        name: Missed
+        type: int64
+      - doc: Skipped counts fires skipped because the previous run was still going.
+        name: Skipped
+        type: int64
+      - doc: LastRun is when the last run started.
+        name: LastRun
+        type: "*time.Time"
+      - doc: LastMs is how long the last run took.
+        name: LastMs
+        type: float64
+      - doc: NextRun is when the next run is due, when it is known.
+        name: NextRun
+        type: "*time.Time"
+      - doc: LastError is the public message of the last failure.
+        name: LastError
+        type: string
+    kind: struct
+    name: LoopMessage
+  - fields:
+      - doc: Seq increases strictly on one stream; a reader drops what it has seen.
+        name: Seq
+        type: uint64
+      - doc: Type selects the payload.
+        name: Type
+        type: EventType
+      - doc: Time is when it happened.
+        name: Time
+        type: time.Time
+      - doc: Revision is the graph revision, on hello and graph events.
+        name: Revision
+        type: string
+      - doc: |-
+          StartedAt is when the process's current run started, on hello: a new
+          value means the process restarted, and what the reader knew of the
+          previous run is stale.
+        name: StartedAt
+        type: "*time.Time"
+      - doc: Phase is the process phase, on hello and lifecycle events.
+        name: Phase
+        type: string
+      - name: Span
+        type: "*SpanMessage"
+      - name: Transition
+        type: "*TransitionEvent"
+      - name: Lifecycle
+        type: "*ComponentMessage"
+      - name: Loop
+        type: "*LoopMessage"
+      - name: Census
+        type: "*CensusMessage"
+      - name: Log
+        type: "*LogRecordMessage"
+      - name: Mail
+        type: "*MailSummaryMessage"
+    kind: struct
+    name: Event
+  - fields:
+      - doc: TraceID groups the spans of one causal chain (W3C, hex).
+        name: TraceID
+        type: string
+      - doc: SpanID identifies the span (W3C, hex).
+        name: SpanID
+        type: string
+      - doc: ParentID is the parent span, absent on a root.
+        name: ParentID
+        type: string
+      - doc: Node is where the work happened.
+        name: Node
+        type: string
+      - doc: "From is the node that caused it: the edge this span travelled."
+        name: From
+        type: string
+      - doc: Edge is the kind of the edge From → Node.
+        name: Edge
+        type: EdgeKind
+      - doc: Label refines Edge, like the edge's own label.
+        name: Label
+        type: string
+      - doc: Op is one of the Op constants.
+        name: Op
+        type: string
+      - doc: "Name is a low-cardinality operation name: a route pattern, \"Get\"."
+        name: Name
+        type: string
+      - doc: Start is when the work began.
+        name: Start
+        type: time.Time
+      - doc: Ms is how long it took.
+        name: Ms
+        type: float64
+      - doc: |-
+          Status is StatusError when the product failed — what kit answers with
+          a 5xx — and StatusOK otherwise, a refusal the caller has to fix (not
+          found, invalid, conflict, rate limited…) included.
+        name: Status
+        type: string
+      - doc: |-
+          Code is the error code, when the work ended in one: a failure's, or a
+          refusal's ("not_found").
+        name: Code
+        type: string
+      - doc: Error is the wire-safe public message of a failure; a refusal has none.
+        name: Error
+        type: string
+      - doc: "Attrs are allow-listed attributes: \"http.status\", \"instance\"…"
+        name: Attrs
+        type: map[string]string
+      - doc: User is the authenticated caller's ID, when there is one.
+        name: User
+        type: string
+      - doc: Payload is what went in and out, in dev only, with secrets redacted.
+        name: Payload
+        type: "*Payload"
+    kind: struct
+    name: SpanMessage
+  - fields:
+      - doc: Request is the decoded request, or the message delivered.
+        name: Request
+        type: json.RawMessage
+      - doc: Response is the response.
+        name: Response
+        type: json.RawMessage
+      - doc: Truncated is set when a side was cut.
+        name: Truncated
+        type: bool
+    kind: struct
+    name: Payload
+  - fields:
+      - doc: Workflow is the workflow node ID.
+        name: Workflow
+        type: string
+      - doc: Instance is the entity key.
+        name: Instance
+        type: string
+      - doc: Event is the transition's event name.
+        name: Event
+        type: string
+      - doc: From is the state left; empty on creation.
+        name: From
+        type: string
+      - doc: To is the state entered.
+        name: To
+        type: string
+      - doc: Trigger is one of the Trigger constants.
+        name: Trigger
+        type: string
+      - doc: Caller is the node that fired it, when code did.
+        name: Caller
+        type: string
+    kind: struct
+    name: TransitionEvent
+  - fields:
+      - doc: Workflow is the workflow node ID.
+        name: Workflow
+        type: string
+      - doc: Counts maps each state to its number of instances.
+        name: Counts
+        type: map[string]int
+    kind: struct
+    name: CensusMessage
+  - fields:
+      - doc: TraceID identifies the trace.
+        name: TraceID
+        type: string
+      - doc: Root is the node of the root span.
+        name: Root
+        type: string
+      - doc: Name is the root span's name.
+        name: Name
+        type: string
+      - doc: Start is when the root began.
+        name: Start
+        type: time.Time
+      - doc: Ms spans from the first start to the last end.
+        name: Ms
+        type: float64
+      - doc: Status is StatusError when any span failed.
+        name: Status
+        type: string
+      - doc: Spans are in start order.
+        name: Spans
+        type: "[]SpanMessage"
+    kind: struct
+    name: TraceMessage
+  - fields:
+      - doc: File is relative to App.Root.
+        name: File
+        type: string
+      - doc: StartLine is the 1-based line of Lines[0].
+        name: StartLine
+        type: int
+      - doc: Focus is the first line of the range asked for.
+        name: Focus
+        type: int
+      - doc: FocusEnd is the last line of the range asked for.
+        name: FocusEnd
+        type: int
+      - doc: Lines are the file's lines around the focus, without terminators.
+        name: Lines
+        type: "[]string"
+      - doc: "Language is the highlighter language: \"go\", \"javascript\"…"
+        name: Language
+        type: string
+    kind: struct
+    name: SnippetMessage
+  - fields:
+      - doc: ID is the entity key.
+        name: ID
+        type: string
+      - doc: State is the current state.
+        name: State
+        type: string
+      - doc: EnteredAt is when the instance entered its current state.
+        name: EnteredAt
+        type: time.Time
+      - doc: History lists the transitions, oldest first, capped.
+        name: History
+        type: "[]StepEvent"
+    kind: struct
+    name: InstanceMessage
+  - fields:
+      - doc: Event is the transition's event name.
+        name: Event
+        type: string
+      - doc: From is the state left.
+        name: From
+        type: string
+      - doc: To is the state entered.
+        name: To
+        type: string
+      - doc: At is when it happened.
+        name: At
+        type: time.Time
+      - doc: Trigger is one of the Trigger constants.
+        name: Trigger
+        type: string
+      - doc: Caller is the node that fired it, when code did.
+        name: Caller
+        type: string
+    kind: struct
+    name: StepEvent
+  - fields:
+      - doc: Seq orders records; it only increases.
+        name: Seq
+        type: uint64
+      - doc: Time is when it was written.
+        name: Time
+        type: time.Time
+      - doc: Level is "debug", "info", "warn" or "error".
+        name: Level
+        type: string
+      - doc: Message is the record's message.
+        name: Message
+        type: string
+      - doc: Node is the node whose code wrote it.
+        name: Node
+        type: string
+      - doc: TraceID and SpanID correlate it with a span.
+        name: TraceID
+        type: string
+      - name: SpanID
+        type: string
+      - doc: Attrs are the record's attributes, as text, secrets redacted.
+        name: Attrs
+        type: map[string]string
+    kind: struct
+    name: LogRecordMessage
+  - fields:
+      - doc: "Node is the node it applies to: a port, a command or a query."
+        name: Node
+        type: string
+      - doc: Mode is [MockReplace].
+        name: Mode
+        type: string
+      - doc: Hits counts the runs it changed.
+        name: Hits
+        type: int64
+    kind: struct
+    name: MockMessage
+  - fields:
+      - doc: ID identifies the mail in the outbox.
+        name: ID
+        type: string
+      - doc: Mailer is the mailer node.
+        name: Mailer
+        type: string
+      - doc: From and To are addresses, rendered.
+        name: From
+        type: string
+      - name: To
+        type: "[]string"
+      - doc: Subject is the subject.
+        name: Subject
+        type: string
+      - doc: Status is one of the Mail constants.
+        name: Status
+        type: string
+      - doc: Attempts counts delivery attempts.
+        name: Attempts
+        type: int
+      - doc: Error is the public message of the last failure.
+        name: Error
+        type: string
+      - doc: QueuedAt is when it entered the outbox; SentAt when it left.
+        name: QueuedAt
+        type: time.Time
+      - name: SentAt
+        type: "*time.Time"
+      - doc: TraceID is the trace that queued it.
+        name: TraceID
+        type: string
+      - doc: Node is the node that queued it.
+        name: Node
+        type: string
+    kind: struct
+    name: MailSummaryMessage
+vars:
+  - grouped: true
+    items:
+      - doc: Engines are the database connector's adapters, as the catalog lists them.
+        name: engines
+        value: |-
+          []AdapterMessage{
+          		{ID: EngineMySQL, Name: "MySQL", Import: "github.com/kitsunium/sdk/framework/connectors/mysql", Driver: "github.com/go-sql-driver/mysql"},
+          		{ID: EnginePostgres, Name: "PostgreSQL", Import: "github.com/kitsunium/sdk/framework/connectors/postgres", Driver: "github.com/jackc/pgx/v5"},
+          		{ID: EngineSQLite, Name: "SQLite", Import: "github.com/kitsunium/sdk/framework/connectors/sqlite", Driver: "modernc.org/sqlite"},
+          	}
+      - doc: |-
+          builtin is every connector kit ships: the one table the graph, the
+          Studio's gating and its catalog of available connectors all read. A node
+          may bring several: a store a database keeps brings the store connector
+          and the database connector.
+        name: builtin
+        value: |-
+          []ConnectorSpec{
+          		{
+          			ID: ConnectorHTTP, Kind: ConnectorTransport, Roles: []string{RoleInbound}, Protocol: "http",
+          			Declares: []NodeKind{KindEndpoint, KindFrontend, KindAuth},
+          		},
+          		{
+          			ID: ConnectorMail, Kind: ConnectorMessaging, Roles: []string{RoleOutbound},
+          			Settings: []string{VarSMTPURL}, Declares: []NodeKind{KindMailer},
+          			detail: func(n *NodeEntity) string {
+          				if n.Mailer == nil {
+          					return ""
+          				}
+          				return n.Mailer.Transport
+          			},
+          		},
+          		{
+          			ID: ConnectorQueue, Kind: ConnectorMessaging, Roles: []string{RoleStorage},
+          			Declares: []NodeKind{KindTopic, KindSubscription, KindCommand},
+          			// A command brings a queue only when it waits in one (ADR 0005).
+          			brings: func(n *NodeEntity) bool { return n.Kind != KindCommand || queued(n) },
+          			detail: func(n *NodeEntity) string {
+          				switch {
+          				case n.Topic != nil:
+          					return n.Topic.Broker
+          				case n.Command != nil:
+          					return n.Command.Queue
+          				}
+          				return ""
+          			},
+          		},
+          		{
+          			ID: ConnectorStore, Kind: ConnectorData, Roles: []string{RoleStorage},
+          			Declares: []NodeKind{KindStore},
+          			detail: func(n *NodeEntity) string {
+          				if n.Store == nil {
+          					return ""
+          				}
+          				return n.Store.Backend
+          			},
+          		},
+          		{
+          			ID: ConnectorDatabase, Kind: ConnectorData, Roles: []string{RoleOutbound, RoleStorage},
+          			Declares: []NodeKind{KindStore}, Adapters: engines,
+          			brings: func(n *NodeEntity) bool { return n.Store != nil && n.Store.Database != "" },
+          			// The engines its stores run on: none while they stay in the data
+          			// directory.
+          			detail: func(n *NodeEntity) string {
+          				if n.Store == nil || !IsEngine(n.Store.Backend) {
+          					return ""
+          				}
+          				return n.Store.Backend
+          			},
+          		},
+          	}
+    name: engines
+  - doc: |-
+      docTag starts a paragraph of a description in another language: a
+      language tag the SDK's i18n domain supports, then a colon. It is matched on
+      a line's start only, so "fr:" inside a sentence changes nothing. It is
+      compiled at its first use, not at every start of every product.
+    items:
+      - name: docTag
+        value: |-
+          sync.OnceValue(func() *regexp.Regexp {
+          	return regexp.MustCompile(`^(ar|de|en|es|fr|it|ja|nl|pl|pt|ru|zh):\s*(.*)$`)
+          })
+    name: docTag
+  - grouped: true
+    items:
+      - doc: |-
+          IDPattern is the whole grammar as one regular expression, anchored —
+          the one the design files' JSON Schema publishes for an ID. Only an
+          endpoint may be named by its route.
+        name: IDPattern
+        type: string
+        value: |-
+          `^(?:external` +
+          		`|(?:` + SegmentPattern + `\.)?` + SegmentPattern +
+          		`(?:/(?:` + kindAlternatives() + `)/` + NamePattern + `|/endpoint/` + RoutePattern + `)?` +
+          		`|binary:` + SegmentPattern + `(?:/role/` + SegmentPattern + `)?` +
+          		`|library:` + SegmentPattern + `)$`
+      - doc: |-
+          serviceKinds are the kinds a service holds, so the only ones a
+          "<service>/<kind>/<name>" ID may name.
+        name: serviceKinds
+        value: |-
+          map[NodeKind]bool{
+          		KindEndpoint: true, KindStore: true, KindTopic: true, KindSubscription: true,
+          		KindWorkflow: true, KindJob: true, KindFrontend: true, KindAuth: true,
+          		KindMailer: true, KindLoop: true, KindSecret: true, KindPort: true,
+          		KindCommand: true, KindQuery: true, KindCLI: true, KindListener: true,
+          		KindPresentation: true,
+          	}
+    name: IDPattern
+  - doc: |-
+      simpleShapes are the Mermaid shapes of the kinds drawn by their name
+      alone, as fmt formats of it.
+    items:
+      - name: simpleShapes
+        value: |-
+          map[NodeKind]string{
+          	KindStore:    "[(%q)]",
+          	KindTopic:    ">%q]",
+          	KindWorkflow: "{{%q}}",
+          	KindJob:      "([%q])",
+          	KindAuth:     "[/%q\\]",
+          	KindMailer:   "[[%q]]",
+          	KindPort:     "[\\%q/]",
+          }
+    name: simpleShapes

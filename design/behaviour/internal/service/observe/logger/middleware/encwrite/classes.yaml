@@ -1,0 +1,135 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          aeadAlgorithm is the registry key of the default AES-256-GCM scheme used
+          to seal each record's bytes (activated by the aesgcm blank import).
+        name: aeadAlgorithm
+        type: corecrypto.Algorithm
+        value: "\"aes-256-gcm\""
+      - doc: |-
+          kdfAlgorithm is the registry key of the HKDF-SHA256 deriver used to
+          derive a per-sink subkey (activated by the hkdfsha256 blank import).
+        name: kdfAlgorithm
+        type: corecrypto.Algorithm
+        value: "\"hkdf-sha256\""
+      - doc: lenPrefixBytes is the width of the big-endian sealed-box length prefix.
+        name: lenPrefixBytes
+        type: int
+        value: "4"
+      - doc: |-
+          defaultInfo is the HKDF info label applied when Config.Info is empty; it
+          binds the derived subkey to the encrypting-sink purpose.
+        name: defaultInfo
+        type: string
+        value: "\"encwrite-sink\""
+    name: aeadAlgorithm
+files:
+  - decls:
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - aeadAlgorithm
+      - keyBytes
+      - EncWriter
+      - NewEncWriter
+      - deriveSubkey
+      - (*EncWriter).Write
+      - (*EncWriter).Flush
+      - (*EncWriter).Close
+      - frame
+    name: encwrite.go
+functions:
+  - name: NewEncWriter
+    params: cfg Config
+    results: writer *EncWriter, err error
+  - doc: |-
+      deriveSubkey derives the per-sink subkey from master via HKDF-SHA256 under the
+      info label and returns it as a zeroizable Key. It zeroizes both intermediate
+      secret copies — the master-key clone and the raw derived bytes — before
+      returning so no un-zeroized key material lingers on the heap (finding V29).
+    name: deriveSubkey
+    params: master corecrypto.Key, info string
+    results: subkey corecrypto.Key, err error
+  - doc: |-
+      frame prepends a 4-byte big-endian length prefix to box, returning
+      [len(box) as uint32 big-endian || box]. A box too large for a uint32 length
+      returns FramingFailed.
+    name: frame
+    params: box []byte
+    results: framed []byte, err error
+imports:
+  binary: encoding/binary
+  context: context
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  coreencwrite: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite
+  name: encwrite
+  purpose: Package encwrite — declares the Config value type consumed by NewEncWriter.
+types:
+  - fields:
+      - doc: Sink is the downstream destination for framed sealed boxes.
+        name: Sink
+        type: corelogger.Sink
+      - doc: Key is the master key from which a per-sink subkey is derived.
+        name: Key
+        type: corecrypto.Key
+      - doc: |-
+          Info is the HKDF info label for per-sink domain separation; empty falls
+          back to a package default that binds the subkey to the sink purpose.
+        name: Info
+        type: string
+    kind: struct
+    name: Config
+  - fields:
+      - doc: mu serializes Write / Flush / Close against concurrent producers.
+        name: mu
+        type: sync.Mutex
+      - doc: downstream receives the framed sealed box plus the originating record.
+        name: downstream
+        type: corelogger.Sink
+      - doc: key is the master key, retained so Close can zeroize it on every path.
+        name: key
+        type: corecrypto.Key
+      - doc: subkey is the derived per-sink key used for sealing; zeroized on Close.
+        name: subkey
+        type: corecrypto.Key
+    kind: struct
+    methods:
+      - name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *EncWriter
+        results: n int, err error
+      - name: Flush
+        params: ctx context.Context
+        recv: s *EncWriter
+        results: error
+      - name: Close
+        recv: s *EncWriter
+        results: error
+    name: EncWriter
+vars:
+  - doc: |-
+      keyBytes is the seam through which deriveSubkey obtains a fresh copy of the
+      master key material; it is a package var solely so a white-box test can wrap
+      it and assert the returned copy is zeroized before deriveSubkey returns
+      (finding V29). Production always binds it to corecrypto.Key.Bytes.
+    items:
+      - name: keyBytes
+        type: func(k corecrypto.Key) []byte
+        value: |-
+          func(k corecrypto.Key) []byte {
+          	//: hand back the cipher-ready master-key copy from the opaque Key value.
+          	return k.Bytes()
+          }
+    name: keyBytes

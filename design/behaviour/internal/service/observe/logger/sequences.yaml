@@ -1,0 +1,834 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*chainBuilder).Str
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.StringValue(val)})"
+      - return: b
+  - of: (*chainBuilder).Int
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.IntValue(val)})"
+      - return: b
+  - of: (*chainBuilder).Int64
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.Int64Value(val)})"
+      - return: b
+  - of: (*chainBuilder).Uint64
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.Uint64Value(val)})"
+      - return: b
+  - of: (*chainBuilder).Bool
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.BoolValue(val)})"
+      - return: b
+  - of: (*chainBuilder).Float64
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.Float64Value(val)})"
+      - return: b
+  - of: (*chainBuilder).Duration
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.DurationValue(val)})"
+      - return: b
+  - of: (*chainBuilder).Time
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.TimeValue(val)})"
+      - return: b
+  - of: (*chainBuilder).Any
+    steps:
+      - set: b.attrs
+        value: "append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.AnyValue(val)})"
+      - return: b
+  - of: (*chainBuilder).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainBuilder).Send
+        kind: self
+      - id: runtime
+        kind: stdlib
+      - id: b.owner.traceContext
+        kind: internal
+      - id: swallowHandlerError
+        kind: internal
+      - id: recordPool.Put
+        kind: value
+    steps:
+      - var:
+          name: pcs
+          type: "[1]uintptr"
+      - eval: runtime.Callers(callerSkipDepth, pcs[:])
+        to: runtime
+      - bind: r
+        eval: "corelogger.RecordEvent{Level: b.lv, Message: msg, PC: pcs[0], Attrs: b.attrs}"
+      - opt:
+          do:
+            - set: r.TraceContext
+              to: b.owner.traceContext
+              value: b.owner.traceContext(ctx)
+            - eval: swallowHandlerError(b.owner.h.Handle(ctx, r))
+              to: swallowHandlerError
+          when: b.owner.h.Enabled(ctx, r)
+      - set: b.attrs
+        value: b.attrs[:0]
+      - set: b.owner
+        value: nil
+      - eval: recordPool.Put(b)
+        to: recordPool.Put
+  - of: NewHandler
+    steps:
+      - opt:
+          do:
+            - return: nil, corelogger.EncoderNil
+          when: enc == nil
+      - opt:
+          do:
+            - return: nil, corelogger.SinkRequired
+          when: sink == nil
+      - return: "&genericHandler{enc: enc, sink: sink, min: min, clk: clock.System}, nil"
+  - of: (*genericHandler).Enabled
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: ctx != nil && ctx.Err() != nil
+      - return: r.Level >= h.min
+  - of: (*genericHandler).Handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).Handle
+        kind: self
+      - id: errs
+        kind: package
+      - id: h.clk.Now
+        kind: value
+      - id: buffer
+        kind: package
+      - id: mergeAttrs
+        kind: internal
+      - id: h.enc.Append
+        kind: value
+      - id: h.sink.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corelogger.CodeCtxCancelled,
+                			Reason:  "CTX_CANCELLED",
+                			Public:  "Logging aborted due to cancellation",
+                			Private: "service/observe/logger.genericHandler.Handle saw a cancelled context",
+                		})
+              to: errs
+          when: ctx != nil && ctx.Err() != nil
+      - opt:
+          do:
+            - set: r.Time
+              to: h.clk.Now
+              value: h.clk.Now()
+          when: r.Time.IsZero()
+      - bind: bp
+        eval: buffer.Get()
+        to: buffer
+      - defer: buffer.Put(bp)
+        to: buffer
+      - bind: bound
+        eval: mergeAttrs(h.attrs, r.Attrs)
+        to: mergeAttrs
+      - set: r.Attrs
+        value: bound
+      - bind: line
+        eval: h.enc.Append(*bp, h.groups, r)
+        to: h.enc.Append
+      - set: "*bp"
+        value: line
+      - bind: _, werr
+        eval: h.sink.Write(ctx, r, line)
+        to: h.sink.Write
+      - return: werr
+  - of: (*genericHandler).WithAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).WithAttrs
+        kind: self
+      - id: mergeAttrs
+        kind: internal
+    steps:
+      - bind: cp
+        eval: mergeAttrs(h.attrs, attrs)
+        to: mergeAttrs
+      - return: "&genericHandler{enc: h.enc, sink: h.sink, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}"
+  - of: (*genericHandler).WithGroup
+    steps:
+      - opt:
+          do:
+            - return: h
+          when: name == ""
+      - bind: cp
+        eval: make([]string, len(h.groups)+1)
+      - eval: copy(cp, h.groups)
+      - set: cp[len(h.groups)]
+        value: name
+      - return: "&genericHandler{enc: h.enc, sink: h.sink, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}"
+  - of: mergeAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeAttrs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: slices.Clone(child)
+              to: slices
+          when: len(parent) == 0
+      - return: slices.Concat(parent, child)
+        to: slices
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: NewWithTraceContext
+        kind: internal
+    steps:
+      - return: NewWithTraceContext(h, nil)
+        to: NewWithTraceContext
+  - of: NewWithTraceContext
+    steps:
+      - opt:
+          do:
+            - return: nil, corelogger.HandlerNil
+          when: h == nil
+      - return: "&loggerImpl{h: h, trace: src}, nil"
+  - of: (*loggerImpl).traceContext
+    steps:
+      - opt:
+          do:
+            - return: corelogger.TraceContextValue{}
+          when: l.trace == nil
+      - return: l.trace(ctx)
+  - of: (*loggerImpl).Enabled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).Enabled
+        kind: self
+      - id: l.h.Enabled
+        kind: value
+    steps:
+      - return: "l.h.Enabled(ctx, corelogger.RecordEvent{Level: lv})"
+        to: l.h.Enabled
+  - of: (*loggerImpl).Log
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).Log
+        kind: self
+      - id: runtime
+        kind: stdlib
+      - id: l.traceContext
+        kind: internal
+      - id: swallowHandlerError
+        kind: internal
+    steps:
+      - var:
+          name: pcs
+          type: "[1]uintptr"
+      - eval: runtime.Callers(callerSkipDepth, pcs[:])
+        to: runtime
+      - bind: r
+        eval: "corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}"
+      - opt:
+          do:
+            - return: ""
+          when: "!l.h.Enabled(ctx, r)"
+      - set: r.TraceContext
+        to: l.traceContext
+        value: l.traceContext(ctx)
+      - eval: swallowHandlerError(l.h.Handle(ctx, r))
+        to: swallowHandlerError
+  - of: (*loggerImpl).With
+    steps:
+      - return: "&loggerImpl{h: l.h.WithAttrs(attrs), trace: l.trace}"
+  - of: Build
+    participants:
+      - id: caller
+        kind: actor
+      - id: Build
+        kind: self
+      - id: impl.Build
+        kind: internal
+    steps:
+      - bind: impl, ok
+        eval: lg.(*loggerImpl)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - return: impl.Build(lv)
+        to: impl.Build
+  - of: LogAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: LogAttrs
+        kind: self
+      - id: impl.LogAttrs
+        kind: internal
+    steps:
+      - bind: impl, ok
+        eval: lg.(*loggerImpl)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - eval: impl.LogAttrs(ctx, lv, msg, attrs)
+        to: impl.LogAttrs
+  - of: swallowHandlerError
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: (*loggerImpl).Build
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).Build
+        kind: self
+      - id: recordPool.Get
+        kind: value
+    steps:
+      - bind: cb
+        eval: recordPool.Get()
+        to: recordPool.Get
+      - set: cb.owner
+        value: l
+      - set: cb.lv
+        value: lv
+      - return: cb
+  - of: (*loggerImpl).LogAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).LogAttrs
+        kind: self
+      - id: runtime
+        kind: stdlib
+      - id: l.traceContext
+        kind: internal
+      - id: swallowHandlerError
+        kind: internal
+    steps:
+      - var:
+          name: pcs
+          type: "[1]uintptr"
+      - eval: runtime.Callers(callerSkipDepth, pcs[:])
+        to: runtime
+      - bind: r
+        eval: "corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}"
+      - opt:
+          do:
+            - return: ""
+          when: "!l.h.Enabled(ctx, r)"
+      - set: r.TraceContext
+        to: l.traceContext
+        value: l.traceContext(ctx)
+      - eval: swallowHandlerError(l.h.Handle(ctx, r))
+        to: swallowHandlerError
+  - of: (*loggerImpl).WithGroup
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "&loggerImpl{h: l.h, trace: l.trace}"
+                when: l.owned != nil
+            - return: l
+          when: name == ""
+      - return: "&loggerImpl{h: l.h.WithGroup(name), trace: l.trace}"
+  - of: (*onceCloser).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*onceCloser).Close
+        kind: self
+      - id: o.once.Do
+        kind: value
+    steps:
+      - eval: |-
+          o.once.Do(func() {
+          		o.err = o.target.Close()
+          	})
+        to: o.once.Do
+      - return: o.err
+  - of: Owning
+    steps:
+      - bind: impl, ok
+        eval: lg.(*loggerImpl)
+      - opt:
+          do:
+            - return: lg
+          when: "!ok || owned == nil"
+      - bind: owning
+        eval: "*impl"
+      - set: owning.owned
+        value: "&onceCloser{target: owned}"
+      - return: "&owning"
+  - of: (*loggerImpl).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).Close
+        kind: self
+      - id: l.owned.Close
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: l.owned == nil
+      - return: l.owned.Close()
+        to: l.owned.Close
+  - of: newChainBuilder
+    steps:
+      - return: "&chainBuilder{attrs: make([]corelogger.AttrValue, 0, initialAttrCap)}"
+  - of: newSourceHandler
+    steps:
+      - opt:
+          do:
+            - return: nil, corelogger.HandlerNil
+          when: next == nil
+      - opt:
+          do:
+            - set: skip
+              value: "0"
+          when: skip < 0
+      - return: "&sourceHandler{next: next, skip: skip}, nil"
+  - of: (*sourceHandler).Enabled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sourceHandler).Enabled
+        kind: self
+      - id: h.next.Enabled
+        kind: value
+    steps:
+      - return: h.next.Enabled(ctx, r)
+        to: h.next.Enabled
+  - of: (*sourceHandler).Handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sourceHandler).Handle
+        kind: self
+      - id: withSource
+        kind: internal
+      - id: h.next.Handle
+        kind: value
+    steps:
+      - set: r.Attrs
+        to: withSource
+        value: withSource(r.Attrs, r.PC)
+      - return: h.next.Handle(ctx, r)
+        to: h.next.Handle
+  - of: (*sourceHandler).WithAttrs
+    steps:
+      - return: "&sourceHandler{next: h.next.WithAttrs(attrs), skip: h.skip}"
+  - of: (*sourceHandler).WithGroup
+    steps:
+      - return: "&sourceHandler{next: h.next.WithGroup(name), skip: h.skip}"
+  - of: withSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: withSource
+        kind: self
+      - id: resolveFrame
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: attrs
+          when: pc == 0
+      - bind: frame, ok
+        eval: resolveFrame(pc)
+        to: resolveFrame
+      - opt:
+          do:
+            - return: attrs
+          when: "!ok"
+      - return: |-
+          append(attrs, corelogger.AttrValue{
+          		Key:   SourceFieldKey,
+          		Value: corelogger.StringValue(renderFrame(frame)),
+          	})
+  - of: resolveFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveFrame
+        kind: self
+      - id: runtime.CallersFrames([]uintptr{pc}).Next
+        kind: value
+    steps:
+      - set: frame, _
+        to: runtime.CallersFrames([]uintptr{pc}).Next
+        value: runtime.CallersFrames([]uintptr{pc}).Next()
+      - opt:
+          do:
+            - return: frame, false
+          when: frame.Function == "" && frame.File == ""
+      - return: frame, true
+  - of: renderFrame
+    steps:
+      - return: frame.File + ":" + strconv.Itoa(frame.Line) + ":" + frame.Function
+  - of: WithCaller
+    participants:
+      - id: caller
+        kind: actor
+      - id: WithCaller
+        kind: self
+      - id: newSourceHandler
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: lg
+          when: lg == nil
+      - bind: impl, ok
+        eval: lg.(*loggerImpl)
+      - opt:
+          do:
+            - return: lg
+          when: "!ok"
+      - bind: wrapped, err
+        eval: newSourceHandler(impl.h, skip)
+        to: newSourceHandler
+      - opt:
+          do:
+            - return: lg
+          when: err != nil
+      - return: "&loggerImpl{h: wrapped}"
+  - of: NewTextHandler
+    steps:
+      - opt:
+          do:
+            - return: nil, corelogger.WriterNil
+          when: w == nil
+      - return: "&TextHandler{w: w, min: min, clk: clock.System}, nil"
+  - of: (*TextHandler).Enabled
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: ctx != nil && ctx.Err() != nil
+      - return: r.Level >= h.min
+  - of: (*TextHandler).WithAttrs
+    steps:
+      - bind: cp
+        eval: make([]corelogger.AttrValue, len(h.attrs)+len(attrs))
+      - eval: copy(cp, h.attrs)
+      - eval: copy(cp[len(h.attrs):], attrs)
+      - return: "&TextHandler{w: h.w, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}"
+  - of: (*TextHandler).WithGroup
+    steps:
+      - opt:
+          do:
+            - return: h
+          when: name == ""
+      - bind: cp
+        eval: make([]string, len(h.groups)+1)
+      - eval: copy(cp, h.groups)
+      - set: cp[len(h.groups)]
+        value: name
+      - return: "&TextHandler{w: h.w, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}"
+  - of: (*TextHandler).Handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TextHandler).Handle
+        kind: self
+      - id: errs
+        kind: package
+      - id: buffer
+        kind: package
+      - id: h.renderLine
+        kind: internal
+      - id: h.writeLine
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corelogger.CodeCtxCancelled,
+                			Reason:  "CTX_CANCELLED",
+                			Public:  "Logging aborted due to cancellation",
+                			Private: "service/observe/logger.TextHandler.Handle saw a cancelled context",
+                		})
+              to: errs
+          when: ctx != nil && ctx.Err() != nil
+      - bind: bp
+        eval: buffer.Get()
+        to: buffer
+      - defer: buffer.Put(bp)
+        to: buffer
+      - bind: line
+        eval: h.renderLine(*bp, r)
+        to: h.renderLine
+      - set: "*bp"
+        value: line
+      - return: h.writeLine(line)
+        to: h.writeLine
+  - of: (*TextHandler).renderLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TextHandler).renderLine
+        kind: self
+      - id: h.clk.Now
+        kind: value
+      - id: r.Time.AppendFormat
+        kind: value
+      - id: encoder
+        kind: package
+      - id: appendTraceContext
+        kind: internal
+      - id: appendAttrWithGroups
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.Time
+              to: h.clk.Now
+              value: h.clk.Now()
+          when: r.Time.IsZero()
+      - set: b
+        to: r.Time.AppendFormat
+        value: r.Time.AppendFormat(b, timestampLayout)
+      - set: b
+        value: append(b, ' ')
+      - set: b
+        value: append(b, r.Level.String()...)
+      - set: b
+        value: append(b, ' ')
+      - set: b
+        to: encoder
+        value: encoder.AppendSanitized(b, r.Message)
+      - set: b
+        to: appendTraceContext
+        value: appendTraceContext(b, r)
+      - loop:
+          do:
+            - set: b
+              to: appendAttrWithGroups
+              value: appendAttrWithGroups(b, h.groups, a)
+          key: _
+          range: h.attrs
+          value: a
+      - loop:
+          do:
+            - set: b
+              to: appendAttrWithGroups
+              value: appendAttrWithGroups(b, h.groups, a)
+          key: _
+          range: r.Attrs
+          value: a
+      - return: append(b, '\n')
+  - of: (*TextHandler).writeLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TextHandler).writeLine
+        kind: self
+      - id: h.mu.Lock
+        kind: value
+      - id: h.w.Write
+        kind: value
+      - id: h.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - eval: h.mu.Lock()
+        to: h.mu.Lock
+      - bind: _, werr
+        eval: h.w.Write(line)
+        to: h.w.Write
+      - eval: h.mu.Unlock()
+        to: h.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(werr, errs.WrapParams{
+                			Code:    corelogger.CodeWriteFailed,
+                			Reason:  "WRITE_FAILED",
+                			Public:  "Log write failed",
+                			Private: "service/observe/logger.TextHandler.Handle underlying writer returned an error",
+                		}, errs.Int("bytes", len(line)))
+              to: errs
+          when: werr != nil
+      - return: nil
+  - of: appendTraceContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTraceContext
+        kind: self
+      - id: tc.AppendTraceIDHex
+        kind: value
+      - id: tc.AppendSpanIDHex
+        kind: value
+    steps:
+      - bind: tc
+        eval: r.TraceContext
+      - opt:
+          do:
+            - return: dst
+          when: "!tc.IsValid()"
+      - set: dst
+        value: append(dst, ' ')
+      - set: dst
+        value: append(dst, corelogger.TraceIDKey...)
+      - set: dst
+        value: append(dst, '=')
+      - set: dst
+        to: tc.AppendTraceIDHex
+        value: tc.AppendTraceIDHex(dst)
+      - set: dst
+        value: append(dst, ' ')
+      - set: dst
+        value: append(dst, corelogger.SpanIDKey...)
+      - set: dst
+        value: append(dst, '=')
+      - return: tc.AppendSpanIDHex(dst)
+        to: tc.AppendSpanIDHex
+  - of: appendAttrWithGroups
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAttrWithGroups
+        kind: self
+      - id: appendAttr
+        kind: internal
+      - id: encoder
+        kind: package
+      - id: appendValueOnly
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendAttr(dst, a)
+              to: appendAttr
+          when: len(groups) == 0
+      - set: dst
+        value: append(dst, ' ')
+      - loop:
+          do:
+            - set: dst
+              to: encoder
+              value: encoder.AppendSanitized(dst, g)
+            - set: dst
+              value: append(dst, groupSeparator)
+          key: _
+          range: groups
+          value: g
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, encoder.ReservedPrefix...)
+          when: len(groups) == 0 && encoder.ReservesKey(a.Key)
+      - set: dst
+        to: encoder
+        value: encoder.AppendSanitized(dst, a.Key)
+      - set: dst
+        value: append(dst, '=')
+      - set: dst
+        to: appendValueOnly
+        value: appendValueOnly(dst, a)
+      - return: dst
+  - of: appendValueOnly
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendValueOnly
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: a.Value.Time().AppendFormat
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: corelogger.KindString
+              do:
+                - return: strconv.AppendQuote(dst, a.Value.String())
+                  to: strconv
+            - case: corelogger.KindInt64
+              do:
+                - return: strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
+                  to: strconv
+            - case: corelogger.KindBool
+              do:
+                - return: strconv.AppendBool(dst, a.Value.Bool())
+                  to: strconv
+            - case: corelogger.KindFloat64
+              do:
+                - return: strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
+                  to: strconv
+            - case: corelogger.KindUint64
+              do:
+                - return: strconv.AppendUint(dst, a.Value.Uint64(), decimalBase)
+                  to: strconv
+            - case: corelogger.KindDuration
+              do:
+                - return: strconv.AppendQuote(dst, a.Value.Duration().String())
+                  to: strconv
+            - case: corelogger.KindTime
+              do:
+                - return: a.Value.Time().AppendFormat(dst, timestampLayout)
+                  to: a.Value.Time().AppendFormat
+            - default: true
+              do:
+                - return: append(dst, '?')
+          "on": a.Value.Kind()
+  - of: appendAttr
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAttr
+        kind: self
+      - id: encoder
+        kind: package
+      - id: appendValueOnly
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, ' ')
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, encoder.ReservedPrefix...)
+          when: encoder.ReservesKey(a.Key)
+      - set: dst
+        to: encoder
+        value: encoder.AppendSanitized(dst, a.Key)
+      - set: dst
+        value: append(dst, '=')
+      - return: appendValueOnly(dst, a)
+        to: appendValueOnly

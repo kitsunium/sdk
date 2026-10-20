@@ -1,0 +1,72 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: appendJSONEscaped
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - switch:
+                cases:
+                  - case: c == '\\' || c == '"'
+                    do:
+                      - set: dst
+                        value: append(dst, '\\', c)
+                  - case: c == '\n'
+                    do:
+                      - set: dst
+                        value: append(dst, '\\', 'n')
+                  - case: c == '\r'
+                    do:
+                      - set: dst
+                        value: append(dst, '\\', 'r')
+                  - case: c == '\t'
+                    do:
+                      - set: dst
+                        value: append(dst, '\\', 't')
+                  - case: c < jsonControlCeiling
+                    do:
+                      - set: dst
+                        value: append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
+                  - default: true
+                    do:
+                      - set: dst
+                        value: append(dst, c)
+          key: i
+          range: len(s)
+      - return: dst
+  - of: AppendSanitized
+    steps:
+      - loop:
+          do:
+            - bind: b
+              eval: text[i]
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ' ')
+                  - continue: true
+                when: b == '\n' || b == '\r' || b == 0
+            - set: dst
+              value: append(dst, b)
+          key: i
+          range: len(text)
+      - return: dst
+  - of: quoteSafe
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - return: "false"
+                when: c < quoteSafeFloor || c > quoteSafeCeiling
+            - opt:
+                do:
+                  - return: "false"
+                when: c == '"' || c == '\\'
+          key: i
+          range: len(s)
+      - return: "true"

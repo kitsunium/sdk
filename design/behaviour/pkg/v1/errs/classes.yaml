@@ -1,0 +1,60 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      MinAppMajor is the lowest Major octet reserved for third-party / application
+      error codes. The SDK only ever allocates Major < MinAppMajor (0 = internal,
+      1.. = the public semver major). A consumer that builds every Code with a
+      Major in [MinAppMajor, MaxMajor] is guaranteed never to collide with an SDK
+      code, now or in any future SDK release. See ADR 0019.
+    items:
+      - comment: "64"
+        name: MinAppMajor
+        type: Major
+        value: "0x40"
+    name: MinAppMajor
+  - doc: |-
+      MaxMajor is the largest legal Major octet. Codes must round-trip through a
+      positive int32 (the kernel rule that keeps the deprecated int accessor from
+      wrapping negative), so the top uint32 bit stays clear and the Major octet
+      caps at 0x7F.
+    items:
+      - comment: "127"
+        name: MaxMajor
+        type: Major
+        value: "0x7F"
+    name: MaxMajor
+files:
+  - decls:
+      - HasAnyCode
+      - HasAnyReason
+    name: accessors.go
+  - decls:
+      - MinAppMajor
+      - MaxMajor
+      - New
+      - Wrap
+    name: construct.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: HasAnyCode
+    params: err error, codes ...Code
+    results: bool
+  - name: HasAnyReason
+    params: err error, reasons ...string
+    results: bool
+  - name: New
+    params: code Code, reason, public, private string, fields ...Field
+    results: error
+  - name: Wrap
+    params: cause error, params WrapParams, fields ...Field
+    results: error
+imports:
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/errs
+  name: errs
+  purpose: Package errs is the public facade for SDK errors — both introspection (the Of-family accessors and the matchers, re-exported in gen_facade.go, beside HasAnyCode and HasAnyReason in accessors.go) and construction ([New], [Wrap] and the application Code range in construct.go, the Field helpers re-exported in gen_facade.go).
+types: []

@@ -1,0 +1,3343 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewAdmission
+    steps:
+      - opt:
+          do:
+            - set: cfg.PerAddress
+              value: defaultPerAddress
+          when: cfg.PerAddress <= 0
+      - opt:
+          do:
+            - set: cfg.Reserved
+              value: defaultReserved
+          when: cfg.Reserved <= 0
+      - return: "&Admission{cfg: cfg, pending: map[string]int{}, reserved: map[string]bool{}}"
+  - of: admissionKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: admissionKey
+        kind: self
+      - id: a.String
+        kind: value
+      - id: admissionKeyOf
+        kind: internal
+    steps:
+      - var:
+          name: ip
+          type: stdnet.IP
+      - typeswitch:
+          bind: t
+          cases:
+            - do:
+                - set: ip
+                  value: t.IP
+              types: "*stdnet.TCPAddr"
+            - do:
+                - set: ip
+                  value: t.IP
+              types: "*stdnet.UDPAddr"
+            - default: true
+              do:
+                - return: a.String()
+                  to: a.String
+          "on": a
+      - return: admissionKeyOf(ip)
+        to: admissionKeyOf
+  - of: admissionKeyOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: admissionKeyOf
+        kind: self
+      - id: ip.To4
+        kind: value
+      - id: v4.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v4.String()
+              to: v4.String
+          init:
+            bind: v4
+            eval: ip.To4()
+            to: ip.To4
+          when: v4 != nil
+      - return: ip.Mask(stdnet.CIDRMask(64, 128)).String() + "/64"
+  - of: (*Admission).Admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Admission).Admit
+        kind: self
+      - id: admissionKey
+        kind: internal
+      - id: a.mu.Lock
+        kind: value
+      - id: a.mu.Unlock
+        kind: value
+      - id: a.refused.Add
+        kind: value
+    steps:
+      - bind: k
+        eval: admissionKey(remote)
+        to: admissionKey
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - bind: limit
+        eval: a.cfg.PerAddress
+      - opt:
+          do:
+            - set: limit
+              value: a.cfg.Reserved
+          when: a.reserved[k]
+      - opt:
+          do:
+            - eval: a.mu.Unlock()
+              to: a.mu.Unlock
+            - eval: a.refused.Add(1)
+              to: a.refused.Add
+            - return: func() {}, false
+          when: a.pending[k] >= limit
+      - op: ++
+        set: a.pending[k]
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+      - var:
+          name: once
+          type: sync.Once
+      - return: |-
+          func() {
+          		once.Do(func() {
+          			a.mu.Lock()
+          			if a.pending[k]--; a.pending[k] <= 0 {
+          				delete(a.pending, k)
+          			}
+          			a.mu.Unlock()
+          		})
+          	}, true
+  - of: (*Admission).SetReserved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Admission).SetReserved
+        kind: self
+      - id: stdnet
+        kind: stdlib
+      - id: a.mu.Lock
+        kind: value
+      - id: a.mu.Unlock
+        kind: value
+    steps:
+      - bind: keys
+        eval: map[string]bool{}
+      - loop:
+          do:
+            - bind: host
+              eval: s
+            - opt:
+                do:
+                  - set: host
+                    value: h
+                init:
+                  bind: h, _, err
+                  eval: stdnet.SplitHostPort(s)
+                  to: stdnet
+                when: err == nil
+            - bind: ips, err
+              eval: stdnet.LookupIP(host)
+              to: stdnet
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil
+            - loop:
+                do:
+                  - set: keys[admissionKeyOf(ip)]
+                    value: "true"
+                key: _
+                range: ips
+                value: ip
+          key: _
+          range: addrs
+          value: s
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - set: a.reserved
+        value: keys
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+  - of: (*Admission).Refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Admission).Refused
+        kind: self
+      - id: a.refused.Load
+        kind: value
+    steps:
+      - return: a.refused.Load()
+        to: a.refused.Load
+  - of: PreHandshake
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.admission
+                value: a
+  - of: releaseAdmission
+    steps:
+      - opt:
+          do:
+            - eval: release()
+          init:
+            bind: release, ok
+            eval: ctx.Value(admissionReleaseKey{}).(func())
+          when: ok
+  - of: (*Server).adoptedSockets
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).adoptedSockets
+        kind: self
+      - id: s.inheritOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          s.inheritOnce.Do(func() {
+          		s.inherited, s.inheritErr = sdlisten.WithNames(false)
+          	})
+        to: s.inheritOnce.Do
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.SocketAdoptFailed, errs.WrapParams{},
+                			errs.String("socket", name), errs.String("cause", s.inheritErr.Error()))
+          when: s.inheritErr != nil
+      - bind: found, ok
+        eval: s.inherited[name]
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.SocketAdoptFailed, errs.WrapParams{},
+                			errs.String("socket", name),
+                			errs.String("why", "no inherited socket published under that name"))
+          when: "!ok || len(found) == 0"
+      - eval: delete(s.inherited, name)
+      - return: found, nil
+  - of: closeFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeFiles
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(file.Close())
+              to: swallowErr
+          key: _
+          range: files
+          value: file
+  - of: (*Server).adoptStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).adoptStream
+        kind: self
+      - id: s.adoptedSockets
+        kind: internal
+      - id: listenersFromFiles
+        kind: internal
+    steps:
+      - bind: files, ferr
+        eval: s.adoptedSockets(name)
+        to: s.adoptedSockets
+      - opt:
+          do:
+            - return: nil, ferr
+          when: ferr != nil
+      - return: listenersFromFiles(name, files)
+        to: listenersFromFiles
+  - of: listenersFromFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: listenersFromFiles
+        kind: self
+      - id: stdnet
+        kind: stdlib
+      - id: closeListeners
+        kind: internal
+      - id: closeFiles
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]stdnet.Listener, 0, len(files))
+      - loop:
+          do:
+            - bind: ln, lerr
+              eval: stdnet.FileListener(file)
+              to: stdnet
+            - opt:
+                do:
+                  - eval: closeListeners(out)
+                    to: closeListeners
+                  - eval: closeFiles(files[i:])
+                    to: closeFiles
+                  - return: |-
+                      nil, errs.Wrap(corenet.SocketAdoptFailed, errs.WrapParams{},
+                      				errs.String("socket", name), errs.String("cause", lerr.Error()))
+                when: lerr != nil
+            - eval: swallowErr(file.Close())
+              to: swallowErr
+            - set: out
+              value: append(out, ln)
+          key: i
+          range: files
+          value: file
+      - return: out, nil
+  - of: closeListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeListeners
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(ln.Close())
+              to: swallowErr
+          key: _
+          range: listeners
+          value: ln
+  - of: closePacketConns
+    participants:
+      - id: caller
+        kind: actor
+      - id: closePacketConns
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(pc.Close())
+              to: swallowErr
+          key: _
+          range: conns
+          value: pc
+  - of: (*Server).adoptPacket
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).adoptPacket
+        kind: self
+      - id: s.adoptedSockets
+        kind: internal
+      - id: packetConnsFromFiles
+        kind: internal
+    steps:
+      - bind: files, ferr
+        eval: s.adoptedSockets(name)
+        to: s.adoptedSockets
+      - opt:
+          do:
+            - return: nil, ferr
+          when: ferr != nil
+      - return: packetConnsFromFiles(name, files)
+        to: packetConnsFromFiles
+  - of: packetConnsFromFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: packetConnsFromFiles
+        kind: self
+      - id: stdnet
+        kind: stdlib
+      - id: closePacketConns
+        kind: internal
+      - id: closeFiles
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]stdnet.PacketConn, 0, len(files))
+      - loop:
+          do:
+            - bind: pc, perr
+              eval: stdnet.FilePacketConn(file)
+              to: stdnet
+            - opt:
+                do:
+                  - eval: closePacketConns(out)
+                    to: closePacketConns
+                  - eval: closeFiles(files[i:])
+                    to: closeFiles
+                  - return: |-
+                      nil, errs.Wrap(corenet.SocketAdoptFailed, errs.WrapParams{},
+                      				errs.String("socket", name), errs.String("cause", perr.Error()))
+                when: perr != nil
+            - eval: swallowErr(file.Close())
+              to: swallowErr
+            - set: out
+              value: append(out, pc)
+          key: i
+          range: files
+          value: file
+      - return: out, nil
+  - of: (*datagram).payload
+    steps:
+      - return: d.buf[:d.n]
+  - of: newSlots
+    steps:
+      - bind: slots
+        eval: make([]datagram, count)
+      - loop:
+          do:
+            - set: slots[i].buf
+              value: make([]byte, size+1)
+          key: i
+          range: slots
+      - return: slots
+  - of: (*portableReader).readBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableReader).readBatch
+        kind: self
+      - id: r.pc.ReadFrom
+        kind: value
+    steps:
+      - bind: read, addr, rerr
+        eval: r.pc.ReadFrom(slots[0].buf)
+        to: r.pc.ReadFrom
+      - opt:
+          do:
+            - set: slots[0].n
+              value: len(slots[0].buf)
+            - set: slots[0].addr
+              value: addr
+            - return: 1, nil
+          when: rerr != nil && datagramTruncated(rerr)
+      - opt:
+          do:
+            - return: 0, rerr
+          when: rerr != nil
+      - set: slots[0].n
+        value: read
+      - set: slots[0].addr
+        value: addr
+      - return: 1, nil
+  - of: (*conn).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).Read
+        kind: self
+      - id: c.boundRead
+        kind: internal
+      - id: c.Conn.Read
+        kind: value
+    steps:
+      - eval: c.boundRead()
+        to: c.boundRead
+      - return: c.Conn.Read(p)
+        to: c.Conn.Read
+  - of: (*conn).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).Write
+        kind: self
+      - id: c.boundWrite
+        kind: internal
+      - id: c.Conn.Write
+        kind: value
+    steps:
+      - eval: c.boundWrite()
+        to: c.boundWrite
+      - return: c.Conn.Write(p)
+        to: c.Conn.Write
+  - of: (*conn).boundRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).boundRead
+        kind: self
+      - id: tighterBudget
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: budget
+        eval: tighterBudget(c.timeouts.Read.Duration(), c.timeouts.Idle.Duration())
+        to: tighterBudget
+      - opt:
+          do:
+            - return: ""
+          when: budget <= 0
+      - eval: swallowErr(c.SetReadDeadline(time.Now().Add(budget)))
+        to: swallowErr
+  - of: (*conn).boundWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).boundWrite
+        kind: self
+      - id: c.timeouts.Write.Duration
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: budget
+        eval: c.timeouts.Write.Duration()
+        to: c.timeouts.Write.Duration
+      - opt:
+          do:
+            - return: ""
+          when: budget <= 0
+      - eval: swallowErr(c.SetWriteDeadline(time.Now().Add(budget)))
+        to: swallowErr
+  - of: tighterBudget
+    steps:
+      - opt:
+          do:
+            - return: b
+          when: a <= 0
+      - opt:
+          do:
+            - return: a
+          when: b <= 0
+      - return: min(a, b)
+  - of: (*conn).ID
+    steps:
+      - return: c.id
+  - of: (*conn).Group
+    steps:
+      - return: c.group
+  - of: (*conn).Buffer
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c.scratch == nil
+      - return: "*c.scratch"
+  - of: (*conn).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).Close
+        kind: self
+      - id: c.Conn.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c.Conn == nil
+      - return: c.Conn.Close()
+        to: c.Conn.Close
+  - of: (*conn).reset
+    steps:
+      - set: c.Conn
+        value: nil
+      - set: c.id
+        value: "0"
+      - set: c.group
+        value: "\"\""
+      - set: c.scratch
+        value: nil
+      - set: c.timeouts
+        value: corenet.TimeoutsValue{}
+      - set: c.hijacked
+        value: "false"
+  - of: (*trackedConn).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*trackedConn).Close
+        kind: self
+      - id: t.Conn.Close
+        kind: value
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: slot.release
+        kind: internal
+    steps:
+      - bind: err
+        eval: t.Conn.Close()
+        to: t.Conn.Close
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.closed
+        value: "true"
+      - bind: slot
+        eval: t.slot
+      - set: t.slot
+        value: nil
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: slot.release()
+              to: slot.release
+          when: slot != nil
+      - return: err
+  - of: (*trackedConn).holdSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*trackedConn).holdSlot
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: slot.release
+        kind: internal
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - opt:
+          do:
+            - eval: t.mu.Unlock()
+              to: t.mu.Unlock
+            - eval: slot.release()
+              to: slot.release
+            - return: ""
+          when: t.closed
+      - set: t.slot
+        value: slot
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*trackedConn).CloseWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*trackedConn).CloseWrite
+        kind: self
+      - id: halfCloser.CloseWrite
+        kind: internal
+    steps:
+      - bind: halfCloser, ok
+        eval: t.Conn.(interface{ CloseWrite() error })
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - return: halfCloser.CloseWrite()
+        to: halfCloser.CloseWrite
+  - of: (*trackedConn).ReadFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*trackedConn).ReadFrom
+        kind: self
+      - id: readerFrom.ReadFrom
+        kind: value
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: readerFrom.ReadFrom(r)
+              to: readerFrom.ReadFrom
+          init:
+            bind: readerFrom, ok
+            eval: t.Conn.(io.ReaderFrom)
+          when: ok
+      - return: io.Copy(t.Conn, r)
+        to: io
+  - of: hijackedTracker
+    participants:
+      - id: caller
+        kind: actor
+      - id: hijackedTracker
+        kind: self
+      - id: secured.NetConn
+        kind: value
+    steps:
+      - bind: pooled, ok
+        eval: c.(*conn)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok || !pooled.hijacked"
+      - bind: socket
+        eval: pooled.Conn
+      - opt:
+          do:
+            - set: socket
+              to: secured.NetConn
+              value: secured.NetConn()
+          init:
+            bind: secured, isTLS
+            eval: socket.(*tls.Conn)
+          when: isTLS
+      - bind: tracked, isTracked
+        eval: socket.(*trackedConn)
+      - opt:
+          do:
+            - return: nil
+          when: "!isTracked"
+      - return: tracked
+  - of: (*connWaiter).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*connWaiter).release
+        kind: self
+      - id: w.doneOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          w.doneOnce.Do(func() {
+          		//: the engine goroutine holding this connection is free to return.
+          		close(w.done)
+          	})
+        to: w.doneOnce.Do
+  - of: newDatagramSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: newDatagramSource
+        kind: self
+      - id: newMultiReader
+        kind: internal
+    steps:
+      - bind: raw, ok
+        eval: pc.(rawConnProvider)
+      - opt:
+          do:
+            - return: "&portableReader{pc: pc}"
+          when: "!ok"
+      - bind: reader, err
+        eval: newMultiReader(pc, raw)
+        to: newMultiReader
+      - opt:
+          do:
+            - return: "&portableReader{pc: pc}"
+          when: err != nil
+      - return: reader
+  - of: batchAvailable
+    steps:
+      - return: "true"
+  - of: platformLacks
+    steps:
+      - return: "false"
+  - of: handshakeHandler.ServeConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: handshakeHandler.ServeConn
+        kind: self
+      - id: boundHandshake
+        kind: internal
+      - id: releaseAdmission
+        kind: internal
+      - id: h.next.ServeConn
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: boundHandshake(ctx, c, h.timeouts)
+            to: boundHandshake
+          when: err != nil
+      - eval: releaseAdmission(ctx)
+        to: releaseAdmission
+      - return: h.next.ServeConn(ctx, c)
+        to: h.next.ServeConn
+  - of: boundHandshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundHandshake
+        kind: self
+      - id: handshakeBudget
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: tlsConn.HandshakeContext
+        kind: value
+    steps:
+      - bind: tlsConn, ok
+        eval: rawSocket(c).(*tls.Conn)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - bind: budget
+        eval: handshakeBudget(timeouts)
+        to: handshakeBudget
+      - eval: swallowErr(tlsConn.SetDeadline(time.Now().Add(budget)))
+        to: swallowErr
+      - bind: err
+        eval: tlsConn.HandshakeContext(ctx)
+        to: tlsConn.HandshakeContext
+      - eval: swallowErr(tlsConn.SetDeadline(time.Time{}))
+        to: swallowErr
+      - return: err
+  - of: handshakeBudget
+    participants:
+      - id: caller
+        kind: actor
+      - id: handshakeBudget
+        kind: self
+      - id: timeouts.Handshake.Duration
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: configured
+          init:
+            bind: configured
+            eval: timeouts.Handshake.Duration()
+            to: timeouts.Handshake.Duration
+          when: configured > 0
+      - return: defaultHandshakeTimeout
+  - of: newHTTPAdapter
+    steps:
+      - return: |-
+          &httpAdapter{
+          		handler:  h,
+          		waiters:  make(map[stdnet.Conn]*connWaiter, expectedLiveConns),
+          		draining: make(chan struct{}),
+          	}
+  - of: (*httpAdapter).ServeConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).ServeConn
+        kind: self
+      - id: rawSocket
+        kind: internal
+      - id: a.start.Do
+        kind: value
+      - id: a.currentBridge
+        kind: internal
+      - id: a.register
+        kind: internal
+      - id: a.unregister
+        kind: internal
+      - id: markHijacked
+        kind: internal
+    steps:
+      - bind: raw
+        eval: rawSocket(c)
+        to: rawSocket
+      - eval: a.start.Do(func() { a.launch(raw) })
+        to: a.start.Do
+      - bind: bridge
+        eval: a.currentBridge()
+        to: a.currentBridge
+      - opt:
+          do:
+            - return: corenet.ServerClosed
+          when: bridge == nil
+      - bind: waiter
+        eval: a.register(raw)
+        to: a.register
+      - defer: a.unregister(raw)
+        to: a.unregister
+      - opt:
+          do:
+            - return: corenet.ServerClosed
+          when: "!bridge.offer(raw)"
+      - select:
+          cases:
+            - comm: <-waiter.done
+            - comm: <-ctx.Done()
+      - opt:
+          do:
+            - eval: markHijacked(c)
+              to: markHijacked
+          when: waiter.hijacked.Load()
+      - return: nil
+  - of: markHijacked
+    steps:
+      - bind: pooled, ok
+        eval: c.(*conn)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - set: pooled.hijacked
+        value: "true"
+  - of: (*httpAdapter).register
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).register
+        kind: self
+      - id: a.mu.Lock
+        kind: value
+      - id: a.mu.Unlock
+        kind: value
+    steps:
+      - bind: waiter
+        eval: "&connWaiter{done: make(chan struct{})}"
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - set: a.waiters[raw]
+        value: waiter
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+      - return: waiter
+  - of: (*httpAdapter).unregister
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).unregister
+        kind: self
+      - id: a.mu.Lock
+        kind: value
+      - id: a.mu.Unlock
+        kind: value
+    steps:
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - eval: delete(a.waiters, raw)
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+  - of: (*httpAdapter).onConnState
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).onConnState
+        kind: self
+      - id: a.mu.Lock
+        kind: value
+      - id: a.mu.Unlock
+        kind: value
+      - id: waiter.hijacked.Store
+        kind: value
+      - id: waiter.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: state != http.StateClosed && state != http.StateHijacked
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - bind: waiter, waiting
+        eval: a.waiters[raw]
+      - opt:
+          do:
+            - eval: delete(a.waiters, raw)
+          when: waiting
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: "!waiting"
+      - opt:
+          do:
+            - eval: waiter.hijacked.Store(true)
+              to: waiter.hijacked.Store
+          when: state == http.StateHijacked
+      - eval: waiter.release()
+        to: waiter.release
+  - of: (*httpAdapter).launch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).launch
+        kind: self
+      - id: newChanListener
+        kind: internal
+      - id: worker
+        kind: package
+    steps:
+      - lock:
+          mutex: a.mu
+      - opt:
+          do:
+            - return: ""
+          when: a.stopped
+      - bind: bridge
+        eval: newChanListener(raw.LocalAddr())
+        to: newChanListener
+      - bind: srv
+        eval: |-
+          &http.Server{
+          		Handler:   a.handler,
+          		ConnState: a.onConnState,
+          		//: net/http applies these per request, refreshing on every one, which
+          		//: is what the group's options promise. Left at zero — as they were —
+          		//: net/http bounds nothing at all, so a single slow reader could hold a
+          		//: request open for as long as it liked on an otherwise bounded group.
+          		ReadTimeout:  a.timeouts.Read.Duration(),
+          		WriteTimeout: a.timeouts.Write.Duration(),
+          		IdleTimeout:  a.timeouts.Idle.Duration(),
+          		//: the header phase is the one a slowloris stalls, and net/http only
+          		//: bounds it separately; its own option wins, and falling back to the
+          		//: read budget means a group that set only that one is still defended
+          		//: without having to know the phase exists.
+          		ReadHeaderTimeout: a.bounds.headerTimeout(a.timeouts.Read.Duration()),
+          		//: zero is net/http's own default (1 MiB); a caller's cap replaces it.
+          		MaxHeaderBytes: a.bounds.headerBytes(),
+          		//: every request on this listener derives from a context carrying the
+          		//: drain signal, which is the only way a handler holding a connection
+          		//: open indefinitely can learn that the server is shutting down. A
+          		//: request context would have to be CANCELLED to say it, and cancelling
+          		//: one asks a handler to abandon a response the drain exists to let it
+          		//: finish.
+          		BaseContext: func(stdnet.Listener) context.Context {
+          			//: the same channel for every request the group serves.
+          			return corenet.WithDrainSignal(context.Background(), a.draining)
+          		},
+          	}
+      - set: a.bridge
+        value: bridge
+      - set: a.server
+        value: srv
+      - set: a.daemon
+        to: worker
+        value: |-
+          worker.Start(func(_ <-chan struct{}) {
+          		//: Serve always returns a non-nil error; ErrClosed on our drain path is
+          		//: the expected one and carries nothing worth reporting.
+          		swallowErr(srv.Serve(bridge))
+          	})
+  - of: (*httpAdapter).shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).shutdown
+        kind: self
+      - id: a.stop
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: bridge, srv, daemon
+        eval: a.stop()
+        to: a.stop
+      - opt:
+          do:
+            - return: ""
+          when: bridge == nil
+      - eval: swallowErr(bridge.Close())
+        to: swallowErr
+      - eval: swallowErr(srv.Shutdown(ctx))
+        to: swallowErr
+      - select:
+          cases:
+            - comm: <-daemon.Done()
+            - comm: <-ctx.Done()
+  - of: (*httpAdapter).closeNow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).closeNow
+        kind: self
+      - id: a.stop
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: bridge, srv, _
+        eval: a.stop()
+        to: a.stop
+      - opt:
+          do:
+            - return: ""
+          when: bridge == nil
+      - eval: swallowErr(bridge.Close())
+        to: swallowErr
+      - eval: swallowErr(srv.Close())
+        to: swallowErr
+  - of: (*httpAdapter).stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*httpAdapter).stop
+        kind: self
+      - id: a.drainOnce.Do
+        kind: value
+    steps:
+      - lock:
+          mutex: a.mu
+      - set: a.stopped
+        value: "true"
+      - eval: |-
+          a.drainOnce.Do(func() {
+          		//: every in-flight handler watching the signal sees this.
+          		close(a.draining)
+          	})
+        to: a.drainOnce.Do
+      - return: a.bridge, a.server, a.daemon
+  - of: (*httpAdapter).currentBridge
+    steps:
+      - lock:
+          mutex: a.mu
+          read: true
+      - return: a.bridge
+  - of: rawSocket
+    steps:
+      - bind: pooled, ok
+        eval: c.(*conn)
+      - opt:
+          do:
+            - return: c
+          when: "!ok || pooled.Conn == nil"
+      - return: pooled.Conn
+  - of: httpBounds.headerTimeout
+    steps:
+      - opt:
+          do:
+            - return: b.readHeaderTimeout
+          when: b.readHeaderTimeout > 0
+      - return: read
+  - of: httpBounds.headerBytes
+    steps:
+      - opt:
+          do:
+            - return: b.maxHeaderBytes
+          when: b.maxHeaderBytes > 0
+      - return: "0"
+  - of: newChanListener
+    steps:
+      - return: |-
+          &chanListener{
+          		conns:  make(chan stdnet.Conn),
+          		addr:   addr,
+          		closed: make(chan struct{}),
+          	}
+  - of: (*chanListener).Accept
+    steps:
+      - select:
+          cases:
+            - comm: c := <-l.conns
+              do:
+                - return: c, nil
+            - comm: <-l.closed
+              do:
+                - return: nil, stdnet.ErrClosed
+  - of: (*chanListener).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chanListener).Close
+        kind: self
+      - id: l.once.Do
+        kind: value
+    steps:
+      - eval: l.once.Do(func() { close(l.closed) })
+        to: l.once.Do
+      - return: nil
+  - of: (*chanListener).Addr
+    steps:
+      - return: l.addr
+  - of: (*chanListener).offer
+    steps:
+      - select:
+          cases:
+            - comm: l.conns <- c
+              do:
+                - return: "true"
+            - comm: <-l.closed
+              do:
+                - return: "false"
+  - of: setKernelLen
+    steps:
+      - set: "*dst"
+        value: T(n)
+  - of: (*Server).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Start
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+      - id: s.phase.Store
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: context
+        kind: stdlib
+      - id: s.bindEverything
+        kind: internal
+      - id: s.Close
+        kind: internal
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - opt:
+          do:
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - return: errs.Wrap(corenet.AlreadyStarted, errs.WrapParams{})
+              to: errs
+          when: corenet.Phase(s.phase.Load()) != corenet.PhaseNew
+      - opt:
+          do:
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - return: s.declErr
+          when: s.declErr != nil
+      - eval: s.phase.Store(uint32(corenet.PhaseStarting))
+        to: s.phase.Store
+      - bind: groups
+        eval: slices.Clone(s.groups)
+        to: slices
+      - bind: packetGroups
+        eval: slices.Clone(s.packetGroups)
+        to: slices
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - bind: runCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - set: s.runCtx
+        value: runCtx
+      - set: s.stop
+        value: cancel
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+                      				errs.String("cause", err.Error()), errs.String("cleanup", cerr.Error()))
+                    to: errs
+                init:
+                  bind: cerr
+                  eval: s.Close()
+                  to: s.Close
+                when: cerr != nil
+            - return: err
+          init:
+            bind: err
+            eval: s.bindEverything(ctx, groups, packetGroups)
+            to: s.bindEverything
+          when: err != nil
+      - eval: s.phase.Store(uint32(corenet.PhaseServing))
+        to: s.phase.Store
+      - return: nil
+  - of: (*Server).bindEverything
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).bindEverything
+        kind: self
+      - id: s.bindAll
+        kind: internal
+      - id: s.bindPacketAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.bindAll(ctx, groups)
+            to: s.bindAll
+          when: err != nil
+      - return: s.bindPacketAll(ctx, packetGroups)
+        to: s.bindPacketAll
+  - of: (*Server).bindPacketAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).bindPacketAll
+        kind: self
+      - id: errs
+        kind: package
+      - id: s.bindPacketGroup
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
+                      				errs.String("group", group.name))
+                    to: errs
+                when: group.handler == nil
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                      				errs.String("group", group.name), errs.String("why", "no listen address"))
+                    to: errs
+                when: len(group.addrs) == 0
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.bindPacketGroup(ctx, group)
+                  to: s.bindPacketGroup
+                when: err != nil
+          key: _
+          range: groups
+          value: group
+      - return: nil
+  - of: (*Server).bindPacketGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).bindPacketGroup
+        kind: self
+      - id: group.resolved
+        kind: internal
+      - id: s.adoptPacketSockets
+        kind: internal
+      - id: listenPacket
+        kind: internal
+      - id: batchDegradation
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.inFlight.Add
+        kind: value
+      - id: s.readLoop
+        kind: internal
+    steps:
+      - bind: handler
+        eval: group.resolved()
+        to: group.resolved
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.adoptPacketSockets(group, handler)
+            to: s.adoptPacketSockets
+          when: err != nil
+      - loop:
+          do:
+            - bind: pc, err
+              eval: listenPacket(ctx, addr)
+              to: listenPacket
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - bind: bound
+              eval: "&boundPacketConn{group: group.name, addr: addr, pc: pc}"
+            - bind: degraded, reason
+              eval: batchDegradation(group.limits)
+              to: batchDegradation
+            - eval: s.mu.Lock()
+              to: s.mu.Lock
+            - set: s.packetConns
+              value: append(s.packetConns, bound)
+            - set: s.states
+              value: |-
+                append(s.states, corenet.ListenerStateValue{
+                			Group:          group.name,
+                			Address:        pc.LocalAddr().String(),
+                			Network:        addr.Network,
+                			Shards:         1,
+                			Degraded:       degraded,
+                			DegradedReason: reason,
+                		})
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - eval: s.inFlight.Add(1)
+              to: s.inFlight.Add
+            - go: s.readLoop(bound, group, handler)
+              to: s.readLoop
+          key: _
+          range: group.addrs
+          value: addr
+      - return: nil
+  - of: (*Server).adoptPacketSockets
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).adoptPacketSockets
+        kind: self
+      - id: s.adoptPacket
+        kind: internal
+      - id: batchDegradation
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.inFlight.Add
+        kind: value
+      - id: s.readLoop
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: conns, err
+              eval: s.adoptPacket(name)
+              to: s.adoptPacket
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - bind: degraded, reason
+              eval: batchDegradation(group.limits)
+              to: batchDegradation
+            - loop:
+                do:
+                  - bind: addr
+                    eval: "corenet.AddressValue{Network: pc.LocalAddr().Network(), Addr: pc.LocalAddr().String()}"
+                  - bind: bound
+                    eval: "&boundPacketConn{group: group.name, addr: addr, pc: pc}"
+                  - eval: s.mu.Lock()
+                    to: s.mu.Lock
+                  - set: s.packetConns
+                    value: append(s.packetConns, bound)
+                  - set: s.states
+                    value: |-
+                      append(s.states, corenet.ListenerStateValue{
+                      				Group:          group.name,
+                      				Address:        pc.LocalAddr().String(),
+                      				Network:        addr.Network,
+                      				Shards:         1,
+                      				Adopted:        true,
+                      				Degraded:       degraded,
+                      				DegradedReason: reason,
+                      			})
+                  - eval: s.mu.Unlock()
+                    to: s.mu.Unlock
+                  - eval: s.inFlight.Add(1)
+                    to: s.inFlight.Add
+                  - go: s.readLoop(bound, group, handler)
+                    to: s.readLoop
+                key: _
+                range: conns
+                value: pc
+          key: _
+          range: group.adopt
+          value: name
+      - return: nil
+  - of: batchDegradation
+    steps:
+      - opt:
+          do:
+            - return: false, ""
+          when: batchAvailable() || batchSize(limits) <= 1
+      - return: true, "batched datagram read unavailable on this platform; reading one per syscall"
+  - of: (*Server).bindAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).bindAll
+        kind: self
+      - id: errs
+        kind: package
+      - id: s.bindGroup
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
+                      				errs.String("group", group.name))
+                    to: errs
+                when: group.handler == nil
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                      				errs.String("group", group.name), errs.String("why", "no listen address"))
+                    to: errs
+                when: len(group.addrs) == 0 && len(group.adopt) == 0
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.bindGroup(ctx, group)
+                  to: s.bindGroup
+                when: err != nil
+          key: _
+          range: groups
+          value: group
+      - return: nil
+  - of: (*Server).bindGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).bindGroup
+        kind: self
+      - id: group.resolved
+        kind: internal
+      - id: newConnLimiter
+        kind: internal
+      - id: s.adoptStreamSockets
+        kind: internal
+      - id: s.bindShards
+        kind: internal
+    steps:
+      - bind: handler
+        eval: group.resolved()
+        to: group.resolved
+      - set: group.limiter
+        to: newConnLimiter
+        value: newConnLimiter(group.limits)
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.adoptStreamSockets(group, handler)
+            to: s.adoptStreamSockets
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.bindShards(ctx, group, addr, handler)
+                  to: s.bindShards
+                when: err != nil
+          key: _
+          range: group.addrs
+          value: addr
+      - return: nil
+  - of: (*Server).adoptStreamSockets
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).adoptStreamSockets
+        kind: self
+      - id: s.adoptStream
+        kind: internal
+      - id: layered
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.inFlight.Add
+        kind: value
+      - id: s.acceptLoop
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: listeners, err
+              eval: s.adoptStream(name)
+              to: s.adoptStream
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - loop:
+                do:
+                  - bind: ln
+                    eval: layered(raw, group.identity, group.tracksCloses())
+                    to: layered
+                  - bind: addr
+                    eval: "corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}"
+                  - bind: bound
+                    eval: "&boundListener{group: group.name, addr: addr, ln: ln}"
+                  - eval: s.mu.Lock()
+                    to: s.mu.Lock
+                  - set: s.listeners
+                    value: append(s.listeners, bound)
+                  - set: s.states
+                    value: |-
+                      append(s.states, corenet.ListenerStateValue{
+                      				Group:   group.name,
+                      				Address: ln.Addr().String(),
+                      				Network: addr.Network,
+                      				Shards:  1,
+                      				Adopted: true,
+                      			})
+                  - eval: s.mu.Unlock()
+                    to: s.mu.Unlock
+                  - eval: s.inFlight.Add(1)
+                    to: s.inFlight.Add
+                  - go: s.acceptLoop(bound, group, handler)
+                    to: s.acceptLoop
+                key: _
+                range: listeners
+                value: raw
+          key: _
+          range: group.adopt
+          value: name
+      - return: nil
+  - of: (*Server).bindShards
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).bindShards
+        kind: self
+      - id: resolveShards
+        kind: internal
+      - id: listen
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.inFlight.Add
+        kind: value
+      - id: s.acceptLoop
+        kind: internal
+    steps:
+      - bind: count, degraded, reason
+        eval: resolveShards(group.limits.Shards, addr.Network)
+        to: resolveShards
+      - bind: opened
+        eval: "0"
+      - loop:
+          do:
+            - bind: ln, err
+              eval: listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
+              to: listen
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - bind: bound
+              eval: "&boundListener{group: group.name, addr: addr, ln: ln}"
+            - eval: s.mu.Lock()
+              to: s.mu.Lock
+            - set: s.listeners
+              value: append(s.listeners, bound)
+            - opt:
+                do:
+                  - set: s.states
+                    value: |-
+                      append(s.states, corenet.ListenerStateValue{
+                      				Group:          group.name,
+                      				Address:        ln.Addr().String(),
+                      				Network:        addr.Network,
+                      				Shards:         count,
+                      				Degraded:       degraded,
+                      				DegradedReason: reason,
+                      			})
+                when: opened == 0
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - op: ++
+              set: opened
+            - eval: s.inFlight.Add(1)
+              to: s.inFlight.Add
+            - go: s.acceptLoop(bound, group, handler)
+              to: s.acceptLoop
+          range: count
+      - return: nil
+  - of: acceptDelay
+    participants:
+      - id: caller
+        kind: actor
+      - id: acceptDelay
+        kind: self
+      - id: "kbackoff.Value{BaseDelay: 5 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay"
+        kind: value
+    steps:
+      - return: "kbackoff.Value{BaseDelay: 5 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay(failures)"
+        to: "kbackoff.Value{BaseDelay: 5 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay"
+  - of: (*Server).acceptLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).acceptLoop
+        kind: self
+      - id: s.inFlight.Done
+        kind: value
+      - id: bound.ln.Accept
+        kind: value
+      - id: s.acceptBackoffs.Add
+        kind: value
+      - id: group.admission.Admit
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: s.total.Add
+        kind: value
+      - id: s.active.Add
+        kind: value
+      - id: s.inFlight.Add
+        kind: value
+      - id: s.serve
+        kind: internal
+    steps:
+      - defer: s.inFlight.Done()
+        to: s.inFlight.Done
+      - bind: failures
+        eval: "0"
+      - loop:
+          do:
+            - bind: raw, err
+              eval: bound.ln.Accept()
+              to: bound.ln.Accept
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: ""
+                      when: errors.Is(err, stdnet.ErrClosed)
+                  - op: ++
+                    set: failures
+                  - eval: s.acceptBackoffs.Add(1)
+                    to: s.acceptBackoffs.Add
+                  - opt:
+                      do:
+                        - return: ""
+                      when: "!s.backOff(bound, acceptDelay(failures))"
+                  - continue: true
+                when: err != nil
+            - set: failures
+              value: "0"
+            - var:
+                name: release
+                type: func()
+            - opt:
+                do:
+                  - bind: ok
+                    eval: "false"
+                  - opt:
+                      do:
+                        - eval: swallowErr(raw.Close())
+                          to: swallowErr
+                        - continue: true
+                      init:
+                        bind: release, ok
+                        eval: group.admission.Admit(raw.RemoteAddr())
+                        op: =
+                        to: group.admission.Admit
+                      when: "!ok"
+                when: group.admission != nil
+            - eval: s.total.Add(1)
+              to: s.total.Add
+            - eval: s.active.Add(1)
+              to: s.active.Add
+            - eval: s.inFlight.Add(1)
+              to: s.inFlight.Add
+            - go: s.serve(raw, group, handler, release)
+              to: s.serve
+          forever: true
+  - of: (*Server).backOff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).backOff
+        kind: self
+      - id: s.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: timer
+        eval: s.clk.NewTimer(delay)
+        to: s.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+              do:
+                - return: "true"
+            - comm: <-bound.closedSignal()
+              do:
+                - return: "false"
+  - of: (*Server).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).serve
+        kind: self
+      - id: s.inFlight.Done
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: s.active.Add
+        kind: value
+      - id: s.acquire
+        kind: internal
+      - id: s.release
+        kind: internal
+      - id: recoverHandler
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - defer: s.inFlight.Done()
+        to: s.inFlight.Done
+      - bind: ctx
+        eval: s.runCtx
+      - opt:
+          do:
+            - defer: release()
+            - set: ctx
+              to: context
+              value: context.WithValue(ctx, admissionReleaseKey{}, release)
+          when: release != nil
+      - defer: s.active.Add(-1)
+        to: s.active.Add
+      - bind: c
+        eval: s.acquire(raw, group)
+        to: s.acquire
+      - defer: s.release(c)
+        to: s.release
+      - defer: recoverHandler()
+        to: recoverHandler
+      - eval: swallowErr(s.admit(ctx, group.limiter, c, handler))
+        to: swallowErr
+  - of: recoverHandler
+    steps:
+      - eval: recover()
+  - of: (*Server).Serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Serve
+        kind: self
+      - id: s.Start
+        kind: internal
+      - id: ctx.Done
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: s.Shutdown
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.Start(ctx)
+            to: s.Start
+          when: err != nil
+      - eval: <-ctx.Done()
+        to: ctx.Done
+      - bind: drainCtx, cancel
+        eval: context.WithTimeout(context.WithoutCancel(ctx), s.drainTimeout)
+        to: context
+      - defer: cancel()
+      - return: s.Shutdown(drainCtx)
+        to: s.Shutdown
+  - of: (*Server).Shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Shutdown
+        kind: self
+      - id: s.phase.Store
+        kind: value
+      - id: s.closeListeners
+        kind: internal
+      - id: s.shutdownHTTP
+        kind: internal
+      - id: s.waitIdle
+        kind: internal
+      - id: s.closeLive
+        kind: internal
+      - id: s.inFlight.Wait
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: corenet.Phase(s.phase.Load()) == corenet.PhaseNew
+      - eval: s.phase.Store(uint32(corenet.PhaseDraining))
+        to: s.phase.Store
+      - eval: s.closeListeners()
+        to: s.closeListeners
+      - eval: s.shutdownHTTP(ctx)
+        to: s.shutdownHTTP
+      - bind: err
+        eval: s.waitIdle(ctx)
+        to: s.waitIdle
+      - opt:
+          do:
+            - eval: s.stop()
+          when: s.stop != nil
+      - opt:
+          do:
+            - eval: s.closeLive()
+              to: s.closeLive
+            - eval: s.phase.Store(uint32(corenet.PhaseStopped))
+              to: s.phase.Store
+            - return: err
+          when: err != nil
+      - eval: s.inFlight.Wait()
+        to: s.inFlight.Wait
+      - eval: s.phase.Store(uint32(corenet.PhaseStopped))
+        to: s.phase.Store
+      - return: nil
+  - of: (*Server).shutdownHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).shutdownHTTP
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+      - id: group.httpAdapter.shutdown
+        kind: internal
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: groups
+        eval: slices.Clone(s.groups)
+        to: slices
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: group.httpAdapter.shutdown(ctx)
+                    to: group.httpAdapter.shutdown
+                when: group.httpAdapter != nil
+          key: _
+          range: groups
+          value: group
+  - of: (*Server).closeHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).closeHTTP
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+      - id: group.httpAdapter.closeNow
+        kind: internal
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: groups
+        eval: slices.Clone(s.groups)
+        to: slices
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: group.httpAdapter.closeNow()
+                    to: group.httpAdapter.closeNow
+                when: group.httpAdapter != nil
+          key: _
+          range: groups
+          value: group
+  - of: (*Server).waitIdle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).waitIdle
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: ticker.Stop
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: ticker
+        eval: time.NewTicker(drainPollInterval)
+        to: time
+      - defer: ticker.Stop()
+        to: ticker.Stop
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: s.active.Load() == 0
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: |-
+                          errs.Wrap(corenet.DrainTimeout, errs.WrapParams{},
+                          				errs.Int64("active", s.active.Load()))
+                        to: errs
+                  - comm: <-ticker.C
+          forever: true
+  - of: (*Server).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Close
+        kind: self
+      - id: s.closeListeners
+        kind: internal
+      - id: s.closeHTTP
+        kind: internal
+      - id: s.closeLive
+        kind: internal
+      - id: s.phase.Store
+        kind: value
+    steps:
+      - eval: s.closeListeners()
+        to: s.closeListeners
+      - eval: s.closeHTTP()
+        to: s.closeHTTP
+      - opt:
+          do:
+            - eval: s.stop()
+          when: s.stop != nil
+      - eval: s.closeLive()
+        to: s.closeLive
+      - eval: s.phase.Store(uint32(corenet.PhaseStopped))
+        to: s.phase.Store
+      - return: nil
+  - of: (*Server).closeListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).closeListeners
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: listeners
+        eval: s.listeners
+      - set: s.listeners
+        value: nil
+      - bind: packetConns
+        eval: s.packetConns
+      - set: s.packetConns
+        value: nil
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - loop:
+          do:
+            - eval: swallowErr(bound.Close())
+              to: swallowErr
+          key: _
+          range: packetConns
+          value: bound
+      - loop:
+          do:
+            - eval: swallowErr(bound.Close())
+              to: swallowErr
+          key: _
+          range: listeners
+          value: bound
+  - of: shardable
+    steps:
+      - return: strings.HasPrefix(network, "tcp") || strings.HasPrefix(network, "udp")
+  - of: resolveShards
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveShards
+        kind: self
+      - id: shardsFor
+        kind: internal
+    steps:
+      - return: shardsFor(requested, network, reusePortSupported())
+        to: shardsFor
+  - of: shardsFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: shardsFor
+        kind: self
+      - id: runtime
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 1, false, ""
+          when: requested == 1
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: 1, true, "SO_REUSEPORT applies to IP sockets only; using a single listener"
+                when: requested > 1
+            - return: 1, false, ""
+          when: "!shardable(network)"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: 1, true, "SO_REUSEPORT unavailable on this platform; using a single listener"
+                when: requested > 1
+            - return: 1, false, ""
+          when: "!reusePort"
+      - opt:
+          do:
+            - return: runtime.GOMAXPROCS(0), false, ""
+              to: runtime
+          when: requested <= 0
+      - return: requested, false, ""
+  - of: reusePortControl
+    participants:
+      - id: caller
+        kind: actor
+      - id: reusePortControl
+        kind: self
+      - id: rawConn.Control
+        kind: value
+    steps:
+      - set: _, _
+        value: network, address
+      - var:
+          name: setErr
+          type: error
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: |-
+              rawConn.Control(func(fd uintptr) {
+              		setErr = setReusePort(fd)
+              	})
+            to: rawConn.Control
+          when: err != nil
+      - return: setErr
+  - of: listen
+    participants:
+      - id: caller
+        kind: actor
+      - id: listen
+        kind: self
+      - id: familyUnavailable
+        kind: internal
+      - id: cfg.Listen
+        kind: value
+      - id: layered
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
+                			errs.String("network", addr.Network))
+          init:
+            bind: _, ok
+            eval: streamNetworks[addr.Network]
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil, unavailable
+          init:
+            bind: unavailable
+            eval: familyUnavailable(addr)
+            to: familyUnavailable
+          when: unavailable != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                			errs.String("address", addr.String()))
+          when: strings.TrimSpace(addr.Addr) == ""
+      - bind: cfg
+        eval: stdnet.ListenConfig{}
+      - opt:
+          do:
+            - set: cfg.Control
+              value: reusePortControl
+          when: sharded
+      - bind: raw, lerr
+        eval: cfg.Listen(ctx, addr.Network, addr.Addr)
+        to: cfg.Listen
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+                			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
+          when: lerr != nil
+      - return: layered(raw, id, trackCloses), nil
+        to: layered
+  - of: familyUnavailable
+    participants:
+      - id: caller
+        kind: actor
+      - id: familyUnavailable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!platformLacks(addr.Network)"
+      - return: |-
+          errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
+          		errs.String("network", addr.Network), errs.String("goos", runtime.GOOS))
+        to: errs
+  - of: layered
+    participants:
+      - id: caller
+        kind: actor
+      - id: layered
+        kind: self
+      - id: tls
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: raw
+              value: "&trackedListener{Listener: raw}"
+          when: trackCloses
+      - opt:
+          do:
+            - return: raw
+          when: id.IsZero()
+      - return: tls.NewListener(raw, id.ServerConfig())
+        to: tls
+  - of: (*boundListener).closedSignal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundListener).closedSignal
+        kind: self
+      - id: b.made.Do
+        kind: value
+    steps:
+      - eval: b.made.Do(func() { b.closed = make(chan struct{}) })
+        to: b.made.Do
+      - return: b.closed
+  - of: (*boundListener).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundListener).Close
+        kind: self
+      - id: b.closedSignal
+        kind: internal
+      - id: b.shut.Do
+        kind: value
+      - id: b.ln.Close
+        kind: value
+    steps:
+      - eval: b.closedSignal()
+        to: b.closedSignal
+      - eval: b.shut.Do(func() { close(b.closed) })
+        to: b.shut.Do
+      - return: b.ln.Close()
+        to: b.ln.Close
+  - of: (*trackedListener).Accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*trackedListener).Accept
+        kind: self
+      - id: l.Listener.Accept
+        kind: value
+    steps:
+      - bind: socket, aerr
+        eval: l.Listener.Accept()
+        to: l.Listener.Accept
+      - opt:
+          do:
+            - return: nil, aerr
+          when: aerr != nil
+      - return: "&trackedConn{Conn: socket}, nil"
+  - of: newMultiReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMultiReader
+        kind: self
+      - id: sc.SyscallConn
+        kind: internal
+    steps:
+      - bind: raw, rerr
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: nil, rerr
+          when: rerr != nil
+      - return: "&multiReader{pc: pc, raw: raw}, nil"
+  - of: (*multiReader).wire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).wire
+        kind: self
+      - id: setKernelLen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.wired == len(slots)
+      - bind: count
+        eval: len(slots)
+      - set: r.headers
+        value: make([]mmsghdr, count)
+      - set: r.iovecs
+        value: make([]syscall.Iovec, count)
+      - set: r.names
+        value: make([]syscall.RawSockaddrAny, count)
+      - loop:
+          do:
+            - set: r.iovecs[i].Base
+              value: "&slots[i].buf[0]"
+            - eval: setKernelLen(&r.iovecs[i].Len, len(slots[i].buf))
+              to: setKernelLen
+            - set: r.headers[i].hdr.Name
+              value: (*byte)(unsafe.Pointer(&r.names[i]))
+            - set: r.headers[i].hdr.Namelen
+              value: syscall.SizeofSockaddrAny
+            - set: r.headers[i].hdr.Iov
+              value: "&r.iovecs[i]"
+            - eval: setKernelLen(&r.headers[i].hdr.Iovlen, 1)
+              to: setKernelLen
+          key: i
+          range: slots
+      - set: r.wired
+        value: count
+  - of: (*multiReader).readBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).readBatch
+        kind: self
+      - id: r.wire
+        kind: internal
+      - id: r.raw.Read
+        kind: value
+      - id: r.fill
+        kind: internal
+    steps:
+      - eval: r.wire(slots)
+        to: r.wire
+      - var:
+          name: received
+          type: int
+      - var:
+          name: errno
+          type: syscall.Errno
+      - bind: ctrlErr
+        eval: |-
+          r.raw.Read(func(fd uintptr) bool {
+          		result, _, callErrno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
+          			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
+          			syscall.MSG_WAITFORONE, 0, 0)
+          		//: not ready yet — let the netpoller wake us when it is.
+          		if callErrno == syscall.EAGAIN {
+          			//: not ready — hand control back to the netpoller.
+          			return false
+          		}
+          		received, errno = int(result), callErrno
+          		//: the syscall completed, successfully or not.
+          		return true
+          	})
+        to: r.raw.Read
+      - opt:
+          do:
+            - return: 0, ctrlErr
+          when: ctrlErr != nil
+      - opt:
+          do:
+            - return: 0, errno
+          when: errno != 0
+      - eval: r.fill(slots, received)
+        to: r.fill
+      - return: received, nil
+  - of: (*multiReader).fill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).fill
+        kind: self
+      - id: sockaddrToAddr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: slots[i].n
+              value: int(r.headers[i].length)
+            - set: slots[i].addr
+              to: sockaddrToAddr
+              value: sockaddrToAddr(&r.names[i])
+          key: i
+          range: received
+  - of: WithDrainTimeout
+    steps:
+      - return:
+          closure:
+            params: s *Server
+            steps:
+              - set: s.drainTimeout
+                value: d
+  - of: Listen
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.addrs
+                value: "append(g.addrs, corenet.AddressValue{Network: network, Addr: addr})"
+  - of: TLS
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.identity
+                value: id
+  - of: ReadTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadTimeout
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.timeouts.Read
+                to: corenet
+                value: corenet.DurationValue(d)
+  - of: WriteTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: WriteTimeout
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.timeouts.Write
+                to: corenet
+                value: corenet.DurationValue(d)
+  - of: IdleTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: IdleTimeout
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.timeouts.Idle
+                to: corenet
+                value: corenet.DurationValue(d)
+  - of: ReadHeaderTimeout
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.http.readHeaderTimeout
+                value: d
+  - of: MaxHeaderBytes
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.http.maxHeaderBytes
+                value: "n"
+  - of: HandshakeTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: HandshakeTimeout
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.timeouts.Handshake
+                to: corenet
+                value: corenet.DurationValue(d)
+  - of: ReadBufferSize
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.limits.ReadBufferSize
+                value: "n"
+  - of: MaxPacketSize
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.limits.MaxPacketSize
+                value: "n"
+  - of: BatchSize
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.limits.BatchSize
+                value: "n"
+  - of: Shards
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.limits.Shards
+                value: "n"
+  - of: MaxConns
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.limits.MaxConns
+                value: "n"
+  - of: Adopt
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.adopt
+                value: append(g.adopt, names...)
+  - of: (*packet).Data
+    steps:
+      - return: p.data
+  - of: (*packet).From
+    steps:
+      - return: p.from
+  - of: (*packet).To
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*packet).To
+        kind: self
+      - id: p.conn.LocalAddr
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: p.conn == nil
+      - return: p.conn.LocalAddr()
+        to: p.conn.LocalAddr
+  - of: (*packet).ID
+    steps:
+      - return: p.id
+  - of: (*packet).Group
+    steps:
+      - return: p.group
+  - of: (*packet).Reply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*packet).Reply
+        kind: self
+      - id: p.conn.WriteTo
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, stdnet.ErrClosed
+          when: p.conn == nil
+      - return: p.conn.WriteTo(b, p.from)
+        to: p.conn.WriteTo
+  - of: (*packet).reset
+    steps:
+      - set: p.data
+        value: nil
+      - set: p.from
+        value: nil
+      - set: p.conn
+        value: nil
+      - set: p.id
+        value: "0"
+      - set: p.group
+        value: "\"\""
+  - of: (*PacketGroup).Name
+    steps:
+      - return: g.name
+  - of: (*PacketGroup).Handle
+    steps:
+      - set: g.handler
+        value: h
+      - return: g
+  - of: (*PacketGroup).HandleFunc
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PacketGroup).HandleFunc
+        kind: self
+      - id: g.Handle
+        kind: internal
+    steps:
+      - return: g.Handle(f)
+        to: g.Handle
+  - of: (*PacketGroup).Use
+    steps:
+      - set: g.middlewares
+        value: append(g.middlewares, middlewares...)
+      - return: g
+  - of: (*PacketGroup).resolved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PacketGroup).resolved
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - return: corenet.Chain(g.handler, g.middlewares...)
+        to: corenet
+  - of: listenPacket
+    participants:
+      - id: caller
+        kind: actor
+      - id: listenPacket
+        kind: self
+      - id: familyUnavailable
+        kind: internal
+      - id: cfg.ListenPacket
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
+                			errs.String("network", addr.Network))
+          init:
+            bind: _, ok
+            eval: packetNetworks[addr.Network]
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil, unavailable
+          init:
+            bind: unavailable
+            eval: familyUnavailable(addr)
+            to: familyUnavailable
+          when: unavailable != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                			errs.String("address", addr.String()))
+          when: strings.TrimSpace(addr.Addr) == ""
+      - var:
+          name: cfg
+          type: stdnet.ListenConfig
+      - bind: bound, lerr
+        eval: cfg.ListenPacket(ctx, addr.Network, addr.Addr)
+        to: cfg.ListenPacket
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+                			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
+          when: lerr != nil
+      - return: bound, nil
+  - of: (*boundPacketConn).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundPacketConn).Close
+        kind: self
+      - id: b.pc.Close
+        kind: value
+    steps:
+      - return: b.pc.Close()
+        to: b.pc.Close
+  - of: packetSize
+    steps:
+      - opt:
+          do:
+            - return: defaultMaxPacketSize
+          when: limits.MaxPacketSize <= 0
+      - return: limits.MaxPacketSize
+  - of: batchSize
+    steps:
+      - opt:
+          do:
+            - return: defaultBatchSize
+          when: limits.BatchSize <= 0
+      - return: limits.BatchSize
+  - of: (*Server).readLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).readLoop
+        kind: self
+      - id: s.inFlight.Done
+        kind: value
+      - id: packetSize
+        kind: internal
+      - id: newSlots
+        kind: internal
+      - id: newDatagramSource
+        kind: internal
+      - id: held.reset
+        kind: internal
+      - id: reader.readBatch
+        kind: internal
+      - id: s.dispatch
+        kind: internal
+    steps:
+      - defer: s.inFlight.Done()
+        to: s.inFlight.Done
+      - bind: ceiling
+        eval: packetSize(group.limits)
+        to: packetSize
+      - bind: slots
+        eval: newSlots(batchSize(group.limits), ceiling)
+        to: newSlots
+      - bind: reader
+        eval: newDatagramSource(bound.pc)
+        to: newDatagramSource
+      - bind: held
+        eval: "&packet{conn: bound.pc, group: group.name}"
+      - defer: held.reset()
+        to: held.reset
+      - loop:
+          do:
+            - bind: count, err
+              eval: reader.readBatch(slots)
+              to: reader.readBatch
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: ""
+                      when: errors.Is(err, stdnet.ErrClosed)
+                  - continue: true
+                when: err != nil
+            - eval: s.dispatch(slots[:count], held, handler, ceiling)
+              to: s.dispatch
+          forever: true
+  - of: (*Server).dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).dispatch
+        kind: self
+      - id: s.total.Add
+        kind: value
+      - id: s.oversized.Add
+        kind: value
+      - id: slots[i].payload
+        kind: internal
+      - id: s.nextID.Add
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: s.total.Add(1)
+              to: s.total.Add
+            - opt:
+                do:
+                  - eval: s.oversized.Add(1)
+                    to: s.oversized.Add
+                  - continue: true
+                when: slots[i].n > ceiling
+            - set: held.data
+              to: slots[i].payload
+              value: slots[i].payload()
+            - set: held.from
+              value: slots[i].addr
+            - set: held.id
+              to: s.nextID.Add
+              value: s.nextID.Add(1)
+            - eval: swallowErr(s.servePacket(held, handler))
+              to: swallowErr
+          key: i
+          range: slots
+      - set: held.data
+        value: nil
+      - set: held.from
+        value: nil
+  - of: (*Server).servePacket
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).servePacket
+        kind: self
+      - id: recoverHandler
+        kind: internal
+      - id: handler.ServePacket
+        kind: value
+    steps:
+      - defer: recoverHandler()
+        to: recoverHandler
+      - return: handler.ServePacket(s.runCtx, p)
+        to: handler.ServePacket
+  - of: (*Server).acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).acquire
+        kind: self
+      - id: s.connPool.Get
+        kind: value
+      - id: s.nextID.Add
+        kind: value
+      - id: s.liveMu.Lock
+        kind: value
+      - id: s.liveMu.Unlock
+        kind: value
+      - id: buffer
+        kind: package
+    steps:
+      - bind: c
+        eval: s.connPool.Get()
+        to: s.connPool.Get
+      - set: c.Conn
+        value: raw
+      - set: c.id
+        to: s.nextID.Add
+        value: s.nextID.Add(1)
+      - set: c.group
+        value: group.name
+      - set: c.timeouts
+        value: group.timeouts
+      - eval: s.liveMu.Lock()
+        to: s.liveMu.Lock
+      - set: s.live[c.id]
+        value: raw
+      - eval: s.liveMu.Unlock()
+        to: s.liveMu.Unlock
+      - opt:
+          do:
+            - set: c.scratch
+              to: buffer
+              value: buffer.Get()
+            - opt:
+                do:
+                  - set: c.scratch
+                    value: new(make([]byte, size))
+                when: cap(*c.scratch) < size
+            - set: "*c.scratch"
+              value: (*c.scratch)[:size]
+          init:
+            bind: size
+            eval: group.limits.ReadBufferSize
+          when: size > 0
+      - return: c
+  - of: (*Server).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).release
+        kind: self
+      - id: s.liveMu.Lock
+        kind: value
+      - id: s.liveMu.Unlock
+        kind: value
+      - id: swallowErr
+        kind: internal
+      - id: buffer
+        kind: package
+      - id: c.reset
+        kind: internal
+      - id: s.connPool.Put
+        kind: value
+    steps:
+      - eval: s.liveMu.Lock()
+        to: s.liveMu.Lock
+      - eval: delete(s.live, c.id)
+      - eval: s.liveMu.Unlock()
+        to: s.liveMu.Unlock
+      - opt:
+          do:
+            - eval: swallowErr(c.Close())
+              to: swallowErr
+          when: "!c.hijacked"
+      - opt:
+          do:
+            - eval: buffer.Put(c.scratch)
+              to: buffer
+          when: c.scratch != nil
+      - eval: c.reset()
+        to: c.reset
+      - eval: s.connPool.Put(c)
+        to: s.connPool.Put
+  - of: (*Server).closeLive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).closeLive
+        kind: self
+      - id: s.liveMu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.liveMu.RUnlock
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: s.liveMu.RLock()
+        to: s.liveMu.RLock
+      - bind: sockets
+        eval: slices.Collect(maps.Values(s.live))
+        to: slices
+      - eval: s.liveMu.RUnlock()
+        to: s.liveMu.RUnlock
+      - loop:
+          do:
+            - eval: swallowErr(socket.Close())
+              to: swallowErr
+          key: _
+          range: sockets
+          value: socket
+  - of: reusePortSupported
+    steps:
+      - return: "true"
+  - of: setReusePort
+    participants:
+      - id: caller
+        kind: actor
+      - id: setReusePort
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - return: syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, soReusePort, 1)
+        to: syscall
+  - of: newPooledConn
+    steps:
+      - return: "&conn{}"
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: s.phase.Store
+        kind: value
+    steps:
+      - bind: s
+        eval: |-
+          &Server{
+          		byName:       make(map[string]*StreamGroup, expectedGroups),
+          		packetByName: make(map[string]*PacketGroup, expectedGroups),
+          		live:         make(map[uint64]stdnet.Conn, expectedLiveConns),
+          		drainTimeout: defaultDrainTimeout,
+          		connPool:     recycler.NewPool(newPooledConn),
+          		clk:          clock.System,
+          	}
+      - loop:
+          do:
+            - eval: opt(s)
+          key: _
+          range: opts
+          value: opt
+      - set: s.runCtx
+        to: context
+        value: context.Background()
+      - eval: s.phase.Store(uint32(corenet.PhaseNew))
+        to: s.phase.Store
+      - return: s
+  - of: (*Server).Group
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Group
+        kind: self
+      - id: s.recordDeclError
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - eval: |-
+                s.recordDeclError(errs.Wrap(corenet.GroupDuplicate, errs.WrapParams{},
+                			errs.String("group", name)))
+              to: s.recordDeclError
+            - return: "&StreamGroup{name: name}"
+          init:
+            bind: _, exists
+            eval: s.byName[name]
+          when: exists
+      - bind: group
+        eval: "&StreamGroup{name: name}"
+      - loop:
+          do:
+            - eval: opt(group)
+          key: _
+          range: opts
+          value: opt
+      - set: s.byName[name]
+        value: group
+      - set: s.groups
+        value: append(s.groups, group)
+      - return: group
+  - of: (*Server).PacketGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).PacketGroup
+        kind: self
+      - id: s.recordDeclError
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - bind: _, streamTaken
+        eval: s.byName[name]
+      - bind: _, packetTaken
+        eval: s.packetByName[name]
+      - opt:
+          do:
+            - eval: |-
+                s.recordDeclError(errs.Wrap(corenet.GroupDuplicate, errs.WrapParams{},
+                			errs.String("group", name)))
+              to: s.recordDeclError
+            - return: "&PacketGroup{name: name}"
+          when: streamTaken || packetTaken
+      - bind: group
+        eval: "&PacketGroup{name: name}"
+      - bind: shim
+        eval: "&StreamGroup{}"
+      - loop:
+          do:
+            - eval: opt(shim)
+          key: _
+          range: opts
+          value: opt
+      - set: group.addrs
+        value: shim.addrs
+      - set: group.limits
+        value: shim.limits
+      - set: group.adopt
+        value: shim.adopt
+      - set: s.packetByName[name]
+        value: group
+      - set: s.packetGroups
+        value: append(s.packetGroups, group)
+      - return: group
+  - of: (*Server).recordDeclError
+    steps:
+      - opt:
+          do:
+            - set: s.declErr
+              value: err
+          when: s.declErr == nil
+  - of: (*Server).State
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).State
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: listeners
+        eval: slices.Clone(s.states)
+        to: slices
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - return: |-
+          corenet.StateValue{
+          		Phase:            corenet.Phase(s.phase.Load()),
+          		Listeners:        listeners,
+          		ActiveConns:      s.active.Load(),
+          		TotalConns:       s.total.Load(),
+          		RejectedConns:    s.rejected.Load(),
+          		OversizedPackets: s.oversized.Load(),
+          		AcceptBackoffs:   s.acceptBackoffs.Load(),
+          	}
+  - of: sockaddrToAddr
+    participants:
+      - id: caller
+        kind: actor
+      - id: sockaddrToAddr
+        kind: self
+      - id: inet4Addr
+        kind: internal
+      - id: inet6Addr
+        kind: internal
+      - id: unixAddr
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: syscall.AF_INET
+              do:
+                - return: inet4Addr(raw)
+                  to: inet4Addr
+            - case: syscall.AF_INET6
+              do:
+                - return: inet6Addr(raw)
+                  to: inet6Addr
+            - case: syscall.AF_UNIX
+              do:
+                - return: unixAddr(raw)
+                  to: unixAddr
+            - default: true
+              do:
+                - return: nil
+          "on": raw.Addr.Family
+  - of: inet4Addr
+    steps:
+      - bind: sa
+        eval: (*syscall.RawSockaddrInet4)(unsafe.Pointer(raw))
+      - bind: ip
+        eval: make(stdnet.IP, stdnet.IPv4len)
+      - eval: copy(ip, sa.Addr[:])
+      - return: "&stdnet.UDPAddr{IP: ip, Port: hostPort(sa.Port)}"
+  - of: inet6Addr
+    participants:
+      - id: caller
+        kind: actor
+      - id: inet6Addr
+        kind: self
+      - id: zoneOf
+        kind: internal
+    steps:
+      - bind: sa
+        eval: (*syscall.RawSockaddrInet6)(unsafe.Pointer(raw))
+      - bind: ip
+        eval: make(stdnet.IP, stdnet.IPv6len)
+      - eval: copy(ip, sa.Addr[:])
+      - bind: zone, _
+        eval: zoneOf(sa.Scope_id)
+        to: zoneOf
+      - return: "&stdnet.UDPAddr{IP: ip, Port: hostPort(sa.Port), Zone: zone}"
+  - of: hostPort
+    steps:
+      - return: int(port>>portByteShift) | int(port&portLowByteMask)<<portByteShift
+  - of: zoneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: zoneOf
+        kind: self
+      - id: stdnet
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: scope == 0
+      - bind: iface, err
+        eval: stdnet.InterfaceByIndex(int(scope))
+        to: stdnet
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - return: iface.Name, true
+  - of: (*StreamGroup).Name
+    steps:
+      - return: g.name
+  - of: (*StreamGroup).Handle
+    steps:
+      - set: g.handler
+        value: h
+      - return: g
+  - of: (*StreamGroup).HandleFunc
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).HandleFunc
+        kind: self
+      - id: g.Handle
+        kind: internal
+    steps:
+      - return: g.Handle(f)
+        to: g.Handle
+  - of: (*StreamGroup).HandleHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).HandleHTTP
+        kind: self
+      - id: newHTTPAdapter
+        kind: internal
+      - id: g.Handle
+        kind: internal
+    steps:
+      - bind: adapter
+        eval: newHTTPAdapter(h)
+        to: newHTTPAdapter
+      - set: g.httpAdapter
+        value: adapter
+      - return: g.Handle(adapter)
+        to: g.Handle
+  - of: (*StreamGroup).tracksCloses
+    steps:
+      - return: g.httpAdapter != nil && g.limiter != nil
+  - of: (*StreamGroup).Use
+    steps:
+      - set: g.middlewares
+        value: append(g.middlewares, middlewares...)
+      - return: g
+  - of: (*StreamGroup).resolved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).resolved
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: g.httpAdapter.timeouts
+              value: g.timeouts
+            - set: g.httpAdapter.bounds
+              value: g.http
+          when: g.httpAdapter != nil
+      - bind: chained
+        eval: corenet.Chain(g.handler, g.middlewares...)
+        to: corenet
+      - opt:
+          do:
+            - return: chained
+          when: g.identity.IsZero()
+      - return: "handshakeHandler{next: chained, timeouts: g.timeouts}"
+  - of: newConnLimiter
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: limits.MaxConns <= 0
+      - return: |-
+          &connLimiter{
+          		slots:   make(chan struct{}, limits.MaxConns),
+          		ceiling: limits.MaxConns,
+          	}
+  - of: (*connLimiter).tryAcquire
+    steps:
+      - select:
+          cases:
+            - comm: l.slots <- struct{}{}
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+  - of: (*connLimiter).release
+    steps:
+      - eval: <-l.slots
+  - of: (*connLimiter).releaseFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*connLimiter).releaseFor
+        kind: self
+      - id: hijackedTracker
+        kind: internal
+      - id: tracked.holdSlot
+        kind: internal
+      - id: l.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: tracked.holdSlot(l)
+              to: tracked.holdSlot
+            - return: ""
+          init:
+            bind: tracked
+            eval: hijackedTracker(c)
+            to: hijackedTracker
+          when: tracked != nil
+      - eval: l.release()
+        to: l.release
+  - of: (*Server).admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).admit
+        kind: self
+      - id: handler.ServeConn
+        kind: value
+      - id: s.rejected.Add
+        kind: value
+      - id: errs
+        kind: package
+      - id: limiter.releaseFor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: handler.ServeConn(ctx, c)
+              to: handler.ServeConn
+          when: limiter == nil
+      - opt:
+          do:
+            - eval: s.rejected.Add(1)
+              to: s.rejected.Add
+            - return: |-
+                errs.Wrap(corenet.ConnLimitReached, errs.WrapParams{},
+                			errs.Int("limit", limiter.ceiling))
+              to: errs
+          when: "!limiter.tryAcquire()"
+      - defer: limiter.releaseFor(c)
+        to: limiter.releaseFor
+      - return: handler.ServeConn(ctx, c)
+        to: handler.ServeConn
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: datagramTruncated
+    steps:
+      - return: "false"

@@ -1,0 +1,2650 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: resolveBounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveBounds
+        kind: self
+      - id: resolveBound
+        kind: internal
+    steps:
+      - bind: tokenLen, lerr
+        eval: |-
+          resolveBound(cfg.MaxTokenLen, DefaultMaxTokenLen,
+          		MinTokenLen, MaxTokenLenCeiling, "MaxTokenLen")
+        to: resolveBound
+      - opt:
+          do:
+            - return: boundsValue{}, lerr
+          when: lerr != nil
+      - bind: depth, derr
+        eval: |-
+          resolveBound(cfg.MaxClaimDepth, DefaultMaxClaimDepth,
+          		1, MaxClaimDepthCeiling, "MaxClaimDepth")
+        to: resolveBound
+      - opt:
+          do:
+            - return: boundsValue{}, derr
+          when: derr != nil
+      - bind: candidates, cerr
+        eval: |-
+          resolveBound(cfg.MaxKeyCandidates, DefaultMaxKeyCandidates,
+          		1, MaxKeyCandidatesCeiling, "MaxKeyCandidates")
+        to: resolveBound
+      - opt:
+          do:
+            - return: boundsValue{}, cerr
+          when: cerr != nil
+      - return: "boundsValue{tokenLen: tokenLen, claimDepth: depth, keyCandidates: candidates}, nil"
+  - of: resolveBound
+    steps:
+      - opt:
+          do:
+            - return: fallback, nil
+          when: configured == 0
+      - opt:
+          do:
+            - return: 0, misconfigured(knob)
+          when: configured < low || configured > high
+      - return: configured, nil
+  - of: decodeClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeClaims
+        kind: self
+      - id: checkJSONDepth
+        kind: internal
+      - id: checkNoDuplicateMembers
+        kind: internal
+      - id: json
+        kind: stdlib
+      - id: decodeRegistered
+        kind: internal
+      - id: attachPrivate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, malformed("claims are not UTF-8")
+          when: "!utf8.Valid(raw)"
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, derr
+          init:
+            bind: derr
+            eval: checkJSONDepth(raw, maxDepth)
+            to: checkJSONDepth
+          when: derr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, derr
+          init:
+            bind: derr
+            eval: checkNoDuplicateMembers(raw)
+            to: checkNoDuplicateMembers
+          when: derr != nil
+      - var:
+          name: members
+          type: map[string]json.RawMessage
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, malformed("claims are not a JSON object")
+          init:
+            bind: uerr
+            eval: json.Unmarshal(raw, &members)
+            to: json
+          when: uerr != nil
+      - opt:
+          do:
+            - return: |-
+                coretoken.ClaimsValue{}, errs.Wrap(coretoken.TooLarge,
+                			errs.WrapParams{}, errs.Int("limit", maxClaimMembers))
+          when: len(members) > maxClaimMembers
+      - bind: registered, rerr
+        eval: decodeRegistered(members, shape)
+        to: decodeRegistered
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, rerr
+          when: rerr != nil
+      - return: attachPrivate(registered, members)
+        to: attachPrivate
+  - of: decodeRegistered
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRegistered
+        kind: self
+      - id: nullRegisteredClaim
+        kind: internal
+      - id: decodeStringClaim
+        kind: internal
+      - id: shape.decodeAudience
+        kind: internal
+      - id: coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID
+        kind: value
+      - id: decodeTimeClaims
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, malformed("registered claim " + name + " is null")
+          init:
+            bind: name, found
+            eval: nullRegisteredClaim(members)
+            to: nullRegisteredClaim
+          when: found
+      - bind: iss, ierr
+        eval: decodeStringClaim(members, coretoken.ClaimIssuer)
+        to: decodeStringClaim
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, ierr
+          when: ierr != nil
+      - bind: sub, serr
+        eval: decodeStringClaim(members, coretoken.ClaimSubject)
+        to: decodeStringClaim
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, serr
+          when: serr != nil
+      - bind: jti, jerr
+        eval: decodeStringClaim(members, coretoken.ClaimID)
+        to: decodeStringClaim
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, jerr
+          when: jerr != nil
+      - bind: audience, aerr
+        eval: shape.decodeAudience(members[coretoken.ClaimAudience])
+        to: shape.decodeAudience
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, aerr
+          when: aerr != nil
+      - bind: base
+        eval: coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID(jti)
+        to: coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID
+      - return: decodeTimeClaims(base.WithAudience(audience...), members, shape)
+        to: decodeTimeClaims
+  - of: decodeTimeClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTimeClaims
+        kind: self
+      - id: decodeTimeClaim
+        kind: internal
+      - id: base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt
+        kind: value
+    steps:
+      - bind: exp, eerr
+        eval: decodeTimeClaim(members, coretoken.ClaimExpiry, shape)
+        to: decodeTimeClaim
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, eerr
+          when: eerr != nil
+      - bind: nbf, nerr
+        eval: decodeTimeClaim(members, coretoken.ClaimNotBefore, shape)
+        to: decodeTimeClaim
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, nerr
+          when: nerr != nil
+      - bind: iat, ierr
+        eval: decodeTimeClaim(members, coretoken.ClaimIssuedAt, shape)
+        to: decodeTimeClaim
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, ierr
+          when: ierr != nil
+      - return: base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt(iat), nil
+        to: base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt
+  - of: attachPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: attachPrivate
+        kind: self
+      - id: claims.WithPrivateRaw
+        kind: value
+    steps:
+      - set: claims
+        value: base
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: coretoken.IsRegisteredClaim(name)
+            - bind: next, aerr
+              eval: claims.WithPrivateRaw(name, raw)
+              to: claims.WithPrivateRaw
+            - opt:
+                do:
+                  - return: coretoken.ClaimsValue{}, aerr
+                when: aerr != nil
+            - set: claims
+              value: next
+          key: name
+          range: members
+          value: raw
+      - return: claims, nil
+  - of: decodeStringClaim
+    steps:
+      - bind: raw, present
+        eval: members[name]
+      - opt:
+          do:
+            - return: "\"\", nil"
+          when: "!present"
+      - opt:
+          do:
+            - return: "\"\", malformed(\"registered claim \" + name + \" is not a string\")"
+          when: json.Unmarshal(raw, &value) != nil
+      - return: value, nil
+  - of: decodeTimeClaim
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTimeClaim
+        kind: self
+      - id: shape.decodeTime
+        kind: internal
+    steps:
+      - bind: raw, present
+        eval: members[name]
+      - opt:
+          do:
+            - return: time.Time{}, nil
+          when: "!present"
+      - return: shape.decodeTime(raw)
+        to: shape.decodeTime
+  - of: encodeClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeClaims
+        kind: self
+      - id: claims.Audience
+        kind: value
+      - id: checkClaimText
+        kind: internal
+      - id: putString
+        kind: internal
+      - id: putTime
+        kind: internal
+      - id: shape.encodeAudience
+        kind: internal
+      - id: putPrivate
+        kind: internal
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: audience
+        eval: claims.Audience()
+        to: claims.Audience
+      - opt:
+          do:
+            - return: nil, terr
+          init:
+            bind: terr
+            eval: checkClaimText(claims, audience)
+            to: checkClaimText
+          when: terr != nil
+      - bind: members
+        eval: map[string]json.RawMessage{}
+      - eval: putString(members, coretoken.ClaimIssuer, claims.Issuer())
+        to: putString
+      - eval: putString(members, coretoken.ClaimSubject, claims.Subject())
+        to: putString
+      - eval: putString(members, coretoken.ClaimID, claims.ID())
+        to: putString
+      - eval: putTime(members, coretoken.ClaimExpiry, claims.Expiry(), shape)
+        to: putTime
+      - eval: putTime(members, coretoken.ClaimNotBefore, claims.NotBefore(), shape)
+        to: putTime
+      - eval: putTime(members, coretoken.ClaimIssuedAt, claims.IssuedAt(), shape)
+        to: putTime
+      - bind: encodedAudience, aerr
+        eval: shape.encodeAudience(audience)
+        to: shape.encodeAudience
+      - opt:
+          do:
+            - return: nil, aerr
+          when: aerr != nil
+      - opt:
+          do:
+            - set: members[coretoken.ClaimAudience]
+              value: encodedAudience
+          when: encodedAudience != nil
+      - opt:
+          do:
+            - return: nil, perr
+          init:
+            bind: perr
+            eval: putPrivate(members, claims)
+            to: putPrivate
+          when: perr != nil
+      - bind: payload, merr
+        eval: json.Marshal(members)
+        to: json
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretoken.IssueFailed, errs.WrapParams{},
+                			errs.String("claim", "encoding/json refused the claims object: "+merr.Error()))
+          when: merr != nil
+      - return: payload, nil
+  - of: checkClaimText
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkClaimText
+        kind: self
+      - id: textNotUTF8
+        kind: internal
+    steps:
+      - bind: names
+        eval: "[...]string{coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimID}"
+      - bind: values
+        eval: "[...]string{claims.Issuer(), claims.Subject(), claims.ID()}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: textNotUTF8(names[i])
+                    to: textNotUTF8
+                when: "!utf8.ValidString(value)"
+          key: i
+          range: values
+          value: value
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: textNotUTF8(coretoken.ClaimAudience)
+                    to: textNotUTF8
+                when: "!utf8.ValidString(member)"
+          key: _
+          range: audience
+          value: member
+      - return: nil
+  - of: putPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: putPrivate
+        kind: self
+      - id: claims.PrivateRaw
+        kind: value
+      - id: textNotUTF8
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - bind: value, _
+              eval: claims.PrivateRaw(name)
+              to: claims.PrivateRaw
+            - opt:
+                do:
+                  - return: textNotUTF8("a private claim")
+                    to: textNotUTF8
+                when: "!utf8.ValidString(name) || !utf8.Valid(value)"
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(coretoken.IssueFailed, errs.WrapParams{},
+                      				errs.String("claim", "a private claim is not valid JSON"))
+                    to: errs
+                when: "!json.Valid(value)"
+            - set: members[name]
+              value: value
+          key: _
+          range: claims.PrivateNames()
+          value: name
+      - return: nil
+  - of: textNotUTF8
+    participants:
+      - id: caller
+        kind: actor
+      - id: textNotUTF8
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coretoken.IssueFailed, errs.WrapParams{},
+          		errs.String("claim", claim+" is not valid UTF-8"))
+        to: errs
+  - of: putString
+    participants:
+      - id: caller
+        kind: actor
+      - id: putString
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: value == ""
+      - set: members[name]
+        to: json
+        value: json.RawMessage(quoteJSONString(value))
+  - of: putTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: putTime
+        kind: self
+      - id: shape.encodeTime
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: instant.IsZero()
+      - set: members[name]
+        to: shape.encodeTime
+        value: shape.encodeTime(instant)
+  - of: malformed
+    participants:
+      - id: caller
+        kind: actor
+      - id: malformed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coretoken.Malformed, errs.WrapParams{},
+          		errs.String("detail", detail))
+        to: errs
+  - of: (*depthScan).consumeStringByte
+    steps:
+      - opt:
+          do:
+            - set: s.escaped
+              value: "false"
+            - return: ""
+          when: s.escaped
+      - opt:
+          do:
+            - set: s.escaped
+              value: "true"
+            - return: ""
+          when: char == '\\'
+      - opt:
+          do:
+            - set: s.inString
+              value: "false"
+          when: char == '"'
+  - of: (*depthScan).consumeStructuralByte
+    steps:
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - set: s.inString
+                  value: "true"
+            - case: "'{', '['"
+              do:
+                - op: ++
+                  set: s.depth
+            - case: "'}', ']'"
+              do:
+                - op: "--"
+                  set: s.depth
+          "on": char
+  - of: ed25519Signing.algorithm
+    steps:
+      - return: b.alg
+  - of: ed25519Signing.sign
+    participants:
+      - id: caller
+        kind: actor
+      - id: ed25519Signing.sign
+        kind: self
+      - id: ed25519sig.Signer.Sign
+        kind: value
+    steps:
+      - return: ed25519sig.Signer.Sign(b.key, input)
+        to: ed25519sig.Signer.Sign
+  - of: ed25519Verifying.algorithm
+    steps:
+      - return: b.alg
+  - of: ed25519Verifying.verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: ed25519Verifying.verify
+        kind: self
+      - id: ed25519sig.Signer.Verify
+        kind: value
+    steps:
+      - return: ed25519sig.Signer.Verify(b.key, input, sig)
+        to: ed25519sig.Signer.Verify
+  - of: splitCompact
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitCompact
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                segmentsValue{}, errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+                			errs.Int("limit", maxLen))
+          when: len(tok) > maxLen
+      - bind: rest
+        eval: tok
+      - loop:
+          do:
+            - bind: idx
+              eval: strings.IndexByte(rest, '.')
+              to: strings
+            - opt:
+                do:
+                  - set: seg.part[seg.count]
+                    value: rest
+                  - op: ++
+                    set: seg.count
+                  - return: seg, nil
+                when: idx < 0
+            - opt:
+                do:
+                  - return: segmentsValue{}, coretoken.Malformed
+                when: seg.count == maxSegments-1
+            - set: seg.part[seg.count]
+              value: rest[:idx]
+            - op: ++
+              set: seg.count
+            - set: rest
+              value: rest[idx+1:]
+          forever: true
+  - of: decodeSegment
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSegment
+        kind: self
+      - id: b64.DecodeString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+                			errs.Int("limit", maxLen))
+          when: b64.DecodedLen(len(segment)) > maxLen
+      - bind: decoded, derr
+        eval: b64.DecodeString(segment)
+        to: b64.DecodeString
+      - opt:
+          do:
+            - return: nil, malformed("segment is not strict unpadded base64url")
+          when: derr != nil
+      - return: decoded, nil
+  - of: checkJSONDepth
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkJSONDepth
+        kind: self
+      - id: scan.consumeStringByte
+        kind: internal
+      - id: scan.consumeStructuralByte
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: scan
+        eval: depthScan{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: scan.consumeStringByte(char)
+                    to: scan.consumeStringByte
+                  - continue: true
+                when: scan.inString
+            - eval: scan.consumeStructuralByte(char)
+              to: scan.consumeStructuralByte
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(coretoken.TooDeep, errs.WrapParams{},
+                      				errs.Int("limit", maxDepth))
+                    to: errs
+                when: scan.depth > maxDepth
+          key: _
+          range: raw
+          value: char
+      - return: nil
+  - of: checkNoDuplicateMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkNoDuplicateMembers
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: dec.Token
+        kind: value
+      - id: skipValue
+        kind: internal
+    steps:
+      - bind: dec
+        eval: json.NewDecoder(bytes.NewReader(raw))
+        to: json
+      - bind: open, terr
+        eval: dec.Token()
+        to: dec.Token
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: terr != nil || open != json.Delim('{')
+      - bind: seen
+        eval: map[string]struct{}{}
+      - loop:
+          cond: dec.More()
+          do:
+            - bind: name, nerr
+              eval: dec.Token()
+              to: dec.Token
+            - bind: key, isString
+              eval: name.(string)
+            - opt:
+                do:
+                  - return: coretoken.Malformed
+                when: nerr != nil || !isString
+            - opt:
+                do:
+                  - return: coretoken.DuplicateMember
+                init:
+                  bind: _, dup
+                  eval: seen[key]
+                when: dup
+            - set: seen[key]
+              value: struct{}{}
+            - opt:
+                do:
+                  - return: coretoken.Malformed
+                init:
+                  bind: serr
+                  eval: skipValue(dec)
+                  to: skipValue
+                when: serr != nil
+      - return: nil
+  - of: skipValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: skipValue
+        kind: self
+      - id: dec.Token
+        kind: value
+    steps:
+      - bind: depth
+        eval: "0"
+      - loop:
+          do:
+            - bind: tok, terr
+              eval: dec.Token()
+              to: dec.Token
+            - opt:
+                do:
+                  - return: terr
+                when: terr != nil
+            - bind: delim, isDelim
+              eval: tok.(json.Delim)
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: nil
+                      when: depth == 0
+                  - continue: true
+                when: "!isDelim"
+            - switch:
+                cases:
+                  - case: "'{', '['"
+                    do:
+                      - op: ++
+                        set: depth
+                  - default: true
+                    do:
+                      - op: "--"
+                        set: depth
+                      - opt:
+                          do:
+                            - return: nil
+                          when: depth == 0
+                "on": delim
+          forever: true
+  - of: preAuthEncode
+    participants:
+      - id: caller
+        kind: actor
+      - id: preAuthEncode
+        kind: self
+      - id: appendLE64
+        kind: internal
+    steps:
+      - bind: total
+        eval: le64Width
+      - loop:
+          do:
+            - op: +=
+              set: total
+              value: le64Width + len(piece)
+          key: _
+          range: pieces
+          value: piece
+      - bind: out
+        eval: make([]byte, 0, total)
+      - set: out
+        to: appendLE64
+        value: appendLE64(out, uint64(len(pieces)))
+      - loop:
+          do:
+            - set: out
+              to: appendLE64
+              value: appendLE64(out, uint64(len(piece)))
+            - set: out
+              value: append(out, piece...)
+          key: _
+          range: pieces
+          value: piece
+      - return: out
+  - of: appendLE64
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLE64
+        kind: self
+      - id: binary.LittleEndian.PutUint64
+        kind: value
+    steps:
+      - var:
+          name: buf
+          type: "[le64Width]byte"
+      - eval: binary.LittleEndian.PutUint64(buf[:], n&le64SignMask)
+        to: binary.LittleEndian.PutUint64
+      - return: append(dst, buf[:]...)
+  - of: es256Signing.algorithm
+    steps:
+      - return: coretoken.AlgorithmES256
+  - of: es256Signing.sign
+    participants:
+      - id: caller
+        kind: actor
+      - id: es256Signing.sign
+        kind: self
+      - id: sha256
+        kind: stdlib
+      - id: ecdsa
+        kind: stdlib
+      - id: r.FillBytes
+        kind: value
+      - id: s.FillBytes
+        kind: value
+    steps:
+      - bind: digest
+        eval: sha256.Sum256(input)
+        to: sha256
+      - bind: r, s, serr
+        eval: ecdsa.Sign(rand.Reader, b.key, digest[:])
+        to: ecdsa
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(serr, errs.WrapParams{
+                			Code:     coretoken.CodeIssueFailed,
+                			Reason:   "ISSUE_FAILED",
+                			Public:   "The token could not be issued",
+                			Private:  "service/security/token: ecdsa.Sign failed on the P-256 signing key",
+                			ExitCode: exitConfigFault,
+                		})
+          when: serr != nil
+      - var:
+          name: fixed
+          type: "[p256SigLen]byte"
+      - eval: r.FillBytes(fixed[:p256CoordLen])
+        to: r.FillBytes
+      - eval: s.FillBytes(fixed[p256CoordLen:])
+        to: s.FillBytes
+      - return: fixed[:], nil
+  - of: es256Verifying.algorithm
+    steps:
+      - return: coretoken.AlgorithmES256
+  - of: es256Verifying.verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: es256Verifying.verify
+        kind: self
+      - id: sha256
+        kind: stdlib
+      - id: new(big.Int).SetBytes
+        kind: value
+      - id: ecdsa
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(sig) != p256SigLen
+      - bind: digest
+        eval: sha256.Sum256(input)
+        to: sha256
+      - bind: r
+        eval: new(big.Int).SetBytes(sig[:p256CoordLen])
+        to: new(big.Int).SetBytes
+      - bind: s
+        eval: new(big.Int).SetBytes(sig[p256CoordLen:])
+        to: new(big.Int).SetBytes
+      - return: ecdsa.Verify(b.key, digest[:], r, s)
+        to: ecdsa
+  - of: hs256Binding.algorithm
+    steps:
+      - return: coretoken.AlgorithmHS256
+  - of: hs256Binding.sign
+    participants:
+      - id: caller
+        kind: actor
+      - id: hs256Binding.sign
+        kind: self
+      - id: hmacsha2.MAC.Tag
+        kind: value
+    steps:
+      - return: hmacsha2.MAC.Tag(b.secret, input), nil
+        to: hmacsha2.MAC.Tag
+  - of: hs256Binding.verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: hs256Binding.verify
+        kind: self
+      - id: hmacsha2.MAC.Verify
+        kind: value
+    steps:
+      - return: hmacsha2.MAC.Verify(b.secret, input, sig)
+        to: hmacsha2.MAC.Verify
+  - of: joseShape.decodeTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: joseShape.decodeTime
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: time.Unix(int64(whole), int64(frac*float64(time.Second))).UTC
+        kind: value
+    steps:
+      - var:
+          name: seconds
+          type: float64
+      - opt:
+          do:
+            - return: time.Time{}, malformed("NumericDate claim is not a JSON number")
+          when: json.Unmarshal(raw, &seconds) != nil
+      - opt:
+          do:
+            - return: |-
+                time.Time{}, errs.Wrap(coretoken.Malformed, errs.WrapParams{},
+                			errs.String("claim", "NumericDate out of range"))
+          when: math.IsNaN(seconds) || math.IsInf(seconds, 0) || math.Abs(seconds) > maxNumericDate
+      - bind: whole, frac
+        eval: math.Modf(seconds)
+        to: math
+      - return: time.Unix(int64(whole), int64(frac*float64(time.Second))).UTC(), nil
+        to: time.Unix(int64(whole), int64(frac*float64(time.Second))).UTC
+  - of: joseShape.encodeTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: joseShape.encodeTime
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - return: json.RawMessage(strconv.FormatInt(instant.Unix(), decimalBase))
+        to: json
+  - of: joseShape.decodeAudience
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(raw) == 0
+      - var:
+          name: single
+          type: string
+      - opt:
+          do:
+            - return: "[]string{single}, nil"
+          when: json.Unmarshal(raw, &single) == nil
+      - var:
+          name: many
+          type: "[]string"
+      - opt:
+          do:
+            - return: nil, malformed("aud is neither a string nor an array of strings")
+          when: json.Unmarshal(raw, &many) != nil
+      - return: many, nil
+  - of: joseShape.encodeAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: joseShape.encodeAudience
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(audience) == 0
+      - opt:
+          do:
+            - return: json.RawMessage(quoteJSONString(audience[0])), nil
+              to: json
+          when: len(audience) == 1
+      - return: json.RawMessage(quoteJSONStrings(audience)), nil
+        to: json
+  - of: quoteJSONString
+    participants:
+      - id: caller
+        kind: actor
+      - id: quoteJSONString
+        kind: self
+      - id: builder.Grow
+        kind: value
+      - id: builder.WriteByte
+        kind: value
+      - id: writeJSONStringByte
+        kind: internal
+      - id: builder.String
+        kind: value
+    steps:
+      - var:
+          name: builder
+          type: strings.Builder
+      - eval: builder.Grow(len(s) + quoteOverhead)
+        to: builder.Grow
+      - eval: builder.WriteByte('"')
+        to: builder.WriteByte
+      - loop:
+          do:
+            - eval: writeJSONStringByte(&builder, s[i])
+              to: writeJSONStringByte
+          key: i
+          range: len(s)
+      - eval: builder.WriteByte('"')
+        to: builder.WriteByte
+      - return: builder.String()
+        to: builder.String
+  - of: quoteJSONStrings
+    participants:
+      - id: caller
+        kind: actor
+      - id: quoteJSONStrings
+        kind: self
+      - id: builder.WriteByte
+        kind: value
+      - id: builder.WriteString
+        kind: value
+      - id: builder.String
+        kind: value
+    steps:
+      - var:
+          name: builder
+          type: strings.Builder
+      - eval: builder.WriteByte('[')
+        to: builder.WriteByte
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: builder.WriteByte(',')
+                    to: builder.WriteByte
+                when: i > 0
+            - eval: builder.WriteString(quoteJSONString(value))
+              to: builder.WriteString
+          key: i
+          range: values
+          value: value
+      - eval: builder.WriteByte(']')
+        to: builder.WriteByte
+      - return: builder.String()
+        to: builder.String
+  - of: writeJSONStringByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeJSONStringByte
+        kind: self
+      - id: builder.WriteByte
+        kind: value
+      - id: builder.WriteString
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: char == '"' || char == '\\'
+              do:
+                - eval: builder.WriteByte('\\')
+                  to: builder.WriteByte
+                - eval: builder.WriteByte(char)
+                  to: builder.WriteByte
+            - case: char < firstPrintable
+              do:
+                - eval: builder.WriteString(`\u00`)
+                  to: builder.WriteString
+                - eval: builder.WriteByte(hexDigit(char >> nibbleBits))
+                  to: builder.WriteByte
+                - eval: builder.WriteByte(hexDigit(char & lowNibbleMask))
+                  to: builder.WriteByte
+            - default: true
+              do:
+                - eval: builder.WriteByte(char)
+                  to: builder.WriteByte
+  - of: hexDigit
+    steps:
+      - opt:
+          do:
+            - return: "'0' + nibble"
+          when: nibble < decimalDigits
+      - return: "'a' + nibble - decimalDigits"
+  - of: NewVerifierFromJWK
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewVerifierFromJWK
+        kind: self
+      - id: bindJWK
+        kind: internal
+      - id: newJWSVerifier
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindJWK(key)
+        to: bindJWK
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSVerifier(binding, cfg)
+        to: newJWSVerifier
+  - of: NewSetVerifier
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSetVerifier
+        kind: self
+      - id: newPolicy
+        kind: internal
+      - id: indexByKid
+        kind: internal
+    steps:
+      - bind: policy, perr
+        eval: newPolicy(cfg)
+        to: newPolicy
+      - opt:
+          do:
+            - return: nil, perr
+          when: perr != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+                			errs.String("knob", "empty JWK Set"))
+          when: set.Len() == 0
+      - bind: index
+        eval: indexByKid(set)
+        to: indexByKid
+      - opt:
+          do:
+            - return: nil, unverifiableSet(set.Len(), indexedCount(index))
+          when: "!selectable(index)"
+      - return: "&setVerifier{byKid: index, policy: policy}, nil"
+  - of: indexedCount
+    steps:
+      - bind: count
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: count
+              value: len(group)
+          key: _
+          range: index
+          value: group
+      - return: count
+  - of: unverifiableSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: unverifiableSet
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:     coretoken.PolicyMisconfigured.Code(),
+          		Reason:   coretoken.PolicyMisconfigured.Reason(),
+          		Public:   coretoken.PolicyMisconfigured.Public(),
+          		Private:  "service/security/token: no JWK Set member has both a kid and a key this package verifies with; a key published without a kid is verified with NewVerifierFromJWK",
+          		ExitCode: coretoken.PolicyMisconfigured.ExitCode(),
+          	}, errs.String("knob", "JWK Set"), errs.Int("members", members), errs.Int("members_with_kid", withKid))
+        to: errs
+  - of: indexByKid
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexByKid
+        kind: self
+      - id: key.Kid
+        kind: value
+      - id: bindJWK
+        kind: internal
+    steps:
+      - bind: index
+        eval: make(map[string][]boundKeyValue, len(set.Keys()))
+      - loop:
+          do:
+            - bind: kid
+              eval: key.Kid()
+              to: key.Kid
+            - opt:
+                do:
+                  - continue: true
+                when: kid == ""
+            - bind: binding, berr
+              eval: bindJWK(key)
+              to: bindJWK
+            - set: index[kid]
+              value: "append(index[kid], boundKeyValue{binding: binding, usable: berr == nil})"
+          key: _
+          range: set.Keys()
+          value: key
+      - return: index
+  - of: (*setVerifier).Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*setVerifier).Verify
+        kind: self
+      - id: v.policy.parseJWS
+        kind: internal
+      - id: v.candidates
+        kind: internal
+      - id: v.policy.checkHeader
+        kind: internal
+      - id: v.policy.decodeAndValidate
+        kind: internal
+    steps:
+      - bind: parts, perr
+        eval: v.policy.parseJWS(token)
+        to: v.policy.parseJWS
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, perr
+          when: perr != nil
+      - bind: candidates, cerr
+        eval: v.candidates(parts.header.kid)
+        to: v.candidates
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, cerr
+          when: cerr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!candidate.usable"
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: herr
+                  eval: v.policy.checkHeader(parts.header, candidate.binding.algorithm())
+                  to: v.policy.checkHeader
+                when: herr != nil
+            - opt:
+                do:
+                  - return: v.policy.decodeAndValidate(parts.payload, joseShape{})
+                    to: v.policy.decodeAndValidate
+                when: candidate.binding.verify(parts.input, parts.signature)
+          key: _
+          range: candidates
+          value: candidate
+      - return: coretoken.ClaimsValue{}, coretoken.SignatureInvalid
+  - of: (*setVerifier).candidates
+    steps:
+      - opt:
+          do:
+            - return: nil, coretoken.KeyIDMissing
+          when: kid == ""
+      - bind: matches
+        eval: v.byKid[kid]
+      - opt:
+          do:
+            - return: nil, coretoken.KeyNotFound
+          when: len(matches) == 0
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretoken.KeyIDAmbiguous, errs.WrapParams{},
+                			errs.Int("limit", v.policy.maxKeyCandidates))
+          when: len(matches) > v.policy.maxKeyCandidates
+      - return: matches, nil
+  - of: bindJWK
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindJWK
+        kind: self
+      - id: checkJWKUsage
+        kind: internal
+      - id: bindOctJWK
+        kind: internal
+      - id: bindECJWK
+        kind: internal
+      - id: bindOKPJWK
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, uerr
+          init:
+            bind: uerr
+            eval: checkJWKUsage(key)
+            to: checkJWKUsage
+          when: uerr != nil
+      - switch:
+          cases:
+            - case: key.Kty() == jwk.TypeOct
+              do:
+                - return: bindOctJWK(key)
+                  to: bindOctJWK
+            - case: key.Kty() == jwk.TypeEC && key.Crv() == jwk.CurveP256
+              do:
+                - return: bindECJWK(key)
+                  to: bindECJWK
+            - case: key.Kty() == jwk.TypeOKP && key.Crv() == jwk.CurveEd25519
+              do:
+                - return: bindOKPJWK(key)
+                  to: bindOKPJWK
+            - default: true
+              do:
+                - return: nil, keyUnsuitable("no token algorithm for this kty/crv")
+  - of: bindOctJWK
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindOctJWK
+        kind: self
+      - id: key.Secret
+        kind: value
+      - id: bindSecret
+        kind: internal
+    steps:
+      - bind: secret, serr
+        eval: key.Secret()
+        to: key.Secret
+      - opt:
+          do:
+            - return: nil, keyUnsuitable("oct JWK is not a 256-bit symmetric key")
+          when: serr != nil
+      - return: bindSecret(secret)
+        to: bindSecret
+  - of: bindECJWK
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindECJWK
+        kind: self
+      - id: key.ECDSAPublic
+        kind: value
+      - id: x509
+        kind: stdlib
+      - id: bindP256Public
+        kind: internal
+    steps:
+      - bind: der, derr
+        eval: key.ECDSAPublic()
+        to: key.ECDSAPublic
+      - opt:
+          do:
+            - return: nil, keyUnsuitable("EC JWK does not render a PKIX public key")
+          when: derr != nil
+      - bind: parsed, perr
+        eval: x509.ParsePKIXPublicKey(der)
+        to: x509
+      - opt:
+          do:
+            - return: nil, keyUnsuitable("PKIX round-trip of an EC JWK failed")
+          when: perr != nil
+      - bind: public, isECDSA
+        eval: parsed.(*ecdsa.PublicKey)
+      - opt:
+          do:
+            - return: nil, keyUnsuitable("EC JWK did not decode to an ECDSA public key")
+          when: "!isECDSA"
+      - return: bindP256Public(public)
+        to: bindP256Public
+  - of: bindOKPJWK
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindOKPJWK
+        kind: self
+      - id: key.Ed25519Public
+        kind: value
+      - id: bindEd25519Public
+        kind: internal
+    steps:
+      - bind: public, perr
+        eval: key.Ed25519Public()
+        to: key.Ed25519Public
+      - opt:
+          do:
+            - return: nil, keyUnsuitable("OKP JWK does not render an Ed25519 public key")
+          when: perr != nil
+      - return: bindEd25519Public(public, coretoken.AlgorithmEdDSA)
+        to: bindEd25519Public
+  - of: checkJWKUsage
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkJWKUsage
+        kind: self
+      - id: key.Use
+        kind: value
+      - id: keyUnsuitable
+        kind: internal
+      - id: key.KeyOps
+        kind: value
+      - id: impliedAlg
+        kind: internal
+      - id: key.Alg
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: keyUnsuitable("JWK use is not sig")
+              to: keyUnsuitable
+          init:
+            bind: use
+            eval: key.Use()
+            to: key.Use
+          when: use != "" && use != "sig"
+      - opt:
+          do:
+            - return: keyUnsuitable("JWK key_ops does not include verify")
+              to: keyUnsuitable
+          init:
+            bind: ops
+            eval: key.KeyOps()
+            to: key.KeyOps
+          when: len(ops) != 0 && !slices.Contains(ops, "verify")
+      - bind: implied, known
+        eval: impliedAlg(key)
+        to: impliedAlg
+      - opt:
+          do:
+            - return: keyUnsuitable("JWK alg contradicts its kty/crv")
+              to: keyUnsuitable
+          init:
+            bind: alg
+            eval: key.Alg()
+            to: key.Alg
+          when: alg != "" && (!known || alg != implied)
+      - return: nil
+  - of: impliedAlg
+    participants:
+      - id: caller
+        kind: actor
+      - id: impliedAlg
+        kind: self
+      - id: coretoken.AlgorithmHS256.String
+        kind: value
+      - id: coretoken.AlgorithmES256.String
+        kind: value
+      - id: coretoken.AlgorithmEdDSA.String
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: key.Kty() == jwk.TypeOct
+              do:
+                - return: coretoken.AlgorithmHS256.String(), true
+                  to: coretoken.AlgorithmHS256.String
+            - case: key.Kty() == jwk.TypeEC && key.Crv() == jwk.CurveP256
+              do:
+                - return: coretoken.AlgorithmES256.String(), true
+                  to: coretoken.AlgorithmES256.String
+            - case: key.Kty() == jwk.TypeOKP && key.Crv() == jwk.CurveEd25519
+              do:
+                - return: coretoken.AlgorithmEdDSA.String(), true
+                  to: coretoken.AlgorithmEdDSA.String
+            - default: true
+              do:
+                - return: "\"\", false"
+  - of: parseJOSEHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseJOSEHeader
+        kind: self
+      - id: checkJSONDepth
+        kind: internal
+      - id: checkNoDuplicateMembers
+        kind: internal
+      - id: decodeStringClaim
+        kind: internal
+      - id: finishHeader
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: headerValue{}, malformed("JOSE header is not UTF-8")
+          when: "!utf8.Valid(raw)"
+      - opt:
+          do:
+            - return: headerValue{}, derr
+          init:
+            bind: derr
+            eval: checkJSONDepth(raw, maxHeaderDepth)
+            to: checkJSONDepth
+          when: derr != nil
+      - opt:
+          do:
+            - return: headerValue{}, derr
+          init:
+            bind: derr
+            eval: checkNoDuplicateMembers(raw)
+            to: checkNoDuplicateMembers
+          when: derr != nil
+      - var:
+          name: members
+          type: map[string]json.RawMessage
+      - opt:
+          do:
+            - return: headerValue{}, malformed("JOSE header is not a JSON object")
+          when: json.Unmarshal(raw, &members) != nil
+      - bind: alg, aerr
+        eval: decodeStringClaim(members, "alg")
+        to: decodeStringClaim
+      - opt:
+          do:
+            - return: headerValue{}, aerr
+          when: aerr != nil
+      - return: finishHeader(members, alg)
+        to: finishHeader
+  - of: finishHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: finishHeader
+        kind: self
+      - id: decodeStringClaim
+        kind: internal
+    steps:
+      - bind: typ, terr
+        eval: decodeStringClaim(members, "typ")
+        to: decodeStringClaim
+      - opt:
+          do:
+            - return: headerValue{}, terr
+          when: terr != nil
+      - bind: kid, kerr
+        eval: decodeStringClaim(members, "kid")
+        to: decodeStringClaim
+      - opt:
+          do:
+            - return: headerValue{}, kerr
+          when: kerr != nil
+      - bind: _, critical
+        eval: members["crit"]
+      - return: "headerValue{alg: alg, typ: typ, kid: kid, critical: critical}, nil"
+  - of: policyValue.checkHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.checkHeader
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: coretoken.AlgorithmNone
+          when: strings.EqualFold(header.alg, algNone)
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: header.alg == ""
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.AlgorithmMismatch, errs.WrapParams{},
+                			errs.String("expected", bound.String()))
+              to: errs
+          when: header.alg != bound.String()
+      - opt:
+          do:
+            - return: coretoken.HeaderUnsupported
+          when: header.critical
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.HeaderUnsupported, errs.WrapParams{},
+                			errs.String("expected_typ", p.requireType))
+              to: errs
+          when: p.requireType != "" && header.typ != p.requireType
+      - return: nil
+  - of: policyValue.decodeAndValidate
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.decodeAndValidate
+        kind: self
+      - id: decodeSegment
+        kind: internal
+      - id: decodeClaims
+        kind: internal
+      - id: p.validateClaims
+        kind: internal
+    steps:
+      - bind: raw, derr
+        eval: decodeSegment(payload, p.maxTokenLen)
+        to: decodeSegment
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, derr
+          when: derr != nil
+      - bind: decoded, cerr
+        eval: decodeClaims(raw, p.maxClaimDepth, shape)
+        to: decodeClaims
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, cerr
+          when: cerr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, verr
+          init:
+            bind: verr
+            eval: p.validateClaims(decoded)
+            to: p.validateClaims
+          when: verr != nil
+      - return: decoded, nil
+  - of: newJWSIssuer
+    participants:
+      - id: caller
+        kind: actor
+      - id: newJWSIssuer
+        kind: self
+      - id: validateIssuerConfig
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: validateIssuerConfig(cfg)
+            to: validateIssuerConfig
+          when: verr != nil
+      - return: |-
+          &jwsIssuer{
+          		bound: bound, cfg: cfg, timeSource: resolveClock(cfg.Clock),
+          		header: b64.EncodeToString([]byte(renderJOSEHeader(bound.algorithm(), cfg))),
+          	}, nil
+  - of: renderJOSEHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderJOSEHeader
+        kind: self
+      - id: builder.WriteString
+        kind: value
+      - id: builder.WriteByte
+        kind: value
+      - id: builder.String
+        kind: value
+    steps:
+      - bind: typ
+        eval: cfg.Type
+      - opt:
+          do:
+            - set: typ
+              value: defaultType
+          when: typ == ""
+      - var:
+          name: builder
+          type: strings.Builder
+      - eval: builder.WriteString(`{"alg":`)
+        to: builder.WriteString
+      - eval: builder.WriteString(quoteJSONString(alg.String()))
+        to: builder.WriteString
+      - opt:
+          do:
+            - eval: builder.WriteString(`,"kid":`)
+              to: builder.WriteString
+            - eval: builder.WriteString(quoteJSONString(cfg.KeyID))
+              to: builder.WriteString
+          when: cfg.KeyID != ""
+      - eval: builder.WriteString(`,"typ":`)
+        to: builder.WriteString
+      - eval: builder.WriteString(quoteJSONString(typ))
+        to: builder.WriteString
+      - eval: builder.WriteByte('}')
+        to: builder.WriteByte
+      - return: builder.String()
+        to: builder.String
+  - of: (*jwsIssuer).Issue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jwsIssuer).Issue
+        kind: self
+      - id: stampIssuedClaims
+        kind: internal
+      - id: encodeClaims
+        kind: internal
+      - id: i.bound.sign
+        kind: internal
+    steps:
+      - bind: stamped, serr
+        eval: stampIssuedClaims(claims, i.cfg, i.timeSource)
+        to: stampIssuedClaims
+      - opt:
+          do:
+            - return: "\"\", serr"
+          when: serr != nil
+      - bind: payload, cerr
+        eval: encodeClaims(stamped, joseShape{})
+        to: encodeClaims
+      - opt:
+          do:
+            - return: "\"\", cerr"
+          when: cerr != nil
+      - bind: input
+        eval: i.header + "." + b64.EncodeToString(payload)
+      - bind: signature, gerr
+        eval: i.bound.sign([]byte(input))
+        to: i.bound.sign
+      - opt:
+          do:
+            - return: "\"\", gerr"
+          when: gerr != nil
+      - return: input + "." + b64.EncodeToString(signature), nil
+  - of: policyValue.parseJWS
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.parseJWS
+        kind: self
+      - id: splitCompact
+        kind: internal
+      - id: parseHeaderSegment
+        kind: internal
+      - id: decodeSegment
+        kind: internal
+    steps:
+      - bind: seg, serr
+        eval: splitCompact(tok, p.maxTokenLen)
+        to: splitCompact
+      - opt:
+          do:
+            - return: jwsPartsValue{}, serr
+          when: serr != nil
+      - opt:
+          do:
+            - return: jwsPartsValue{}, coretoken.Malformed
+          when: seg.count != jwsSegments
+      - bind: header, herr
+        eval: parseHeaderSegment(seg.part[headerSegment])
+        to: parseHeaderSegment
+      - opt:
+          do:
+            - return: jwsPartsValue{}, herr
+          when: herr != nil
+      - bind: signature, gerr
+        eval: decodeSegment(seg.part[signatureSegment], maxSignatureLen)
+        to: decodeSegment
+      - opt:
+          do:
+            - return: jwsPartsValue{}, gerr
+          when: gerr != nil
+      - bind: inputLen
+        eval: len(seg.part[headerSegment]) + 1 + len(seg.part[payloadSegment])
+      - return: |-
+          jwsPartsValue{
+          		header: header, payload: seg.part[payloadSegment],
+          		input: []byte(tok[:inputLen]), signature: signature,
+          	}, nil
+  - of: parseHeaderSegment
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseHeaderSegment
+        kind: self
+      - id: decodeSegment
+        kind: internal
+      - id: parseJOSEHeader
+        kind: internal
+    steps:
+      - bind: raw, derr
+        eval: decodeSegment(segment, maxHeaderLen)
+        to: decodeSegment
+      - opt:
+          do:
+            - return: headerValue{}, derr
+          when: derr != nil
+      - return: parseJOSEHeader(raw)
+        to: parseJOSEHeader
+  - of: newJWSVerifier
+    participants:
+      - id: caller
+        kind: actor
+      - id: newJWSVerifier
+        kind: self
+      - id: newPolicy
+        kind: internal
+    steps:
+      - bind: policy, perr
+        eval: newPolicy(cfg)
+        to: newPolicy
+      - opt:
+          do:
+            - return: nil, perr
+          when: perr != nil
+      - return: "&jwsVerifier{bound: bound, policy: policy}, nil"
+  - of: (*jwsVerifier).Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jwsVerifier).Verify
+        kind: self
+      - id: v.policy.parseJWS
+        kind: internal
+      - id: v.policy.checkHeader
+        kind: internal
+      - id: v.policy.decodeAndValidate
+        kind: internal
+    steps:
+      - bind: parts, perr
+        eval: v.policy.parseJWS(token)
+        to: v.policy.parseJWS
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, perr
+          when: perr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, herr
+          init:
+            bind: herr
+            eval: v.policy.checkHeader(parts.header, v.bound.algorithm())
+            to: v.policy.checkHeader
+          when: herr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, coretoken.SignatureInvalid
+          when: "!v.bound.verify(parts.input, parts.signature)"
+      - return: v.policy.decodeAndValidate(parts.payload, joseShape{})
+        to: v.policy.decodeAndValidate
+  - of: NewHS256Issuer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHS256Issuer
+        kind: self
+      - id: bindSecret
+        kind: internal
+      - id: newJWSIssuer
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindSecret(secret)
+        to: bindSecret
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSIssuer(binding, cfg)
+        to: newJWSIssuer
+  - of: NewES256Issuer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewES256Issuer
+        kind: self
+      - id: bindP256Private
+        kind: internal
+      - id: newJWSIssuer
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindP256Private(priv)
+        to: bindP256Private
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSIssuer(binding, cfg)
+        to: newJWSIssuer
+  - of: NewEdDSAIssuer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewEdDSAIssuer
+        kind: self
+      - id: bindEd25519Private
+        kind: internal
+      - id: newJWSIssuer
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindEd25519Private(priv, coretoken.AlgorithmEdDSA)
+        to: bindEd25519Private
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSIssuer(binding, cfg)
+        to: newJWSIssuer
+  - of: NewHS256Verifier
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHS256Verifier
+        kind: self
+      - id: bindSecret
+        kind: internal
+      - id: newJWSVerifier
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindSecret(secret)
+        to: bindSecret
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSVerifier(binding, cfg)
+        to: newJWSVerifier
+  - of: NewES256Verifier
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewES256Verifier
+        kind: self
+      - id: bindP256Public
+        kind: internal
+      - id: newJWSVerifier
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindP256Public(pub)
+        to: bindP256Public
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSVerifier(binding, cfg)
+        to: newJWSVerifier
+  - of: NewEdDSAVerifier
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewEdDSAVerifier
+        kind: self
+      - id: bindEd25519Public
+        kind: internal
+      - id: newJWSVerifier
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindEd25519Public(pub, coretoken.AlgorithmEdDSA)
+        to: bindEd25519Public
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: newJWSVerifier(binding, cfg)
+        to: newJWSVerifier
+  - of: keyUnsuitable
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyUnsuitable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coretoken.KeyUnsuitable, errs.WrapParams{},
+          		errs.String("detail", detail))
+        to: errs
+  - of: bindSecret
+    steps:
+      - opt:
+          do:
+            - return: hs256Binding{}, keyUnsuitable("HS256 needs a 256-bit crypto.Key")
+          when: len(secret.Bytes()) != corecrypto.KeyLen
+      - return: "hs256Binding{secret: secret}, nil"
+  - of: bindP256Public
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindP256Public
+        kind: self
+      - id: pub.ECDH
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: es256Verifying{}, keyUnsuitable("ES256 needs a P-256 public key")
+          when: pub == nil || pub.Curve != elliptic.P256()
+      - opt:
+          do:
+            - return: es256Verifying{}, keyUnsuitable("P-256 public key is not a valid curve point")
+          init:
+            bind: _, cerr
+            eval: pub.ECDH()
+            to: pub.ECDH
+          when: cerr != nil
+      - return: "es256Verifying{key: pub}, nil"
+  - of: bindP256Private
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindP256Private
+        kind: self
+      - id: priv.PublicKey.ECDH
+        kind: value
+      - id: priv.ECDH
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: es256Signing{}, keyUnsuitable("ES256 needs a P-256 private key")
+          when: priv == nil || priv.Curve != elliptic.P256()
+      - bind: public, cerr
+        eval: priv.PublicKey.ECDH()
+        to: priv.PublicKey.ECDH
+      - opt:
+          do:
+            - return: es256Signing{}, keyUnsuitable("P-256 private key's public half is not a valid curve point")
+          when: cerr != nil
+      - opt:
+          do:
+            - return: es256Signing{}, keyUnsuitable("P-256 private key has no positive scalar")
+          when: priv.D == nil || priv.D.Sign() <= 0
+      - bind: derived, derr
+        eval: priv.ECDH()
+        to: priv.ECDH
+      - opt:
+          do:
+            - return: es256Signing{}, keyUnsuitable("P-256 private scalar is out of range")
+          when: derr != nil
+      - opt:
+          do:
+            - return: es256Signing{}, keyUnsuitable("P-256 private scalar does not match its public point")
+          when: "!derived.PublicKey().Equal(public)"
+      - return: "es256Signing{key: priv}, nil"
+  - of: bindEd25519Public
+    steps:
+      - opt:
+          do:
+            - return: ed25519Verifying{}, keyUnsuitable("Ed25519 needs a 32-octet public key")
+          when: len(pub) != ed25519.PublicKeySize
+      - return: "ed25519Verifying{key: pub, alg: alg}, nil"
+  - of: bindEd25519Private
+    steps:
+      - opt:
+          do:
+            - return: ed25519Signing{}, keyUnsuitable("Ed25519 needs a 64-octet private key")
+          when: len(priv) != ed25519.PrivateKeySize
+      - return: "ed25519Signing{key: priv, alg: alg}, nil"
+  - of: NewPasetoV4Issuer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewPasetoV4Issuer
+        kind: self
+      - id: bindEd25519Private
+        kind: internal
+      - id: cfg.issuing
+        kind: internal
+      - id: validateIssuerConfig
+        kind: internal
+      - id: checkFooterLen
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindEd25519Private(priv, coretoken.AlgorithmPasetoV4Public)
+        to: bindEd25519Private
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - bind: issuing
+        eval: cfg.issuing()
+        to: cfg.issuing
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: validateIssuerConfig(issuing)
+            to: validateIssuerConfig
+          when: verr != nil
+      - opt:
+          do:
+            - return: nil, ferr
+          init:
+            bind: ferr
+            eval: checkFooterLen(cfg.Footer)
+            to: checkFooterLen
+          when: ferr != nil
+      - return: |-
+          &pasetoIssuer{
+          		bound: binding, cfg: cfg, issuing: issuing,
+          		timeSource: resolveClock(cfg.Clock),
+          	}, nil
+  - of: NewPasetoV4Verifier
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewPasetoV4Verifier
+        kind: self
+      - id: bindEd25519Public
+        kind: internal
+      - id: newPolicy
+        kind: internal
+      - id: checkFooterLen
+        kind: internal
+    steps:
+      - bind: binding, berr
+        eval: bindEd25519Public(pub, coretoken.AlgorithmPasetoV4Public)
+        to: bindEd25519Public
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - bind: policy, perr
+        eval: newPolicy(cfg.verifying())
+        to: newPolicy
+      - opt:
+          do:
+            - return: nil, perr
+          when: perr != nil
+      - opt:
+          do:
+            - return: nil, ferr
+          init:
+            bind: ferr
+            eval: checkFooterLen(cfg.Footer)
+            to: checkFooterLen
+          when: ferr != nil
+      - return: "&pasetoVerifier{bound: binding, policy: policy, cfg: cfg}, nil"
+  - of: checkFooterLen
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkFooterLen
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+                			errs.String("knob", "Footer"), errs.Int("limit", maxFooterLen))
+              to: errs
+          when: len(footer) > maxFooterLen
+      - return: nil
+  - of: checkPasetoScheme
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkPasetoScheme
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: version == "v4" && purpose == "public"
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.SchemeUnsupported, errs.WrapParams{},
+                			errs.String("scheme", version+"."+purpose))
+              to: errs
+          when: slices.Contains(pasetoVersions, version) && (purpose == "public" || purpose == "local")
+      - return: coretoken.Malformed
+  - of: (*pasetoIssuer).Issue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pasetoIssuer).Issue
+        kind: self
+      - id: stampIssuedClaims
+        kind: internal
+      - id: encodeClaims
+        kind: internal
+      - id: i.bound.sign
+        kind: internal
+      - id: b64.EncodeToString
+        kind: value
+    steps:
+      - bind: stamped, serr
+        eval: stampIssuedClaims(claims, i.issuing, i.timeSource)
+        to: stampIssuedClaims
+      - opt:
+          do:
+            - return: "\"\", serr"
+          when: serr != nil
+      - bind: payload, cerr
+        eval: encodeClaims(stamped, pasetoShape{})
+        to: encodeClaims
+      - opt:
+          do:
+            - return: "\"\", cerr"
+          when: cerr != nil
+      - bind: signature, gerr
+        eval: |-
+          i.bound.sign(preAuthEncode(
+          		[]byte(pasetoV4PublicHeader), payload, i.cfg.Footer, i.cfg.ImplicitAssertion))
+        to: i.bound.sign
+      - opt:
+          do:
+            - return: "\"\", gerr"
+          when: gerr != nil
+      - bind: body
+        eval: b64.EncodeToString(append(payload, signature...))
+        to: b64.EncodeToString
+      - opt:
+          do:
+            - return: pasetoV4PublicHeader + body, nil
+          when: len(i.cfg.Footer) == 0
+      - return: pasetoV4PublicHeader + body + "." + b64.EncodeToString(i.cfg.Footer), nil
+  - of: PasetoIssuerConfig.issuing
+    steps:
+      - return: |-
+          IssuerConfig{
+          		Issuer:             c.Issuer,
+          		Lifetime:           c.Lifetime,
+          		AllowMissingExpiry: c.AllowMissingExpiry,
+          		Clock:              c.Clock,
+          	}
+  - of: pasetoShape.decodeTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: pasetoShape.decodeTime
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: parsed.UTC
+        kind: value
+    steps:
+      - var:
+          name: text
+          type: string
+      - opt:
+          do:
+            - return: time.Time{}, malformed("PASETO time claim is not a JSON string")
+          when: json.Unmarshal(raw, &text) != nil
+      - bind: parsed, perr
+        eval: time.Parse(time.RFC3339, text)
+        to: time
+      - opt:
+          do:
+            - return: time.Time{}, malformed("PASETO time claim is not RFC 3339")
+          when: perr != nil
+      - return: parsed.UTC(), nil
+        to: parsed.UTC
+  - of: pasetoShape.encodeTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: pasetoShape.encodeTime
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - return: json.RawMessage(quoteJSONString(instant.UTC().Format(time.RFC3339)))
+        to: json
+  - of: pasetoShape.decodeAudience
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(raw) == 0
+      - var:
+          name: single
+          type: string
+      - opt:
+          do:
+            - return: nil, malformed("PASETO aud is not a string")
+          when: json.Unmarshal(raw, &single) != nil
+      - return: "[]string{single}, nil"
+  - of: pasetoShape.encodeAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: pasetoShape.encodeAudience
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(audience) == 0
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretoken.IssueFailed, errs.WrapParams{},
+                			errs.String("claim", "PASETO aud accepts exactly one value"))
+          when: len(audience) > 1
+      - return: json.RawMessage(quoteJSONString(audience[0])), nil
+        to: json
+  - of: (*pasetoVerifier).Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pasetoVerifier).Verify
+        kind: self
+      - id: v.split
+        kind: internal
+      - id: v.decodeAuthenticated
+        kind: internal
+    steps:
+      - bind: payload, footer, perr
+        eval: v.split(token)
+        to: v.split
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, perr
+          when: perr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, coretoken.FooterMismatch
+          when: subtle.ConstantTimeCompare(footer, v.cfg.Footer) != 1
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, coretoken.Malformed
+          when: len(payload) < pasetoSigLen
+      - bind: message, signature
+        eval: payload[:len(payload)-pasetoSigLen], payload[len(payload)-pasetoSigLen:]
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, coretoken.SignatureInvalid
+          when: |-
+            !v.bound.verify(preAuthEncode(
+            		[]byte(pasetoV4PublicHeader), message, footer, v.cfg.ImplicitAssertion), signature)
+      - return: v.decodeAuthenticated(message)
+        to: v.decodeAuthenticated
+  - of: (*pasetoVerifier).decodeAuthenticated
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pasetoVerifier).decodeAuthenticated
+        kind: self
+      - id: decodeClaims
+        kind: internal
+      - id: v.policy.validateClaims
+        kind: internal
+    steps:
+      - bind: decoded, cerr
+        eval: decodeClaims(message, v.policy.maxClaimDepth, pasetoShape{})
+        to: decodeClaims
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, cerr
+          when: cerr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, verr
+          init:
+            bind: verr
+            eval: v.policy.validateClaims(decoded)
+            to: v.policy.validateClaims
+          when: verr != nil
+      - return: decoded, nil
+  - of: (*pasetoVerifier).split
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pasetoVerifier).split
+        kind: self
+      - id: splitCompact
+        kind: internal
+      - id: checkPasetoScheme
+        kind: internal
+      - id: decodeSegment
+        kind: internal
+    steps:
+      - bind: seg, serr
+        eval: splitCompact(token, v.policy.maxTokenLen)
+        to: splitCompact
+      - opt:
+          do:
+            - return: nil, nil, serr
+          when: serr != nil
+      - opt:
+          do:
+            - return: nil, nil, coretoken.Malformed
+          when: seg.count < pasetoMinSegments || seg.count > pasetoMaxSegments
+      - opt:
+          do:
+            - return: nil, nil, cerr
+          init:
+            bind: cerr
+            eval: checkPasetoScheme(seg.part[pasetoVersionSegment], seg.part[pasetoPurposeSegment])
+            to: checkPasetoScheme
+          when: cerr != nil
+      - bind: body, berr
+        eval: decodeSegment(seg.part[pasetoBodySegment], v.policy.maxTokenLen)
+        to: decodeSegment
+      - opt:
+          do:
+            - return: nil, nil, berr
+          when: berr != nil
+      - opt:
+          do:
+            - return: body, nil, nil
+          when: seg.count == pasetoMinSegments
+      - bind: decodedFooter, ferr
+        eval: decodeSegment(seg.part[pasetoFooterSegment], maxFooterLen)
+        to: decodeSegment
+      - opt:
+          do:
+            - return: nil, nil, ferr
+          when: ferr != nil
+      - return: body, decodedFooter, nil
+  - of: PasetoVerifierConfig.verifying
+    steps:
+      - return: |-
+          VerifierConfig{
+          		Issuer:             c.Issuer,
+          		Audience:           c.Audience,
+          		Leeway:             c.Leeway,
+          		MaxLifetime:        c.MaxLifetime,
+          		MaxTokenLen:        c.MaxTokenLen,
+          		MaxClaimDepth:      c.MaxClaimDepth,
+          		AllowMissingExpiry: c.AllowMissingExpiry,
+          		Clock:              c.Clock,
+          	}
+  - of: newPolicy
+    participants:
+      - id: caller
+        kind: actor
+      - id: newPolicy
+        kind: self
+      - id: nonUTF8VerifierKnob
+        kind: internal
+      - id: resolveBounds
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: policyValue{}, misconfigured("Leeway")
+          when: cfg.Leeway < 0 || cfg.Leeway > MaxLeeway
+      - opt:
+          do:
+            - return: policyValue{}, misconfigured("MaxLifetime")
+          when: cfg.MaxLifetime < 0
+      - opt:
+          do:
+            - return: |-
+                policyValue{}, errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+                			errs.String("knob", knob), errs.String("problem", "not valid UTF-8"))
+          init:
+            bind: knob
+            eval: nonUTF8VerifierKnob(cfg)
+            to: nonUTF8VerifierKnob
+          when: knob != ""
+      - bind: bounds, berr
+        eval: resolveBounds(cfg)
+        to: resolveBounds
+      - opt:
+          do:
+            - return: policyValue{}, berr
+          when: berr != nil
+      - return: |-
+          policyValue{
+          		issuer: cfg.Issuer, audience: cfg.Audience, requireType: cfg.RequireType,
+          		leeway: cfg.Leeway, maxLifetime: cfg.MaxLifetime,
+          		maxTokenLen: bounds.tokenLen, maxClaimDepth: bounds.claimDepth,
+          		maxKeyCandidates:   bounds.keyCandidates,
+          		allowMissingExpiry: cfg.AllowMissingExpiry,
+          		timeSource:         resolveClock(cfg.Clock),
+          	}, nil
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+          		errs.String("knob", knob))
+        to: errs
+  - of: resolveClock
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: configured == nil
+      - return: configured
+  - of: validateIssuerConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateIssuerConfig
+        kind: self
+      - id: errs
+        kind: package
+      - id: nonUTF8Knob
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+                			errs.String("knob", "Lifetime"))
+              to: errs
+          when: cfg.Lifetime < 0
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+                			errs.String("knob", knob), errs.String("problem", "not valid UTF-8"))
+              to: errs
+          init:
+            bind: knob
+            eval: nonUTF8Knob(cfg)
+            to: nonUTF8Knob
+          when: knob != ""
+      - return: nil
+  - of: policyValue.validateClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.validateClaims
+        kind: self
+      - id: p.timeSource.Now
+        kind: value
+      - id: p.checkExpiry
+        kind: internal
+      - id: claims.NotBefore
+        kind: value
+      - id: p.checkLifetime
+        kind: internal
+      - id: p.checkIdentity
+        kind: internal
+    steps:
+      - bind: now
+        eval: p.timeSource.Now()
+        to: p.timeSource.Now
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: p.checkExpiry(claims, now)
+            to: p.checkExpiry
+          when: err != nil
+      - opt:
+          do:
+            - return: coretoken.NotYetValid
+          init:
+            bind: nbf
+            eval: claims.NotBefore()
+            to: claims.NotBefore
+          when: "!nbf.IsZero() && now.Before(nbf.Add(-p.leeway))"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: p.checkLifetime(claims)
+            to: p.checkLifetime
+          when: err != nil
+      - return: p.checkIdentity(claims)
+        to: p.checkIdentity
+  - of: policyValue.checkIdentity
+    steps:
+      - opt:
+          do:
+            - return: coretoken.IssuerMismatch
+          when: p.issuer != "" && claims.Issuer() != p.issuer
+      - opt:
+          do:
+            - return: coretoken.AudienceMismatch
+          when: p.audience != "" && !slices.Contains(claims.Audience(), p.audience)
+      - return: nil
+  - of: policyValue.checkExpiry
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.checkExpiry
+        kind: self
+      - id: claims.Expiry
+        kind: value
+    steps:
+      - bind: exp
+        eval: claims.Expiry()
+        to: claims.Expiry
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: p.allowMissingExpiry
+            - return: coretoken.ExpiryRequired
+          when: exp.IsZero()
+      - opt:
+          do:
+            - return: coretoken.Expired
+          when: now.After(exp.Add(p.leeway))
+      - return: nil
+  - of: policyValue.checkLifetime
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.checkLifetime
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: p.maxLifetime <= 0
+      - bind: exp, iat
+        eval: claims.Expiry(), claims.IssuedAt()
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.LifetimeTooLong, errs.WrapParams{},
+                			errs.String("reason", "exp or iat absent"))
+              to: errs
+          when: exp.IsZero() || iat.IsZero()
+      - opt:
+          do:
+            - return: coretoken.LifetimeTooLong
+          when: exp.Sub(iat) > p.maxLifetime
+      - return: nil
+  - of: stampIssuedClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: stampIssuedClaims
+        kind: self
+      - id: source.Now
+        kind: value
+      - id: claims.WithIssuer
+        kind: value
+      - id: claims.WithIssuedAt
+        kind: value
+      - id: claims.WithExpiry
+        kind: value
+    steps:
+      - bind: now
+        eval: source.Now()
+        to: source.Now
+      - opt:
+          do:
+            - set: claims
+              to: claims.WithIssuer
+              value: claims.WithIssuer(cfg.Issuer)
+          when: claims.Issuer() == "" && cfg.Issuer != ""
+      - opt:
+          do:
+            - set: claims
+              to: claims.WithIssuedAt
+              value: claims.WithIssuedAt(now.Truncate(time.Second))
+          when: claims.IssuedAt().IsZero()
+      - opt:
+          do:
+            - return: claims, nil
+          when: "!claims.Expiry().IsZero()"
+      - opt:
+          do:
+            - return: claims.WithExpiry(now.Add(cfg.Lifetime).Truncate(time.Second)), nil
+              to: claims.WithExpiry
+          when: cfg.Lifetime > 0
+      - opt:
+          do:
+            - return: claims, nil
+          when: cfg.AllowMissingExpiry
+      - return: coretoken.ClaimsValue{}, coretoken.ExpiryRequired

@@ -1,0 +1,174 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Kind.String
+    steps:
+      - opt:
+          do:
+            - return: unknownKindLabel
+          when: k < 0 || int(k) >= len(kindLabels)
+      - return: kindLabels[k]
+  - of: TraceContextValue.IsValid
+    steps:
+      - var:
+          name: unsetTrace
+          type: "[TraceIDLen]byte"
+      - var:
+          name: unsetSpan
+          type: "[SpanIDLen]byte"
+      - return: c.TraceID != unsetTrace && c.SpanID != unsetSpan
+  - of: TraceContextValue.AppendTraceIDHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: TraceContextValue.AppendTraceIDHex
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[TraceIDHexLen]byte"
+      - eval: hex.Encode(buf[:], c.TraceID[:])
+        to: hex
+      - return: append(dst, buf[:]...)
+  - of: TraceContextValue.AppendSpanIDHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: TraceContextValue.AppendSpanIDHex
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[SpanIDHexLen]byte"
+      - eval: hex.Encode(buf[:], c.SpanID[:])
+        to: hex
+      - return: append(dst, buf[:]...)
+  - of: NewValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewValue
+        kind: self
+      - id: AnyValue
+        kind: internal
+    steps:
+      - return: AnyValue(v)
+        to: AnyValue
+  - of: StringValue
+    steps:
+      - return: "Value{kind: KindString, str: v}"
+  - of: Int64Value
+    steps:
+      - return: "Value{kind: KindInt64, bits: packedBits(uint64(v))}"
+  - of: IntValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: IntValue
+        kind: self
+      - id: Int64Value
+        kind: internal
+    steps:
+      - return: Int64Value(int64(v))
+        to: Int64Value
+  - of: Uint64Value
+    steps:
+      - return: "Value{kind: KindUint64, bits: packedBits(v)}"
+  - of: Float64Value
+    steps:
+      - return: "Value{kind: KindFloat64, bits: packedBits(math.Float64bits(v))}"
+  - of: BoolValue
+    steps:
+      - opt:
+          do:
+            - return: "Value{kind: KindBool, bits: boolOne}"
+          when: v
+      - return: "Value{kind: KindBool, bits: 0}"
+  - of: DurationValue
+    steps:
+      - return: "Value{kind: KindDuration, bits: packedBits(durationBits(v))}"
+  - of: durationBits
+    steps:
+      - return: uint64(int64(d))
+  - of: TimeValue
+    steps:
+      - return: "Value{kind: KindTime, any: v}"
+  - of: GroupValue
+    steps:
+      - return: "Value{kind: KindGroup, any: attrs}"
+  - of: AnyValue
+    steps:
+      - return: "Value{kind: KindAny, any: v}"
+  - of: Value.Kind
+    steps:
+      - return: v.kind
+  - of: Value.String
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: v.kind != KindString
+      - return: v.str
+  - of: Value.Int64
+    steps:
+      - return: int64(uint64(v.bits))
+  - of: Value.Bits
+    steps:
+      - return: v.bits
+  - of: Value.Uint64
+    steps:
+      - return: uint64(v.bits)
+  - of: Value.Float64
+    participants:
+      - id: caller
+        kind: actor
+      - id: Value.Float64
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - return: math.Float64frombits(uint64(v.bits))
+        to: math
+  - of: Value.Bool
+    steps:
+      - return: v.bits != 0
+  - of: Value.Duration
+    participants:
+      - id: caller
+        kind: actor
+      - id: Value.Duration
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Duration(int64(uint64(v.bits)))
+        to: time
+  - of: Value.Time
+    steps:
+      - bind: parsed, ok
+        eval: v.any.(time.Time)
+      - opt:
+          do:
+            - return: time.Time{}
+          when: "!ok"
+      - return: parsed
+  - of: Value.Group
+    steps:
+      - bind: attrs, ok
+        eval: v.any.([]AttrValue)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - return: attrs
+  - of: Value.Any
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: v.kind != KindAny
+      - return: v.any

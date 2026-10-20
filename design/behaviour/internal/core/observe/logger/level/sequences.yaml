@@ -1,0 +1,67 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Level.String
+    steps:
+      - switch:
+          cases:
+            - case: l < Info
+              do:
+                - return: "\"DEBUG\""
+            - case: l < Warn
+              do:
+                - return: "\"INFO\""
+            - case: l < Error
+              do:
+                - return: "\"WARN\""
+            - default: true
+              do:
+                - return: "\"ERROR\""
+  - of: ParseLevel
+    steps:
+      - switch:
+          cases:
+            - case: "\"debug\""
+              do:
+                - return: Debug, nil
+            - case: "\"info\""
+              do:
+                - return: Info, nil
+            - case: "\"warn\""
+              do:
+                - return: Warn, nil
+            - case: "\"error\""
+              do:
+                - return: Error, nil
+            - default: true
+              do:
+                - return: Level(0), LevelUnknown
+          "on": strings.ToLower(strings.TrimSpace(name))
+  - of: NewVar
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewVar
+        kind: self
+      - id: lv.v.Store
+        kind: value
+    steps:
+      - bind: lv
+        eval: "&Var{}"
+      - eval: lv.v.Store(int32(initial))
+        to: lv.v.Store
+      - return: lv
+  - of: (*Var).Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Var).Set
+        kind: self
+      - id: v.v.Store
+        kind: value
+    steps:
+      - eval: v.v.Store(int32(lvl))
+        to: v.v.Store
+  - of: (*Var).Level
+    steps:
+      - return: Level(int8(v.v.Load()))

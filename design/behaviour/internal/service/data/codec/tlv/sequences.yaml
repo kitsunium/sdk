@@ -1,0 +1,3617 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*tlvCodec).Name
+    steps:
+      - return: "\"tlv\""
+  - of: (*tlvCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*tlvCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*tlvCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvCodec).Marshal
+        kind: self
+      - id: c.Append
+        kind: internal
+    steps:
+      - bind: out, aerr
+        eval: c.Append(nil, v)
+        to: c.Append
+      - opt:
+          do:
+            - return: nil, aerr
+          when: aerr != nil
+      - return: out, nil
+  - of: (*tlvCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvCodec).Unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: decodeRoot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coretlv.CodeTLVSizeExceeded,
+                			Reason:  "SIZE_EXCEEDED",
+                			Public:  "TLV input exceeds size limit",
+                			Private: "service/data/codec/tlv.Unmarshal: len(data) exceeds maxTLVBytes",
+                		}, errs.Int("len", len(data)), errs.Int("cap", maxTLVBytes))
+              to: errs
+          when: len(data) > maxTLVBytes
+      - return: decodeRoot(data, v)
+        to: decodeRoot
+  - of: (*tlvCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvCodec).Append
+        kind: self
+      - id: encodeValue
+        kind: internal
+    steps:
+      - bind: origLen
+        eval: len(dst)
+      - bind: out, eerr
+        eval: encodeValue(dst, v, 0)
+        to: encodeValue
+      - opt:
+          do:
+            - return: out, nil
+          when: eerr == nil
+      - return: dst[:origLen], eerr
+  - of: (*tlvCodec).NewEncoder
+    steps:
+      - return: "&tlvEncoder{w: w}"
+  - of: (*tlvCodec).NewDecoder
+    steps:
+      - return: "&tlvDecoder{r: r}"
+  - of: (*tlvDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvDecoder).Decode
+        kind: self
+      - id: readOneRecord
+        kind: internal
+      - id: decodeRoot
+        kind: internal
+    steps:
+      - bind: buf, rerr
+        eval: readOneRecord(d.r)
+        to: readOneRecord
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: io.EOF
+          when: errors.Is(rerr, io.EOF)
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: rerr
+          when: rerr != nil
+      - return: decodeRoot(buf, v)
+        to: decodeRoot
+  - of: (*tlvDecoder).More
+    steps:
+      - return: "!d.done"
+  - of: readOneRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: readOneRecord
+        kind: self
+      - id: readTag
+        kind: internal
+      - id: readRecordBody
+        kind: internal
+    steps:
+      - bind: tag, terr
+        eval: readTag(r)
+        to: readTag
+      - opt:
+          do:
+            - return: nil, io.EOF
+          when: errors.Is(terr, io.EOF)
+      - opt:
+          do:
+            - return: nil, terr
+          when: terr != nil
+      - return: readRecordBody(r, tag, 0)
+        to: readRecordBody
+  - of: readRecordBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: readRecordBody
+        kind: self
+      - id: readUvarint
+        kind: internal
+      - id: readCompositeRecord
+        kind: internal
+      - id: assembleRecord
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - bind: length, lerr
+        eval: readUvarint(r)
+        to: readUvarint
+      - opt:
+          do:
+            - return: nil, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: nil, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - opt:
+          do:
+            - return: readCompositeRecord(r, tag, length, depth)
+              to: readCompositeRecord
+          when: isCompositeTag(Tag(tag))
+      - return: assembleRecord(r, tag, length)
+        to: assembleRecord
+  - of: isCompositeTag
+    steps:
+      - return: tag == tagSlice || tag == tagMap || tag == tagStruct
+  - of: subRecordCount
+    steps:
+      - opt:
+          do:
+            - return: length * recordsPerPair
+          when: tag == tagMap || tag == tagStruct
+      - return: length
+  - of: readCompositeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: readCompositeRecord
+        kind: self
+      - id: binary
+        kind: stdlib
+      - id: readTag
+        kind: internal
+      - id: readRecordBody
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]byte, 0, 1+maxVarintBytes)
+      - set: out
+        value: append(out, tag)
+      - set: out
+        to: binary
+        value: binary.AppendUvarint(out, length)
+      - loop:
+          do:
+            - bind: childTag, terr
+              eval: readTag(r)
+              to: readTag
+            - opt:
+                do:
+                  - return: nil, truncatedError()
+                when: errors.Is(terr, io.EOF)
+            - opt:
+                do:
+                  - return: nil, terr
+                when: terr != nil
+            - bind: child, cerr
+              eval: readRecordBody(r, childTag, depth+1)
+              to: readRecordBody
+            - opt:
+                do:
+                  - return: nil, cerr
+                when: cerr != nil
+            - set: out
+              value: append(out, child...)
+          range: subRecordCount(Tag(tag), length)
+      - return: out, nil
+  - of: readTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: readTag
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[1]byte"
+      - bind: n, rerr
+        eval: io.ReadFull(r, buf[:])
+        to: io
+      - opt:
+          do:
+            - return: 0, io.EOF
+          when: errors.Is(rerr, io.EOF) && n == 0
+      - opt:
+          do:
+            - return: 0, wrapReadFailure(rerr)
+          when: rerr != nil
+      - return: buf[0], nil
+  - of: assembleRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: assembleRecord
+        kind: self
+      - id: value.ReadFrom
+        kind: value
+      - id: binary
+        kind: stdlib
+    steps:
+      - bind: limited
+        eval: "&io.LimitedReader{R: r, N: int64(length)}"
+      - var:
+          name: value
+          type: bytes.Buffer
+      - opt:
+          do:
+            - return: nil, wrapReadFailure(verr)
+          init:
+            bind: _, verr
+            eval: value.ReadFrom(limited)
+            to: value.ReadFrom
+          when: verr != nil
+      - opt:
+          do:
+            - return: nil, wrapReadFailure(io.ErrUnexpectedEOF)
+          when: uint64(value.Len()) != length
+      - bind: out
+        eval: make([]byte, 0, 1+maxVarintBytes+value.Len())
+      - set: out
+        value: append(out, tag)
+      - set: out
+        to: binary
+        value: binary.AppendUvarint(out, length)
+      - set: out
+        value: append(out, value.Bytes()...)
+      - return: out, nil
+  - of: readUvarint
+    participants:
+      - id: caller
+        kind: actor
+      - id: readUvarint
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - var:
+          name: shift
+          type: uint
+      - loop:
+          do:
+            - var:
+                name: buf
+                type: "[1]byte"
+            - opt:
+                do:
+                  - return: 0, wrapReadFailure(rerr)
+                init:
+                  bind: _, rerr
+                  eval: io.ReadFull(r, buf[:])
+                  to: io
+                when: rerr != nil
+            - bind: b
+              eval: buf[0]
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: 0, varintOverflowError()
+                      when: i == maxVarintBytes-1 && b > varintMaxLastByte
+                  - return: value | uint64(b)<<shift, nil
+                when: b < varintContinuationBit
+            - op: "|="
+              set: value
+              value: uint64(b&varintPayloadMask) << shift
+            - op: +=
+              set: shift
+              value: varintShiftStep
+          key: i
+          range: maxVarintBytes
+      - return: 0, varintOverflowError()
+  - of: wrapReadFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapReadFailure
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(rerr, errs.WrapParams{
+                			Code:    coretlv.CodeTLVTruncated,
+                			Reason:  "TRUNCATED",
+                			Public:  "TLV buffer truncated",
+                			Private: "service/data/codec/tlv: reader exhausted before record completed",
+                		})
+              to: errs
+          when: errors.Is(rerr, io.ErrUnexpectedEOF) || errors.Is(rerr, io.EOF)
+      - return: |-
+          errs.Wrap(rerr, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv: reader returned an error",
+          	})
+        to: errs
+  - of: decodeRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRoot
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: nonPointerTargetError
+        kind: internal
+      - id: rv.Elem
+        kind: value
+      - id: tryDecodeRootInto
+        kind: internal
+      - id: decodeValue
+        kind: internal
+      - id: trailingBytesError
+        kind: internal
+      - id: assignDecoded
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: nonPointerTargetError()
+              to: nonPointerTargetError
+          when: rv.Kind() != reflect.Pointer || rv.IsNil()
+      - bind: target
+        eval: rv.Elem()
+        to: rv.Elem
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: handled, err
+            eval: tryDecodeRootInto(data, target)
+            to: tryDecodeRootInto
+          when: handled
+      - bind: value, rest, derr
+        eval: decodeValue(data, 0)
+        to: decodeValue
+      - opt:
+          do:
+            - return: derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: trailingBytesError(len(rest))
+              to: trailingBytesError
+          when: len(rest) != 0
+      - return: assignDecoded(reflectView(target), target.Type(), value)
+        to: assignDecoded
+  - of: decodeValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeValue
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeByTag
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, data, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - opt:
+          do:
+            - return: nil, data, truncatedError()
+          when: len(data) < minRecordBytes
+      - bind: tag
+        eval: Tag(data[0])
+      - set: rest
+        value: data[1:]
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: nil, data, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: nil, data, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - return: decodeByTag(tag, length, rest, depth)
+        to: decodeByTag
+  - of: decodeByTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeByTag
+        kind: self
+      - id: decodeScalarByTag
+        kind: internal
+      - id: decodeSlice
+        kind: internal
+      - id: decodeMap
+        kind: internal
+      - id: decodeStruct
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: decodeScalarByTag(tag, length, rest)
+              to: decodeScalarByTag
+          when: tag <= tagBytes
+      - switch:
+          cases:
+            - case: tagSlice
+              do:
+                - return: decodeSlice(length, rest, depth)
+                  to: decodeSlice
+            - case: tagMap
+              do:
+                - return: decodeMap(length, rest, depth)
+                  to: decodeMap
+            - case: tagStruct
+              do:
+                - return: decodeStruct(length, rest, depth)
+                  to: decodeStruct
+            - default: true
+              do:
+                - return: nil, rest, unknownTagError(tag)
+          "on": tag
+  - of: decodeScalarByTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeScalarByTag
+        kind: self
+      - id: tryZeroPayloadTag
+        kind: internal
+      - id: tryNumericTag
+        kind: internal
+      - id: decodeString
+        kind: internal
+      - id: decodeBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, rest, malformedLengthError(0, length)
+                when: length != 0
+            - return: zeroVal, zeroRest, nil
+          init:
+            bind: zeroVal, zeroRest, handled
+            eval: tryZeroPayloadTag(tag, rest)
+            to: tryZeroPayloadTag
+          when: handled
+      - opt:
+          do:
+            - return: numVal, numRest, numErr
+          init:
+            bind: numVal, numRest, handled, numErr
+            eval: tryNumericTag(tag, length, rest)
+            to: tryNumericTag
+          when: handled
+      - switch:
+          cases:
+            - case: tagString
+              do:
+                - return: decodeString(length, rest)
+                  to: decodeString
+            - case: tagBytes
+              do:
+                - return: decodeBytes(length, rest)
+                  to: decodeBytes
+            - default: true
+              do:
+                - return: nil, rest, unknownTagError(tag)
+          "on": tag
+  - of: tryZeroPayloadTag
+    steps:
+      - switch:
+          cases:
+            - case: tagNil
+              do:
+                - return: nil, rest, true
+            - case: tagBoolFalse
+              do:
+                - return: false, rest, true
+            - case: tagBoolTrue
+              do:
+                - return: true, rest, true
+            - default: true
+              do:
+                - return: nil, rest, false
+          "on": tag
+  - of: tryNumericTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryNumericTag
+        kind: self
+      - id: decodeInt
+        kind: internal
+      - id: decodeUint
+        kind: internal
+      - id: decodeFloat
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: tagInt8, tagInt16, tagInt32, tagInt64
+              do:
+                - bind: intVal, intRest, intErr
+                  eval: decodeInt(tag, length, rest)
+                  to: decodeInt
+                - return: intVal, intRest, true, intErr
+            - case: tagUint8, tagUint16, tagUint32, tagUint64
+              do:
+                - bind: uintVal, uintRest, uintErr
+                  eval: decodeUint(tag, length, rest)
+                  to: decodeUint
+                - return: uintVal, uintRest, true, uintErr
+            - case: tagFloat32, tagFloat64
+              do:
+                - bind: fVal, fRest, fErr
+                  eval: decodeFloat(tag, length, rest)
+                  to: decodeFloat
+                - return: fVal, fRest, true, fErr
+            - default: true
+              do:
+                - return: nil, rest, false, nil
+          "on": tag
+  - of: readVarintFromBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: readVarintFromBytes
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: uint64(data[0]), data[1:], nil
+          when: len(data) > 0 && uint64(data[0]) < uvarintSingleByteCap
+      - bind: val, n
+        eval: binary.Uvarint(data)
+        to: binary
+      - opt:
+          do:
+            - return: 0, data, truncatedError()
+          when: n == 0
+      - opt:
+          do:
+            - return: 0, data, varintOverflowError()
+          when: n < 0
+      - return: val, data[n:], nil
+  - of: decodeInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeInt
+        kind: self
+      - id: intWidth
+        kind: internal
+    steps:
+      - bind: w
+        eval: intWidth(tag)
+        to: intWidth
+      - opt:
+          do:
+            - return: nil, rest, malformedLengthError(uint64(w), length)
+          when: length != uint64(w)
+      - opt:
+          do:
+            - return: nil, rest, truncatedError()
+          when: uint64(len(rest)) < length
+      - switch:
+          cases:
+            - case: tagInt8
+              do:
+                - return: int64(int8(rest[0])), rest[1:], nil
+            - case: tagInt16
+              do:
+                - return: int64(int16(binary.BigEndian.Uint16(rest[:width16]))), rest[width16:], nil
+            - case: tagInt32
+              do:
+                - return: int64(int32(binary.BigEndian.Uint32(rest[:width32]))), rest[width32:], nil
+            - case: tagInt64
+              do:
+                - return: int64(binary.BigEndian.Uint64(rest[:width64])), rest[width64:], nil
+            - default: true
+              do:
+                - return: nil, rest, unknownTagError(tag)
+          "on": tag
+  - of: decodeUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeUint
+        kind: self
+      - id: uintWidth
+        kind: internal
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - bind: w
+        eval: uintWidth(tag)
+        to: uintWidth
+      - opt:
+          do:
+            - return: nil, rest, malformedLengthError(uint64(w), length)
+          when: length != uint64(w)
+      - opt:
+          do:
+            - return: nil, rest, truncatedError()
+          when: uint64(len(rest)) < length
+      - switch:
+          cases:
+            - case: tagUint8
+              do:
+                - return: uint64(rest[0]), rest[1:], nil
+            - case: tagUint16
+              do:
+                - return: uint64(binary.BigEndian.Uint16(rest[:width16])), rest[width16:], nil
+            - case: tagUint32
+              do:
+                - return: uint64(binary.BigEndian.Uint32(rest[:width32])), rest[width32:], nil
+            - case: tagUint64
+              do:
+                - return: binary.BigEndian.Uint64(rest[:width64]), rest[width64:], nil
+                  to: binary.BigEndian.Uint64
+            - default: true
+              do:
+                - return: nil, rest, unknownTagError(tag)
+          "on": tag
+  - of: decodeFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeFloat
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, rest, malformedLengthError(uint64(width32), length)
+                when: length != uint64(width32)
+            - opt:
+                do:
+                  - return: nil, rest, truncatedError()
+                when: uint64(len(rest)) < uint64(width32)
+            - return: float64(math.Float32frombits(binary.BigEndian.Uint32(rest[:width32]))), rest[width32:], nil
+          when: tag == tagFloat32
+      - opt:
+          do:
+            - return: nil, rest, malformedLengthError(uint64(width64), length)
+          when: length != uint64(width64)
+      - opt:
+          do:
+            - return: nil, rest, truncatedError()
+          when: uint64(len(rest)) < uint64(width64)
+      - return: math.Float64frombits(binary.BigEndian.Uint64(rest[:width64])), rest[width64:], nil
+        to: math
+  - of: decodeString
+    steps:
+      - opt:
+          do:
+            - return: nil, rest, truncatedError()
+          when: uint64(len(rest)) < length
+      - return: string(rest[:length]), rest[length:], nil
+  - of: decodeBytes
+    steps:
+      - opt:
+          do:
+            - return: nil, rest, truncatedError()
+          when: uint64(len(rest)) < length
+      - bind: out
+        eval: make([]byte, length)
+      - eval: copy(out, rest[:length])
+      - return: out, rest[length:], nil
+  - of: decodeSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSlice
+        kind: self
+      - id: decodeValue
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]any, 0, sliceHint(length))
+      - loop:
+          do:
+            - bind: val, next, derr
+              eval: decodeValue(rest, depth+1)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: nil, rest, derr
+                when: derr != nil
+            - set: out
+              value: append(out, val)
+            - set: rest
+              value: next
+          range: length
+      - return: out, rest, nil
+  - of: decodeMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeMap
+        kind: self
+      - id: decodeValue
+        kind: internal
+    steps:
+      - bind: out
+        eval: make(map[any]any, sliceHint(length))
+      - loop:
+          do:
+            - bind: key, next, kerr
+              eval: decodeValue(rest, depth+1)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: nil, rest, kerr
+                when: kerr != nil
+            - bind: val, next2, verr
+              eval: decodeValue(next, depth+1)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: nil, rest, verr
+                when: verr != nil
+            - opt:
+                do:
+                  - return: nil, rest, unhashableKeyError()
+                when: key != nil && !reflect.TypeOf(key).Comparable()
+            - set: out[key]
+              value: val
+            - set: rest
+              value: next2
+          range: length
+      - return: out, rest, nil
+  - of: decodeStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStruct
+        kind: self
+      - id: decodeFieldName
+        kind: internal
+      - id: decodeValue
+        kind: internal
+    steps:
+      - bind: out
+        eval: make(map[string]any, sliceHint(length))
+      - loop:
+          do:
+            - bind: nameStr, next, nerr
+              eval: decodeFieldName(rest, depth+1)
+              to: decodeFieldName
+            - opt:
+                do:
+                  - return: nil, rest, nerr
+                when: nerr != nil
+            - bind: val, next2, verr
+              eval: decodeValue(next, depth+1)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: nil, rest, verr
+                when: verr != nil
+            - set: out[nameStr]
+              value: val
+            - set: rest
+              value: next2
+          range: length
+      - return: out, rest, nil
+  - of: decodeFieldName
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeFieldName
+        kind: self
+      - id: parseFieldName
+        kind: internal
+    steps:
+      - bind: nameBytes, residual, perr
+        eval: parseFieldName(data, depth)
+        to: parseFieldName
+      - opt:
+          do:
+            - return: "\"\", data, perr"
+          when: perr != nil
+      - return: string(nameBytes), residual, nil
+  - of: parseFieldName
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseFieldName
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, data, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - opt:
+          do:
+            - return: nil, data, truncatedError()
+          when: len(data) < minRecordBytes
+      - bind: tag
+        eval: Tag(data[0])
+      - opt:
+          do:
+            - return: nil, data, nonStringFieldNameError()
+          when: tag != tagString
+      - bind: length, after, lerr
+        eval: readVarintFromBytes(data[1:])
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: nil, data, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: nil, data, fieldNameTooLongDecodeError(length)
+          when: length > uint64(maxFieldNameBytes)
+      - opt:
+          do:
+            - return: nil, data, truncatedError()
+          when: uint64(len(after)) < length
+      - return: after[:length], after[length:], nil
+  - of: intWidth
+    steps:
+      - switch:
+          cases:
+            - case: tagInt8
+              do:
+                - return: width8
+            - case: tagInt16
+              do:
+                - return: width16
+            - case: tagInt32
+              do:
+                - return: width32
+            - case: tagInt64
+              do:
+                - return: width64
+            - default: true
+              do:
+                - return: "0"
+          "on": tag
+  - of: uintWidth
+    steps:
+      - switch:
+          cases:
+            - case: tagUint8
+              do:
+                - return: width8
+            - case: tagUint16
+              do:
+                - return: width16
+            - case: tagUint32
+              do:
+                - return: width32
+            - case: tagUint64
+              do:
+                - return: width64
+            - default: true
+              do:
+                - return: "0"
+          "on": tag
+  - of: sliceHint
+    steps:
+      - opt:
+          do:
+            - return: sliceHintCap
+          when: length > uint64(sliceHintCap)
+      - return: int(length)
+  - of: assignDecoded
+    participants:
+      - id: caller
+        kind: actor
+      - id: assignDecoded
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: cannotSetError
+        kind: internal
+      - id: rv.Set
+        kind: value
+      - id: convertValue
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(target)
+        to: reflect
+      - opt:
+          do:
+            - return: cannotSetError()
+              to: cannotSetError
+          when: "!rv.CanSet()"
+      - opt:
+          do:
+            - eval: rv.Set(reflect.Zero(targetType))
+              to: rv.Set
+            - return: nil
+          when: value == nil
+      - bind: conv, cerr
+        eval: convertValue(value, targetType)
+        to: convertValue
+      - opt:
+          do:
+            - return: cerr
+          when: cerr != nil
+      - eval: rv.Set(conv)
+        to: rv.Set
+      - return: nil
+  - of: convertValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: convertValue
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: narrowNumeric
+        kind: internal
+      - id: rv.Convert
+        kind: value
+      - id: projectComposite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: reflect.ValueOf(value), nil
+              to: reflect
+          when: target.Kind() == reflect.Interface && target.NumMethod() == 0
+      - opt:
+          do:
+            - return: v, nil
+          init:
+            bind: v, ok
+            eval: narrowNumeric(value, target)
+            to: narrowNumeric
+          when: ok
+      - bind: rv
+        eval: reflect.ValueOf(value)
+        to: reflect
+      - opt:
+          do:
+            - return: rv, nil
+          when: rv.Type().AssignableTo(target)
+      - opt:
+          do:
+            - return: rv.Convert(target), nil
+              to: rv.Convert
+          when: rv.Type().ConvertibleTo(target)
+      - opt:
+          do:
+            - return: conv, perr
+          init:
+            bind: conv, ok, perr
+            eval: projectComposite(value, target)
+            to: projectComposite
+          when: ok || perr != nil
+      - return: reflect.Value{}, incompatibleTypeError(rv.Type().String(), target.String())
+  - of: projectComposite
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectComposite
+        kind: self
+      - id: projectCompositeStruct
+        kind: internal
+      - id: projectCompositeSlice
+        kind: internal
+      - id: projectCompositeMap
+        kind: internal
+      - id: projectCompositePointer
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - return: projectCompositeStruct(value, target)
+                  to: projectCompositeStruct
+            - case: reflect.Slice
+              do:
+                - return: projectCompositeSlice(value, target)
+                  to: projectCompositeSlice
+            - case: reflect.Map
+              do:
+                - return: projectCompositeMap(value, target)
+                  to: projectCompositeMap
+            - case: reflect.Pointer
+              do:
+                - return: projectCompositePointer(value, target)
+                  to: projectCompositePointer
+            - default: true
+              do:
+                - return: reflect.Value{}, false, nil
+          "on": target.Kind()
+  - of: projectCompositeStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectCompositeStruct
+        kind: self
+      - id: projectMapToStruct
+        kind: internal
+    steps:
+      - bind: m, ok
+        eval: value.(map[string]any)
+      - opt:
+          do:
+            - return: reflect.Value{}, false, nil
+          when: "!ok"
+      - bind: conv, perr
+        eval: projectMapToStruct(m, target)
+        to: projectMapToStruct
+      - return: conv, true, perr
+  - of: projectCompositeSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectCompositeSlice
+        kind: self
+      - id: projectSliceToTyped
+        kind: internal
+    steps:
+      - bind: s, ok
+        eval: value.([]any)
+      - opt:
+          do:
+            - return: reflect.Value{}, false, nil
+          when: "!ok"
+      - bind: conv, perr
+        eval: projectSliceToTyped(s, target)
+        to: projectSliceToTyped
+      - return: conv, true, perr
+  - of: projectCompositeMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectCompositeMap
+        kind: self
+      - id: projectMapToTyped
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: reflect.Value{}, false, nil
+          when: reflect.ValueOf(value).Kind() != reflect.Map
+      - bind: conv, perr
+        eval: projectMapToTyped(value, target)
+        to: projectMapToTyped
+      - return: conv, true, perr
+  - of: projectCompositePointer
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectCompositePointer
+        kind: self
+      - id: projectComposite
+        kind: internal
+      - id: reflect
+        kind: stdlib
+      - id: ptr.Elem().Set
+        kind: value
+    steps:
+      - bind: elem, ok, perr
+        eval: projectComposite(value, target.Elem())
+        to: projectComposite
+      - opt:
+          do:
+            - return: reflect.Value{}, false, perr
+          when: perr != nil
+      - opt:
+          do:
+            - return: reflect.Value{}, false, nil
+          when: "!ok"
+      - bind: ptr
+        eval: reflect.New(target.Elem())
+        to: reflect
+      - eval: ptr.Elem().Set(elem)
+        to: ptr.Elem().Set
+      - return: ptr, true, nil
+  - of: projectMapToStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectMapToStruct
+        kind: self
+      - id: cachedStructTypeInfo
+        kind: internal
+      - id: reflect.New(target).Elem
+        kind: value
+      - id: dst.Field(f.index).Set
+        kind: value
+      - id: convertValue
+        kind: internal
+    steps:
+      - bind: ti
+        eval: cachedStructTypeInfo(target)
+        to: cachedStructTypeInfo
+      - bind: dst
+        eval: reflect.New(target).Elem()
+        to: reflect.New(target).Elem
+      - loop:
+          do:
+            - bind: srcVal, found
+              eval: src[f.name]
+            - opt:
+                do:
+                  - continue: true
+                when: "!found"
+            - opt:
+                do:
+                  - eval: dst.Field(f.index).Set(reflect.Zero(f.typ))
+                    to: dst.Field(f.index).Set
+                  - continue: true
+                when: srcVal == nil
+            - bind: conv, cerr
+              eval: convertValue(srcVal, f.typ)
+              to: convertValue
+            - opt:
+                do:
+                  - return: reflect.Value{}, cerr
+                when: cerr != nil
+            - eval: dst.Field(f.index).Set(conv)
+              to: dst.Field(f.index).Set
+          key: _
+          range: ti.fields
+          value: f
+      - return: dst, nil
+  - of: projectSliceToTyped
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectSliceToTyped
+        kind: self
+      - id: target.Elem
+        kind: value
+      - id: reflect
+        kind: stdlib
+      - id: dst.Index(i).Set
+        kind: value
+      - id: convertValue
+        kind: internal
+    steps:
+      - bind: elemType
+        eval: target.Elem()
+        to: target.Elem
+      - bind: dst
+        eval: reflect.MakeSlice(target, len(src), len(src))
+        to: reflect
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: dst.Index(i).Set(reflect.Zero(elemType))
+                    to: dst.Index(i).Set
+                  - continue: true
+                when: e == nil
+            - bind: conv, cerr
+              eval: convertValue(e, elemType)
+              to: convertValue
+            - opt:
+                do:
+                  - return: reflect.Value{}, cerr
+                when: cerr != nil
+            - eval: dst.Index(i).Set(conv)
+              to: dst.Index(i).Set
+          key: i
+          range: src
+          value: e
+      - return: dst, nil
+  - of: projectMapToTyped
+    participants:
+      - id: caller
+        kind: actor
+      - id: projectMapToTyped
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.Key
+        kind: value
+      - id: target.Elem
+        kind: value
+      - id: convertValue
+        kind: internal
+      - id: rv.MapIndex(k).Interface
+        kind: value
+      - id: dst.SetMapIndex
+        kind: value
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(src)
+        to: reflect
+      - bind: keyType
+        eval: target.Key()
+        to: target.Key
+      - bind: valType
+        eval: target.Elem()
+        to: target.Elem
+      - bind: dst
+        eval: reflect.MakeMapWithSize(target, rv.Len())
+        to: reflect
+      - loop:
+          do:
+            - bind: kConv, kErr
+              eval: convertValue(k.Interface(), keyType)
+              to: convertValue
+            - opt:
+                do:
+                  - return: reflect.Value{}, kErr
+                when: kErr != nil
+            - bind: rawV
+              eval: rv.MapIndex(k).Interface()
+              to: rv.MapIndex(k).Interface
+            - opt:
+                do:
+                  - eval: dst.SetMapIndex(kConv, reflect.Zero(valType))
+                    to: dst.SetMapIndex
+                  - continue: true
+                when: rawV == nil
+            - bind: vConv, vErr
+              eval: convertValue(rawV, valType)
+              to: convertValue
+            - opt:
+                do:
+                  - return: reflect.Value{}, vErr
+                when: vErr != nil
+            - eval: dst.SetMapIndex(kConv, vConv)
+              to: dst.SetMapIndex
+          key: _
+          range: rv.MapKeys()
+          value: k
+      - return: dst, nil
+  - of: narrowNumeric
+    participants:
+      - id: caller
+        kind: actor
+      - id: narrowNumeric
+        kind: self
+      - id: narrowFromInt
+        kind: internal
+      - id: narrowFromUint
+        kind: internal
+      - id: narrowFromFloat
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: narrowFromInt(n, target)
+              to: narrowFromInt
+          init:
+            bind: n, isInt
+            eval: value.(int64)
+          when: isInt
+      - opt:
+          do:
+            - return: narrowFromUint(ui, target)
+              to: narrowFromUint
+          init:
+            bind: ui, isUint
+            eval: value.(uint64)
+          when: isUint
+      - opt:
+          do:
+            - return: narrowFromFloat(f, target)
+              to: narrowFromFloat
+          init:
+            bind: f, isFloat
+            eval: value.(float64)
+          when: isFloat
+      - return: reflect.Value{}, false
+  - of: narrowFromInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: narrowFromInt
+        kind: self
+      - id: reflect.ValueOf(n).Convert
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - return: reflect.ValueOf(n).Convert(target), true
+                  to: reflect.ValueOf(n).Convert
+            - default: true
+              do:
+                - return: reflect.Value{}, false
+          "on": target.Kind()
+  - of: narrowFromUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: narrowFromUint
+        kind: self
+      - id: reflect.ValueOf(ui).Convert
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - return: reflect.ValueOf(ui).Convert(target), true
+                  to: reflect.ValueOf(ui).Convert
+            - default: true
+              do:
+                - return: reflect.Value{}, false
+          "on": target.Kind()
+  - of: narrowFromFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: narrowFromFloat
+        kind: self
+      - id: reflect.ValueOf(f).Convert
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: reflect.ValueOf(f).Convert(target), true
+                  to: reflect.ValueOf(f).Convert
+            - default: true
+              do:
+                - return: reflect.Value{}, false
+          "on": target.Kind()
+  - of: truncatedError
+    participants:
+      - id: caller
+        kind: actor
+      - id: truncatedError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVTruncated,
+          		Reason:  "TRUNCATED",
+          		Public:  "TLV buffer truncated",
+          		Private: "service/data/codec/tlv: buffer ended before the declared record length was satisfied",
+          	})
+        to: errs
+  - of: malformedLengthError
+    participants:
+      - id: caller
+        kind: actor
+      - id: malformedLengthError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv: declared length does not match the expected tag width",
+          	}, errs.String("expected", strconv.FormatUint(expected, decimalBase)), errs.String("got", strconv.FormatUint(got, decimalBase)))
+        to: errs
+  - of: unknownTagError
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownTagError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv: unknown tag byte",
+          	}, errs.Int("tag", int(tag)))
+        to: errs
+  - of: sizeExceededError
+    participants:
+      - id: caller
+        kind: actor
+      - id: sizeExceededError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVSizeExceeded,
+          		Reason:  "SIZE_EXCEEDED",
+          		Public:  "TLV input exceeds size limit",
+          		Private: "service/data/codec/tlv: declared length exceeds maxTLVBytes",
+          	}, errs.String("len", strconv.FormatUint(length, decimalBase)), errs.Int("cap", maxTLVBytes))
+        to: errs
+  - of: cannotSetError
+    participants:
+      - id: caller
+        kind: actor
+      - id: cannotSetError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV codec requires a settable pointer target",
+          		Private: "service/data/codec/tlv.assignToPointer: target is not settable",
+          	})
+        to: errs
+  - of: unhashableKeyError
+    participants:
+      - id: caller
+        kind: actor
+      - id: unhashableKeyError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv: decoded map key is not comparable",
+          	})
+        to: errs
+  - of: nonStringFieldNameError
+    participants:
+      - id: caller
+        kind: actor
+      - id: nonStringFieldNameError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv.decodeStruct: field name is not a string",
+          	})
+        to: errs
+  - of: fieldNameTooLongDecodeError
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldNameTooLongDecodeError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv.decodeFieldName: declared field name length exceeds maxFieldNameBytes",
+          	}, errs.String("len", strconv.FormatUint(length, decimalBase)), errs.Int("cap", maxFieldNameBytes))
+        to: errs
+  - of: nonPointerTargetError
+    participants:
+      - id: caller
+        kind: actor
+      - id: nonPointerTargetError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV codec requires a non-nil pointer target",
+          		Private: "service/data/codec/tlv.Unmarshal: target is not a non-nil pointer",
+          	})
+        to: errs
+  - of: trailingBytesError
+    participants:
+      - id: caller
+        kind: actor
+      - id: trailingBytesError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv.Unmarshal: trailing bytes after the first record",
+          	}, errs.Int("trailing", trailing))
+        to: errs
+  - of: varintOverflowError
+    participants:
+      - id: caller
+        kind: actor
+      - id: varintOverflowError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv: varint length overflow",
+          	})
+        to: errs
+  - of: incompatibleTypeError
+    participants:
+      - id: caller
+        kind: actor
+      - id: incompatibleTypeError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "TLV decoding failed",
+          		Private: "service/data/codec/tlv.convertValue: decoded type not assignable to target",
+          	}, errs.String("from", from), errs.String("to", to))
+        to: errs
+  - of: tryDecodeRootInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootInto
+        kind: self
+      - id: tryDecodeRootIntoStruct
+        kind: internal
+      - id: tryDecodeRootIntoSlice
+        kind: internal
+      - id: tryDecodeRootIntoMap
+        kind: internal
+      - id: tryDecodeRootIntoScalar
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: "!target.CanSet()"
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - return: tryDecodeRootIntoStruct(data, target)
+                  to: tryDecodeRootIntoStruct
+            - case: reflect.Slice
+              do:
+                - return: tryDecodeRootIntoSlice(data, target)
+                  to: tryDecodeRootIntoSlice
+            - case: reflect.Map
+              do:
+                - return: tryDecodeRootIntoMap(data, target)
+                  to: tryDecodeRootIntoMap
+            - case: reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64, reflect.String
+              do:
+                - return: tryDecodeRootIntoScalar(data, target)
+                  to: tryDecodeRootIntoScalar
+            - default: true
+              do:
+                - return: false, nil
+          "on": target.Kind()
+  - of: tryDecodeRootIntoScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootIntoScalar
+        kind: self
+      - id: decodeValue
+        kind: internal
+      - id: target.Set
+        kind: value
+    steps:
+      - bind: value, rest, derr
+        eval: decodeValue(data, 0)
+        to: decodeValue
+      - opt:
+          do:
+            - return: true, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: true, trailingBytesError(len(rest))
+          when: len(rest) != 0
+      - opt:
+          do:
+            - eval: target.Set(reflect.Zero(target.Type()))
+              to: target.Set
+            - return: true, nil
+          when: value == nil
+      - opt:
+          do:
+            - return: true, nil
+          when: tryDirectScalarSet(target, value)
+      - return: false, nil
+  - of: tryDirectScalarSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDirectScalarSet
+        kind: self
+      - id: setBoolTarget
+        kind: internal
+      - id: setIntegerTarget
+        kind: internal
+      - id: setUnsignedTarget
+        kind: internal
+      - id: setFloatTarget
+        kind: internal
+      - id: setStringTarget
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: v
+          cases:
+            - do:
+                - return: setBoolTarget(reflectView(target), v)
+                  to: setBoolTarget
+              types: bool
+            - do:
+                - return: setIntegerTarget(reflectView(target), v)
+                  to: setIntegerTarget
+              types: int64
+            - do:
+                - return: setUnsignedTarget(reflectView(target), v)
+                  to: setUnsignedTarget
+              types: uint64
+            - do:
+                - return: setFloatTarget(reflectView(target), v)
+                  to: setFloatTarget
+              types: float64
+            - do:
+                - return: setFloatTarget(reflectView(target), float64(v))
+                  to: setFloatTarget
+              types: float32
+            - do:
+                - return: setStringTarget(reflectView(target), v)
+                  to: setStringTarget
+              types: string
+            - default: true
+              do:
+                - return: "false"
+          "on": value
+  - of: setBoolTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: setBoolTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.SetBool
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: "false"
+          when: target.Kind() != reflect.Bool
+      - eval: target.SetBool(v)
+        to: target.SetBool
+      - return: "true"
+  - of: setIntegerTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: setIntegerTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.SetInt
+        kind: value
+      - id: target.SetUint
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - eval: target.SetInt(v)
+                  to: target.SetInt
+                - return: "true"
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - eval: target.SetUint(uint64(v))
+                  to: target.SetUint
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": target.Kind()
+  - of: setUnsignedTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: setUnsignedTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.SetUint
+        kind: value
+      - id: target.SetInt
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - switch:
+          cases:
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - eval: target.SetUint(v)
+                  to: target.SetUint
+                - return: "true"
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - eval: target.SetInt(int64(v))
+                  to: target.SetInt
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": target.Kind()
+  - of: setFloatTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: setFloatTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.SetFloat
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: "false"
+          when: target.Kind() != reflect.Float32 && target.Kind() != reflect.Float64
+      - eval: target.SetFloat(v)
+        to: target.SetFloat
+      - return: "true"
+  - of: setStringTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: setStringTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.SetString
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: "false"
+          when: target.Kind() != reflect.String
+      - eval: target.SetString(v)
+        to: target.SetString
+      - return: "true"
+  - of: tryDecodeRootIntoMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootIntoMap
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeMapInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: true, truncatedError()
+          when: len(data) < minRecordBytes
+      - opt:
+          do:
+            - return: false, nil
+          when: Tag(data[0]) != tagMap
+      - bind: rest
+        eval: data[1:]
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: true, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: true, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - bind: residual, derr
+        eval: decodeMapInto(length, rest, reflectView(target), 0)
+        to: decodeMapInto
+      - opt:
+          do:
+            - return: true, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: true, trailingBytesError(len(residual))
+          when: len(residual) != 0
+      - return: true, nil
+  - of: decodeMapInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeMapInto
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.Type().Key
+        kind: value
+      - id: target.Type().Elem
+        kind: value
+      - id: decodeValue
+        kind: internal
+      - id: assignMapPair
+        kind: internal
+      - id: target.Set
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: rest, depthExceededError(depth + 1)
+          when: depth+1 > maxTLVDepth
+      - bind: keyType
+        eval: target.Type().Key()
+        to: target.Type().Key
+      - bind: valType
+        eval: target.Type().Elem()
+        to: target.Type().Elem
+      - bind: out
+        eval: reflect.MakeMapWithSize(target.Type(), sliceHint(length))
+        to: reflect
+      - loop:
+          do:
+            - bind: keyVal, next, kerr
+              eval: decodeValue(rest, depth+1)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: rest, kerr
+                when: kerr != nil
+            - bind: valVal, next2, verr
+              eval: decodeValue(next, depth+1)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: rest, verr
+                when: verr != nil
+            - opt:
+                do:
+                  - return: rest, perr
+                init:
+                  bind: perr
+                  eval: assignMapPair(reflectView(out), keyType, valType, keyVal, valVal)
+                  to: assignMapPair
+                when: perr != nil
+            - set: rest
+              value: next2
+          range: length
+      - eval: target.Set(out)
+        to: target.Set
+      - return: rest, nil
+  - of: assignMapPair
+    participants:
+      - id: caller
+        kind: actor
+      - id: assignMapPair
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: convertValue
+        kind: internal
+      - id: unhashableKeyError
+        kind: internal
+      - id: out.SetMapIndex
+        kind: value
+    steps:
+      - bind: out
+        eval: reflect.Value(outView)
+        to: reflect
+      - bind: kConv, kerr
+        eval: convertValue(keyVal, keyType)
+        to: convertValue
+      - opt:
+          do:
+            - return: kerr
+          when: kerr != nil
+      - bind: vConv, verr
+        eval: convertValue(valVal, valType)
+        to: convertValue
+      - opt:
+          do:
+            - return: verr
+          when: verr != nil
+      - opt:
+          do:
+            - return: unhashableKeyError()
+              to: unhashableKeyError
+          when: "!mapKeyComparable(kConv)"
+      - eval: out.SetMapIndex(kConv, vConv)
+        to: out.SetMapIndex
+      - return: nil
+  - of: mapKeyComparable
+    participants:
+      - id: caller
+        kind: actor
+      - id: mapKeyComparable
+        kind: self
+      - id: key.Type().Comparable
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: key.IsNil() || key.Elem().Type().Comparable()
+          when: key.Kind() == reflect.Interface
+      - return: key.Type().Comparable()
+        to: key.Type().Comparable
+  - of: tryDecodeRootIntoStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootIntoStruct
+        kind: self
+      - id: decodeStructFromHeader
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: true, truncatedError()
+          when: len(data) < minRecordBytes
+      - opt:
+          do:
+            - return: false, nil
+          when: Tag(data[0]) != tagStruct
+      - bind: residual, derr
+        eval: decodeStructFromHeader(data[1:], target, 0)
+        to: decodeStructFromHeader
+      - opt:
+          do:
+            - return: true, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: true, trailingBytesError(len(residual))
+          when: len(residual) != 0
+      - return: true, nil
+  - of: tryDecodeRootIntoSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootIntoSlice
+        kind: self
+      - id: target.Type().Elem().Kind
+        kind: value
+      - id: tryDecodeRootIntoSliceOfStruct
+        kind: internal
+      - id: tryDecodeRootIntoSliceOfScalar
+        kind: internal
+    steps:
+      - bind: elemKind
+        eval: target.Type().Elem().Kind()
+        to: target.Type().Elem().Kind
+      - opt:
+          do:
+            - return: tryDecodeRootIntoSliceOfStruct(data, target)
+              to: tryDecodeRootIntoSliceOfStruct
+          when: elemKind == reflect.Struct
+      - opt:
+          do:
+            - return: tryDecodeRootIntoSliceOfScalar(data, reflectView(target))
+              to: tryDecodeRootIntoSliceOfScalar
+          when: isScalarKind(elemKind)
+      - return: false, nil
+  - of: isScalarKind
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64, reflect.String
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
+  - of: tryDecodeRootIntoSliceOfScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootIntoSliceOfScalar
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeSliceOfScalarInto
+        kind: internal
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: false, nil
+          when: target.Type().Elem().Kind() == reflect.Uint8
+      - opt:
+          do:
+            - return: true, truncatedError()
+          when: len(data) < minRecordBytes
+      - opt:
+          do:
+            - return: false, nil
+          when: Tag(data[0]) != tagSlice
+      - bind: rest
+        eval: data[1:]
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: true, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: true, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - bind: residual, derr
+        eval: decodeSliceOfScalarInto(length, rest, reflectView(target), 0)
+        to: decodeSliceOfScalarInto
+      - opt:
+          do:
+            - return: true, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: true, trailingBytesError(len(residual))
+          when: len(residual) != 0
+      - return: true, nil
+  - of: decodeSliceOfScalarInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSliceOfScalarInto
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: walkScalarSlice
+        kind: internal
+      - id: target.Set
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: rest, depthExceededError(depth + 1)
+          when: depth+1 > maxTLVDepth
+      - bind: out, err
+        eval: walkScalarSlice(reflectView(target), length, rest, depth+1)
+        to: walkScalarSlice
+      - opt:
+          do:
+            - return: rest, err
+          when: err != nil
+      - eval: target.Set(out.slice)
+        to: target.Set
+      - return: out.residual, nil
+  - of: walkScalarSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: walkScalarSlice
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: walkScalarSliceExact
+        kind: internal
+      - id: walkScalarSliceGrowing
+        kind: internal
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: walkScalarSliceExact(reflectView(target), length, rest, depth)
+              to: walkScalarSliceExact
+          when: length <= uint64(sliceHintCap)
+      - return: walkScalarSliceGrowing(reflectView(target), length, rest, depth)
+        to: walkScalarSliceGrowing
+  - of: walkScalarSliceExact
+    participants:
+      - id: caller
+        kind: actor
+      - id: walkScalarSliceExact
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.Type().Elem
+        kind: value
+      - id: narrowAndSet
+        kind: internal
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - bind: elemType
+        eval: target.Type().Elem()
+        to: target.Type().Elem
+      - bind: out
+        eval: reflect.MakeSlice(target.Type(), int(length), int(length))
+        to: reflect
+      - loop:
+          do:
+            - bind: next, derr
+              eval: narrowAndSet(reflectView(out.Index(i)), elemType, rest, depth)
+              to: narrowAndSet
+            - opt:
+                do:
+                  - return: scalarSliceWalkResult{}, derr
+                when: derr != nil
+            - set: rest
+              value: next
+          key: i
+          range: int(length)
+      - return: "scalarSliceWalkResult{slice: out, residual: rest}, nil"
+  - of: walkScalarSliceGrowing
+    participants:
+      - id: caller
+        kind: actor
+      - id: walkScalarSliceGrowing
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.Type().Elem
+        kind: value
+      - id: reflect.New(elemType).Elem
+        kind: value
+      - id: narrowAndSet
+        kind: internal
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - bind: elemType
+        eval: target.Type().Elem()
+        to: target.Type().Elem
+      - bind: out
+        eval: reflect.MakeSlice(target.Type(), 0, sliceHintCap)
+        to: reflect
+      - loop:
+          do:
+            - bind: ev
+              eval: reflect.New(elemType).Elem()
+              to: reflect.New(elemType).Elem
+            - bind: next, derr
+              eval: narrowAndSet(reflectView(ev), elemType, rest, depth)
+              to: narrowAndSet
+            - opt:
+                do:
+                  - return: scalarSliceWalkResult{}, derr
+                when: derr != nil
+            - set: out
+              to: reflect
+              value: reflect.Append(out, ev)
+            - set: rest
+              value: next
+          range: length
+      - return: "scalarSliceWalkResult{slice: out, residual: rest}, nil"
+  - of: narrowAndSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: narrowAndSet
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: decodeValue
+        kind: internal
+      - id: convertValue
+        kind: internal
+      - id: dst.Set
+        kind: value
+    steps:
+      - bind: dst
+        eval: reflect.Value(dstView)
+        to: reflect
+      - bind: val, next, verr
+        eval: decodeValue(rest, depth)
+        to: decodeValue
+      - opt:
+          do:
+            - return: rest, verr
+          when: verr != nil
+      - opt:
+          do:
+            - return: next, nil
+          when: val == nil
+      - bind: conv, cerr
+        eval: convertValue(val, elemType)
+        to: convertValue
+      - opt:
+          do:
+            - return: rest, cerr
+          when: cerr != nil
+      - eval: dst.Set(conv)
+        to: dst.Set
+      - return: next, nil
+  - of: tryDecodeRootIntoSliceOfStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryDecodeRootIntoSliceOfStruct
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeSliceOfStructInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: true, truncatedError()
+          when: len(data) < minRecordBytes
+      - opt:
+          do:
+            - return: false, nil
+          when: Tag(data[0]) != tagSlice
+      - bind: rest
+        eval: data[1:]
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: true, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: true, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - bind: residual, derr
+        eval: decodeSliceOfStructInto(length, rest, reflectView(target), 0)
+        to: decodeSliceOfStructInto
+      - opt:
+          do:
+            - return: true, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: true, trailingBytesError(len(residual))
+          when: len(residual) != 0
+      - return: true, nil
+  - of: decodeSliceOfStructInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSliceOfStructInto
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.Type().Elem
+        kind: value
+      - id: decodeSliceElement
+        kind: internal
+      - id: target.Set
+        kind: value
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: rest, depthExceededError(depth + 1)
+          when: depth+1 > maxTLVDepth
+      - bind: elemType
+        eval: target.Type().Elem()
+        to: target.Type().Elem
+      - bind: out
+        eval: reflect.MakeSlice(target.Type(), 0, sliceHint(length))
+        to: reflect
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: rest, truncatedError()
+                when: len(rest) < minRecordBytes
+            - bind: next, elemValue, eerr
+              eval: decodeSliceElement(rest, elemType, depth+1)
+              to: decodeSliceElement
+            - opt:
+                do:
+                  - return: rest, eerr
+                when: eerr != nil
+            - set: out
+              to: reflect
+              value: reflect.Append(out, elemValue)
+            - set: rest
+              value: next
+          range: length
+      - eval: target.Set(out)
+        to: target.Set
+      - return: rest, nil
+  - of: decodeSliceElement
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSliceElement
+        kind: self
+      - id: reflect.New(elemType).Elem
+        kind: value
+      - id: decodeStructFromHeader
+        kind: internal
+      - id: decodeValue
+        kind: internal
+      - id: convertValue
+        kind: internal
+      - id: ev.Set
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: ev
+              eval: reflect.New(elemType).Elem()
+              to: reflect.New(elemType).Elem
+            - bind: next2, ferr
+              eval: decodeStructFromHeader(rest[1:], ev, depth)
+              to: decodeStructFromHeader
+            - opt:
+                do:
+                  - return: rest, reflect.Value{}, ferr
+                when: ferr != nil
+            - return: next2, ev, nil
+          when: Tag(rest[0]) == tagStruct
+      - bind: val, next3, verr
+        eval: decodeValue(rest, depth)
+        to: decodeValue
+      - opt:
+          do:
+            - return: rest, reflect.Value{}, verr
+          when: verr != nil
+      - bind: ev
+        eval: reflect.New(elemType).Elem()
+        to: reflect.New(elemType).Elem
+      - opt:
+          do:
+            - return: next3, ev, nil
+          when: val == nil
+      - bind: conv, cerr
+        eval: convertValue(val, elemType)
+        to: convertValue
+      - opt:
+          do:
+            - return: rest, reflect.Value{}, cerr
+          when: cerr != nil
+      - eval: ev.Set(conv)
+        to: ev.Set
+      - return: next3, ev, nil
+  - of: decodeStructFromHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStructFromHeader
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeStructInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rest, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: rest, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: rest, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - return: decodeStructInto(length, rest, target, depth)
+        to: decodeStructInto
+  - of: decodeStructInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStructInto
+        kind: self
+      - id: cachedStructTypeInfo
+        kind: internal
+      - id: buildNameIndex
+        kind: internal
+      - id: parseFieldName
+        kind: internal
+      - id: resolveFieldIndex
+        kind: internal
+      - id: decodeFieldValue
+        kind: internal
+    steps:
+      - bind: info
+        eval: cachedStructTypeInfo(target.Type())
+        to: cachedStructTypeInfo
+      - bind: nameIndex
+        eval: buildNameIndex(info)
+        to: buildNameIndex
+      - loop:
+          do:
+            - bind: name, next, nerr
+              eval: parseFieldName(rest, depth+1)
+              to: parseFieldName
+            - opt:
+                do:
+                  - return: rest, nerr
+                when: nerr != nil
+            - set: rest
+              value: next
+            - bind: fieldIdx, _
+              eval: resolveFieldIndex(info, nameIndex, name)
+              to: resolveFieldIndex
+            - bind: next2, ferr
+              eval: decodeFieldValue(rest, target, info, fieldIdx, depth+1)
+              to: decodeFieldValue
+            - opt:
+                do:
+                  - return: rest, ferr
+                when: ferr != nil
+            - set: rest
+              value: next2
+          range: length
+      - return: rest, nil
+  - of: buildNameIndex
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(info.fields) <= linearScanFieldLimit
+      - bind: out
+        eval: make(map[string]int, len(info.fields))
+      - loop:
+          do:
+            - set: out[f.name]
+              value: i
+          key: i
+          range: info.fields
+          value: f
+      - return: out
+  - of: decodeFieldValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeFieldValue
+        kind: self
+      - id: decodeValue
+        kind: internal
+      - id: tryTypedFieldRecursion
+        kind: internal
+      - id: assignFieldValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: _, next2, verr
+              eval: decodeValue(rest, depth)
+              to: decodeValue
+            - opt:
+                do:
+                  - return: rest, verr
+                when: verr != nil
+            - return: next2, nil
+          when: fieldIdx == notFoundFieldIdx
+      - opt:
+          do:
+            - return: next2, terr
+          init:
+            bind: next2, took, terr
+            eval: tryTypedFieldRecursion(rest, reflectView(target), info, fieldIdx, depth)
+            to: tryTypedFieldRecursion
+          when: took
+      - bind: val, next2, verr
+        eval: decodeValue(rest, depth)
+        to: decodeValue
+      - opt:
+          do:
+            - return: rest, verr
+          when: verr != nil
+      - opt:
+          do:
+            - return: rest, aerr
+          init:
+            bind: aerr
+            eval: assignFieldValue(reflectView(target), info, fieldIdx, val)
+            to: assignFieldValue
+          when: aerr != nil
+      - return: next2, nil
+  - of: tryTypedFieldRecursion
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryTypedFieldRecursion
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: target.Field
+        kind: value
+      - id: decodeStructFromHeader
+        kind: internal
+      - id: decodeNestedSliceOfStruct
+        kind: internal
+      - id: decodeNestedMap
+        kind: internal
+    steps:
+      - bind: target
+        eval: reflect.Value(targetView)
+        to: reflect
+      - opt:
+          do:
+            - return: nil, false, nil
+          when: len(rest) < minRecordBytes
+      - bind: field
+        eval: info.fields[fieldIdx]
+      - bind: dst
+        eval: target.Field(field.index)
+        to: target.Field
+      - opt:
+          do:
+            - bind: next2, derr
+              eval: decodeStructFromHeader(rest[1:], dst, depth+1)
+              to: decodeStructFromHeader
+            - return: next2, true, derr
+          when: field.kind == reflect.Struct && Tag(rest[0]) == tagStruct
+      - opt:
+          do:
+            - bind: next2, serr
+              eval: decodeNestedSliceOfStruct(rest[1:], dst, depth+1)
+              to: decodeNestedSliceOfStruct
+            - return: next2, true, serr
+          when: isSliceOfStruct(field.typ) && Tag(rest[0]) == tagSlice
+      - opt:
+          do:
+            - bind: next2, merr
+              eval: decodeNestedMap(rest[1:], dst, depth+1)
+              to: decodeNestedMap
+            - return: next2, true, merr
+          when: field.kind == reflect.Map && Tag(rest[0]) == tagMap
+      - return: nil, false, nil
+  - of: decodeNestedMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeNestedMap
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeMapInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rest, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: rest, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: rest, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - return: decodeMapInto(length, rest, reflectView(target), depth)
+        to: decodeMapInto
+  - of: isSliceOfStruct
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: t.Kind() != reflect.Slice
+      - return: t.Elem().Kind() == reflect.Struct
+  - of: decodeNestedSliceOfStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeNestedSliceOfStruct
+        kind: self
+      - id: readVarintFromBytes
+        kind: internal
+      - id: decodeSliceOfStructInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rest, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - bind: length, rest, lerr
+        eval: readVarintFromBytes(rest)
+        to: readVarintFromBytes
+      - opt:
+          do:
+            - return: rest, lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: rest, sizeExceededError(length)
+          when: length > uint64(maxTLVBytes)
+      - return: decodeSliceOfStructInto(length, rest, reflectView(target), depth)
+        to: decodeSliceOfStructInto
+  - of: assignFieldValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: assignFieldValue
+        kind: self
+      - id: reflect.Value(target).Field
+        kind: value
+      - id: dst.Set
+        kind: value
+      - id: convertValue
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: field
+        eval: info.fields[fieldIdx]
+      - bind: dst
+        eval: reflect.Value(target).Field(field.index)
+        to: reflect.Value(target).Field
+      - opt:
+          do:
+            - eval: dst.Set(reflect.Zero(field.typ))
+              to: dst.Set
+            - return: nil
+          when: val == nil
+      - opt:
+          do:
+            - return: nil
+          when: isScalarKind(field.kind) && tryDirectScalarSet(dst, val)
+      - bind: conv, cerr
+        eval: convertValue(val, field.typ)
+        to: convertValue
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(cerr, errs.WrapParams{
+                			Code:    coretlv.CodeTLVUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "TLV decoding failed",
+                			Private: "service/data/codec/tlv.decodeStructInto: field conversion failed",
+                		}, errs.Int("field-index", field.index))
+              to: errs
+          when: cerr != nil
+      - eval: dst.Set(conv)
+        to: dst.Set
+      - return: nil
+  - of: (*tlvEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tlvEncoder).Encode
+        kind: self
+      - id: encodeScratch.Get
+        kind: value
+      - id: encodeValue
+        kind: internal
+      - id: encodeScratch.Put
+        kind: value
+      - id: e.w.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: bp
+        eval: encodeScratch.Get()
+        to: encodeScratch.Get
+      - bind: buf, eerr
+        eval: encodeValue(*bp, v, 0)
+        to: encodeValue
+      - opt:
+          do:
+            - set: "*bp"
+              value: buf
+            - eval: encodeScratch.Put(bp)
+              to: encodeScratch.Put
+            - return: eerr
+          when: eerr != nil
+      - bind: n, werr
+        eval: e.w.Write(buf)
+        to: e.w.Write
+      - set: "*bp"
+        value: buf
+      - eval: encodeScratch.Put(bp)
+        to: encodeScratch.Put
+      - opt:
+          do:
+            - set: werr
+              value: io.ErrShortWrite
+          when: werr == nil && n != len(buf)
+      - opt:
+          do:
+            - return: nil
+          when: werr == nil
+      - return: |-
+          errs.Wrap(werr, errs.WrapParams{
+          		Code:    coretlv.CodeTLVMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "TLV encoding failed",
+          		Private: "service/data/codec/tlv.Encoder.Encode: writer error or short write",
+          	})
+        to: errs
+  - of: (*tlvEncoder).Close
+    steps:
+      - return: nil
+  - of: appendTagLen
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTagLen
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: append(dst, byte(tag), byte(length))
+          when: length < uvarintSingleByteCap
+      - set: dst
+        value: append(dst, byte(tag))
+      - return: binary.AppendUvarint(dst, length)
+        to: binary
+  - of: encodeValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeValue
+        kind: self
+      - id: appendTagLen
+        kind: internal
+      - id: reflect
+        kind: stdlib
+      - id: rv.Elem
+        kind: value
+      - id: encodeByKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - opt:
+          do:
+            - return: appendTagLen(dst, tagNil, 0), nil
+              to: appendTagLen
+          when: v == nil
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - loop:
+          cond: rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface
+          do:
+            - opt:
+                do:
+                  - return: appendTagLen(dst, tagNil, 0), nil
+                    to: appendTagLen
+                when: rv.IsNil()
+            - set: rv
+              to: rv.Elem
+              value: rv.Elem()
+      - return: encodeByKind(dst, reflectView(rv), depth)
+        to: encodeByKind
+  - of: encodeByKind
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeByKind
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: tryEncodeScalar
+        kind: internal
+      - id: tryEncodeComposite
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - opt:
+          do:
+            - return: scalarOut, nil
+          init:
+            bind: scalarOut, handled
+            eval: tryEncodeScalar(dst, view)
+            to: tryEncodeScalar
+          when: handled
+      - opt:
+          do:
+            - return: compositeOut, compositeErr
+          init:
+            bind: compositeOut, handled, compositeErr
+            eval: tryEncodeComposite(dst, view, depth)
+            to: tryEncodeComposite
+          when: handled
+      - return: dst, unsupportedKind(rv.Kind().String())
+  - of: tryEncodeScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryEncodeScalar
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: encodeBool
+        kind: internal
+      - id: encodeInt
+        kind: internal
+      - id: encodeUint
+        kind: internal
+      - id: encodeFloat32
+        kind: internal
+      - id: encodeFloat64
+        kind: internal
+      - id: encodeString
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - return: encodeBool(dst, rv.Bool()), true
+                  to: encodeBool
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: encodeInt(dst, rv.Int()), true
+                  to: encodeInt
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: encodeUint(dst, rv.Uint()), true
+                  to: encodeUint
+            - case: reflect.Float32
+              do:
+                - return: encodeFloat32(dst, float32(rv.Float())), true
+                  to: encodeFloat32
+            - case: reflect.Float64
+              do:
+                - return: encodeFloat64(dst, rv.Float()), true
+                  to: encodeFloat64
+            - case: reflect.String
+              do:
+                - return: encodeString(dst, rv.String()), true
+                  to: encodeString
+            - default: true
+              do:
+                - return: dst, false
+          "on": rv.Kind()
+  - of: tryEncodeComposite
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryEncodeComposite
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: encodeCompositeSliceLike
+        kind: internal
+      - id: encodeMapDirect
+        kind: internal
+      - id: encodeStructDirect
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - switch:
+          cases:
+            - case: reflect.Slice, reflect.Array
+              do:
+                - bind: out, eerr
+                  eval: encodeCompositeSliceLike(dst, view, depth)
+                  to: encodeCompositeSliceLike
+                - return: out, true, eerr
+            - case: reflect.Map
+              do:
+                - bind: out, eerr
+                  eval: encodeMapDirect(dst, view, depth)
+                  to: encodeMapDirect
+                - return: out, true, eerr
+            - case: reflect.Struct
+              do:
+                - bind: out, eerr
+                  eval: encodeStructDirect(dst, view, depth)
+                  to: encodeStructDirect
+                - return: out, true, eerr
+            - default: true
+              do:
+                - return: dst, false, nil
+          "on": rv.Kind()
+  - of: encodeCompositeSliceLike
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeCompositeSliceLike
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: encodeBytes
+        kind: internal
+      - id: encodeSliceDirect
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - opt:
+          do:
+            - return: encodeBytes(dst, bytesFromReflectValue(view)), nil
+              to: encodeBytes
+          when: rv.Type().Elem().Kind() == reflect.Uint8
+      - return: encodeSliceDirect(dst, view, depth)
+        to: encodeSliceDirect
+  - of: encodeMapDirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeMapDirect
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: appendTagLen
+        kind: internal
+      - id: rv.Type().Key().Kind
+        kind: value
+      - id: rv.Type().Elem().Kind
+        kind: value
+      - id: rv.MapRange
+        kind: value
+      - id: encodeFieldValue
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagMap, uint64(rv.Len()))
+      - bind: keyKind
+        eval: rv.Type().Key().Kind()
+        to: rv.Type().Key().Kind
+      - bind: valKind
+        eval: rv.Type().Elem().Kind()
+        to: rv.Type().Elem().Kind
+      - bind: iter
+        eval: rv.MapRange()
+        to: rv.MapRange
+      - loop:
+          cond: iter.Next()
+          do:
+            - bind: next, kerr
+              eval: encodeFieldValue(dst, reflectView(iter.Key()), keyKind, depth+1)
+              to: encodeFieldValue
+            - opt:
+                do:
+                  - return: dst, kerr
+                when: kerr != nil
+            - bind: next2, verr
+              eval: encodeFieldValue(next, reflectView(iter.Value()), valKind, depth+1)
+              to: encodeFieldValue
+            - opt:
+                do:
+                  - return: dst, verr
+                when: verr != nil
+            - set: dst
+              value: next2
+      - return: dst, nil
+  - of: encodeSliceDirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeSliceDirect
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: appendTagLen
+        kind: internal
+      - id: rv.Type().Elem().Kind
+        kind: value
+      - id: encodeFieldValue
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagSlice, uint64(rv.Len()))
+      - bind: elemKind
+        eval: rv.Type().Elem().Kind()
+        to: rv.Type().Elem().Kind
+      - loop:
+          do:
+            - bind: next, eerr
+              eval: encodeFieldValue(dst, reflectView(rv.Index(i)), elemKind, depth+1)
+              to: encodeFieldValue
+            - opt:
+                do:
+                  - return: dst, eerr
+                when: eerr != nil
+            - set: dst
+              value: next
+          key: i
+          range: rv.Len()
+      - return: dst, nil
+  - of: encodeFieldValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeFieldValue
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: encodeBool
+        kind: internal
+      - id: encodeInt
+        kind: internal
+      - id: encodeUint
+        kind: internal
+      - id: encodeFloat32
+        kind: internal
+      - id: encodeFloat64
+        kind: internal
+      - id: encodeString
+        kind: internal
+      - id: encodeReflectValue
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(rvView)
+        to: reflect
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - return: encodeBool(dst, rv.Bool()), nil
+                  to: encodeBool
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: encodeInt(dst, rv.Int()), nil
+                  to: encodeInt
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: encodeUint(dst, rv.Uint()), nil
+                  to: encodeUint
+            - case: reflect.Float32
+              do:
+                - return: encodeFloat32(dst, float32(rv.Float())), nil
+                  to: encodeFloat32
+            - case: reflect.Float64
+              do:
+                - return: encodeFloat64(dst, rv.Float()), nil
+                  to: encodeFloat64
+            - case: reflect.String
+              do:
+                - return: encodeString(dst, rv.String()), nil
+                  to: encodeString
+            - default: true
+              do:
+                - return: encodeReflectValue(dst, reflectView(rv), depth)
+                  to: encodeReflectValue
+          "on": kind
+  - of: encodeReflectValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeReflectValue
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: appendTagLen
+        kind: internal
+      - id: rv.Elem
+        kind: value
+      - id: encodeByKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst, depthExceededError(depth)
+          when: depth > maxTLVDepth
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - loop:
+          cond: rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface
+          do:
+            - opt:
+                do:
+                  - return: appendTagLen(dst, tagNil, 0), nil
+                    to: appendTagLen
+                when: rv.IsNil()
+            - set: rv
+              to: rv.Elem
+              value: rv.Elem()
+      - return: encodeByKind(dst, reflectView(rv), depth)
+        to: encodeByKind
+  - of: encodeBool
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeBool
+        kind: self
+      - id: appendTagLen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendTagLen(dst, tagBoolTrue, 0)
+              to: appendTagLen
+          when: b
+      - return: appendTagLen(dst, tagBoolFalse, 0)
+        to: appendTagLen
+  - of: encodeInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeInt
+        kind: self
+      - id: appendTagLen
+        kind: internal
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: dst
+              to: appendTagLen
+              value: appendTagLen(dst, tagInt8, uint64(width8))
+            - return: append(dst, byte(int8(n)))
+          when: n >= math.MinInt8 && n <= math.MaxInt8
+      - opt:
+          do:
+            - set: dst
+              to: appendTagLen
+              value: appendTagLen(dst, tagInt16, uint64(width16))
+            - return: binary.BigEndian.AppendUint16(dst, uint16(int16(n)))
+              to: binary.BigEndian.AppendUint16
+          when: n >= math.MinInt16 && n <= math.MaxInt16
+      - opt:
+          do:
+            - set: dst
+              to: appendTagLen
+              value: appendTagLen(dst, tagInt32, uint64(width32))
+            - return: binary.BigEndian.AppendUint32(dst, uint32(int32(n)))
+              to: binary.BigEndian.AppendUint32
+          when: n >= math.MinInt32 && n <= math.MaxInt32
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagInt64, uint64(width64))
+      - return: binary.BigEndian.AppendUint64(dst, uint64(n))
+        to: binary.BigEndian.AppendUint64
+  - of: encodeUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeUint
+        kind: self
+      - id: appendTagLen
+        kind: internal
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: dst
+              to: appendTagLen
+              value: appendTagLen(dst, tagUint8, uint64(width8))
+            - return: append(dst, byte(ui))
+          when: ui <= math.MaxUint8
+      - opt:
+          do:
+            - set: dst
+              to: appendTagLen
+              value: appendTagLen(dst, tagUint16, uint64(width16))
+            - return: binary.BigEndian.AppendUint16(dst, uint16(ui))
+              to: binary.BigEndian.AppendUint16
+          when: ui <= math.MaxUint16
+      - opt:
+          do:
+            - set: dst
+              to: appendTagLen
+              value: appendTagLen(dst, tagUint32, uint64(width32))
+            - return: binary.BigEndian.AppendUint32(dst, uint32(ui))
+              to: binary.BigEndian.AppendUint32
+          when: ui <= math.MaxUint32
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagUint64, uint64(width64))
+      - return: binary.BigEndian.AppendUint64(dst, ui)
+        to: binary.BigEndian.AppendUint64
+  - of: encodeFloat32
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeFloat32
+        kind: self
+      - id: appendTagLen
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagFloat32, uint64(width32))
+      - return: binary.BigEndian.AppendUint32(dst, math.Float32bits(f))
+        to: binary.BigEndian.AppendUint32
+  - of: encodeFloat64
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeFloat64
+        kind: self
+      - id: appendTagLen
+        kind: internal
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagFloat64, uint64(width64))
+      - return: binary.BigEndian.AppendUint64(dst, math.Float64bits(f))
+        to: binary.BigEndian.AppendUint64
+  - of: encodeString
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeString
+        kind: self
+      - id: appendTagLen
+        kind: internal
+    steps:
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagString, uint64(len(s)))
+      - return: append(dst, s...)
+  - of: encodeBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeBytes
+        kind: self
+      - id: appendTagLen
+        kind: internal
+    steps:
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagBytes, uint64(len(payload)))
+      - return: append(dst, payload...)
+  - of: encodeStructDirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeStructDirect
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: cachedStructTypeInfo
+        kind: internal
+      - id: appendTagLen
+        kind: internal
+      - id: encodeFieldValue
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - bind: info
+        eval: cachedStructTypeInfo(rv.Type())
+        to: cachedStructTypeInfo
+      - set: dst
+        to: appendTagLen
+        value: appendTagLen(dst, tagStruct, uint64(len(info.fields)))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: dst, fieldNameTooLong(len(f.name))
+                when: f.namePrefix == nil
+            - set: dst
+              value: append(dst, f.namePrefix...)
+            - bind: next, eerr
+              eval: encodeFieldValue(dst, reflectView(rv.Field(f.index)), f.kind, depth+1)
+              to: encodeFieldValue
+            - opt:
+                do:
+                  - return: dst, eerr
+                when: eerr != nil
+            - set: dst
+              value: next
+          key: _
+          range: info.fields
+          value: f
+      - return: dst, nil
+  - of: unsupportedKind
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsupportedKind
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVUnsupportedType,
+          		Reason:  "UNSUPPORTED_TYPE",
+          		Public:  "TLV codec cannot encode this type",
+          		Private: "service/data/codec/tlv: reflect.Kind not supported on the wire",
+          	}, errs.String("kind", kind))
+        to: errs
+  - of: depthExceededError
+    participants:
+      - id: caller
+        kind: actor
+      - id: depthExceededError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVDepthExceeded,
+          		Reason:  "DEPTH_EXCEEDED",
+          		Public:  "TLV nesting depth exceeds limit",
+          		Private: "service/data/codec/tlv: depth exceeded maxTLVDepth",
+          	}, errs.Int("depth", depth), errs.Int("cap", maxTLVDepth))
+        to: errs
+  - of: fieldNameTooLong
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldNameTooLong
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coretlv.CodeTLVMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "TLV struct field name too long",
+          		Private: "service/data/codec/tlv.encodeStructField: name exceeds maxFieldNameBytes",
+          	}, errs.Int("len", length), errs.Int("cap", maxFieldNameBytes))
+        to: errs
+  - of: bytesFromReflectValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: bytesFromReflectValue
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: rv.Bytes
+        kind: value
+    steps:
+      - bind: rv
+        eval: reflect.Value(view)
+        to: reflect
+      - opt:
+          do:
+            - return: rv.Bytes()
+              to: rv.Bytes
+          when: rv.Kind() == reflect.Slice
+      - bind: buf
+        eval: make([]byte, rv.Len())
+      - loop:
+          do:
+            - set: buf[i]
+              value: byte(rv.Index(i).Uint())
+          key: i
+          range: rv.Len()
+      - return: buf
+  - of: buildNamePrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildNamePrefix
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(name) > maxFieldNameBytes
+      - bind: prefix
+        eval: make([]byte, 0, 1+maxVarintBytes+len(name))
+      - alt:
+          - do:
+              - set: prefix
+                value: append(prefix, byte(tagString), byte(len(name)))
+            when: uint64(len(name)) < uvarintSingleByteCap
+          - do:
+              - set: prefix
+                value: append(prefix, byte(tagString))
+              - set: prefix
+                to: binary
+                value: binary.AppendUvarint(prefix, uint64(len(name)))
+            else: true
+      - set: prefix
+        value: append(prefix, name...)
+      - return: prefix
+  - of: cachedStructTypeInfo
+    participants:
+      - id: caller
+        kind: actor
+      - id: cachedStructTypeInfo
+        kind: self
+      - id: structTypeInfoCache.Load
+        kind: value
+      - id: buildStructTypeInfo
+        kind: internal
+      - id: structTypeInfoCache.LoadOrStore
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: ti, okType
+              eval: v.(*structTypeInfo)
+            - opt:
+                do:
+                  - panic: "\"service/data/codec/tlv: structTypeInfoCache yielded non-*structTypeInfo\""
+                when: "!okType"
+            - return: ti
+          init:
+            bind: v, ok
+            eval: structTypeInfoCache.Load(t)
+            to: structTypeInfoCache.Load
+          when: ok
+      - bind: ti
+        eval: buildStructTypeInfo(t)
+        to: buildStructTypeInfo
+      - bind: actual, _
+        eval: structTypeInfoCache.LoadOrStore(t, ti)
+        to: structTypeInfoCache.LoadOrStore
+      - bind: out, okType
+        eval: actual.(*structTypeInfo)
+      - opt:
+          do:
+            - panic: "\"service/data/codec/tlv: structTypeInfoCache yielded non-*structTypeInfo on LoadOrStore\""
+          when: "!okType"
+      - return: out
+  - of: buildStructTypeInfo
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildStructTypeInfo
+        kind: self
+      - id: t.NumField
+        kind: value
+      - id: t.Field
+        kind: value
+    steps:
+      - bind: "n"
+        eval: t.NumField()
+        to: t.NumField
+      - bind: fields
+        eval: make([]structFieldInfo, 0, n)
+      - loop:
+          do:
+            - bind: sf
+              eval: t.Field(i)
+              to: t.Field
+            - opt:
+                do:
+                  - continue: true
+                when: sf.PkgPath != ""
+            - set: fields
+              value: |-
+                append(fields, structFieldInfo{
+                			name:       sf.Name,
+                			nameBytes:  []byte(sf.Name),
+                			index:      i,
+                			typ:        sf.Type,
+                			kind:       sf.Type.Kind(),
+                			namePrefix: buildNamePrefix(sf.Name),
+                		})
+          key: i
+          range: "n"
+      - return: "&structTypeInfo{fields: fields}"

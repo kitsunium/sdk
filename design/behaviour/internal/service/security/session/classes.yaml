@@ -1,0 +1,1573 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      kindIndirection names what was found at a component of Dir.
+
+      It is deliberately not "symlink": a component is judged through
+      fs.FileMode, which maps a Unix symbolic link, a Windows symbolic link and a
+      Windows junction onto the same bit, so naming one of the three would be a
+      guess. The target field says where it goes, which is what an operator needs.
+    items:
+      - name: kindIndirection
+        type: string
+        value: "\"indirection\""
+    name: kindIndirection
+  - doc: |-
+      recordVersion is the first byte of every encoded record. A future framing
+      change bumps it and decode refuses the old one as RecordCorrupt rather than
+      guessing which layout it is looking at.
+    items:
+      - name: recordVersion
+        type: byte
+        value: "0x01"
+    name: recordVersion
+  - doc: versionLen is the width of that version byte.
+    items:
+      - name: versionLen
+        type: int
+        value: "1"
+    name: versionLen
+  - doc: lenPrefix is the width of the length prefix in front of every string.
+    items:
+      - name: lenPrefix
+        type: int
+        value: "4"
+    name: lenPrefix
+  - doc: |-
+      timeLen is the width of one instant, stored as a big-endian int64 of Unix
+      nanoseconds.
+    items:
+      - name: timeLen
+        type: int
+        value: "8"
+    name: timeLen
+  - doc: |-
+      timeFields is how many instants a record carries: createdAt, lastSeen and
+      absoluteExpiry. The idle deadline is deliberately NOT stored — it is derived
+      from lastSeen and the store's current IdleTimeout, so changing the timeout in
+      configuration reaches the sessions that already exist.
+    items:
+      - name: timeFields
+        type: int
+        value: "3"
+    name: timeFields
+  - doc: |-
+      stringFields is how many length-prefixed strings the header carries: the
+      digest and the subject.
+    items:
+      - name: stringFields
+        type: int
+        value: "2"
+    name: stringFields
+  - doc: pairStrings is how many length-prefixed strings one data entry costs.
+    items:
+      - name: pairStrings
+        type: int
+        value: "2"
+    name: pairStrings
+  - doc: |-
+      maxDataEntries caps a session's key count. A session store is not a
+      database: it is per-user state on the request path, and an unbounded payload
+      there is a memory-exhaustion vector with a very cheap trigger. The cap is
+      enforced on the way IN (Save refuses) and again on the way OUT, before the
+      map is allocated — a bound is checked before the work it funds.
+    items:
+      - name: maxDataEntries
+        type: int
+        value: "256"
+    name: maxDataEntries
+  - doc: maxStringLen caps any single key or value at 4 KiB, on the same reasoning.
+    items:
+      - name: maxStringLen
+        type: int
+        value: "4096"
+    name: maxStringLen
+  - doc: |-
+      DefaultPoll is the interval between store-wide lock attempts when
+      [FileConfig.Poll] is unset.
+
+      25 ms is internal/service/app/lock's own default, for the same syscall and the
+      same contention, and the two are deliberately the same number: a caller
+      reading both should not have to wonder which lock they are looking at. It is
+      short enough that an uncontended handler never notices it and long enough
+      that a contended one is not a spin.
+    items:
+      - name: DefaultPoll
+        type: time.Duration
+        value: 25 * time.Millisecond
+    name: DefaultPoll
+  - doc: kindSymlink names an indirection found at a name in the store directory.
+    items:
+      - name: kindSymlink
+        type: string
+        value: "\"symlink\""
+    name: kindSymlink
+  - doc: |-
+      kindNotRegular names an entry that is neither a regular file nor a link — a
+      directory, a FIFO, a socket. Opening one is either pointless or, for a FIFO,
+      a wait that would hold the store-wide lock.
+    items:
+      - name: kindNotRegular
+        type: string
+        value: "\"not-regular\""
+    name: kindNotRegular
+  - doc: |-
+      kindReplaced names a name that, once compared with the handle its open
+      produced, did not lead to the file that handle holds.
+    items:
+      - name: kindReplaced
+        type: string
+        value: "\"replaced\""
+    name: kindReplaced
+  - doc: |-
+      dirMode is the only mode a session directory may have: owner-only. Anything
+      with a group or world bit is refused rather than repaired, because repairing
+      it would hide the fact that the records were exposed until now.
+    items:
+      - name: dirMode
+        type: fs.FileMode
+        value: "0o700"
+    name: dirMode
+  - doc: |-
+      fileMode is the only mode a session record may have. It is asserted after
+      creation, not merely requested — see [fileStore.publish].
+    items:
+      - name: fileMode
+        type: fs.FileMode
+        value: "0o600"
+    name: fileMode
+  - doc: |-
+      recordSuffix names a record file. The stem is ID.Digest(), never the
+      identifier: a directory listing is not a secret, and on many systems neither
+      is a filename in a backup, an audit log or a crash report.
+    items:
+      - name: recordSuffix
+        type: string
+        value: "\".session\""
+    name: recordSuffix
+  - doc: lockName is the store-wide lock file, created once and never removed.
+    items:
+      - name: lockName
+        type: string
+        value: "\".lock\""
+    name: lockName
+  - doc: |-
+      tempPrefix starts the name of the temporary file a record is written to
+      before it is renamed into place. It carries no record suffix, so a sweep
+      never mistakes one for a session — and it lives in the SAME directory,
+      because rename(2) is only atomic within one filesystem.
+    items:
+      - name: tempPrefix
+        type: string
+        value: "\".tmp-\""
+    name: tempPrefix
+  - doc: |-
+      digestLen is the character length of a hex SHA-256 — the only shape a record
+      filename may have.
+    items:
+      - name: digestLen
+        type: int
+        value: "64"
+    name: digestLen
+  - doc: |-
+      sealAlgorithm is the AEAD every record is sealed under. It is named here
+      rather than configured: the choice of cipher for the SDK's own at-rest
+      framing is not the caller's decision, and a configurable one would be a
+      downgrade knob.
+    items:
+      - name: sealAlgorithm
+        type: corecrypto.Algorithm
+        value: "\"aes-256-gcm\""
+    name: sealAlgorithm
+  - doc: recordAAD prefixes the additional authenticated data of every record seal.
+    items:
+      - name: recordAAD
+        type: string
+        value: "\"kitsunium/sdk/session/record/v1|\""
+    name: recordAAD
+  - doc: |-
+      kindHeldReplaced names the one PathRedirected shape that involves no link:
+      Dir stopped naming the directory the store had just opened.
+    items:
+      - name: kindHeldReplaced
+        type: string
+        value: "\"replaced\""
+    name: kindHeldReplaced
+  - doc: |-
+      platformNative reports that this GOOS has both mechanics natively. The file
+      store's constructor reads it and refuses on the platforms where it is false,
+      rather than building a store that would silently provide neither.
+
+      It is narrower than internal/kernel/fs/flock.Native, which is also true on
+      Windows: the lock exists there, the owner-only permissions do not.
+      TestTheStoreIsBuiltOnlyWhereTheKernelCanLock pins that the store's set never
+      grows past the lock's.
+    items:
+      - name: platformNative
+        type: bool
+        value: "true"
+    name: platformNative
+  - doc: |-
+      worldWritable is the permission bit that lets any account create an entry in
+      a directory.
+    items:
+      - name: worldWritable
+        type: fs.FileMode
+        value: "0o002"
+    name: worldWritable
+  - doc: |-
+      initialRecords is the map's starting capacity. It is a hint, not a bound: a
+      memory store holds as many sessions as its process has live users, which
+      nothing here can know. Sixty-four is one page's worth of buckets — enough to
+      carry a small service without a rehash, cheap enough to be wrong.
+    items:
+      - name: initialRecords
+        type: int
+        value: "64"
+    name: initialRecords
+  - doc: |-
+      cookieAAD prefixes the additional authenticated data of every sealed
+      identifier. The caller's purpose is appended to it, so a value minted for one
+      purpose does not open under another even though both use the same key.
+    items:
+      - name: cookieAAD
+        type: string
+        value: "\"kitsunium/sdk/session/cookie/v1|\""
+    name: cookieAAD
+files:
+  - decls:
+      - kindIndirection
+      - checkChain
+      - chainRedirected
+    name: chain.go
+  - decls:
+      - digestsEqual
+    name: compare.go
+  - decls:
+      - Config
+      - Config.window
+      - validateWindow
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - recordVersion
+      - versionLen
+      - lenPrefix
+      - timeLen
+      - timeFields
+      - stringFields
+      - pairStrings
+      - maxDataEntries
+      - maxStringLen
+      - encodeRecord
+      - encodedSize
+      - appendString
+      - appendTime
+      - decodeRecord
+      - decodeHeader
+      - decodeData
+      - takePair
+      - takeString
+      - takeTime
+      - boundSubject
+      - boundPayload
+    name: encode.go
+  - decls:
+      - DefaultPoll
+      - FileConfig
+      - FileConfig.waiter
+      - FileConfig.pollInterval
+      - FileConfig.window
+      - FileConfig.validate
+    name: file_config.go
+  - decls:
+      - kindSymlink
+      - kindNotRegular
+      - kindReplaced
+      - openEntry
+      - readEntry
+      - lookAt
+      - entryKind
+      - sameEntry
+      - isLinkNow
+    name: file_entry.go
+  - decls:
+      - (*fileStore).withLock
+      - noDone
+      - (*fileStore).enter
+      - (*fileStore).leave
+      - (*fileStore).takeFlock
+      - (*fileStore).waitPoll
+      - checkContext
+      - (*fileStore).liveLocked
+      - (*fileStore).removeLocked
+      - (*fileStore).unlinkLocked
+      - (*fileStore).New
+      - (*fileStore).exists
+      - (*fileStore).Load
+    name: file_ops.go
+  - decls:
+      - tempRecord
+      - assertPrivateFile
+      - writeAndSync
+      - flushHeld
+      - removeTemp
+      - firstFailure
+    name: file_publish.go
+  - decls:
+      - dirMode
+      - fileMode
+      - recordSuffix
+      - lockName
+      - tempPrefix
+      - digestLen
+      - sealAlgorithm
+      - recordAAD
+      - kindHeldReplaced
+      - fileStore
+      - NewFileStore
+      - openStoreDir
+      - narrowHeld
+      - assertHeldDir
+      - releaseDir
+      - openLocked
+      - openLockFile
+      - (*fileStore).Close
+      - recordName
+      - isDigest
+      - aad
+      - (*fileStore).readLocked
+      - (*fileStore).decodeAt
+      - (*fileStore).writeLocked
+      - (*fileStore).flushLocked
+      - (*fileStore).publish
+    name: file_store.go
+  - decls:
+      - (*fileStore).Save
+      - (*fileStore).Regenerate
+      - (*fileStore).rotateLocked
+      - (*fileStore).withdrawLocked
+      - (*fileStore).Destroy
+      - (*fileStore).Sweep
+      - (*fileStore).sweepEntries
+      - recordDigest
+    name: file_write.go
+  - decls:
+      - platformNative
+      - worldWritable
+      - plantable
+    name: fsguard_unix.go
+  - decls:
+      - initialRecords
+      - memoryStore
+      - NewMemoryStore
+      - (*memoryStore).New
+      - (*memoryStore).Load
+      - (*memoryStore).liveLocked
+    name: memory_store.go
+  - decls:
+      - (*memoryStore).Save
+      - (*memoryStore).Regenerate
+      - (*memoryStore).Destroy
+      - (*memoryStore).Sweep
+    name: memory_write.go
+  - decls:
+      - mintID
+    name: mint.go
+  - decls:
+      - record
+    name: record.go
+  - decls:
+      - cookieAAD
+      - sealedEncoding
+      - sealer
+      - NewSealer
+      - sealer.Seal
+      - sealer.Open
+    name: sealer.go
+  - decls:
+      - wrapAs
+      - _
+    name: session.go
+  - decls:
+      - window
+      - window.slide
+      - window.deadline
+      - window.live
+      - window.mint
+      - window.build
+      - window.rotate
+    name: window.go
+functions:
+  - doc: |-
+      checkChain refuses Dir when any existing component of its path is an
+      indirection that anybody could have planted.
+
+      pathchain.Resolve stops at the first component that does not exist yet and
+      reports that as an answer rather than a fault — the store is usually about
+      to create the last component or two — so a fresh directory is audited
+      exactly as far as it exists.
+    name: checkChain
+    params: dir string
+    results: error
+  - doc: |-
+      chainRedirected builds the [coresession.PathRedirected] refusal for a component of Dir.
+
+      It names both paths on purpose: Dir is what the operator configured and will
+      search for, and the component is where the redirection actually is — usually
+      neither the first nor the last thing they would have looked at. Paths are
+      fields, never the Public string.
+    name: chainRedirected
+    params: dir string, step pathchain.StepValue, observed string
+    results: error
+  - doc: |-
+      digestsEqual compares two ID.Digest values in time that does not depend on
+      how many leading characters they share.
+
+      A digest is not itself a secret — it is the unkeyed SHA-256 of the
+      identifier, and anyone holding the identifier can compute it. The
+      constant-time compare is here anyway, for one reason: it makes "every path
+      from a presented identifier to a stored record ends in a crypto/subtle
+      comparison" a property that is TRUE rather than nearly true. A map lookup and
+      a filename match are both variable-time, and both are followed by this call,
+      so no amount of reasoning about which of them was the real check is needed.
+    name: digestsEqual
+    params: stored, presented string
+    results: bool
+  - doc: |-
+      validateWindow refuses a timeout pair that could never work. It is shared by
+      Config and FileConfig so the two cannot drift into different rules.
+    name: validateWindow
+    params: idle, absolute time.Duration
+    results: error
+  - doc: |-
+      encodeRecord renders rec as a deterministic byte frame:
+
+      	u8 version | str digest | str subject | i64 created | i64 lastSeen |
+      	i64 absoluteExpiry | u32 count | (str key, str value)*
+
+      Keys are emitted in sorted order so the same record always produces the same
+      bytes — which is what makes a round-trip test a byte comparison rather than a
+      field-by-field one.
+
+      The framing is hand-written rather than dispatched through the codec domain
+      on purpose. This is an AT-REST frame, not an interchange format: nothing
+      outside this package ever reads it, it must be total over map[string]string
+      with no reflection and no tag vocabulary, and routing it through the codec
+      registry would drag a codec dependency into every binary that wants a
+      session store.
+    name: encodeRecord
+    params: rec record
+    results: "[]byte"
+  - doc: |-
+      encodedSize reports the frame length so encodeRecord allocates once. It is
+      exact, not an estimate: the frame has no variable-width parts.
+    name: encodedSize
+    params: rec record
+    results: int
+  - doc: appendString writes a 4-byte big-endian length followed by the bytes.
+    name: appendString
+    params: buf []byte, value string
+    results: "[]byte"
+  - doc: appendTime writes an instant as a big-endian int64 of Unix nanoseconds.
+    name: appendTime
+    params: buf []byte, value time.Time
+    results: "[]byte"
+  - doc: |-
+      decodeRecord parses a frame produced by encodeRecord. Every failure — a bad
+      version, a truncated frame, a length prefix pointing past the end, a count
+      above the cap — is the same RecordCorrupt verdict.
+    name: decodeRecord
+    params: raw []byte
+    results: rec record, err error
+  - doc: decodeHeader reads everything up to the entry count.
+    name: decodeHeader
+    params: raw []byte, off int
+    results: rec record, next int, ok bool
+  - doc: decodeData reads the entry count and the key/value pairs behind it.
+    name: decodeData
+    params: raw []byte, off int
+    results: payload map[string]string, ok bool
+  - doc: takePair reads one key/value pair.
+    name: takePair
+    params: raw []byte, off int
+    results: key, value string, next int, ok bool
+  - doc: takeString reads one length-prefixed string, bounded by maxStringLen.
+    name: takeString
+    params: raw []byte, off int
+    results: value string, next int, ok bool
+  - doc: takeTime reads one int64 of Unix nanoseconds.
+    name: takeTime
+    params: raw []byte, off int
+    results: value time.Time, next int, ok bool
+  - doc: |-
+      boundSubject refuses a subject longer than the frame can carry back, before
+      anything is minted, written or retired.
+
+      takeString caps every decoded string at maxStringLen, the subject included,
+      so a longer subject used to be WRITTEN — and then every load of the session
+      failed as RecordCorrupt, after Regenerate had already retired the record
+      that worked. The memory store has no frame and so no such limit, which is
+      exactly why both stores call this: a subject one store keeps and the other
+      cannot read back would make the port two contracts.
+    name: boundSubject
+    params: subject string
+    results: error
+  - doc: boundPayload refuses a session payload above the caps, before it is written.
+    name: boundPayload
+    params: data map[string]string
+    results: error
+  - doc: |-
+      openEntry opens name in the held directory and proves the handle is the
+      regular file the name leads to — never what a link planted at the name
+      points to.
+
+      It has three outcomes. A handle the caller owns, with found empty. No handle
+      and found naming what stood at the name instead — [kindSymlink],
+      [kindNotRegular] or [kindReplaced] — because finding one is a VERDICT the
+      caller turns into its own refusal (a record and the lock file are refused
+      differently); err is then nil, or the failure to close a handle the proof
+      refused, which rides along and never replaces the verdict. Or, with found
+      empty, the filesystem's own failure, unwrapped, so each caller wraps it once:
+      fs.ErrNotExist is how an absent name reads when flag does not create it.
+
+      Callers read found BEFORE err, for exactly that reason.
+    name: openEntry
+    params: root *os.Root, name string, flag int, perm fs.FileMode
+    results: file *os.File, found string, err error
+  - doc: |-
+      readEntry reads the whole regular file named name in the held directory,
+      refusing an indirection exactly as [openEntry] does.
+    name: readEntry
+    params: root *os.Root, name string
+    results: raw []byte, found string, err error
+  - doc: lookAt reports what stands at name, without following it.
+    name: lookAt
+    params: root *os.Root, name string
+    results: info fs.FileInfo, present bool, err error
+  - doc: |-
+      entryKind names what is wrong with an entry for this store's purposes, and
+      reports whether anything is. A nil info — nothing there — is not wrong.
+    name: entryKind
+    params: info fs.FileInfo
+    results: kind string, wrong bool
+  - doc: |-
+      sameEntry proves that handle holds the regular file name leads to.
+
+      When the name was there before the open, the handle must be THAT file: the
+      look already established what the name was, and a swap since then is what
+      this exists to catch. When it was absent — the open created it — the name is
+      looked at again, and must now be a regular file and the same one.
+    name: sameEntry
+    params: root *os.Root, name string, handle *os.File, before fs.FileInfo, present bool
+    results: found string, err error
+  - doc: |-
+      isLinkNow reports whether name is a link now — asked after an open of it
+      failed.
+
+      It is DIAGNOSIS, never the decision: the open already failed, so nothing
+      this returns can turn the failure into a success; it only says which of two
+      things the failure was. A link that leaves the directory is the one shape
+      os.Root refuses at the open instead of following.
+    name: isLinkNow
+    params: root *os.Root, name string
+    results: bool
+  - doc: |-
+      checkContext reports a cancelled or expired context as a retryable backend
+      fault. It is the file store's answer only: the memory store never blocks, so
+      it has nothing to interrupt (see memoryStore.New).
+    name: checkContext
+    params: ctx context.Context
+    results: error
+  - doc: |-
+      assertPrivateFile narrows a freshly created file to owner-only and then
+      CHECKS that the narrowing took.
+
+      Both halves are load-bearing. The create asks for 0600, and a parent
+      carrying a default POSIX ACL can hand back something wider, so the chmod is
+      what makes the request true on an ordinary Linux box. And on a filesystem
+      that does not implement Unix permissions at all — an exFAT stick, an SMB
+      share, a container mount with blanket file_mode= options — BOTH calls report
+      success and the file stays world-readable, which is what the stat catches.
+      Without it the store would be writing session contents to a world-readable
+      file while reporting success: precisely the "store that pretends" this domain
+      exists not to be.
+    name: assertPrivateFile
+    params: file tempRecord
+    results: error
+  - doc: writeAndSync writes payload, flushes it to the device, and closes the file.
+    name: writeAndSync
+    params: file tempRecord, payload []byte
+    results: error
+  - doc: |-
+      flushHeld fsyncs the held store directory, so the renames and unlinks
+      inside it survive a power loss. It is the production value of
+      fileStore.syncDir.
+
+      It flushes the directory's ENTRIES, not the files they name: a record's
+      bytes were synced before its rename, and this is the step that makes the
+      rename — or the unlink — itself durable. The directory is opened through the
+      held root rather than by path, so the directory flushed is the one the
+      renames happened in, even if a component of the configured path has moved.
+    name: flushHeld
+    params: root *os.Root
+    results: err error
+  - doc: |-
+      removeTemp deletes an abandoned temporary record and returns the failure that
+      caused it to be abandoned. The previous record — if there is one — is
+      untouched, which is the whole point: a failed write must never replace a good
+      record with an empty one.
+
+      The removal is CHECKED rather than discarded, and then deliberately
+      subordinate to cause: replacing "the disk is full" with "the orphan would not
+      unlink" would report the consequence instead of the problem.
+    name: removeTemp
+    params: root *os.Root, name string, cause error
+    results: error
+  - doc: firstFailure keeps cause when there is one, and promotes fallback otherwise.
+    name: firstFailure
+    params: cause, fallback error, op string
+    results: error
+  - name: NewFileStore
+    params: cfg FileConfig
+    results: store coresession.Store, err error
+  - doc: |-
+      openStoreDir audits dir's path, creates the directory if it is absent and
+      narrows it if this call created it, and returns it HELD — after asserting
+      that the held directory is owner-only and is still the one dir names.
+
+      The audit runs FIRST, before anything is created. os.MkdirAll follows an
+      indirection at a parent component, so auditing afterwards would mean
+      refusing the directory only after having created it inside whatever tree the
+      indirection pointed at.
+
+      The chmod is conditional, and that condition is the whole point. A directory
+      this call CREATED belongs to the store, so narrowing it surprises nobody —
+      and it is necessary, because MkdirAll's mode is only a request: a parent
+      carrying a default POSIX ACL hands back a group-writable directory whatever
+      was asked for, and a store that refused the directory it had just made would
+      be unusable on a perfectly ordinary machine. A directory that ALREADY existed belongs to the operator,
+      possibly shared with another service, and silently narrowing it is not the
+      SDK's call to make; that one is refused instead.
+
+      Either way the mode is then ASSERTED — on the HELD directory, through its
+      handle — so a filesystem that accepts the chmod without honouring it is
+      still caught, and the directory judged is the one every later operation
+      uses.
+    name: openStoreDir
+    params: dir string
+    results: root *os.Root, err error
+  - doc: |-
+      narrowHeld narrows the held directory to [dirMode] with fchmod(2) on a
+      handle to it.
+
+      Not os.Root.Chmod("."): that is fchmodat with AT_SYMLINK_NOFOLLOW, which
+      Linux implements only from 6.6 on — before it, go1.27 falls back to
+      /proc/self/fd and answers EOPNOTSUPP where /proc is not mounted, which would
+      refuse every directory the store creates in such a sandbox. fchmod on a
+      descriptor needs neither the flag nor /proc, on every kernel here.
+    name: narrowHeld
+    params: root *os.Root
+    results: error
+  - doc: |-
+      assertHeldDir refuses the directory the store HOLDS when any account but the
+      owner can reach it, and proves dir still names it.
+
+      The mode is read through the handle, not the path, so the directory judged
+      is the one every later operation resolves against. The path is then stat'ed
+      once more and must lead to that same directory: between the path checks
+      above and os.OpenRoot, anyone able to rename a component could have handed
+      the store a directory nobody checked.
+    name: assertHeldDir
+    params: root *os.Root, dir string
+    results: error
+  - doc: |-
+      releaseDir closes a held directory on a construction path that is abandoning
+      it, and returns the failure that caused it to be abandoned. A close that
+      fails too is subordinate to that failure.
+    name: releaseDir
+    params: root *os.Root, cause error
+    results: error
+  - doc: |-
+      openLocked opens the store-wide lock file through the held directory and
+      assembles the store, which takes ownership of both handles.
+
+      The lock descriptor deliberately OUTLIVES this function: it is the lock, and
+      a deferred close would release it before the store's first operation. On a
+      refusal the held directory is given back, since nothing has taken ownership
+      of it.
+    name: openLocked
+    params: cfg FileConfig, root *os.Root
+    results: store coresession.Store, err error
+  - doc: |-
+      openLockFile opens the store-wide lock file, refusing a link planted at its
+      name.
+
+      The name is fixed and therefore PREDICTABLE, which is the whole of what a
+      planter needs: before this, a dangling link at it made the open create the
+      link's target and take the lock there — measured, see file_entry.go. The
+      open goes through [openEntry], so a link is refused before anything is
+      created through it. It is 0600 like every other file here; the lock file's
+      contents are empty but its existence should not be readable by another
+      account either.
+    name: openLockFile
+    params: root *os.Root, dir string
+    results: lock *os.File, err error
+  - doc: |-
+      recordName maps a digest to its file's name in the held directory, refusing
+      anything that is not the exact shape ID.Digest produces.
+    name: recordName
+    params: digest string
+    results: name string, err error
+  - doc: |-
+      isDigest reports whether s has the exact shape ID.Digest produces: 64
+      lowercase hexadecimal characters. It is the ONE test both recordName and
+      recordDigest apply, so building a record's name and recognising a record's
+      file cannot drift apart — and what a sweep recognises is what it deletes.
+    name: isDigest
+    params: s string
+    results: bool
+  - doc: |-
+      aad returns the additional authenticated data binding a record to its own
+      filename. Sealing without it would let anyone with write access to the
+      directory rename one session's ciphertext onto another's digest and have it
+      open — a session-swap that needs no key at all.
+    name: aad
+    params: digest string
+    results: "[]byte"
+  - doc: |-
+      recordDigest maps a directory entry to the digest it names, or reports that
+      it is not a record file.
+    name: recordDigest
+    params: entry os.DirEntry
+    results: digest string, ok bool
+  - doc: |-
+      plantable reports whether any account could have created an entry in a
+      directory whose mode is container, and renders what it read.
+
+      It is internal/service/app/lock's rule for the same question (ADR 0083), read
+      off the same pathchain.StepValue.Container. Other-write is the one bit that
+      answers it. Group-write is not enough: a directory shared with a group is a
+      deliberate arrangement, and its members are accounts the operator chose. The
+      sticky bit is deliberately NOT consulted: it says only an entry's owner may
+      UNLINK it, and planting a component CREATES an entry at a name nobody has
+      taken, so 0777|sticky — exactly what /tmp is — is plantable.
+    name: plantable
+    params: container fs.FileMode
+    results: yes bool, observed string
+  - name: NewMemoryStore
+    params: cfg Config
+    results: store coresession.Store, err error
+  - doc: |-
+      mintID reads exactly IDLen bytes from source and builds an identifier.
+
+      io.ReadFull, not Read: a short read is a FAILURE, not a smaller identifier.
+      Accepting one would silently reduce the entropy the whole domain rests on,
+      and it would do so in exactly the situation — a degraded random source — when
+      that reduction matters most. A partial read therefore mints nothing and
+      returns EntropyFailed.
+
+      source is a field on the store rather than a hard-coded crypto/rand.Reader so
+      the collision guard in New and Regenerate is reachable from a test: a reader
+      that always returns the same bytes is what a broken entropy source looks
+      like, and the store's answer to it is asserted rather than assumed. The field
+      is deliberately NOT on the exported Config — a knob that lets a caller swap
+      the session identifier's random source is a footgun with no legitimate
+      production use.
+    name: mintID
+    params: source io.Reader
+    results: id coresession.ID, err error
+  - name: NewSealer
+    params: key corecrypto.Key, purpose string
+    results: seal coresession.Sealer, err error
+  - doc: |-
+      wrapAs returns the given session sentinel as the error ORIGIN — its code,
+      reason, public and private win under errs' origin-wins rule — with the
+      cause's message carried as a structured field.
+
+      Attaching the cause as a field rather than as the wrap origin is the choice
+      the package makes everywhere: a filesystem error must not be able to hijack
+      the code a framework routes on, and the uniform typed shape (401 for every
+      "no usable session", 503 + EX_TEMPFAIL for a backend fault) is worth more at
+      the call site than errors.Is against fs.ErrPermission. The OS message stays
+      reachable through errs.FieldsOf. It never contains the identifier: the file
+      store names its files by ID.Digest, which is not a secret.
+    name: wrapAs
+    params: sentinel *kerrs.Error, cause error, fields ...kerrs.FieldValue
+    results: error
+imports:
+  base64: encoding/base64
+  binary: encoding/binary
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
+  context: context
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  coresession: github.com/kitsunium/sdk/internal/core/security/session
+  errors: errors
+  filepath: path/filepath
+  flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
+  fs: io/fs
+  io: io
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  os: os
+  pathchain: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
+  rand: crypto/rand
+  slices: slices
+  strings: strings
+  subtle: crypto/subtle
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/security/session
+  name: session
+  purpose: Package session — the components ABOVE the store directory, which no flag on an open can reach.
+types:
+  - fields:
+      - doc: |-
+          IdleTimeout is how long a session may go untouched before it dies. Every
+          successful Load slides it forward from "now".
+        name: IdleTimeout
+        type: time.Duration
+      - doc: |-
+          AbsoluteTimeout is how long a session may live at all, measured from the
+          instant its identifier was minted. Nothing extends it — not a Load, not
+          a Save. It is the ceiling the sliding window is clamped to.
+        name: AbsoluteTimeout
+        type: time.Duration
+      - doc: |-
+          Clock is the time source. A nil Clock falls back to clock.System; a
+          clock.ManualClock makes every expiry assertion deterministic and
+          instant, which is why no test in this package sleeps.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: window is the validated deadline policy every store carries.
+        name: window
+        recv: c Config
+        results: window
+    name: Config
+  - fields:
+      - doc: |-
+          IdleTimeout is how long a session may go untouched. Refused when
+          non-positive, and when it is not strictly shorter than AbsoluteTimeout.
+        name: IdleTimeout
+        type: time.Duration
+      - doc: AbsoluteTimeout is the ceiling from the identifier's minting instant.
+        name: AbsoluteTimeout
+        type: time.Duration
+      - doc: |-
+          Clock is the time source; nil falls back to clock.System.
+
+          It is [clock.Timed] rather than [clock.Clock] because this store both
+          STAMPS and WAITS: the poll between lock attempts is armed on it, so a
+          ManualClock makes contention deterministic and nothing here sleeps. The
+          published shape changed while the module is v0, out loud, per ADR 0040 —
+          clock.System and clock.ManualClock both satisfy it, so only a
+          hand-written Clock-only double is affected.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          Dir is the directory records live in. It is created with mode 0700 if
+          absent, and REFUSED if it exists with any group or world bit set — a
+          session directory another user can read is the whole compromise.
+        name: Dir
+        type: string
+      - doc: |-
+          Poll is the interval between attempts while ANOTHER PROCESS holds the
+          store-wide lock. Zero means [DefaultPoll]; negative is refused.
+
+          It exists because the lock is polled rather than waited on: a blocking
+          flock(2) parks the thread inside a syscall no cancellation reaches, so a
+          request whose caller has hung up could not stop waiting (ADR 0073). The
+          interval is the clamp half of ADR 0031 — any value works, and the SDK
+          picking one surprises nobody — while a negative one is refused, since it
+          spells a caller who meant something the field cannot express.
+        name: Poll
+        type: time.Duration
+      - doc: |-
+          Key is the 256-bit AEAD key every record is sealed under. The seal binds
+          the record to its own filename, so an attacker with write access to the
+          directory cannot make one session's ciphertext answer for another's
+          identifier.
+        name: Key
+        type: corecrypto.Key
+    kind: struct
+    methods:
+      - doc: |-
+          waiter resolves the WAITING half of the injected clock.
+
+          Clock is [clock.Timed] because this store both stamps and waits, which is the
+          same call internal/service/data/sql made and for the same reason. A nil Clock
+          falls back to the system clock, so the field stays optional.
+        name: waiter
+        recv: c FileConfig
+        results: clock.Waiter
+      - doc: pollInterval resolves the interval between flock attempts.
+        name: pollInterval
+        recv: c FileConfig
+        results: time.Duration
+      - doc: window is the validated deadline policy this configuration describes.
+        name: window
+        recv: c FileConfig
+        results: window
+      - doc: validate refuses a configuration the file store cannot honour.
+        name: validate
+        recv: c FileConfig
+        results: error
+    name: FileConfig
+  - doc: |-
+      tempRecord is the narrow view of a freshly created record file that the
+      publication path uses. `*os.File` satisfies it; nothing else in the SDK does.
+
+      It is an interface rather than the concrete handle for one reason worth
+      stating: it makes the three helpers below testable against a double that
+      FAILS. A `chmod` that reports success without honouring the mode, a `Sync`
+      that errors, a `Close` on an already-closed descriptor — those are the paths
+      the store's guarantees rest on, and they cannot be provoked on a real file
+      without a hostile filesystem.
+    kind: named
+    name: tempRecord
+    underlying: |-
+      interface {
+      	// Chmod narrows the file to a mode.
+      	Chmod(mode fs.FileMode) error
+      	// Stat reports the mode the filesystem actually applied.
+      	Stat() (fs.FileInfo, error)
+      	// Write appends the sealed payload.
+      	Write(payload []byte) (int, error)
+      	// Sync flushes it to the device.
+      	Sync() error
+      	// Close releases the descriptor.
+      	Close() error
+      }
+  - doc: |-
+      fileStore keeps every record in one directory, one file per session, sealed.
+
+      # What it guarantees, and how
+
+        - CONFIDENTIALITY AT REST. The file holds an AEAD box, never a readable
+          record, so an operator with the file has ciphertext and a filename.
+        - NO IDENTIFIER ON DISK. The filename is ID.Digest() and the record inside
+          stores the same digest. Nothing anywhere on disk is a usable cookie.
+        - NO RECORD SUBSTITUTION. The seal binds each record to its own filename
+          through the additional authenticated data, so renaming one record's file
+          to another's digest yields a value that does not open.
+        - OWNER-ONLY PERMISSIONS, ASSERTED. The directory must be 0700 and each
+          record is created 0600 and then STAT'ed to confirm it — which is what
+          catches a filesystem that accepts a mode and does not enforce it.
+        - ONE DIRECTORY, HELD. The directory is opened once, at construction, as
+          an os.Root, after an audit of every component of its path that refuses
+          a link anybody could have planted (chain.go). Every name the store
+          touches afterwards — records, temporaries, the lock file, the listing a
+          sweep reads, the directory it flushes — resolves against that handle,
+          so a parent renamed or replaced later moves nothing.
+        - NO OPEN THROUGH A LINK. The two opens that could be redirected — reading
+          a record and opening the lock file — look at the name first and prove
+          the handle afterwards (file_entry.go). A link at a record's name is
+          RecordCorrupt; a link at the lock file is PathRedirected.
+        - ATOMIC PUBLICATION. A record is written to a temporary file in the same
+          directory, synced, and moved into place with rename(2). A reader sees the
+          old record or the new one, never a half-written one, and a failed write
+          leaves the previous record intact rather than publishing an empty file.
+        - DURABLE CHANGES. Every rename and every unlink is followed by an fsync
+          of the directory, because POSIX does not make either survive a crash
+          until the directory itself is flushed — without it a power cut may bring
+          back a record Destroy removed, which is a revocation undone.
+        - SERIALISED READ-MODIFY-WRITE. Every operation runs under one store-wide
+          exclusive flock, so two processes sharing the directory cannot lose an
+          update between a read and the write that follows it.
+    fields:
+      - doc: |-
+          dir is the directory as configured. Nothing is opened through it after
+          construction — root is — and it stays for the fields an error carries
+          and for the tests that observe the directory from outside.
+        name: dir
+        type: string
+      - doc: |-
+          root is the store directory, held open since construction. Every name
+          resolves against it, so a component of dir renamed or replaced after the
+          store was built cannot move a single record.
+        name: root
+        type: "*os.Root"
+      - doc: |-
+          lock is the descriptor the store-wide flock is taken on. It is opened
+          once at construction and stays open for the store's lifetime, so no
+          operation races another over creating or unlinking it.
+
+          A store-wide lock is coarser than a per-record one and that is a
+          deliberate trade. Per-record locking needs a lock file per record, and a
+          lock file that is ever unlinked has a well-known race: a process blocked
+          on the old inode acquires it just as another creates and locks a new one,
+          leaving two holders. Never unlinking them leaks a file per session. One
+          lock, held for microseconds per operation, avoids both.
+        name: lock
+        type: "*os.File"
+      - doc: |-
+          gate serialises the read-modify-write cycle BETWEEN GOROUTINES, which
+          the flock above does not. Measured on linux/amd64: flock on the SAME
+          open file description is a lock CONVERSION, not a wait — it succeeds
+          immediately. Since this store holds one descriptor for its whole
+          lifetime (deliberately, see the comment above), every goroutine
+          re-locks that one description and every one of them proceeds. Eight
+          goroutines reached full occupancy of the counted section on every run.
+          Cross-PROCESS exclusion was always intact; cross-goroutine never was,
+          and no test that only spawns processes could see it. Taken BEFORE the
+          flock, the same order internal/service/app/lock's nameGate uses.
+
+          It is a one-slot CHANNEL rather than a sync.Mutex because a Mutex has no
+          abandonable Lock: a goroutine parked in it cannot be told its caller has
+          gone (ADR 0073).
+        name: gate
+        type: chan struct{}
+      - doc: |-
+          clk is the time source the poll between flock attempts is armed on, so
+          contention is deterministic under a ManualClock and nothing here sleeps.
+        name: clk
+        type: clock.Waiter
+      - doc: |-
+          poll is the interval between attempts while another PROCESS holds the
+          lock (FileConfig.Poll).
+        name: poll
+        type: time.Duration
+      - doc: key seals every record.
+        name: key
+        type: corecrypto.Key
+      - doc: win is the validated deadline policy and the clock behind it.
+        name: win
+        type: window
+      - doc: source is the entropy behind every minted identifier.
+        name: source
+        type: io.Reader
+      - doc: |-
+          syncDir flushes the held directory's entries to the device. It is
+          [flushHeld] over root in production and a field only so that
+          dirsync_internal_test.go can observe WHEN it runs and make it fail: a
+          failing directory fsync cannot be provoked on a real filesystem, and an
+          untested failure path is one that has never run — the reason tempRecord
+          is an interface too.
+        name: syncDir
+        type: func() error
+    kind: struct
+    methods:
+      - doc: |-
+          withLock runs fn under the store-wide exclusive lock.
+
+          Every operation — including Load, which slides the idle window and therefore
+          writes — goes through here. Without it, two processes sharing the directory
+          would read the same record, each apply its own change, and each publish a
+          whole record atomically: two atomic writes, one lost update. rename(2) makes
+          the PUBLICATION indivisible; only the lock makes the read-modify-write cycle
+          indivisible, and they are different guarantees.
+
+          Both waits observe ctx (ADR 0073). The in-process gate is a channel rather
+          than a sync.Mutex because a Mutex cannot be abandoned, and the flock is
+          LOCK_NB plus a poll on the injected clock because a blocking LOCK_EX parks
+          the thread inside a syscall no cancellation reaches. A request whose caller
+          has hung up stops waiting for a lock nobody will read the result of.
+        name: withLock
+        params: ctx context.Context, fn func() error
+        recv: f *fileStore
+        results: err error
+      - doc: |-
+          enter takes the in-process gate, or reports the caller's own departure.
+
+          The gate is a one-slot channel and not a sync.Mutex for one reason: a Mutex
+          has no abandonable Lock. A goroutine parked in mu.Lock() cannot be told its
+          request was cancelled, so a store shared by a handful of handlers turned one
+          slow operation into a queue nobody could leave.
+        name: enter
+        params: ctx context.Context
+        recv: f *fileStore
+        results: error
+      - doc: leave releases the in-process gate.
+        name: leave
+        recv: f *fileStore
+      - doc: |-
+          takeFlock polls for the cross-process lock until it has it or ctx ends.
+
+          The lock is the kernel's (internal/kernel/fs/flock): an exclusive flock(2)
+          on the descriptor the store holds for its whole lifetime. flock(2) belongs
+          to the open file DESCRIPTION, so that descriptor is the lock and no other
+          process can hold it at the same time. It is ADVISORY: it binds every process
+          that takes it, which is every process using this store, and binds nothing
+          else — a mandatory lock would need a mount option no portable code can
+          require.
+
+          It is polled rather than waited on, because the primitive never blocks: a
+          blocking LOCK_EX parks the thread inside a syscall no cancellation can
+          reach, so a caller whose request was abandoned would keep waiting for a lock
+          it no longer has any use for, and the goroutine would not come back until
+          some other process released it. internal/service/app/lock made the same
+          decision for the same syscall (ADR 0052), and this store made it again
+          (ADR 0073). The poll interval is the caller's (FileConfig.Poll), armed on
+          the injected clock, so a test drives contention without sleeping and
+          production waits on the real one.
+        name: takeFlock
+        params: ctx context.Context
+        recv: f *fileStore
+        results: error
+      - doc: waitPoll waits one poll interval or until ctx ends.
+        name: waitPoll
+        params: ctx context.Context
+        recv: f *fileStore
+        results: error
+      - doc: |-
+          liveLocked reads a record and drops it if it has expired. The caller MUST
+          hold the store lock.
+        name: liveLocked
+        params: id coresession.ID, now time.Time
+        recv: f *fileStore
+        results: rec record, err error
+      - doc: |-
+          removeLocked deletes a record file and flushes the directory, so the removal
+          survives a power cut — for Destroy, the difference between a revocation and
+          a revocation a crash can undo. An already-absent file is success: the caller
+          asked for it to be gone and it is. The directory is flushed on that path
+          too, because the call that DID unlink it may be the one whose flush failed,
+          and a retried Destroy must be able to make that revocation durable. The
+          caller MUST hold the store lock.
+        name: removeLocked
+        params: digest string
+        recv: f *fileStore
+        results: error
+      - doc: |-
+          unlinkLocked deletes a record file WITHOUT flushing the directory — the half
+          of removeLocked a sweep repeats per record before flushing once for the whole
+          pass. An already-absent file is success. The caller MUST hold the store lock.
+
+          The unlink goes through the held directory and removes the ENTRY: a link at
+          a record's name is unlinked, never followed to whatever it points at — which
+          is how a sweep clears a planted link it refused to read.
+        name: unlinkLocked
+        params: digest string
+        recv: f *fileStore
+        results: error
+      - doc: New mints an anonymous session and writes it.
+        name: New
+        params: ctx context.Context
+        recv: f *fileStore
+        results: session coresession.SessionValue, err error
+      - doc: |-
+          exists reports whether anything occupies a record's name. The caller MUST
+          hold the store lock.
+
+          It looks WITHOUT following, so a link at the name — dangling or not — is an
+          occupant like any other entry, and minting is refused over it rather than
+          decided by wherever the link happens to point.
+        name: exists
+        params: digest string
+        recv: f *fileStore
+        results: bool
+      - doc: Load resolves id and slides its idle window.
+        name: Load
+        params: ctx context.Context, id coresession.ID
+        recv: f *fileStore
+        results: session coresession.SessionValue, err error
+      - doc: |-
+          Close releases the lock descriptor and the held directory. It satisfies
+          io.Closer, which is the second capability reached by type assertion rather
+          than by a wider Store (ADR 0039) — and it needs no new interface at all,
+          because the stdlib already has the right one:
+
+          	if closer, ok := store.(io.Closer); ok { _ = closer.Close() }
+        name: Close
+        recv: f *fileStore
+        results: error
+      - doc: readLocked reads and opens one record. The caller MUST hold the store lock.
+        name: readLocked
+        params: digest string
+        recv: f *fileStore
+        results: rec record, err error
+      - doc: |-
+          decodeAt opens a sealed record and checks that it is the one that was asked
+          for.
+        name: decodeAt
+        params: raw []byte, digest string
+        recv: f *fileStore
+        results: rec record, err error
+      - doc: |-
+          writeLocked seals rec and publishes it atomically. The caller MUST hold the
+          store lock.
+        name: writeLocked
+        params: rec record
+        recv: f *fileStore
+        results: error
+      - doc: |-
+          flushLocked makes the directory's latest renames and unlinks durable. The
+          caller MUST hold the store lock.
+
+          POSIX does not require a rename or an unlink to survive a crash until the
+          containing directory is flushed: after a power cut the filesystem may
+          legally present the directory as it was before, which for Destroy means the
+          revoked session is back. A failure here arrives AFTER the change is visible
+          to every reader, so it is reported as StoreUnavailable and deliberately NOT
+          rolled back — undoing a rename to repair a durability problem would be a
+          second write that can fail the same way (ADR 0056 D7).
+        name: flushLocked
+        params: op string
+        recv: f *fileStore
+        results: error
+      - doc: |-
+          publish writes payload to a temporary file in the held directory and moves
+          it into place under name.
+
+          Same directory, because rename(2) is only atomic within a filesystem and a
+          temp file elsewhere would degrade to a copy. Synced before the rename,
+          because an atomic rename over unflushed data is atomic about nothing after a
+          power cut. And on EVERY failure path the temporary file is removed and the
+          previous record is left exactly as it was: a failed write must never replace
+          a good record with an empty one.
+
+          The temporary is created O_EXCL, which never follows a link — a name nobody
+          has taken is the only name it will create — and the rename replaces whatever
+          entry holds name, a planted link included, rather than following it.
+
+          The directory flush that makes the rename itself durable is the caller's
+          next step ([fileStore.flushLocked]), and it is outside this function on
+          purpose: the cleanup below is for failures BEFORE the switch, and a flush
+          that fails after it has nothing to clean up and nothing to undo.
+        name: publish
+        params: name string, payload []byte
+        recv: f *fileStore
+        results: err error
+      - doc: Save persists the session's data. It never writes the subject.
+        name: Save
+        params: ctx context.Context, session coresession.SessionValue
+        recv: f *fileStore
+        results: error
+      - doc: |-
+          Regenerate rotates the identifier, carries the data across, and binds
+          subject. See window.rotate for the lifetime rule.
+        name: Regenerate
+        params: ctx context.Context, current coresession.ID, subject string
+        recv: f *fileStore
+        results: session coresession.SessionValue, err error
+      - doc: rotateLocked performs the rotation. The caller MUST hold the store lock.
+        name: rotateLocked
+        params: current, next coresession.ID, subject string
+        recv: f *fileStore
+        results: rec record, err error
+      - doc: |-
+          withdrawLocked removes a record this operation published and is abandoning,
+          and returns the failure that caused it to be abandoned. That failure stays
+          the answer: a withdrawal that fails as well is attached to it as a field and
+          never replaces it, because the reason the rotation failed is what the caller
+          needs. The caller MUST hold the store lock.
+        name: withdrawLocked
+        params: digest string, cause error
+        recv: f *fileStore
+        results: error
+      - doc: Destroy removes the session. It is idempotent.
+        name: Destroy
+        params: ctx context.Context, id coresession.ID
+        recv: f *fileStore
+        results: error
+      - doc: |-
+          Sweep drops every expired record. It is the [coresession.Sweeper] sibling:
+          reached by type assertion, never by a wider Store.
+        name: Sweep
+        params: ctx context.Context
+        recv: f *fileStore
+        results: removed int, err error
+      - doc: |-
+          sweepEntries unlinks every expired or unreadable record and reports how many
+          it unlinked; the directory flush is the caller's, once. The caller MUST hold
+          the store lock.
+        name: sweepEntries
+        params: entries []os.DirEntry
+        recv: f *fileStore
+        results: int
+    name: fileStore
+  - doc: |-
+      memoryStore keeps every record in one map guarded by an RWMutex. It dies
+      with the process, which is the whole of its contract: it is the right store
+      for a single-process service, for a test, and for a development run, and the
+      wrong one for anything that must survive a deploy.
+
+      Records are keyed by ID.Digest, never by the identifier. That is not a
+      micro-optimisation — a Go map lookup is not constant-time, so keying on the
+      secret would make lookup latency depend on the secret. Keying on its digest
+      moves the variable-time work onto a value that is not secret, and the
+      identifier is then re-checked with crypto/subtle.
+    fields:
+      - doc: |-
+          mu guards records. RWMutex rather than Mutex because Load is the hot
+          path — but note that Load also WRITES (it slides the idle window), so it
+          takes the write lock; the read lock serves Sweep's scan.
+        name: mu
+        type: sync.RWMutex
+      - doc: records maps ID.Digest() to the stored session.
+        name: records
+        type: map[string]record
+      - doc: win is the validated deadline policy and the clock behind it.
+        name: win
+        type: window
+      - doc: |-
+          source is the entropy behind every minted identifier. Unexported and
+          absent from Config: see mint.go.
+        name: source
+        type: io.Reader
+    kind: struct
+    methods:
+      - doc: |-
+          New mints an anonymous session.
+
+          The context is unused and named so. This store never blocks, never performs
+          I/O and never crosses a process boundary, so there is nothing a cancellation
+          could interrupt; honouring ctx here would mean inventing a failure the store
+          cannot actually have. The file store, which does block, honours it.
+        name: New
+        params: _ context.Context
+        recv: m *memoryStore
+        results: session coresession.SessionValue, err error
+      - doc: Load resolves id and slides its idle window.
+        name: Load
+        params: _ context.Context, id coresession.ID
+        recv: m *memoryStore
+        results: session coresession.SessionValue, err error
+      - doc: |-
+          liveLocked resolves id to a live record, dropping it if it has expired. The
+          caller MUST hold the write lock.
+        name: liveLocked
+        params: id coresession.ID, now time.Time
+        recv: m *memoryStore
+        results: rec record, err error
+      - doc: Save persists the session's data. It never writes the subject.
+        name: Save
+        params: _ context.Context, session coresession.SessionValue
+        recv: m *memoryStore
+        results: error
+      - doc: |-
+          Regenerate rotates the identifier, carries the data across, and binds
+          subject. See rotate.go for the lifetime rule.
+        name: Regenerate
+        params: _ context.Context, current coresession.ID, subject string
+        recv: m *memoryStore
+        results: session coresession.SessionValue, err error
+      - doc: Destroy removes the session. It is idempotent.
+        name: Destroy
+        params: _ context.Context, id coresession.ID
+        recv: m *memoryStore
+        results: error
+      - doc: |-
+          Sweep drops every expired record. It is the [coresession.Sweeper] sibling:
+          reached by type assertion, never by a wider Store.
+        name: Sweep
+        params: _ context.Context
+        recv: m *memoryStore
+        results: removed int, err error
+    name: memoryStore
+  - doc: |-
+      record is what a store keeps. It is deliberately NOT a
+      core/security/session.SessionValue: the value type carries the identifier, and a
+      record must not.
+
+      # The identifier is never stored
+
+      A record holds ID.Digest — the unkeyed SHA-256 of the identifier — and never
+      the identifier itself. The digest is what the map is keyed on and what the
+      file store names its files after, so the bearer secret is not a map key, not
+      a directory entry, and not on disk. A stolen backup, a leaked directory
+      listing or a core dump of the file store therefore yields digests, which are
+      not cookies. On a successful lookup the store re-attaches the identifier the
+      CALLER presented; it never reads one back.
+
+      # There is no idle deadline here either
+
+      Only lastSeen is stored. The idle deadline is lastSeen + the store's
+      IdleTimeout, computed on read, so changing the timeout in configuration
+      takes effect on the sessions that already exist instead of leaving a
+      generation of records pinned to the old policy.
+    fields:
+      - doc: |-
+          digest is ID.Digest() — the lookup key, kept so a load can re-check it
+          in constant time rather than trusting the map or the filename alone.
+        name: digest
+        type: string
+      - doc: |-
+          subject is the authenticated principal, "" when anonymous. It is written
+          by minting and by regeneration, and by nothing else.
+        name: subject
+        type: string
+      - doc: |-
+          createdAt is when the identifier was minted; it anchors absoluteExpiry
+          and never moves for the life of this identifier.
+        name: createdAt
+        type: time.Time
+      - doc: lastSeen is when the idle window last slid.
+        name: lastSeen
+        type: time.Time
+      - doc: absoluteExpiry is the ceiling, stamped once at minting.
+        name: absoluteExpiry
+        type: time.Time
+      - doc: data is the caller's payload.
+        name: data
+        type: map[string]string
+    kind: struct
+    name: record
+  - doc: |-
+      sealer seals an identifier under one key and one purpose, both bound at
+      construction and neither readable from the sealed value.
+
+      It composes the crypto domain rather than reimplementing it: core/crypto.Seal
+      resolves the AEAD, generates the nonce inside Seal so it never reaches a
+      caller, and emits a self-describing box. This type adds the domain
+      separation and the base64url rendering, and nothing else.
+    fields:
+      - doc: "key is the AEAD key. Redacting: its String is \"<redacted>\"."
+        name: key
+        type: corecrypto.Key
+      - doc: aad is cookieAAD + the caller's purpose, computed once.
+        name: aad
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          Seal renders id as an opaque string safe to use verbatim as a cookie value.
+
+          The output is unpadded base64url over the crypto domain's self-describing box
+          ([version][alg-id][nonce][ciphertext||tag]), so every character is in RFC
+          6265's cookie-octet set and no further escaping is needed. Nothing but the
+          identifier goes inside: a sealed value carrying its own expiry would be a
+          token, and would inherit a token's revocation problem.
+        name: Seal
+        params: id coresession.ID
+        recv: s sealer
+        results: sealed string, err error
+      - doc: |-
+          Open reverses [sealer.Seal].
+
+          Every failure returns the same [coresession.SealInvalid] verdict and a zero
+          ID: a value that is not base64, a value that is base64 but not a box, a box
+          under the wrong key, a box under the right key and the wrong purpose, and a
+          box that opens to something that is not an identifier. Telling them apart
+          would let a forger binary-search a value one property at a time — the same
+          reasoning that makes crypto.Open non-oracle, carried one layer up rather than
+          undone here.
+        name: Open
+        params: sealed string
+        recv: s sealer
+        results: id coresession.ID, err error
+    name: sealer
+  - doc: |-
+      window is the validated expiry policy: an idle window, an absolute ceiling,
+      and the clock both are read against. Every store embeds one, so the two
+      backends cannot disagree about when a session dies.
+
+      # When the two deadlines contradict each other
+
+      They contradict constantly — that is the normal case, not an edge case. A
+      session created at T with a 30-minute idle window and a 12-hour ceiling has
+      an idle deadline of T+30m and an absolute deadline of T+12h, and after eleven
+      hours of steady use the idle deadline is beyond the ceiling. The rule is one
+      sentence and it has no exceptions:
+
+      	the EARLIER deadline always wins.
+
+      Mechanically that is enforced twice, on purpose. The sliding window is
+      CLAMPED to the ceiling when a record is touched (see [window.slide]), so no
+      stored session ever carries an idle deadline past its ceiling; and
+      core/security/session.NewSessionValue clamps again when it builds the value, so the rule
+      also holds for a session a third-party Store constructed. A store that
+      clamped only on write would still be correct here; the second clamp is what
+      makes the invariant true of the TYPE rather than of this package.
+    fields:
+      - doc: |-
+          idle is how long a session may go untouched. Validated positive and
+          strictly less than absolute.
+        name: idle
+        type: time.Duration
+      - doc: absolute is the ceiling from the identifier's minting instant.
+        name: absolute
+        type: time.Duration
+      - doc: clk reads time. Never waits on it — a store has nothing to wait for.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          slide returns rec touched at now: its idle deadline restarts from now,
+          clamped to the ceiling it may not cross.
+        name: slide
+        params: rec record, now time.Time
+        recv: w window
+        results: record
+      - doc: deadline reports rec's effective expiry — the earlier of the two.
+        name: deadline
+        params: rec record
+        recv: w window
+        results: time.Time
+      - doc: |-
+          live reports whether rec is still usable at now. The boundary is exclusive:
+          a session is dead AT its deadline, not one tick after it.
+        name: live
+        params: rec record, now time.Time
+        recv: w window
+        results: bool
+      - doc: mint builds a brand-new record for id at now, with the given subject.
+        name: mint
+        params: digest, subject string, now time.Time
+        recv: w window
+        results: record
+      - doc: |-
+          build converts a stored record into the immutable value the port returns,
+          re-attaching the identifier the CALLER presented — the record never held it.
+        name: build
+        params: id coresession.ID, rec record
+        recv: w window
+        results: session coresession.SessionValue, err error
+      - doc: |-
+          rotate returns rec re-identified under nextDigest and bound to subject.
+
+          # Rotating does not buy more time — unless the principal changed
+
+          A sliding session under an absolute ceiling can only be kept alive up to that
+          ceiling. If every Regenerate restarted the ceiling, a caller rotating on a
+          timer would have a session that never dies, and the absolute timeout — the
+          one deadline the whole policy rests on — would be decorative. So a rotation
+          that keeps the SAME subject keeps the same createdAt and the same
+          absoluteExpiry: a new identifier, not a new session.
+
+          A rotation that CHANGES the subject is different in kind. Anonymous becoming
+          alice, or alice becoming bob, is a privilege boundary: the thing that exists
+          afterwards is a new session in every sense that matters, and giving it the
+          remaining seconds of the anonymous browsing that preceded it would log a user
+          out moments after they signed in. So a principal change restarts both clocks,
+          and only a principal change does.
+        name: rotate
+        params: rec record, nextDigest, subject string, now time.Time
+        recv: w window
+        results: record
+    name: window
+vars:
+  - doc: |-
+      noDone is the never-ready channel a nil context stands in for. A nil
+      receive-only channel blocks forever, which is exactly what "no cancellation"
+      means in a select.
+    items:
+      - name: noDone
+        type: <-chan struct{}
+    name: noDone
+  - doc: |-
+      sealedEncoding renders and reads a sealed value: unpadded base64url, decoded
+      STRICTLY. Unless a box is a multiple of three bytes long — today's is not —
+      the last character of its encoding carries bits no byte uses; a lenient
+      decoder ignores them and several cookie strings would open to one session,
+      and the AEAD cannot object, because the bytes it authenticates are
+      identical. Built once, because Strict returns a new copy of the encoding on
+      every call.
+    items:
+      - name: sealedEncoding
+        value: base64.RawURLEncoding.Strict()
+    name: sealedEncoding
+  - doc: keep the core import referenced even when a source file is built alone.
+    items:
+      - name: _
+        value: coresession.NotFound
+    name: _

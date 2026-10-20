@@ -1,0 +1,17 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Phase.String
+    steps:
+      - switch:
+          cases:
+            - case: PhaseStart
+              do:
+                - return: "\"start\""
+            - case: PhaseStop
+              do:
+                - return: "\"stop\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": p

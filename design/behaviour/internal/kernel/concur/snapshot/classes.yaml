@@ -1,0 +1,53 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Value
+      - NewValue
+      - (*Value).Load
+      - (*Value).Store
+      - (*Value).Swap
+      - (*Value).Update
+    name: snapshot.go
+functions:
+  - name: NewValue
+    params: initial *T
+    results: "*Value[T]"
+    typeParams: T any
+imports:
+  atomic: sync/atomic
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
+  name: snapshot
+  purpose: Package snapshot provides Value[T any], a copy-on-write container for read-mostly shared state.
+types:
+  - fields:
+      - doc: |-
+          mu serialises writers so Update's read-modify-write is atomic against
+          other writers. Readers (Load) never take it.
+        name: mu
+        type: sync.Mutex
+      - doc: p holds the current value pointer; Load reads it without the lock.
+        name: p
+        type: atomic.Pointer[T]
+    kind: struct
+    methods:
+      - name: Load
+        recv: v *Value[T]
+        results: "*T"
+      - name: Store
+        params: next *T
+        recv: v *Value[T]
+      - name: Swap
+        params: next *T
+        recv: v *Value[T]
+        results: "*T"
+      - name: Update
+        params: fn func(current *T) (next *T)
+        recv: v *Value[T]
+    name: Value
+    typeParams: T any

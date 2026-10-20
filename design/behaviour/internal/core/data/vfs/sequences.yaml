@@ -1,0 +1,60 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ValidatePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidatePath
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(InvalidPath, errs.WrapParams{}, errs.String("path", name))
+              to: errs
+          when: "!fs.ValidPath(name)"
+      - return: nil
+  - of: ValidateWritePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateWritePath
+        kind: self
+      - id: ValidatePath
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: pathErr
+          init:
+            bind: pathErr
+            eval: ValidatePath(name)
+            to: ValidatePath
+          when: pathErr != nil
+      - opt:
+          do:
+            - return: errs.Wrap(InvalidPath, errs.WrapParams{}, errs.String("path", name))
+              to: errs
+          when: name == rootName
+      - return: nil
+  - of: ValidatePerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidatePerm
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(InvalidPermission, errs.WrapParams{},
+                			errs.String("perm", perm.String()))
+              to: errs
+          when: perm == 0 || perm&^fs.ModePerm != 0
+      - return: nil

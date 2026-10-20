@@ -1,0 +1,390 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - broker
+      - (*broker).Publish
+      - (*broker).Consume
+      - (*broker).DeadLetters
+      - (*broker).Messages
+      - (*broker).PutMessage
+      - (*broker).PutDeadLetter
+      - (*broker).Close
+      - BrokerOf
+      - lacks
+      - pluggedMessage
+      - sdkMessage
+      - pluggedDeadLetter
+      - pluggedStep
+    name: broker.go
+  - decls:
+      - sdkClock
+      - clockOf
+      - sdkClock.NewTimer
+      - sdkClock.NewTicker
+    name: clock.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - sealedOutbox
+      - newSealedOutbox
+      - (*sealedOutbox).Publish
+      - (*sealedOutbox).Receive
+      - (*sealedOutbox).open
+      - (*sealedOutbox).Wake
+      - (*sealedOutbox).Extend
+      - (*sealedOutbox).Reject
+      - (*sealedOutbox).DeadLetters
+      - (*sealedOutbox).Messages
+      - (*sealedOutbox).PutMessage
+      - (*sealedOutbox).PutDeadLetter
+      - (*sealedOutbox).sealMail
+      - (*sealedOutbox).lacks
+      - (*sealedOutbox).ReplayDeadLetter
+      - (*sealedOutbox).DeleteDeadLetter
+    name: outbox.go
+  - decls:
+      - Enable
+      - open
+      - openSQL
+      - policyOf
+      - notRetryable
+      - tableMigration
+      - dialectOf
+    name: queueengine.go
+  - decls:
+      - _
+    name: queueengine_compliance.go
+functions:
+  - name: BrokerOf
+    params: b plug.Broker
+    results: queue.Broker, bool
+  - doc: |-
+      lacks is the refusal of a capability the SDK's broker behind a queue does
+      not have.
+    name: lacks
+    params: capability string
+    results: error
+  - doc: pluggedMessage is the SDK's message as kit's core reads it.
+    name: pluggedMessage
+    params: m queue.Message
+    results: plug.MessageValue
+  - doc: sdkMessage is kit's message as the SDK's queue takes it.
+    name: sdkMessage
+    params: m plug.MessageValue
+    results: queue.Message
+  - doc: pluggedDeadLetter is the SDK's dead letter as kit's core reads it.
+    name: pluggedDeadLetter
+    params: d *queue.DeadLetter
+    results: plug.DeadLetterValue
+  - doc: |-
+      pluggedStep is the SDK's migration step s on the standard library's
+      executor, nil for none.
+    name: pluggedStep
+    params: s sql.Step
+    results: plug.Step
+  - doc: |-
+      clockOf is c as the SDK's queue takes it, nil — the queue's own, the
+      system's — for none.
+    name: clockOf
+    params: c plug.Clock
+    results: clock.Timed
+  - doc: |-
+      newSealedOutbox is inner, a SQL broker, behind the sealing cfg says. A
+      broker without one of the SQL broker's siblings is refused: the spool
+      would lose what it relies on.
+    name: newSealedOutbox
+    params: inner queue.Broker, cfg *plug.QueueConfig
+    results: "*sealedOutbox, error"
+  - name: Enable
+  - doc: |-
+      open opens the queue cfg places: one table of the SDK's SQL broker on its
+      database, else a file queue in its directory, else a memory queue; a
+      mailer's outbox behind its sealing, and behind a test's wrapper when it
+      set one.
+
+      IFACE-PLUGIN: kit reaches a queue through plug.Broker; this is its
+      implementation.
+    name: open
+    params: cfg plug.QueueConfig
+    results: plug.Broker, error
+  - doc: |-
+      openSQL is the SDK's SQL broker over cfg's table: on the transaction
+      manager and in the dialect of the database the store subsystem opened,
+      so that a publication joins the transaction its context carries.
+    name: openSQL
+    params: cfg *plug.QueueConfig, policy queue.Policy, clk clock.Timed
+    results: queue.Broker, error
+  - doc: policyOf is kit's policy as the SDK's queue takes it.
+    name: policyOf
+    params: p plug.QueuePolicyValue
+    results: queue.Policy
+  - doc: |-
+      notRetryable reports whether err says that no retry can help: the SDK's
+      mark, which DoNotRetry puts on it.
+    name: notRetryable
+    params: err error
+    results: bool
+  - doc: |-
+      tableMigration is the migration of a consumer's queue's table on a
+      database of the dialect named: the SDK's SQL broker's one table (ADR 0178
+      C1).
+    name: tableMigration
+    params: dialect, table string, version uint64
+    results: plug.MigrationValue, error
+  - doc: dialectOf is the SDK's dialect the engine's name says.
+    name: dialectOf
+    params: name string
+    results: sql.Dialect, error
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  io: io
+  model: github.com/kitsunium/sdk/framework/model
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  queue: github.com/kitsunium/sdk/pkg/v1/data/queue
+  sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+  storeengine: github.com/kitsunium/sdk/framework/internal/app/storeengine
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/queueengine
+  name: queueengine
+  purpose: "Package queueengine is what framework/app/queue plugs into kit: the brokers the framework's consumers' queues run on — the SDK's queue in memory, in the data directory and over SQL, a mailer's outbox on a database sealed in front of the SQL one —, the consumer that delivers them, and the migration of a queue's table (ADR 0179 §1, step 4)."
+types:
+  - doc: broker is one of the SDK's brokers as kit's core uses it.
+    fields:
+      - name: q
+        type: queue.Broker
+      - name: clock
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: |-
+          Publish puts payload in the queue, in the transaction ctx carries for its
+          database when it lives on one.
+        name: Publish
+        params: ctx context.Context, payload []byte
+        recv: b *broker
+        results: error
+      - doc: |-
+          Consume runs the SDK's consumer over the queue until ctx ends or its
+          storage fails: every handler kit runs tolerates a redelivery.
+        name: Consume
+        params: ctx context.Context, cfg plug.ConsumeConfig
+        recv: b *broker
+        results: error
+      - doc: DeadLetters are up to maxLetters of the queue's dead letters.
+        name: DeadLetters
+        params: ctx context.Context, maxLetters int
+        recv: b *broker
+        results: "[]plug.DeadLetterValue, error"
+      - doc: |-
+          Messages are up to maxMessages live messages after the identifier after,
+          as they lie.
+        name: Messages
+        params: ctx context.Context, after string, maxMessages int
+        recv: b *broker
+        results: "[]plug.LiveMessageValue, error"
+      - doc: PutMessage writes live as it lies.
+        name: PutMessage
+        params: ctx context.Context, live plug.LiveMessageValue
+        recv: b *broker
+        results: string, error
+      - doc: PutDeadLetter writes dead as it lies.
+        name: PutDeadLetter
+        params: ctx context.Context, dead plug.DeadLetterValue
+        recv: b *broker
+        results: string, error
+      - doc: |-
+          Close releases what the queue holds — a file queue's directory
+          descriptors —; nothing for a queue that holds none.
+        name: Close
+        recv: b *broker
+        results: error
+    name: broker
+  - doc: |-
+      sdkClock is the app's clock, as kit's core hands it (plug.Clock), as the
+      SDK's queue stamps and waits on it: the same instants and the same timers,
+      a test's manual clock included.
+    fields:
+      - name: ""
+        role: embedded
+        type: plug.Clock
+    kind: struct
+    methods:
+      - doc: NewTimer is the clock's timer, as the SDK's.
+        name: NewTimer
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Timer
+      - doc: NewTicker is the clock's ticker, as the SDK's.
+        name: NewTicker
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Ticker
+    name: sdkClock
+  - doc: |-
+      sealedOutbox is the broker a mailer's spool writes into and delivers from
+      when its outbox is on a database: the SQL broker, each payload sealed on
+      its way in and opened on its way out — a delivery's and a dead letter's.
+      It answers every sibling the SQL broker answers, so the spool keeps its
+      wake, its lease renewal and its dead letters.
+    fields:
+      - name: ""
+        role: embedded
+        type: queue.Broker
+      - name: waker
+        type: queue.Waker
+      - name: renew
+        type: queue.LeaseExtender
+      - name: dead
+        type: queue.DeadLetterReader
+      - name: reject
+        type: queue.Rejecter
+      - name: manager
+        type: queue.DeadLetterManager
+      - name: seal
+        type: func(ctx context.Context, payload []byte) ([]byte, error)
+      - name: unseal
+        type: func(ctx context.Context, box []byte) []byte
+      - doc: |-
+          node is the mailer's node ID, max the bound of a mail before it is
+          sealed.
+        name: node
+        type: string
+      - name: max
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          Publish seals payload — a mail as the spool writes it — and publishes the
+          box, in the transaction ctx carries when there is one. A mail larger than
+          the bound is the queue's MessageTooLarge, as the spool's own queue would
+          say it, and nothing is published.
+        name: Publish
+        params: ctx context.Context, payload []byte
+        recv: o *sealedOutbox
+        results: queue.Message, error
+      - doc: Receive leases up to maxMessages mails and opens each.
+        name: Receive
+        params: ctx context.Context, maxMessages int
+        recv: o *sealedOutbox
+        results: "[]queue.Delivery, error"
+      - doc: open is the mail a box holds, the box as it lies when it does not open.
+        name: open
+        params: ctx context.Context, payload []byte
+        recv: o *sealedOutbox
+        results: "[]byte"
+      - doc: Wake is the SQL broker's.
+        name: Wake
+        recv: o *sealedOutbox
+        results: queue.Wake
+      - doc: Extend is the SQL broker's.
+        name: Extend
+        params: ctx context.Context, receipt queue.Receipt, by time.Duration
+        recv: o *sealedOutbox
+        results: queue.Lease, error
+      - doc: Reject is the SQL broker's.
+        name: Reject
+        params: ctx context.Context, receipt queue.Receipt, cause error
+        recv: o *sealedOutbox
+        results: error
+      - doc: |-
+          DeadLetters returns up to maxLetters dead mails, oldest first, each
+          opened as a delivery is.
+        name: DeadLetters
+        params: ctx context.Context, maxLetters int
+        recv: o *sealedOutbox
+        results: "[]queue.DeadLetter, error"
+      - doc: |-
+          Messages lists up to maxMessages live mails after an identifier, each
+          opened as a delivery is (queue.MessageReader): what a data copy
+          fingerprints, the mail and not its box.
+        name: Messages
+        params: ctx context.Context, after string, maxMessages int
+        recv: o *sealedOutbox
+        results: "[]queue.LiveMessage, error"
+      - doc: |-
+          PutMessage seals a mail, as it waits in a file outbox, and writes the box
+          into the table with its count and its instants (queue.MessageWriter):
+          what a data copy moves a mailer's outbox with.
+        name: PutMessage
+        params: ctx context.Context, live queue.LiveMessage
+        recv: o *sealedOutbox
+        results: string, error
+      - doc: |-
+          PutDeadLetter seals a dead mail and writes the box into the table's dead
+          letters with its cause (queue.DeadLetterWriter).
+        name: PutDeadLetter
+        params: ctx context.Context, dead queue.DeadLetter
+        recv: o *sealedOutbox
+        results: string, error
+      - doc: sealMail seals a mail as Publish does, refusing one above the bound.
+        name: sealMail
+        params: ctx context.Context, payload []byte
+        recv: o *sealedOutbox
+        results: "[]byte, error"
+      - doc: |-
+          lacks is the refusal of a capability the broker behind the sealing does
+          not have.
+        name: lacks
+        params: capability string
+        recv: o *sealedOutbox
+        results: error
+      - doc: "ReplayDeadLetter is the SQL broker's: the box goes back as it lies."
+        name: ReplayDeadLetter
+        params: ctx context.Context, id string
+        recv: o *sealedOutbox
+        results: error
+      - doc: DeleteDeadLetter is the SQL broker's.
+        name: DeleteDeadLetter
+        params: ctx context.Context, id string
+        recv: o *sealedOutbox
+        results: error
+    name: sealedOutbox
+vars:
+  - doc: |-
+      : Asserts at compile time that a queue is what plug describes, with every
+      sibling kit's core asks for, that a mailer's sealed outbox answers every
+      sibling the SDK's SQL broker does, and that the app's clock is the SDK's.
+    grouped: true
+    items:
+      - name: _
+        type: plug.Broker
+        value: (*broker)(nil)
+      - name: _
+        type: plug.MessageMover
+        value: (*broker)(nil)
+      - name: _
+        type: io.Closer
+        value: (*broker)(nil)
+      - name: _
+        type: queue.Waker
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.LeaseExtender
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.DeadLetterReader
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.Rejecter
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.DeadLetterManager
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.MessageReader
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.MessageWriter
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.DeadLetterWriter
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: clock.Timed
+        value: sdkClock{}
+    name: _

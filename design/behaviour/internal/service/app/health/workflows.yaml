@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: failures
+    steps:
+      - bind: collected
+        eval: make([]error, 0, len(report.Results))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: result.Status == corehealth.StatusHealthy || result.Err == nil
+            - set: collected
+              value: append(collected, result.Err)
+          key: _
+          range: report.Results
+          value: result
+      - return: collected

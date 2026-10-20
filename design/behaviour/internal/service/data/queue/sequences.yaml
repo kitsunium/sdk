@@ -1,0 +1,4922 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Consume
+    participants:
+      - id: caller
+        kind: actor
+      - id: Consume
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: cfg.normalized
+        kind: internal
+      - id: group
+        kind: package
+      - id: workers.Go
+        kind: value
+      - id: workers.Wait
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: invalid
+          init:
+            bind: invalid
+            eval: cfg.validate()
+            to: cfg.validate
+          when: invalid != nil
+      - bind: resolved
+        eval: cfg.normalized()
+        to: cfg.normalized
+      - bind: workers, _
+        eval: group.NewJoined(ctx, resolved.Parallelism)
+        to: group
+      - loop:
+          do:
+            - eval: |-
+                workers.Go(func(stop context.Context) error {
+                			//: nil for a stopped worker, the broker's error for a failed one.
+                			return pump(stop, broker, resolved)
+                		})
+              to: workers.Go
+          range: resolved.Parallelism
+      - return: workers.Wait()
+        to: workers.Wait
+  - of: pump
+    participants:
+      - id: caller
+        kind: actor
+      - id: pump
+        kind: self
+      - id: broker.Receive
+        kind: value
+      - id: ignoreCancelled
+        kind: internal
+      - id: settleBatch
+        kind: internal
+    steps:
+      - bind: waker, wakes
+        eval: broker.(corequeue.Waker)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: ctx.Err() != nil
+            - var:
+                name: signal
+                type: <-chan struct{}
+            - opt:
+                do:
+                  - set: signal
+                    value: waker.Wake().Signal
+                when: wakes
+            - bind: batch, receiveErr
+              eval: broker.Receive(ctx, cfg.BatchSize)
+              to: broker.Receive
+            - opt:
+                do:
+                  - return: ignoreCancelled(ctx, receiveErr)
+                    to: ignoreCancelled
+                when: receiveErr != nil
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: nil
+                      when: "!idle(ctx, cfg, signal, idleFor(cfg.PollInterval, waker, wakes))"
+                  - continue: true
+                when: len(batch) == 0
+            - opt:
+                do:
+                  - return: ignoreCancelled(ctx, settleErr)
+                    to: ignoreCancelled
+                init:
+                  bind: settleErr
+                  eval: settleBatch(ctx, broker, cfg.Handler, batch)
+                  to: settleBatch
+                when: settleErr != nil
+          forever: true
+  - of: idleFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: idleFor
+        kind: self
+      - id: waker.Wake
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: poll
+          when: "!wakes"
+      - bind: next
+        eval: waker.Wake()
+        to: waker.Wake
+      - opt:
+          do:
+            - return: poll
+          when: "!next.Scheduled || next.In >= poll"
+      - return: max(next.In, 0)
+  - of: idle
+    participants:
+      - id: caller
+        kind: actor
+      - id: idle
+        kind: self
+      - id: cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: timer
+        eval: cfg.Clock.NewTimer(wait)
+        to: cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: "false"
+            - comm: <-signal
+              do:
+                - return: "true"
+            - comm: <-timer.C()
+              do:
+                - return: "true"
+  - of: settleBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: settleBatch
+        kind: self
+      - id: settle
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: settle(ctx, broker, handler, delivery)
+                  to: settle
+                when: err != nil
+          key: _
+          range: batch
+          value: delivery
+      - return: nil
+  - of: settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: settle
+        kind: self
+      - id: guard
+        kind: internal
+      - id: ignoreLapsed
+        kind: internal
+      - id: broker.Nack
+        kind: value
+    steps:
+      - bind: failure
+        eval: guard(ctx, handler, delivery)
+        to: guard
+      - opt:
+          do:
+            - return: ignoreLapsed(broker.Ack(ctx, delivery.Lease.Receipt))
+              to: ignoreLapsed
+          when: failure == nil
+      - bind: rejecter, rejects
+        eval: broker.(corequeue.Rejecter)
+      - opt:
+          do:
+            - return: ignoreLapsed(rejecter.Reject(ctx, delivery.Lease.Receipt, failure))
+              to: ignoreLapsed
+          when: rejects && kerrs.HasCode(failure, corequeue.CodeNotRetryable)
+      - bind: _, nackErr
+        eval: broker.Nack(ctx, delivery.Lease.Receipt, failure)
+        to: broker.Nack
+      - return: ignoreLapsed(nackErr)
+        to: ignoreLapsed
+  - of: guard
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: leave failure as the handler returned it.
+          			return
+          		}
+          		failure = kerrs.Wrap(corequeue.HandlerPanicked, kerrs.WrapParams{},
+          			kerrs.String("message", delivery.Message.ID),
+          			kerrs.String("panic", fmt.Sprint(value)), kerrs.String("stack", string(debug.Stack())))
+          	}()
+      - return: handler(ctx, delivery)
+  - of: ignoreLapsed
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: kerrs.HasCode(cause, corequeue.CodeLeaseExpired)
+      - return: cause
+  - of: ignoreCancelled
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ctx.Err() != nil
+      - return: cause
+  - of: ConsumerConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: ConsumerConfig.validate
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.ConsumerMisconfigured, kerrs.WrapParams{}, kerrs.String("field", "Handler"))
+              to: kerrs
+          when: c.Handler == nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corequeue.ConsumerMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "HandlerIsIdempotent"), kerrs.Bool("value", c.HandlerIsIdempotent))
+              to: kerrs
+          when: "!c.HandlerIsIdempotent"
+      - return: nil
+  - of: ConsumerConfig.normalized
+    steps:
+      - set: c.Parallelism
+        value: max(c.Parallelism, 1)
+      - set: c.BatchSize
+        value: max(c.BatchSize, 1)
+      - opt:
+          do:
+            - set: c.PollInterval
+              value: DefaultPollInterval
+          when: c.PollInterval <= 0
+      - opt:
+          do:
+            - set: c.Clock
+              value: clock.System
+          when: c.Clock == nil
+      - return: c
+  - of: rootWritableByAnyone
+    participants:
+      - id: caller
+        kind: actor
+      - id: rootWritableByAnyone
+        kind: self
+      - id: info.Mode
+        kind: value
+    steps:
+      - bind: mode
+        eval: info.Mode()
+        to: info.Mode
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: mode&worldWritable == 0 || mode&os.ModeSticky != 0
+      - return: "\"world-writable\", mode.String(), true"
+  - of: stateWritableByAnyone
+    participants:
+      - id: caller
+        kind: actor
+      - id: stateWritableByAnyone
+        kind: self
+      - id: info.Mode
+        kind: value
+    steps:
+      - bind: mode
+        eval: info.Mode()
+        to: info.Mode
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: mode&worldWritable == 0
+      - opt:
+          do:
+            - return: "\"sticky-world-writable\", mode.String(), true"
+          when: mode&os.ModeSticky != 0
+      - return: "\"world-writable\", mode.String(), true"
+  - of: reparsePoint
+    steps:
+      - return: "false"
+  - of: NewFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewFile
+        kind: self
+      - id: cfg.Policy.Validate
+        kind: value
+      - id: prepareQueueDir
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: svcvfs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.Policy.Validate()
+            to: cfg.Policy.Validate
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, dirErr
+          init:
+            bind: dirErr
+            eval: prepareQueueDir(cfg.Dir)
+            to: prepareQueueDir
+          when: dirErr != nil
+      - bind: root, rootErr
+        eval: os.OpenRoot(cfg.Dir)
+        to: os
+      - opt:
+          do:
+            - return: nil, backendFailed("openroot", cfg.Dir, rootErr)
+          when: rootErr != nil
+      - bind: publisher, vfsErr
+        eval: svcvfs.NewOS(cfg.Dir)
+        to: svcvfs
+      - opt:
+          do:
+            - return: nil, cmp.Or(vfsErr, root.Close())
+          when: vfsErr != nil
+      - return: |-
+          &fileBroker{
+          		root: root, publisher: publisher, wake: forDir(cfg.Dir),
+          		policy: cfg.Policy.Normalized(), clk: clockOrSystem(cfg.Clock),
+          	}, nil
+  - of: (*fileBroker).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Wake
+        kind: self
+      - id: b.wake.current
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: wakeValue
+        kind: internal
+    steps:
+      - bind: signal, due
+        eval: b.wake.current()
+        to: b.wake.current
+      - var:
+          name: at
+          type: time.Time
+      - opt:
+          do:
+            - set: at
+              to: time
+              value: time.Unix(0, due)
+          when: due != 0
+      - return: wakeValue(signal, at, b.clk.Now())
+        to: wakeValue
+  - of: (*fileBroker).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Close
+        kind: self
+      - id: b.root.Close
+        kind: value
+      - id: closer.Close
+        kind: value
+      - id: cmp
+        kind: stdlib
+      - id: backendFailed
+        kind: internal
+    steps:
+      - bind: rootErr
+        eval: b.root.Close()
+        to: b.root.Close
+      - var:
+          name: publisherErr
+          type: error
+      - opt:
+          do:
+            - set: publisherErr
+              to: closer.Close
+              value: closer.Close()
+          init:
+            bind: closer, ok
+            eval: b.publisher.(io.Closer)
+          when: ok
+      - opt:
+          do:
+            - return: backendFailed("close", "", closeErr)
+              to: backendFailed
+          init:
+            bind: closeErr
+            eval: cmp.Or(rootErr, publisherErr)
+            to: cmp
+          when: closeErr != nil
+      - return: nil
+  - of: (*fileBroker).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Publish
+        kind: self
+      - id: checkSize
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.publisher.WriteAtomic
+        kind: value
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, ctx.Err()
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, tooLarge
+          init:
+            bind: tooLarge
+            eval: checkSize(len(payload), b.policy.MaxMessageBytes)
+            to: checkSize
+          when: tooLarge != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(idEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, backendFailed("rand", "", entropyErr)
+          when: entropyErr != nil
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - bind: name
+        eval: "nameValue{At: now.UnixNano(), EnqueuedAt: now.UnixNano(), Entropy: entropy}"
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, backendFailed("publish", dirReady, writeErr)
+          init:
+            bind: writeErr
+            eval: |-
+              b.publisher.WriteAtomic(
+              		path.Join(dirReady, name.readyName()), payload, messageMode,
+              	)
+            to: b.publisher.WriteAtomic
+          when: writeErr != nil
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: "corequeue.MessageValue{ID: name.ID(), Payload: payload, EnqueuedAt: now}, nil"
+  - of: (*fileBroker).Ack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Ack
+        kind: self
+      - id: b.resolve
+        kind: internal
+      - id: b.root.Remove
+        kind: value
+      - id: b.classifyMissing
+        kind: internal
+    steps:
+      - bind: held
+        eval: string(receipt)
+      - opt:
+          do:
+            - return: resolveErr
+          init:
+            bind: _, resolveErr
+            eval: b.resolve(ctx, held)
+            to: b.resolve
+          when: resolveErr != nil
+      - opt:
+          do:
+            - return: b.classifyMissing("remove", held, removeErr)
+              to: b.classifyMissing
+          init:
+            bind: removeErr
+            eval: b.root.Remove(path.Join(dirInflight, held))
+            to: b.root.Remove
+          when: removeErr != nil
+      - return: nil
+  - of: (*fileBroker).resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).resolve
+        kind: self
+      - id: parseInflight
+        kind: internal
+      - id: b.root.Stat
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nameValue{}, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: parsed, ok
+        eval: parseInflight(receipt)
+        to: parseInflight
+      - opt:
+          do:
+            - return: |-
+                nameValue{}, kerrs.Wrap(corequeue.UnknownReceipt, kerrs.WrapParams{},
+                			kerrs.String("broker", "file"))
+          when: "!ok"
+      - opt:
+          do:
+            - return: |-
+                nameValue{}, kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{},
+                			kerrs.String("broker", "file"))
+          when: parsed.At <= b.clk.Now().UnixNano()
+      - opt:
+          do:
+            - return: nameValue{}, b.classifyMissing("stat", receipt, statErr)
+          init:
+            bind: _, statErr
+            eval: b.root.Stat(path.Join(dirInflight, receipt))
+            to: b.root.Stat
+          when: statErr != nil
+      - return: parsed, nil
+  - of: (*fileBroker).classifyMissing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).classifyMissing
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: backendFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{}, kerrs.String("broker", "file"))
+              to: kerrs
+          when: os.IsNotExist(cause)
+      - return: backendFailed(op, name, cause)
+        to: backendFailed
+  - of: backendFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: backendFailed
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code: corequeue.CodeQueueBackendFailed, Reason: "QUEUE_BACKEND_FAILED",
+          		Public:   "The queue's storage refused an operation",
+          		Private:  "service/data/queue: a filesystem call failed; the fields name the operation and the path",
+          		ExitCode: exitIOErr,
+          	}, kerrs.String("op", op), kerrs.String("path", name))
+        to: kerrs
+  - of: (*fileBroker).entriesOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).entriesOf
+        kind: self
+      - id: fs
+        kind: stdlib
+    steps:
+      - bind: read, readErr
+        eval: fs.ReadDir(b.root.FS(), state)
+        to: fs
+      - opt:
+          do:
+            - return: nil, backendFailed("readdir", state, readErr)
+          when: readErr != nil
+      - return: read, nil
+  - of: prepareQueueDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareQueueDir
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: os
+        kind: stdlib
+      - id: backendFailed
+        kind: internal
+      - id: checkQueueDir
+        kind: internal
+      - id: makeStates
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.QueueDirectoryUnusable, kerrs.WrapParams{}, kerrs.String("field", "Dir"))
+              to: kerrs
+          when: dir == ""
+      - opt:
+          do:
+            - return: backendFailed("mkdir", dir, mkErr)
+              to: backendFailed
+          init:
+            bind: mkErr
+            eval: os.MkdirAll(dir, queueDirMode)
+            to: os
+          when: mkErr != nil
+      - bind: info, statErr
+        eval: os.Stat(dir)
+        to: os
+      - opt:
+          do:
+            - return: backendFailed("stat", dir, statErr)
+              to: backendFailed
+          when: statErr != nil
+      - opt:
+          do:
+            - return: unsafe
+          init:
+            bind: unsafe
+            eval: checkQueueDir(dir, info)
+            to: checkQueueDir
+          when: unsafe != nil
+      - return: makeStates(dir)
+        to: makeStates
+  - of: checkQueueDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkQueueDir
+        kind: self
+      - id: unusableBecause
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: why, observed, unusable
+        eval: unusableBecause(dir, info)
+        to: unusableBecause
+      - opt:
+          do:
+            - return: nil
+          when: "!unusable"
+      - return: |-
+          kerrs.Wrap(corequeue.QueueDirectoryUnusable, kerrs.WrapParams{},
+          		withObserved(observed, kerrs.String("field", "Dir"), kerrs.String("value", dir), kerrs.String("why", why))...)
+        to: kerrs
+  - of: withObserved
+    steps:
+      - opt:
+          do:
+            - return: fields
+          when: observed == ""
+      - return: append(fields, kerrs.String("observed", observed))
+  - of: unusableBecause
+    participants:
+      - id: caller
+        kind: actor
+      - id: unusableBecause
+        kind: self
+      - id: indirectionOrFile
+        kind: internal
+      - id: rootWritableByAnyone
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: why, "", true
+          init:
+            bind: why, unusable
+            eval: indirectionOrFile(info)
+            op: =
+            to: indirectionOrFile
+          when: unusable
+      - return: rootWritableByAnyone(dir, info)
+        to: rootWritableByAnyone
+  - of: stateUnusableBecause
+    participants:
+      - id: caller
+        kind: actor
+      - id: stateUnusableBecause
+        kind: self
+      - id: indirectionOrFile
+        kind: internal
+      - id: stateWritableByAnyone
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: why, "", true
+          init:
+            bind: why, unusable
+            eval: indirectionOrFile(info)
+            op: =
+            to: indirectionOrFile
+          when: unusable
+      - return: stateWritableByAnyone(dir, info)
+        to: stateWritableByAnyone
+  - of: indirectionOrFile
+    steps:
+      - opt:
+          do:
+            - return: "\"symlink\", true"
+          when: info.Mode()&fs.ModeSymlink != 0 || reparsePoint(info)
+      - opt:
+          do:
+            - return: "\"not-a-directory\", true"
+          when: "!info.IsDir()"
+      - return: "\"\", false"
+  - of: makeStates
+    participants:
+      - id: caller
+        kind: actor
+      - id: makeStates
+        kind: self
+      - id: prepareState
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: stateErr
+                init:
+                  bind: stateErr
+                  eval: prepareState(dir, state)
+                  to: prepareState
+                when: stateErr != nil
+          key: _
+          range: stateDirs
+          value: state
+      - return: nil
+  - of: prepareState
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareState
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: backendFailed
+        kind: internal
+      - id: stateUnusableBecause
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: statePath
+        eval: path.Join(dir, state)
+        to: path
+      - opt:
+          do:
+            - return: backendFailed("mkdir", state, mkErr)
+              to: backendFailed
+          init:
+            bind: mkErr
+            eval: os.Mkdir(statePath, queueDirMode)
+            to: os
+          when: mkErr != nil && !os.IsExist(mkErr)
+      - bind: info, statErr
+        eval: os.Lstat(statePath)
+        to: os
+      - opt:
+          do:
+            - return: backendFailed("lstat", state, statErr)
+              to: backendFailed
+          when: statErr != nil
+      - bind: why, observed, unusable
+        eval: stateUnusableBecause(statePath, info)
+        to: stateUnusableBecause
+      - opt:
+          do:
+            - return: nil
+          when: "!unusable"
+      - return: |-
+          kerrs.Wrap(corequeue.QueueDirectoryUnusable, kerrs.WrapParams{},
+          		withObserved(observed, kerrs.String("field", "Dir"), kerrs.String("state", state),
+          			kerrs.String("value", statePath), kerrs.String("why", why))...)
+        to: kerrs
+  - of: (*fileBroker).Nack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Nack
+        kind: self
+      - id: b.resolve
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.nackDead
+        kind: internal
+      - id: b.root.Rename
+        kind: value
+      - id: b.dropStale
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - bind: held
+        eval: string(receipt)
+      - bind: name, resolveErr
+        eval: b.resolve(ctx, held)
+        to: b.resolve
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, resolveErr
+          when: resolveErr != nil
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - opt:
+          do:
+            - return: b.nackDead(name, held, cause, now.UnixNano())
+              to: b.nackDead
+          when: name.Deliveries >= b.policy.MaxDeliveries
+      - bind: requeued
+        eval: |-
+          nameValue{
+          		At: now.Add(retryDelay(b.policy, name.Deliveries)).UnixNano(), EnqueuedAt: name.EnqueuedAt,
+          		Entropy: name.Entropy, Deliveries: name.Deliveries,
+          	}
+      - bind: renameErr
+        eval: |-
+          b.root.Rename(
+          		path.Join(dirInflight, held), path.Join(dirReady, requeued.readyName()))
+        to: b.root.Rename
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, b.classifyMissing("rename", held, renameErr)
+          when: renameErr != nil
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, dropErr
+          init:
+            bind: dropErr
+            eval: b.dropStale(path.Join(dirInflight, held))
+            to: b.dropStale
+          when: dropErr != nil
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: |-
+          corequeue.NackValue{
+          		Deliveries: name.Deliveries, VisibleAt: time.Unix(0, requeued.At),
+          	}, nil
+  - of: (*fileBroker).Reject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Reject
+        kind: self
+      - id: b.resolve
+        kind: internal
+      - id: b.clk.Now().UnixNano
+        kind: value
+      - id: b.bury
+        kind: internal
+    steps:
+      - bind: held
+        eval: string(receipt)
+      - bind: name, resolveErr
+        eval: b.resolve(ctx, held)
+        to: b.resolve
+      - opt:
+          do:
+            - return: resolveErr
+          when: resolveErr != nil
+      - bind: failedAt
+        eval: b.clk.Now().UnixNano()
+        to: b.clk.Now().UnixNano
+      - return: b.bury(name, held, describeCause(cause), failedAt)
+        to: b.bury
+  - of: (*fileBroker).nackDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).nackDead
+        kind: self
+      - id: b.bury
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, buryErr
+          init:
+            bind: buryErr
+            eval: b.bury(name, receipt, describeCause(cause), now)
+            to: b.bury
+          when: buryErr != nil
+      - return: "corequeue.NackValue{Deliveries: name.Deliveries, DeadLettered: true}, nil"
+  - of: (*fileBroker).Extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Extend
+        kind: self
+      - id: b.clk.Now().Add
+        kind: value
+      - id: b.resolve
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: b.renameLease
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
+          when: by <= 0
+      - bind: deadline
+        eval: b.clk.Now().Add(by)
+        to: b.clk.Now().Add
+      - opt:
+          do:
+            - return: |-
+                corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
+          when: "!nameable(deadline)"
+      - bind: held
+        eval: string(receipt)
+      - bind: name, resolveErr
+        eval: b.resolve(ctx, held)
+        to: b.resolve
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, resolveErr
+          when: resolveErr != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(leaseEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, backendFailed("rand", "", entropyErr)
+          when: entropyErr != nil
+      - return: b.renameLease(name, held, entropy, deadline.UnixNano())
+        to: b.renameLease
+  - of: (*fileBroker).renameLease
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).renameLease
+        kind: self
+      - id: renewed.inflightName
+        kind: internal
+      - id: b.root.Rename
+        kind: value
+    steps:
+      - bind: renewed
+        eval: |-
+          nameValue{
+          		At: deadline, EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy,
+          		Deliveries: name.Deliveries, Lease: entropy,
+          	}
+      - bind: target
+        eval: renewed.inflightName()
+        to: renewed.inflightName
+      - bind: renameErr
+        eval: b.root.Rename(path.Join(dirInflight, receipt), path.Join(dirInflight, target))
+        to: b.root.Rename
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, b.classifyMissing("rename", receipt, renameErr)
+          when: renameErr != nil
+      - return: |-
+          corequeue.LeaseValue{
+          		Receipt: corequeue.ReceiptValue(target), ExpiresAt: renewed.AtTime(),
+          	}, nil
+  - of: (*fileBroker).bury
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).bury
+        kind: self
+      - id: b.root.ReadFile
+        kind: value
+      - id: b.classifyMissing
+        kind: internal
+      - id: encodeDead
+        kind: internal
+      - id: b.publisher.WriteAtomic
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: ignoreMissing
+        kind: internal
+    steps:
+      - bind: payload, readErr
+        eval: b.root.ReadFile(path.Join(dirInflight, receipt))
+        to: b.root.ReadFile
+      - opt:
+          do:
+            - return: b.classifyMissing("read", receipt, readErr)
+              to: b.classifyMissing
+          when: readErr != nil
+      - bind: record
+        eval: encodeDead(name, cause, now, payload)
+        to: encodeDead
+      - opt:
+          do:
+            - return: backendFailed("publish", dirDead, writeErr)
+              to: backendFailed
+          init:
+            bind: writeErr
+            eval: |-
+              b.publisher.WriteAtomic(
+              		path.Join(dirDead, name.deadName()), record, messageMode,
+              	)
+            to: b.publisher.WriteAtomic
+          when: writeErr != nil
+      - return: ignoreMissing("remove", receipt, b.root.Remove(path.Join(dirInflight, receipt)))
+        to: ignoreMissing
+  - of: (*fileBroker).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).DeadLetters
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.entriesOf
+        kind: internal
+      - id: b.readDead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: entries, listErr
+        eval: b.entriesOf(dirDead)
+        to: b.entriesOf
+      - opt:
+          do:
+            - return: nil, listErr
+          when: listErr != nil
+      - var:
+          name: out
+          type: "[]corequeue.DeadLetterValue"
+      - loop:
+          do:
+            - bind: record, ok, readErr
+              eval: b.readDead(entry.Name())
+              to: b.readDead
+            - opt:
+                do:
+                  - return: nil, readErr
+                when: readErr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - set: out
+              value: append(out, record)
+            - opt:
+                do:
+                  - break: true
+                when: len(out) == max
+          key: _
+          range: entries
+          value: entry
+      - return: out, nil
+  - of: (*fileBroker).readDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).readDead
+        kind: self
+      - id: parseDead
+        kind: internal
+      - id: b.root.ReadFile
+        kind: value
+      - id: decodeDead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corequeue.DeadLetterValue{}, false, nil
+          init:
+            bind: _, named
+            eval: parseDead(base)
+            to: parseDead
+          when: "!named"
+      - bind: raw, readErr
+        eval: b.root.ReadFile(path.Join(dirDead, base))
+        to: b.root.ReadFile
+      - opt:
+          do:
+            - return: corequeue.DeadLetterValue{}, false, ignoreMissing("read", base, readErr)
+          when: readErr != nil
+      - bind: decoded, sound
+        eval: decodeDead(raw)
+        to: decodeDead
+      - return: decoded, sound, nil
+  - of: encodeDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeDead
+        kind: self
+      - id: header.WriteString
+        kind: value
+    steps:
+      - var:
+          name: header
+          type: strings.Builder
+      - eval: header.WriteString(deadMagic + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("id " + name.ID() + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("enqueued " + strconv.FormatInt(name.EnqueuedAt, decimalBase) + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("failed " + strconv.FormatInt(failedAt, decimalBase) + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("deliveries " + strconv.Itoa(name.Deliveries) + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("code " + strconv.FormatUint(uint64(cause.code), decimalBase) + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("reason " + oneLine(cause.reason) + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("public " + oneLine(cause.public) + "\n")
+        to: header.WriteString
+      - eval: header.WriteString("\n")
+        to: header.WriteString
+      - bind: record
+        eval: make([]byte, 0, header.Len()+len(payload))
+      - set: record
+        value: append(record, header.String()...)
+      - return: append(record, payload...)
+  - of: decodeDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeDead
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: head, payload, split
+        eval: bytes.Cut(raw, []byte(deadHeaderSep))
+        to: bytes
+      - bind: lines
+        eval: strings.Split(string(head), "\n")
+        to: strings
+      - opt:
+          do:
+            - return: corequeue.DeadLetterValue{}, false
+          when: "!split || len(lines) == 0 || lines[0] != deadMagic"
+      - bind: fields
+        eval: map[string]string{}
+      - loop:
+          do:
+            - bind: key, value, found
+              eval: strings.Cut(line, " ")
+              to: strings
+            - opt:
+                do:
+                  - set: fields[key]
+                    value: value
+                when: found
+          key: _
+          range: lines[1:]
+          value: line
+      - return: |-
+          corequeue.DeadLetterValue{
+          		Message: corequeue.MessageValue{
+          			ID: fields["id"], Payload: payload, EnqueuedAt: nanoField(fields["enqueued"]),
+          		},
+          		FailedAt: nanoField(fields["failed"]), Deliveries: intField(fields["deliveries"]),
+          		Code: uint32(intField(fields["code"])), Reason: fields["reason"], Cause: fields["public"],
+          	}, true
+  - of: oneLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: oneLine
+        kind: self
+      - id: strings.NewReplacer("\n", " ", "\r", " ").Replace
+        kind: value
+    steps:
+      - bind: stripped
+        eval: strings.NewReplacer("\n", " ", "\r", " ").Replace(value)
+        to: strings.NewReplacer("\n", " ", "\r", " ").Replace
+      - bind: runes
+        eval: "[]rune(stripped)"
+      - opt:
+          do:
+            - return: string(runes[:publicMaxRunes])
+          when: len(runes) > publicMaxRunes
+      - return: stripped
+  - of: nanoField
+    participants:
+      - id: caller
+        kind: actor
+      - id: nanoField
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: nanos, err
+        eval: strconv.ParseInt(value, decimalBase, int64Bits)
+        to: strconv
+      - opt:
+          do:
+            - return: time.Time{}
+          when: err != nil
+      - return: time.Unix(0, nanos)
+        to: time
+  - of: intField
+    participants:
+      - id: caller
+        kind: actor
+      - id: intField
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: count, err
+        eval: strconv.Atoi(value)
+        to: strconv
+      - opt:
+          do:
+            - return: "0"
+          when: err != nil
+      - return: count
+  - of: nameValue.ID
+    participants:
+      - id: caller
+        kind: actor
+      - id: nameValue.ID
+        kind: self
+      - id: messageID
+        kind: internal
+    steps:
+      - return: messageID(n.EnqueuedAt, n.Entropy)
+        to: messageID
+  - of: messageID
+    steps:
+      - return: pad(enqueuedAt) + "-" + entropy
+  - of: parseMessageID
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseMessageID
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseNano
+        kind: internal
+    steps:
+      - bind: instant, entropy, split
+        eval: strings.Cut(id, "-")
+        to: strings
+      - opt:
+          do:
+            - return: 0, "", false
+          when: "!split || !isHexOfWidth(entropy, idEntropyBytes)"
+      - set: enqueuedAt, ok
+        to: parseNano
+        value: parseNano(instant)
+      - return: enqueuedAt, entropy, ok
+  - of: nameValue.AtTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: nameValue.AtTime
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Unix(0, n.At)
+        to: time
+  - of: nameValue.EnqueuedTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: nameValue.EnqueuedTime
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Unix(0, n.EnqueuedAt)
+        to: time
+  - of: nameValue.readyName
+    steps:
+      - return: |-
+          strings.Join([]string{
+          		pad(n.At), pad(n.EnqueuedAt), n.Entropy, padCount(n.Deliveries),
+          	}, ".") + suffixMessage
+  - of: nameValue.inflightName
+    steps:
+      - return: |-
+          strings.Join([]string{
+          		pad(n.At), pad(n.EnqueuedAt), n.Entropy, padCount(n.Deliveries), n.Lease,
+          	}, ".") + suffixMessage
+  - of: nameValue.deadName
+    steps:
+      - return: |-
+          strings.Join([]string{
+          		pad(n.EnqueuedAt), n.Entropy, padCount(n.Deliveries),
+          	}, ".") + suffixDead
+  - of: parseReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseReady
+        kind: self
+      - id: splitName
+        kind: internal
+      - id: assemble
+        kind: internal
+    steps:
+      - bind: fields, split
+        eval: splitName(base, suffixMessage, readyFields)
+        to: splitName
+      - opt:
+          do:
+            - return: nameValue{}, false
+          when: "!split"
+      - return: |-
+          assemble(fields[posAt], fields[posEnqueued], fields[posEntropy],
+          		fields[posDeliveries], "")
+        to: assemble
+  - of: parseInflight
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseInflight
+        kind: self
+      - id: splitName
+        kind: internal
+      - id: assemble
+        kind: internal
+    steps:
+      - bind: fields, split
+        eval: splitName(base, suffixMessage, inflightFields)
+        to: splitName
+      - opt:
+          do:
+            - return: nameValue{}, false
+          when: "!split || fields[posLease] == \"\""
+      - return: |-
+          assemble(fields[posAt], fields[posEnqueued], fields[posEntropy],
+          		fields[posDeliveries], fields[posLease])
+        to: assemble
+  - of: parseDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseDead
+        kind: self
+      - id: splitName
+        kind: internal
+      - id: assemble
+        kind: internal
+    steps:
+      - bind: fields, split
+        eval: splitName(base, suffixDead, deadFields)
+        to: splitName
+      - opt:
+          do:
+            - return: nameValue{}, false
+          when: "!split"
+      - return: |-
+          assemble(fields[posDeadEnqueued], fields[posDeadEnqueued], fields[posDeadEntropy],
+          		fields[posDeadDeliveries], "")
+        to: assemble
+  - of: assemble
+    participants:
+      - id: caller
+        kind: actor
+      - id: assemble
+        kind: self
+      - id: parseNano
+        kind: internal
+      - id: parseCount
+        kind: internal
+    steps:
+      - bind: atNanos, atOK
+        eval: parseNano(at)
+        to: parseNano
+      - bind: enqueuedNanos, enqueuedOK
+        eval: parseNano(enqueued)
+        to: parseNano
+      - bind: count, countOK
+        eval: parseCount(deliveries)
+        to: parseCount
+      - opt:
+          do:
+            - return: nameValue{}, false
+          when: "!atOK || !enqueuedOK || !countOK || !randomFieldsWellFormed(entropy, lease)"
+      - return: |-
+          nameValue{
+          		At: atNanos, EnqueuedAt: enqueuedNanos,
+          		Entropy: entropy, Deliveries: count, Lease: lease,
+          	}, true
+  - of: splitName
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitName
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: stem, trimmed
+        eval: strings.CutSuffix(base, suffix)
+        to: strings
+      - opt:
+          do:
+            - return: nil, false
+          when: "!trimmed"
+      - bind: cut
+        eval: strings.Split(stem, ".")
+        to: strings
+      - opt:
+          do:
+            - return: nil, false
+          when: len(cut) != want
+      - return: cut, true
+  - of: parseNano
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseNano
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(field) != nanoWidth
+      - bind: value, err
+        eval: strconv.ParseInt(field, decimalBase, int64Bits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || value < 0
+      - return: value, true
+  - of: parseCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseCount
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: count, err
+        eval: strconv.Atoi(field)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || count < 0 || padCount(count) != field
+      - return: count, true
+  - of: randomFieldsWellFormed
+    steps:
+      - return: isHexOfWidth(entropy, idEntropyBytes) && (lease == "" || isHexOfWidth(lease, leaseEntropyBytes))
+  - of: isHexOfWidth
+    steps:
+      - return: len(field) == hex.EncodedLen(n) && isHex(field)
+  - of: nameable
+    steps:
+      - return: "!at.Before(time.Unix(0, 0)) && !at.After(time.Unix(0, math.MaxInt64))"
+  - of: pad
+    participants:
+      - id: caller
+        kind: actor
+      - id: pad
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: digits
+        eval: strconv.FormatInt(nanos, decimalBase)
+        to: strconv
+      - return: strings.Repeat("0", max(0, nanoWidth-len(digits))) + digits
+  - of: padCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: padCount
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: digits
+        eval: strconv.Itoa(count)
+        to: strconv
+      - return: strings.Repeat("0", max(0, deliveryWidth-len(digits))) + digits
+  - of: (*fileBroker).Receive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Receive
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.clk.Now().UnixNano
+        kind: value
+      - id: b.reclaim
+        kind: internal
+      - id: b.leaseVisible
+        kind: internal
+      - id: b.wake.record
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: now
+        eval: b.clk.Now().UnixNano()
+        to: b.clk.Now().UnixNano
+      - bind: lapse, reclaimErr
+        eval: b.reclaim(now)
+        to: b.reclaim
+      - opt:
+          do:
+            - return: nil, reclaimErr
+          when: reclaimErr != nil
+      - bind: batch, visible, leaseErr
+        eval: b.leaseVisible(now, max)
+        to: b.leaseVisible
+      - opt:
+          do:
+            - return: nil, leaseErr
+          when: leaseErr != nil
+      - var:
+          name: leased
+          type: int64
+      - opt:
+          do:
+            - set: leased
+              value: now + int64(b.policy.VisibilityTimeout)
+          when: len(batch) > 0
+      - eval: b.wake.record(earliest(lapse, visible, leased))
+        to: b.wake.record
+      - return: batch, nil
+  - of: (*fileBroker).leaseVisible
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).leaseVisible
+        kind: self
+      - id: b.entriesOf
+        kind: internal
+      - id: parseReady
+        kind: internal
+      - id: b.takeLease
+        kind: internal
+    steps:
+      - bind: entries, listErr
+        eval: b.entriesOf(dirReady)
+        to: b.entriesOf
+      - opt:
+          do:
+            - return: nil, 0, listErr
+          when: listErr != nil
+      - var:
+          name: out
+          type: "[]corequeue.DeliveryValue"
+      - loop:
+          do:
+            - bind: name, ok
+              eval: parseReady(entry.Name())
+              to: parseReady
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: out, name.At, nil
+                when: name.At > now
+            - opt:
+                do:
+                  - return: out, now, nil
+                when: len(out) == max
+            - bind: delivery, leased, leaseErr
+              eval: b.takeLease(name, entry.Name(), now)
+              to: b.takeLease
+            - opt:
+                do:
+                  - return: nil, 0, leaseErr
+                when: leaseErr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!leased"
+            - set: out
+              value: append(out, delivery)
+          key: _
+          range: entries
+          value: entry
+      - return: out, 0, nil
+  - of: (*fileBroker).takeLease
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).takeLease
+        kind: self
+      - id: randomHex
+        kind: internal
+      - id: leasedName.inflightName
+        kind: internal
+      - id: b.root.Rename
+        kind: value
+      - id: b.dropStale
+        kind: internal
+      - id: b.readLeased
+        kind: internal
+    steps:
+      - bind: lease, entropyErr
+        eval: randomHex(leaseEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: corequeue.DeliveryValue{}, false, backendFailed("rand", "", entropyErr)
+          when: entropyErr != nil
+      - bind: leasedName
+        eval: |-
+          nameValue{
+          		At: now + int64(b.policy.VisibilityTimeout), EnqueuedAt: name.EnqueuedAt,
+          		Entropy: name.Entropy, Deliveries: name.Deliveries + 1, Lease: lease,
+          	}
+      - bind: target
+        eval: leasedName.inflightName()
+        to: leasedName.inflightName
+      - bind: renameErr
+        eval: b.root.Rename(path.Join(dirReady, base), path.Join(dirInflight, target))
+        to: b.root.Rename
+      - opt:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: corequeue.DeliveryValue{}, false, dropErr
+                      init:
+                        bind: dropErr
+                        eval: b.dropStale(path.Join(dirInflight, target))
+                        to: b.dropStale
+                      when: dropErr != nil
+                when: os.IsNotExist(renameErr)
+            - return: corequeue.DeliveryValue{}, false, ignoreMissing("rename", base, renameErr)
+          when: renameErr != nil
+      - opt:
+          do:
+            - return: corequeue.DeliveryValue{}, false, dropErr
+          init:
+            bind: dropErr
+            eval: b.dropStale(path.Join(dirReady, base))
+            to: b.dropStale
+          when: dropErr != nil
+      - return: b.readLeased(leasedName, target)
+        to: b.readLeased
+  - of: (*fileBroker).readLeased
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).readLeased
+        kind: self
+      - id: b.root.ReadFile
+        kind: value
+    steps:
+      - bind: payload, readErr
+        eval: b.root.ReadFile(path.Join(dirInflight, receipt))
+        to: b.root.ReadFile
+      - opt:
+          do:
+            - return: corequeue.DeliveryValue{}, false, backendFailed("read", receipt, readErr)
+          when: readErr != nil
+      - return: |-
+          corequeue.DeliveryValue{
+          		Message: corequeue.MessageValue{
+          			ID: name.ID(), Payload: payload, EnqueuedAt: name.EnqueuedTime(),
+          		},
+          		Lease: corequeue.LeaseValue{
+          			Receipt: corequeue.ReceiptValue(receipt), ExpiresAt: name.AtTime(),
+          		},
+          		Deliveries: name.Deliveries,
+          	}, true, nil
+  - of: (*fileBroker).reclaim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).reclaim
+        kind: self
+      - id: b.entriesOf
+        kind: internal
+      - id: parseInflight
+        kind: internal
+      - id: b.recoverOne
+        kind: internal
+    steps:
+      - bind: entries, listErr
+        eval: b.entriesOf(dirInflight)
+        to: b.entriesOf
+      - opt:
+          do:
+            - return: 0, listErr
+          when: listErr != nil
+      - loop:
+          do:
+            - bind: name, ok
+              eval: parseInflight(entry.Name())
+              to: parseInflight
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: name.At, nil
+                when: name.At > now
+            - opt:
+                do:
+                  - return: 0, recoverErr
+                init:
+                  bind: recoverErr
+                  eval: b.recoverOne(name, entry.Name(), now)
+                  to: b.recoverOne
+                when: recoverErr != nil
+          key: _
+          range: entries
+          value: entry
+      - return: 0, nil
+  - of: (*fileBroker).recoverOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).recoverOne
+        kind: self
+      - id: b.bury
+        kind: internal
+      - id: b.root.Rename
+        kind: value
+      - id: ignoreMissing
+        kind: internal
+      - id: b.dropStale
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "b.bury(name, base, causeValue{reason: reasonLeaseExpired}, now)"
+              to: b.bury
+          when: name.Deliveries >= b.policy.MaxDeliveries
+      - bind: requeued
+        eval: |-
+          nameValue{
+          		//: a lapsed lease has ALREADY waited a whole visibility timeout, so it
+          		//: is not charged the retry delay on top: a crashed consumer must not
+          		//: be punished harder than a failing one.
+          		At: now, EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy, Deliveries: name.Deliveries,
+          	}
+      - bind: renameErr
+        eval: b.root.Rename(path.Join(dirInflight, base), path.Join(dirReady, requeued.readyName()))
+        to: b.root.Rename
+      - opt:
+          do:
+            - return: ignoreMissing("rename", base, renameErr)
+              to: ignoreMissing
+          when: renameErr != nil
+      - return: b.dropStale(path.Join(dirInflight, base))
+        to: b.dropStale
+  - of: (*fileBroker).dropStale
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).dropStale
+        kind: self
+      - id: ignoreMissing
+        kind: internal
+    steps:
+      - return: ignoreMissing("remove", name, b.root.Remove(name))
+        to: ignoreMissing
+  - of: ignoreMissing
+    participants:
+      - id: caller
+        kind: actor
+      - id: ignoreMissing
+        kind: self
+      - id: backendFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cause == nil || os.IsNotExist(cause)
+      - return: backendFailed(op, name, cause)
+        to: backendFailed
+  - of: (*fileBroker).ReplayDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).ReplayDeadLetter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.deadRecordsOf
+        kind: internal
+      - id: b.readDead
+        kind: internal
+      - id: parseDead
+        kind: internal
+      - id: b.publisher.WriteAtomic
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+      - id: b.removeDead
+        kind: internal
+      - id: deadLetterNotFound
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - bind: records, listErr
+        eval: b.deadRecordsOf(id)
+        to: b.deadRecordsOf
+      - opt:
+          do:
+            - return: listErr
+          when: listErr != nil
+      - loop:
+          do:
+            - bind: record, ok, readErr
+              eval: b.readDead(base)
+              to: b.readDead
+            - opt:
+                do:
+                  - return: readErr
+                when: readErr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok || record.Message.ID != id"
+            - bind: name, _
+              eval: parseDead(base)
+              to: parseDead
+            - bind: queued
+              eval: "nameValue{At: b.clk.Now().UnixNano(), EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy}"
+            - opt:
+                do:
+                  - return: backendFailed("publish", dirReady, writeErr)
+                    to: backendFailed
+                init:
+                  bind: writeErr
+                  eval: |-
+                    b.publisher.WriteAtomic(
+                    			path.Join(dirReady, queued.readyName()), record.Message.Payload, messageMode,
+                    		)
+                  to: b.publisher.WriteAtomic
+                when: writeErr != nil
+            - eval: b.wake.fire()
+              to: b.wake.fire
+            - return: b.removeDead(records)
+              to: b.removeDead
+          key: _
+          range: records
+          value: base
+      - return: deadLetterNotFound("file", id)
+        to: deadLetterNotFound
+  - of: (*fileBroker).DeleteDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).DeleteDeadLetter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.deadRecordsOf
+        kind: internal
+      - id: deadLetterNotFound
+        kind: internal
+      - id: b.removeDead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - bind: records, listErr
+        eval: b.deadRecordsOf(id)
+        to: b.deadRecordsOf
+      - opt:
+          do:
+            - return: listErr
+          when: listErr != nil
+      - opt:
+          do:
+            - return: deadLetterNotFound("file", id)
+              to: deadLetterNotFound
+          when: len(records) == 0
+      - return: b.removeDead(records)
+        to: b.removeDead
+  - of: (*fileBroker).PutDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).PutDeadLetter
+        kind: self
+      - id: checkDeadLetter
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: encodeDead
+        kind: internal
+      - id: b.publisher.WriteAtomic
+        kind: value
+      - id: name.ID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", ctx.Err()"
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: "\"\", invalid"
+          init:
+            bind: invalid
+            eval: checkDeadLetter(dead, b.policy.MaxMessageBytes)
+            to: checkDeadLetter
+          when: invalid != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(idEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"rand\", \"\", entropyErr)"
+          when: entropyErr != nil
+      - bind: name
+        eval: "nameValue{EnqueuedAt: dead.Message.EnqueuedAt.UnixNano(), Entropy: entropy, Deliveries: dead.Deliveries}"
+      - bind: cause
+        eval: "causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code}"
+      - bind: record
+        eval: encodeDead(name, cause, dead.FailedAt.UnixNano(), dead.Message.Payload)
+        to: encodeDead
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"publish\", dirDead, writeErr)"
+          init:
+            bind: writeErr
+            eval: b.publisher.WriteAtomic(path.Join(dirDead, name.deadName()), record, messageMode)
+            to: b.publisher.WriteAtomic
+          when: writeErr != nil
+      - return: name.ID(), nil
+        to: name.ID
+  - of: (*fileBroker).Messages
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Messages
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.liveFiles
+        kind: internal
+      - id: b.root.ReadFile
+        kind: value
+      - id: ignoreMissing
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: found, listErr
+        eval: b.liveFiles(after)
+        to: b.liveFiles
+      - opt:
+          do:
+            - return: nil, listErr
+          when: listErr != nil
+      - var:
+          name: out
+          type: "[]corequeue.LiveMessageValue"
+      - loop:
+          do:
+            - bind: payload, readErr
+              eval: b.root.ReadFile(path.Join(f.dir, f.base))
+              to: b.root.ReadFile
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: nil, missing
+                      init:
+                        bind: missing
+                        eval: ignoreMissing("read", f.base, readErr)
+                        to: ignoreMissing
+                      when: missing != nil
+                  - continue: true
+                when: readErr != nil
+            - set: out
+              value: |-
+                append(out, corequeue.LiveMessageValue{
+                			VisibleAt:  f.name.AtTime(),
+                			Message:    corequeue.MessageValue{ID: f.id, Payload: payload, EnqueuedAt: f.name.EnqueuedTime()},
+                			Deliveries: f.name.Deliveries, Leased: f.leased,
+                		})
+            - opt:
+                do:
+                  - break: true
+                when: len(out) == max
+          key: _
+          range: found
+          value: f
+      - return: out, nil
+  - of: (*fileBroker).liveFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).liveFiles
+        kind: self
+      - id: b.entriesOf
+        kind: internal
+      - id: parseLive
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - var:
+          name: found
+          type: "[]liveFile"
+      - loop:
+          do:
+            - bind: entries, err
+              eval: b.entriesOf(dir)
+              to: b.entriesOf
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - loop:
+                do:
+                  - bind: name, ok
+                    eval: parseLive(dir, entry.Name())
+                    to: parseLive
+                  - opt:
+                      do:
+                        - continue: true
+                      when: "!ok || name.ID() <= after"
+                  - set: found
+                    value: "append(found, liveFile{dir: dir, base: entry.Name(), id: name.ID(), name: name, leased: dir == dirInflight})"
+                key: _
+                range: entries
+                value: entry
+          key: _
+          range: "[]string{dirReady, dirInflight}"
+          value: dir
+      - eval: |-
+          slices.SortFunc(found, func(x, y liveFile) int {
+          		//: byte order of the identifiers, as the SQL broker's ORDER BY id.
+          		return strings.Compare(x.id, y.id)
+          	})
+        to: slices
+      - return: found, nil
+  - of: parseLive
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseLive
+        kind: self
+      - id: parseInflight
+        kind: internal
+      - id: parseReady
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: parseInflight(base)
+              to: parseInflight
+          when: dir == dirInflight
+      - return: parseReady(base)
+        to: parseReady
+  - of: (*fileBroker).PutMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).PutMessage
+        kind: self
+      - id: checkLiveMessage
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: b.publisher.WriteAtomic
+        kind: value
+      - id: b.wake.fire
+        kind: internal
+      - id: name.ID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", ctx.Err()"
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: "\"\", invalid"
+          init:
+            bind: invalid
+            eval: checkLiveMessage(live, b.policy.MaxMessageBytes)
+            to: checkLiveMessage
+          when: invalid != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(idEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"rand\", \"\", entropyErr)"
+          when: entropyErr != nil
+      - bind: name
+        eval: |-
+          nameValue{
+          		At: live.VisibleAt.UnixNano(), EnqueuedAt: live.Message.EnqueuedAt.UnixNano(),
+          		Entropy: entropy, Deliveries: live.Deliveries,
+          	}
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"publish\", dirReady, writeErr)"
+          init:
+            bind: writeErr
+            eval: b.publisher.WriteAtomic(path.Join(dirReady, name.readyName()), live.Message.Payload, messageMode)
+            to: b.publisher.WriteAtomic
+          when: writeErr != nil
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: name.ID(), nil
+        to: name.ID
+  - of: (*fileBroker).deadRecordsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).deadRecordsOf
+        kind: self
+      - id: parseMessageID
+        kind: internal
+      - id: b.entriesOf
+        kind: internal
+      - id: parseDead
+        kind: internal
+    steps:
+      - bind: enqueued, entropy, minted
+        eval: parseMessageID(id)
+        to: parseMessageID
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!minted"
+      - bind: entries, listErr
+        eval: b.entriesOf(dirDead)
+        to: b.entriesOf
+      - opt:
+          do:
+            - return: nil, listErr
+          when: listErr != nil
+      - bind: prefix
+        eval: pad(enqueued) + "." + entropy + "."
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: records
+                    value: append(records, entry.Name())
+                init:
+                  bind: _, named
+                  eval: parseDead(entry.Name())
+                  to: parseDead
+                when: named && strings.HasPrefix(entry.Name(), prefix)
+          key: _
+          range: entries
+          value: entry
+      - return: records, nil
+  - of: (*fileBroker).removeDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).removeDead
+        kind: self
+      - id: ignoreMissing
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: removeErr
+                init:
+                  bind: removeErr
+                  eval: ignoreMissing("remove", base, b.root.Remove(path.Join(dirDead, base)))
+                  to: ignoreMissing
+                when: removeErr != nil
+          key: _
+          range: records
+          value: base
+      - return: nil
+  - of: NewMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMemory
+        kind: self
+      - id: cfg.Policy.Validate
+        kind: value
+      - id: randomHex
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.Policy.Validate()
+            to: cfg.Policy.Validate
+          when: invalid != nil
+      - bind: nonce, nonceErr
+        eval: randomHex(instanceNonceBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: nil, backendFailed("rand", "", nonceErr)
+          when: nonceErr != nil
+      - return: |-
+          &memoryBroker{
+          		policy:   cfg.Policy.Normalized(),
+          		clk:      clockOrSystem(cfg.Clock),
+          		nonce:    nonce,
+          		wake:     newWakeSignal(),
+          		inflight: map[corequeue.ReceiptValue]*memRecord{},
+          		//: earliest deadline first, so the reclaim scan meets the most
+          		//: overdue lease and stops at the first one still held.
+          		expiry: heap.New(func(a, b leaseExpiry) int { return a.at.Compare(b.at) }),
+          	}, nil
+  - of: (*memoryBroker).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Publish
+        kind: self
+      - id: checkSize
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.insertReady
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, ctx.Err()
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, tooLarge
+          init:
+            bind: tooLarge
+            eval: checkSize(len(payload), b.policy.MaxMessageBytes)
+            to: checkSize
+          when: tooLarge != nil
+      - lock:
+          mutex: b.mu
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - op: ++
+        set: b.seq
+      - bind: record
+        eval: |-
+          &memRecord{
+          		//: the caller's slice is copied, so a producer that reuses its buffer
+          		//: cannot rewrite a message the queue has already accepted.
+          		payload: slices.Clone(payload), id: memID(now, b.seq),
+          		enqueuedAt: now, visibleAt: now, seq: b.seq,
+          	}
+      - eval: b.insertReady(record)
+        to: b.insertReady
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: "corequeue.MessageValue{ID: record.id, Payload: payload, EnqueuedAt: now}, nil"
+  - of: (*memoryBroker).Receive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Receive
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.reclaimExpired
+        kind: internal
+      - id: b.takeEligible
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - eval: b.reclaimExpired(now)
+        to: b.reclaimExpired
+      - var:
+          name: out
+          type: "[]corequeue.DeliveryValue"
+      - loop:
+          cond: len(out) < max
+          do:
+            - bind: record
+              eval: b.takeEligible(now)
+              to: b.takeEligible
+            - opt:
+                do:
+                  - break: true
+                when: record == nil
+            - set: out
+              value: append(out, b.lease(record, now))
+      - return: out, nil
+  - of: (*memoryBroker).takeEligible
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b.ready) == 0 || b.ready[0].visibleAt.After(now)
+      - bind: head
+        eval: b.ready[0]
+      - set: b.ready
+        value: b.ready[1:]
+      - return: head
+  - of: (*memoryBroker).lease
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).lease
+        kind: self
+      - id: now.Add
+        kind: value
+      - id: b.mintReceipt
+        kind: internal
+      - id: b.expiry.Push
+        kind: value
+    steps:
+      - op: ++
+        set: b.seq
+      - op: ++
+        set: record.deliveries
+      - set: record.expiresAt
+        to: now.Add
+        value: now.Add(b.policy.VisibilityTimeout)
+      - set: record.receipt
+        to: b.mintReceipt
+        value: b.mintReceipt()
+      - set: b.inflight[record.receipt]
+        value: record
+      - eval: "b.expiry.Push(leaseExpiry{at: record.expiresAt, receipt: record.receipt})"
+        to: b.expiry.Push
+      - return: |-
+          corequeue.DeliveryValue{
+          		Message: corequeue.MessageValue{
+          			ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt,
+          		},
+          		Lease:      corequeue.LeaseValue{Receipt: record.receipt, ExpiresAt: record.expiresAt},
+          		Deliveries: record.deliveries,
+          	}
+  - of: (*memoryBroker).mintReceipt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).mintReceipt
+        kind: self
+      - id: corequeue
+        kind: package
+    steps:
+      - return: corequeue.ReceiptValue(b.nonce + "-" + strconv.FormatUint(b.seq, receiptRadix))
+        to: corequeue
+  - of: (*memoryBroker).Ack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Ack
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.resolve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: record, resolveErr
+        eval: b.resolve(receipt)
+        to: b.resolve
+      - opt:
+          do:
+            - return: resolveErr
+          when: resolveErr != nil
+      - eval: delete(b.inflight, record.receipt)
+      - return: nil
+  - of: (*memoryBroker).Nack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Nack
+        kind: self
+      - id: b.resolve
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.bury
+        kind: internal
+      - id: now.Add
+        kind: value
+      - id: b.insertReady
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, ctx.Err()
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: record, resolveErr
+        eval: b.resolve(receipt)
+        to: b.resolve
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, resolveErr
+          when: resolveErr != nil
+      - eval: delete(b.inflight, record.receipt)
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - opt:
+          do:
+            - eval: b.bury(record, now, describeCause(cause))
+              to: b.bury
+            - return: "corequeue.NackValue{Deliveries: record.deliveries, DeadLettered: true}, nil"
+          when: record.deliveries >= b.policy.MaxDeliveries
+      - set: record.visibleAt
+        to: now.Add
+        value: now.Add(retryDelay(b.policy, record.deliveries))
+      - eval: b.insertReady(record)
+        to: b.insertReady
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: "corequeue.NackValue{Deliveries: record.deliveries, VisibleAt: record.visibleAt}, nil"
+  - of: (*memoryBroker).Reject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Reject
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.resolve
+        kind: internal
+      - id: b.bury
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: record, resolveErr
+        eval: b.resolve(receipt)
+        to: b.resolve
+      - opt:
+          do:
+            - return: resolveErr
+          when: resolveErr != nil
+      - eval: delete(b.inflight, record.receipt)
+      - eval: b.bury(record, b.clk.Now(), describeCause(cause))
+        to: b.bury
+      - return: nil
+  - of: (*memoryBroker).ReplayDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).ReplayDeadLetter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.takeDead
+        kind: internal
+      - id: deadLetterNotFound
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.insertReady
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: dead, found
+        eval: b.takeDead(id)
+        to: b.takeDead
+      - opt:
+          do:
+            - return: deadLetterNotFound("memory", id)
+              to: deadLetterNotFound
+          when: "!found"
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - op: ++
+        set: b.seq
+      - eval: |-
+          b.insertReady(&memRecord{
+          		payload: dead.Message.Payload, id: dead.Message.ID,
+          		enqueuedAt: dead.Message.EnqueuedAt, visibleAt: now, seq: b.seq,
+          	})
+        to: b.insertReady
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: nil
+  - of: (*memoryBroker).DeleteDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).DeleteDeadLetter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.takeDead
+        kind: internal
+      - id: deadLetterNotFound
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - return: deadLetterNotFound("memory", id)
+              to: deadLetterNotFound
+          init:
+            bind: _, found
+            eval: b.takeDead(id)
+            to: b.takeDead
+          when: "!found"
+      - return: nil
+  - of: (*memoryBroker).PutDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).PutDeadLetter
+        kind: self
+      - id: checkDeadLetter
+        kind: internal
+      - id: memID
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", ctx.Err()"
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: "\"\", invalid"
+          init:
+            bind: invalid
+            eval: checkDeadLetter(dead, b.policy.MaxMessageBytes)
+            to: checkDeadLetter
+          when: invalid != nil
+      - lock:
+          mutex: b.mu
+      - op: ++
+        set: b.seq
+      - set: dead.Message.ID
+        to: memID
+        value: memID(dead.Message.EnqueuedAt, b.seq)
+      - set: dead.Message.Payload
+        to: slices
+        value: slices.Clone(dead.Message.Payload)
+      - set: b.dead
+        value: append(b.dead, dead)
+      - return: dead.Message.ID, nil
+  - of: (*memoryBroker).Messages
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Messages
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+          read: true
+      - var:
+          name: live
+          type: "[]corequeue.LiveMessageValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: live
+                    value: append(live, liveOf(record, record.visibleAt, false))
+                when: record.id > after
+          key: _
+          range: b.ready
+          value: record
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: live
+                    value: append(live, liveOf(record, record.expiresAt, true))
+                when: record.id > after
+          key: _
+          range: b.inflight
+          value: record
+      - eval: |-
+          slices.SortFunc(live, func(x, y corequeue.LiveMessageValue) int {
+          		//: byte order of the identifiers, as the durable brokers list them.
+          		return strings.Compare(x.Message.ID, y.Message.ID)
+          	})
+        to: slices
+      - return: live[:min(max, len(live))], nil
+  - of: liveOf
+    steps:
+      - return: |-
+          corequeue.LiveMessageValue{
+          		VisibleAt:  visibleAt,
+          		Message:    corequeue.MessageValue{ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt},
+          		Deliveries: record.deliveries, Leased: leased,
+          	}
+  - of: (*memoryBroker).PutMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).PutMessage
+        kind: self
+      - id: checkLiveMessage
+        kind: internal
+      - id: b.insertReady
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", ctx.Err()"
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: "\"\", invalid"
+          init:
+            bind: invalid
+            eval: checkLiveMessage(live, b.policy.MaxMessageBytes)
+            to: checkLiveMessage
+          when: invalid != nil
+      - lock:
+          mutex: b.mu
+      - op: ++
+        set: b.seq
+      - bind: record
+        eval: |-
+          &memRecord{
+          		payload: slices.Clone(live.Message.Payload), id: memID(live.Message.EnqueuedAt, b.seq),
+          		enqueuedAt: live.Message.EnqueuedAt, visibleAt: live.VisibleAt, seq: b.seq, deliveries: live.Deliveries,
+          	}
+      - eval: b.insertReady(record)
+        to: b.insertReady
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: record.id, nil
+  - of: (*memoryBroker).takeDead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).takeDead
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: at
+        eval: slices.IndexFunc(b.dead, func(record corequeue.DeadLetterValue) bool { return record.Message.ID == id })
+        to: slices
+      - opt:
+          do:
+            - return: corequeue.DeadLetterValue{}, false
+          when: at < 0
+      - set: dead
+        value: b.dead[at]
+      - set: b.dead
+        to: slices
+        value: slices.Delete(b.dead, at, at+1)
+      - return: dead, true
+  - of: (*memoryBroker).Extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Extend
+        kind: self
+      - id: b.clk.Now().Add
+        kind: value
+      - id: b.resolve
+        kind: internal
+      - id: b.mintReceipt
+        kind: internal
+      - id: b.expiry.Push
+        kind: value
+    steps:
+      - bind: deadline
+        eval: b.clk.Now().Add(by)
+        to: b.clk.Now().Add
+      - opt:
+          do:
+            - return: |-
+                corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
+          when: by <= 0 || !nameable(deadline)
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, ctx.Err()
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: record, resolveErr
+        eval: b.resolve(receipt)
+        to: b.resolve
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, resolveErr
+          when: resolveErr != nil
+      - eval: delete(b.inflight, record.receipt)
+      - op: ++
+        set: b.seq
+      - set: record.expiresAt
+        value: deadline
+      - set: record.receipt
+        to: b.mintReceipt
+        value: b.mintReceipt()
+      - set: b.inflight[record.receipt]
+        value: record
+      - eval: "b.expiry.Push(leaseExpiry{at: record.expiresAt, receipt: record.receipt})"
+        to: b.expiry.Push
+      - return: "corequeue.LeaseValue{Receipt: record.receipt, ExpiresAt: record.expiresAt}, nil"
+  - of: (*memoryBroker).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Wake
+        kind: self
+      - id: b.wake.current
+        kind: internal
+      - id: b.expiry.Peek
+        kind: value
+      - id: wakeValue
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+          read: true
+      - bind: signal, _
+        eval: b.wake.current()
+        to: b.wake.current
+      - var:
+          name: due
+          type: time.Time
+      - opt:
+          do:
+            - set: due
+              value: b.ready[0].visibleAt
+          when: len(b.ready) > 0
+      - opt:
+          do:
+            - set: due
+              value: lapse.at
+          init:
+            bind: lapse, held
+            eval: b.expiry.Peek()
+            to: b.expiry.Peek
+          when: held && (due.IsZero() || lapse.at.Before(due))
+      - return: wakeValue(signal, due, b.clk.Now())
+        to: wakeValue
+  - of: (*memoryBroker).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).DeadLetters
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+          read: true
+      - set: dead
+        to: slices
+        value: slices.Clone(b.dead[:min(max, len(b.dead))])
+      - loop:
+          do:
+            - set: dead[index].Message.Payload
+              to: slices
+              value: slices.Clone(dead[index].Message.Payload)
+          key: index
+          range: dead
+      - return: dead, nil
+  - of: (*memoryBroker).resolve
+    steps:
+      - bind: held, leased
+        eval: b.inflight[receipt]
+      - opt:
+          do:
+            - return: held, nil
+          when: leased && held.expiresAt.After(b.clk.Now())
+      - opt:
+          do:
+            - return: |-
+                nil, kerrs.Wrap(corequeue.UnknownReceipt, kerrs.WrapParams{},
+                			kerrs.String("broker", "memory"))
+          when: "!strings.HasPrefix(string(receipt), b.nonce+\"-\")"
+      - return: |-
+          nil, kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{},
+          		kerrs.String("broker", "memory"))
+  - of: (*memoryBroker).reclaimExpired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).reclaimExpired
+        kind: self
+      - id: b.expiry.Peek
+        kind: value
+      - id: b.expiry.Pop
+        kind: value
+      - id: b.recoverExpired
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: due, pending
+              eval: b.expiry.Peek()
+              to: b.expiry.Peek
+            - opt:
+                do:
+                  - return: ""
+                when: "!pending || due.at.After(now)"
+            - eval: b.expiry.Pop()
+              to: b.expiry.Pop
+            - bind: record, leased
+              eval: b.inflight[due.receipt]
+            - opt:
+                do:
+                  - continue: true
+                when: "!leased || !record.expiresAt.Equal(due.at)"
+            - eval: delete(b.inflight, due.receipt)
+            - eval: b.recoverExpired(record, now)
+              to: b.recoverExpired
+          forever: true
+  - of: (*memoryBroker).recoverExpired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).recoverExpired
+        kind: self
+      - id: b.bury
+        kind: internal
+      - id: b.insertReady
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: "b.bury(record, now, causeValue{reason: reasonLeaseExpired})"
+              to: b.bury
+            - return: ""
+          when: record.deliveries >= b.policy.MaxDeliveries
+      - set: record.visibleAt
+        value: now
+      - eval: b.insertReady(record)
+        to: b.insertReady
+  - of: (*memoryBroker).bury
+    steps:
+      - set: b.dead
+        value: |-
+          append(b.dead, corequeue.DeadLetterValue{
+          		Message: corequeue.MessageValue{
+          			ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt,
+          		},
+          		Deliveries: record.deliveries, FailedAt: now,
+          		Reason: cause.reason, Cause: cause.public, Code: cause.code,
+          	})
+  - of: (*memoryBroker).insertReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).insertReady
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: at
+        eval: len(b.ready)
+      - loop:
+          cond: at > 0 && laterThan(b.ready[at-1], record)
+          do:
+            - op: "--"
+              set: at
+      - set: b.ready
+        to: slices
+        value: slices.Insert(b.ready, at, record)
+  - of: laterThan
+    participants:
+      - id: caller
+        kind: actor
+      - id: laterThan
+        kind: self
+      - id: first.visibleAt.After
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: first.seq > second.seq
+          when: first.visibleAt.Equal(second.visibleAt)
+      - return: first.visibleAt.After(second.visibleAt)
+        to: first.visibleAt.After
+  - of: memID
+    steps:
+      - return: |-
+          strconv.FormatInt(now.UnixNano(), receiptRadix) + "-" +
+          		strconv.FormatUint(seq, receiptRadix)
+  - of: clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: describeCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: describeCause
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "causeValue{reason: reasonUnreported}"
+          when: cause == nil
+      - bind: described
+        eval: "causeValue{public: kerrs.PublicOf(cause)}"
+      - bind: reason, named
+        eval: kerrs.ReasonOf(cause)
+        to: kerrs
+      - opt:
+          do:
+            - set: described.reason
+              value: reason
+          when: named
+      - bind: code, coded
+        eval: kerrs.CodeOf(cause)
+        to: kerrs
+      - opt:
+          do:
+            - set: described.code
+              value: uint32(code)
+          when: coded
+      - return: described
+  - of: checkBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkBatch
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.InvalidBatchSize, kerrs.WrapParams{}, kerrs.Int("max", max))
+              to: kerrs
+          when: max <= 0
+      - return: nil
+  - of: randomHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: randomHex
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: make([]byte, n)
+      - bind: _, randErr
+        eval: rand.Read(raw)
+        to: rand
+      - opt:
+          do:
+            - return: "\"\", randErr"
+          when: randErr != nil
+      - return: hex.EncodeToString(raw), nil
+        to: hex
+  - of: checkSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkSize
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corequeue.MessageTooLarge, kerrs.WrapParams{},
+                			kerrs.Int("size", size), kerrs.Int("max", maxBytes))
+              to: kerrs
+          when: size > maxBytes
+      - return: nil
+  - of: deadLetterNotFound
+    participants:
+      - id: caller
+        kind: actor
+      - id: deadLetterNotFound
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corequeue.DeadLetterNotFound, kerrs.WrapParams{},
+          		kerrs.String("broker", broker), kerrs.String("id", id))
+        to: kerrs
+  - of: checkDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDeadLetter
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: checkSize
+        kind: internal
+    steps:
+      - bind: field
+        eval: "\"\""
+      - switch:
+          cases:
+            - case: dead.Message.ID != ""
+              do:
+                - set: field
+                  value: "\"Message.ID\""
+            - case: dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries
+              do:
+                - set: field
+                  value: "\"Deliveries\""
+            - case: "!nameable(dead.Message.EnqueuedAt)"
+              do:
+                - set: field
+                  value: "\"Message.EnqueuedAt\""
+            - case: "!nameable(dead.FailedAt)"
+              do:
+                - set: field
+                  value: "\"FailedAt\""
+            - case: "!keptAsWritten(dead.Reason)"
+              do:
+                - set: field
+                  value: "\"Reason\""
+            - case: "!keptAsWritten(dead.Cause)"
+              do:
+                - set: field
+                  value: "\"Cause\""
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.InvalidDeadLetter, kerrs.WrapParams{}, kerrs.String("field", field))
+              to: kerrs
+          when: field != ""
+      - return: checkSize(len(dead.Message.Payload), maxBytes)
+        to: checkSize
+  - of: checkLiveMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkLiveMessage
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: checkSize
+        kind: internal
+    steps:
+      - bind: field
+        eval: "\"\""
+      - switch:
+          cases:
+            - case: live.Message.ID != ""
+              do:
+                - set: field
+                  value: "\"Message.ID\""
+            - case: live.Leased
+              do:
+                - set: field
+                  value: "\"Leased\""
+            - case: live.Deliveries < 0 || live.Deliveries > maxDeadDeliveries
+              do:
+                - set: field
+                  value: "\"Deliveries\""
+            - case: "!nameable(live.Message.EnqueuedAt)"
+              do:
+                - set: field
+                  value: "\"Message.EnqueuedAt\""
+            - case: "!nameable(live.VisibleAt)"
+              do:
+                - set: field
+                  value: "\"VisibleAt\""
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.InvalidMessage, kerrs.WrapParams{}, kerrs.String("field", field))
+              to: kerrs
+          when: field != ""
+      - return: checkSize(len(live.Message.Payload), maxBytes)
+        to: checkSize
+  - of: keptAsWritten
+    steps:
+      - return: "!strings.ContainsAny(value, \"\\r\\n\") && utf8.RuneCountInString(value) <= publicMaxRunes"
+  - of: retryDelay
+    participants:
+      - id: caller
+        kind: actor
+      - id: retryDelay
+        kind: self
+      - id: "kbackoff.Value{BaseDelay: policy.RetryDelay, MaxDelay: policy.MaxRetryDelay}.Delay"
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: policy.RetryDelay
+          when: policy.MaxRetryDelay <= 0
+      - return: "kbackoff.Value{BaseDelay: policy.RetryDelay, MaxDelay: policy.MaxRetryDelay}.Delay(deliveries)"
+        to: "kbackoff.Value{BaseDelay: policy.RetryDelay, MaxDelay: policy.MaxRetryDelay}.Delay"
+  - of: NewSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSQL
+        kind: self
+      - id: cfg.validate
+        kind: internal
+    steps:
+      - bind: parts, invalid
+        eval: cfg.validate()
+        to: cfg.validate
+      - opt:
+          do:
+            - return: nil, invalid
+          when: invalid != nil
+      - return: |-
+          &sqlBroker{
+          		tm: cfg.Transactor, clk: clockOrSystem(cfg.Clock), tx: parts,
+          		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
+          		stmts: renderSQLStatements(cfg.Dialect, cfg.Table), own: sqlOwnTxOptions(cfg.Dialect),
+          		policy: cfg.Policy.Normalized(),
+          	}, nil
+  - of: sqlWakeFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlWakeFor
+        kind: self
+      - id: join.Join
+        kind: value
+      - id: newWakeSignal
+        kind: internal
+      - id: sqlWakes.forKey
+        kind: internal
+    steps:
+      - bind: pool, _
+        eval: join.Join(context.Background())
+        to: join.Join
+      - opt:
+          do:
+            - return: newWakeSignal()
+              to: newWakeSignal
+          when: pool == nil || !reflect.TypeOf(pool).Comparable()
+      - return: "sqlWakes.forKey(sqlQueueKey{pool: pool, table: table})"
+        to: sqlWakes.forKey
+  - of: sqlOwnTxOptions
+    steps:
+      - opt:
+          do:
+            - return: "coresql.TxOptionsValue{Isolation: stdsql.LevelReadCommitted}"
+          when: dialect == coresql.DialectMySQL
+      - return: coresql.TxOptionsValue{}
+  - of: (*sqlBroker).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Publish
+        kind: self
+      - id: checkSize
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: messageID
+        kind: internal
+      - id: b.run
+        kind: internal
+      - id: b.announce
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, ctx.Err()
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, tooLarge
+          init:
+            bind: tooLarge
+            eval: checkSize(len(payload), b.policy.MaxMessageBytes)
+            to: checkSize
+          when: tooLarge != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(idEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, backendFailed("rand", "", entropyErr)
+          when: entropyErr != nil
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, clockRefused(now)
+          when: "!nameable(now)"
+      - bind: id
+        eval: messageID(now.UnixNano(), entropy)
+        to: messageID
+      - bind: insertErr
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		//: one row: live, queued, visible now, never delivered. A nil or empty
+          		//: payload may be stored as NULL, which reads back as empty.
+          		if _, execErr := ex.ExecContext(txCtx, b.stmts.insert, []byte(id), now.UnixNano(), now.UnixNano(), payload); execErr != nil {
+          			//: QueueBackendFailed, the driver's text withheld.
+          			return b.failed("publish", execErr)
+          		}
+          		//: inserted.
+          		return nil
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: corequeue.MessageValue{}, insertErr
+          when: insertErr != nil
+      - eval: b.announce(ctx)
+        to: b.announce
+      - return: "corequeue.MessageValue{ID: id, Payload: payload, EnqueuedAt: now}, nil"
+  - of: (*sqlBroker).Ack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Ack
+        kind: self
+      - id: b.receiptOf
+        kind: internal
+      - id: b.clk.Now().UnixNano
+        kind: value
+      - id: b.run
+        kind: internal
+    steps:
+      - bind: held, err
+        eval: b.receiptOf(ctx, receipt)
+        to: b.receiptOf
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: now
+        eval: b.clk.Now().UnixNano()
+        to: b.clk.Now().UnixNano
+      - return: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.ack, held.args(now)...)
+          		//: gone, LeaseExpired, or QueueBackendFailed.
+          		return b.leased(result, execErr, "acknowledge")
+          	})
+        to: b.run
+  - of: (*sqlBroker).Nack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Nack
+        kind: self
+      - id: b.receiptOf
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: now.Add
+        kind: value
+      - id: b.buryHeld
+        kind: internal
+      - id: b.run
+        kind: internal
+      - id: b.announce
+        kind: internal
+    steps:
+      - bind: held, err
+        eval: b.receiptOf(ctx, receipt)
+        to: b.receiptOf
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, err
+          when: err != nil
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - bind: visibleAt
+        eval: now.Add(retryDelay(b.policy, held.deliveries))
+        to: now.Add
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, clockRefused(now)
+          when: "!nameable(now) || !nameable(visibleAt)"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: corequeue.NackValue{}, buryErr
+                init:
+                  bind: buryErr
+                  eval: b.buryHeld(ctx, held, describeCause(cause), now)
+                  to: b.buryHeld
+                when: buryErr != nil
+            - return: "corequeue.NackValue{Deliveries: held.deliveries, DeadLettered: true}, nil"
+          when: held.deliveries >= b.policy.MaxDeliveries
+      - bind: retryErr
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.retry, append([]any{visibleAt.UnixNano()}, held.args(now.UnixNano())...)...)
+          		//: queued again, LeaseExpired, or QueueBackendFailed.
+          		return b.leased(result, execErr, "hand a message back")
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: corequeue.NackValue{}, retryErr
+          when: retryErr != nil
+      - eval: b.announce(ctx)
+        to: b.announce
+      - return: "corequeue.NackValue{Deliveries: held.deliveries, VisibleAt: time.Unix(0, visibleAt.UnixNano())}, nil"
+  - of: (*sqlBroker).Extend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Extend
+        kind: self
+      - id: b.clk.Now
+        kind: value
+      - id: now.Add
+        kind: value
+      - id: b.receiptOf
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: b.run
+        kind: internal
+    steps:
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - bind: deadline
+        eval: now.Add(by)
+        to: now.Add
+      - opt:
+          do:
+            - return: |-
+                corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
+          when: by <= 0 || !nameable(deadline)
+      - bind: held, err
+        eval: b.receiptOf(ctx, receipt)
+        to: b.receiptOf
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, err
+          when: err != nil
+      - bind: renewed, entropyErr
+        eval: randomHex(sqlLeaseEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, backendFailed("rand", "", entropyErr)
+          when: entropyErr != nil
+      - bind: extendErr
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		args := append([]any{deadline.UnixNano(), []byte(renewed)}, held.args(now.UnixNano())...)
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.extend, args...)
+          		//: renewed, LeaseExpired, or QueueBackendFailed.
+          		return b.leased(result, execErr, "extend a lease")
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: corequeue.LeaseValue{}, extendErr
+          when: extendErr != nil
+      - return: |-
+          corequeue.LeaseValue{
+          		Receipt:   sqlReceiptValue(held.id, held.deliveries, renewed),
+          		ExpiresAt: time.Unix(0, deadline.UnixNano()),
+          	}, nil
+  - of: (*sqlBroker).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Wake
+        kind: self
+      - id: b.wake.current
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: wakeValue
+        kind: internal
+    steps:
+      - bind: signal, due
+        eval: b.wake.current()
+        to: b.wake.current
+      - var:
+          name: at
+          type: time.Time
+      - opt:
+          do:
+            - set: at
+              to: time
+              value: time.Unix(0, due)
+          when: due != 0
+      - return: wakeValue(signal, at, b.clk.Now())
+        to: wakeValue
+  - of: (*sqlBroker).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).run
+        kind: self
+      - id: b.tx.join.Join
+        kind: value
+      - id: b.tm.Transact
+        kind: value
+    steps:
+      - bind: ex, inTx
+        eval: b.tx.join.Join(ctx)
+        to: b.tx.join.Join
+      - opt:
+          do:
+            - return: b.tm.Transact(ctx, coresql.TxOptionsValue{}, work)
+              to: b.tm.Transact
+          when: inTx
+      - opt:
+          do:
+            - return: work(ctx, ex)
+          when: "!several"
+      - return: b.tm.Transact(ctx, b.own, work)
+        to: b.tm.Transact
+  - of: (*sqlBroker).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).announce
+        kind: self
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: b.tx.hold.Defer(ctx, b.wake.fire)
+      - eval: b.wake.fire()
+        to: b.wake.fire
+  - of: (*sqlBroker).buryHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).buryHeld
+        kind: self
+      - id: clockRefused
+        kind: internal
+      - id: b.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: clockRefused(now)
+              to: clockRefused
+          when: "!nameable(now)"
+      - return: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		args := append(causeArgs(now.UnixNano(), cause), held.args(now.UnixNano())...)
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.bury, args...)
+          		//: dead, LeaseExpired, or QueueBackendFailed.
+          		return b.leased(result, execErr, "dead-letter a message")
+          	})
+        to: b.run
+  - of: (*sqlBroker).receiptOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).receiptOf
+        kind: self
+      - id: parseSQLReceipt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sqlReceipt{}, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: held, ok
+        eval: parseSQLReceipt(string(receipt))
+        to: parseSQLReceipt
+      - opt:
+          do:
+            - return: |-
+                sqlReceipt{}, kerrs.Wrap(corequeue.UnknownReceipt, kerrs.WrapParams{},
+                			kerrs.String("broker", sqlBrokerName))
+          when: "!ok"
+      - return: held, nil
+  - of: (*sqlBroker).leased
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).leased
+        kind: self
+      - id: rowsAffected
+        kind: internal
+      - id: b.failed
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: n, err
+        eval: rowsAffected(result, execErr)
+        to: rowsAffected
+      - opt:
+          do:
+            - return: b.failed(step, err)
+              to: b.failed
+          when: err != nil
+      - opt:
+          do:
+            - return: kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{}, kerrs.String("broker", sqlBrokerName))
+              to: kerrs
+          when: n == 0
+      - return: nil
+  - of: clockRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: clockRefused
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("field", "Clock"), kerrs.String("instant", now.UTC().Format(time.RFC3339Nano)))
+        to: kerrs
+  - of: (*sqlBroker).failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).failed
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: |-
+          errors.Join(
+          		kerrs.Wrap(corequeue.QueueBackendFailed, kerrs.WrapParams{}, kerrs.String("op", step), kerrs.String("table", b.table)),
+          		svcsql.NewWithheld(cause))
+        to: errors
+  - of: sqlReceipt.args
+    steps:
+      - return: "[]any{[]byte(r.id), []byte(r.lease), int64(r.deliveries), now}"
+  - of: causeArgs
+    steps:
+      - return: "[]any{now, []byte(oneLine(cause.reason)), []byte(oneLine(cause.public)), int64(cause.code)}"
+  - of: sqlReceiptValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlReceiptValue
+        kind: self
+      - id: corequeue
+        kind: package
+    steps:
+      - return: corequeue.ReceiptValue(id + "." + padCount(deliveries) + "." + lease)
+        to: corequeue
+  - of: parseSQLReceipt
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseSQLReceipt
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseMessageID
+        kind: internal
+      - id: parseCount
+        kind: internal
+    steps:
+      - bind: fields
+        eval: strings.Split(receipt, ".")
+        to: strings
+      - opt:
+          do:
+            - return: sqlReceipt{}, false
+          when: len(fields) != sqlReceiptFields
+      - bind: _, _, minted
+        eval: parseMessageID(fields[0])
+        to: parseMessageID
+      - bind: deliveries, counted
+        eval: parseCount(fields[1])
+        to: parseCount
+      - opt:
+          do:
+            - return: sqlReceipt{}, false
+          when: "!minted || !counted || deliveries < 1 || !isHexOfWidth(fields[2], sqlLeaseEntropyBytes)"
+      - return: "sqlReceipt{id: fields[0], deliveries: deliveries, lease: fields[2]}, true"
+  - of: rowsAffected
+    participants:
+      - id: caller
+        kind: actor
+      - id: rowsAffected
+        kind: self
+      - id: result.RowsAffected
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, execErr
+          when: execErr != nil
+      - return: result.RowsAffected()
+        to: result.RowsAffected
+  - of: (*SQLConfig).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLConfig).validate
+        kind: self
+      - id: c.Policy.Validate
+        kind: value
+      - id: validateSQLTable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sqlParts{}, invalid
+          init:
+            bind: invalid
+            eval: c.Policy.Validate()
+            to: c.Policy.Validate
+          when: invalid != nil
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Transactor", "nil")
+          when: c.Transactor == nil
+      - bind: joiner, joins
+        eval: c.Transactor.(coresql.Joiner)
+      - bind: deferrer, defers
+        eval: c.Transactor.(coresql.Deferrer)
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Transactor", "not a core/data/sql Joiner and Deferrer")
+          when: "!joins || !defers"
+      - opt:
+          do:
+            - return: "sqlParts{}, sqlMisconfigured(\"Dialect\", \"not one the SDK speaks: \"+c.Dialect.String())"
+          when: "!c.Dialect.Valid()"
+      - opt:
+          do:
+            - return: sqlParts{}, tableErr
+          init:
+            bind: tableErr
+            eval: validateSQLTable(c.Table)
+            to: validateSQLTable
+          when: tableErr != nil
+      - return: "sqlParts{join: joiner, hold: deferrer}, nil"
+  - of: validateSQLTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSQLTable
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - var:
+          name: problem
+          type: string
+      - switch:
+          cases:
+            - case: "!sqlTablePattern.MatchString(table)"
+              do:
+                - set: problem
+                  value: "\"not a lower-case SQL identifier\""
+            - case: len(table) > MaxSQLTableLen
+              do:
+                - set: problem
+                  value: "\"longer than \" + strconv.Itoa(MaxSQLTableLen) + \" bytes\""
+            - case: strings.Contains(table, sqlTableSeparator)
+              do:
+                - set: problem
+                  value: "\"holds three underscores in a row\""
+            - case: strings.HasPrefix(table, sqlReservedPrefix)
+              do:
+                - set: problem
+                  value: "\"starts with sqlite_, which SQLite reserves\""
+            - default: true
+              do:
+                - return: nil
+      - return: |-
+          kerrs.Wrap(corequeue.SQLQueueMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("setting", "Table"), kerrs.String("problem", problem), kerrs.String("table", table))
+        to: kerrs
+  - of: sqlMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlMisconfigured
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corequeue.SQLQueueMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("setting", setting), kerrs.String("problem", problem))
+        to: kerrs
+  - of: (*sqlBroker).Reject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Reject
+        kind: self
+      - id: b.receiptOf
+        kind: internal
+      - id: b.buryHeld
+        kind: internal
+    steps:
+      - bind: held, err
+        eval: b.receiptOf(ctx, receipt)
+        to: b.receiptOf
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: b.buryHeld(ctx, held, describeCause(cause), b.clk.Now())
+        to: b.buryHeld
+  - of: (*sqlBroker).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).DeadLetters
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: scanDeadLetter
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: ex, _
+        eval: b.tx.join.Join(ctx)
+        to: b.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, b.stmts.deadList, int64(max))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, b.failed("read the dead letters", err)
+          when: err != nil
+      - defer: func() { err = b.finishRows(rows, "read the dead letters", err) }()
+      - loop:
+          cond: rows.Next()
+          do:
+            - bind: record, scanErr
+              eval: scanDeadLetter(rows)
+              to: scanDeadLetter
+            - opt:
+                do:
+                  - return: nil, b.failed("read the dead letters", scanErr)
+                when: scanErr != nil
+            - set: dead
+              value: append(dead, record)
+      - return: dead, nil
+  - of: scanDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanDeadLetter
+        kind: self
+      - id: rows.Scan
+        kind: internal
+    steps:
+      - leaf: a var of several names, or of no type
+        stmt: var id, reason, cause, payload []byte
+      - leaf: a var of several names, or of no type
+        stmt: var enqueuedAt, deliveries, failedAt int64
+      - var:
+          name: code
+          type: stdsql.NullInt64
+      - opt:
+          do:
+            - return: corequeue.DeadLetterValue{}, err
+          init:
+            bind: err
+            eval: rows.Scan(&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &payload)
+            to: rows.Scan
+          when: err != nil
+      - return: |-
+          corequeue.DeadLetterValue{
+          		Message: corequeue.MessageValue{
+          			ID: string(id), Payload: payload, EnqueuedAt: time.Unix(0, enqueuedAt),
+          		},
+          		FailedAt: time.Unix(0, failedAt), Deliveries: int(deliveries),
+          		Reason: string(reason), Cause: string(cause), Code: uint32(code.Int64), //nolint:gosec // written from a uint32
+          	}, nil
+  - of: (*sqlBroker).ReplayDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).ReplayDeadLetter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.clk.Now().UnixNano
+        kind: value
+      - id: b.run
+        kind: internal
+      - id: b.announce
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - bind: now
+        eval: b.clk.Now().UnixNano()
+        to: b.clk.Now().UnixNano
+      - bind: err
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.replay, now, []byte(id))
+          		//: queued, DeadLetterNotFound, or QueueBackendFailed.
+          		return b.deadLetterMoved(result, execErr, "replay a dead letter", id)
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - eval: b.announce(ctx)
+        to: b.announce
+      - return: nil
+  - of: (*sqlBroker).DeleteDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).DeleteDeadLetter
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - return: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.deleteDead, []byte(id))
+          		//: gone, DeadLetterNotFound, or QueueBackendFailed.
+          		return b.deadLetterMoved(result, execErr, "delete a dead letter", id)
+          	})
+        to: b.run
+  - of: (*sqlBroker).PutDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).PutDeadLetter
+        kind: self
+      - id: checkDeadLetter
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: dead.Message.EnqueuedAt.UnixNano
+        kind: value
+      - id: messageID
+        kind: internal
+      - id: b.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", ctx.Err()"
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: "\"\", invalid"
+          init:
+            bind: invalid
+            eval: checkDeadLetter(dead, b.policy.MaxMessageBytes)
+            to: checkDeadLetter
+          when: invalid != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(idEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"rand\", \"\", entropyErr)"
+          when: entropyErr != nil
+      - bind: enqueuedAt
+        eval: dead.Message.EnqueuedAt.UnixNano()
+        to: dead.Message.EnqueuedAt.UnixNano
+      - bind: id
+        eval: messageID(enqueuedAt, entropy)
+        to: messageID
+      - bind: err
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		_, execErr := ex.ExecContext(txCtx, b.stmts.putDead,
+          			[]byte(id), dead.FailedAt.UnixNano(), enqueuedAt, int64(dead.Deliveries), dead.Message.Payload,
+          			[]byte(dead.Reason), []byte(dead.Cause), int64(dead.Code))
+          		//: the insertion did not complete.
+          		if execErr != nil {
+          			//: QueueBackendFailed, the driver's text withheld.
+          			return b.failed("write a dead letter", execErr)
+          		}
+          		//: written.
+          		return nil
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - return: id, nil
+  - of: (*sqlBroker).Messages
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Messages
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: ex, _
+        eval: b.tx.join.Join(ctx)
+        to: b.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, b.stmts.liveList, []byte(after), int64(max))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, b.failed("read the messages", err)
+          when: err != nil
+      - defer: func() { err = b.finishRows(rows, "read the messages", err) }()
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: id
+                type: string
+            - leaf: a var of several names, or of no type
+              stmt: var lease, payload []byte
+            - leaf: a var of several names, or of no type
+              stmt: var enqueuedAt, deliveries, due int64
+            - opt:
+                do:
+                  - return: nil, b.failed("read the messages", scanErr)
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&id, &enqueuedAt, &deliveries, &due, &lease, &payload)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: live
+              value: |-
+                append(live, corequeue.LiveMessageValue{
+                			VisibleAt:  time.Unix(0, due),
+                			Message:    corequeue.MessageValue{ID: id, Payload: payload, EnqueuedAt: time.Unix(0, enqueuedAt)},
+                			Deliveries: int(deliveries), Leased: lease != nil,
+                		})
+      - return: live, nil
+  - of: (*sqlBroker).PutMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).PutMessage
+        kind: self
+      - id: checkLiveMessage
+        kind: internal
+      - id: randomHex
+        kind: internal
+      - id: live.Message.EnqueuedAt.UnixNano
+        kind: value
+      - id: messageID
+        kind: internal
+      - id: b.run
+        kind: internal
+      - id: b.announce
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", ctx.Err()"
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: "\"\", invalid"
+          init:
+            bind: invalid
+            eval: checkLiveMessage(live, b.policy.MaxMessageBytes)
+            to: checkLiveMessage
+          when: invalid != nil
+      - bind: entropy, entropyErr
+        eval: randomHex(idEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"rand\", \"\", entropyErr)"
+          when: entropyErr != nil
+      - bind: enqueuedAt
+        eval: live.Message.EnqueuedAt.UnixNano()
+        to: live.Message.EnqueuedAt.UnixNano
+      - bind: id
+        eval: messageID(enqueuedAt, entropy)
+        to: messageID
+      - bind: err
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		_, execErr := ex.ExecContext(txCtx, b.stmts.putLive,
+          			[]byte(id), live.VisibleAt.UnixNano(), enqueuedAt, int64(live.Deliveries), live.Message.Payload)
+          		//: the insertion did not complete.
+          		if execErr != nil {
+          			//: QueueBackendFailed, the driver's text withheld.
+          			return b.failed("write a message", execErr)
+          		}
+          		//: written.
+          		return nil
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - eval: b.announce(ctx)
+        to: b.announce
+      - return: id, nil
+  - of: (*sqlBroker).deadLetterMoved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).deadLetterMoved
+        kind: self
+      - id: rowsAffected
+        kind: internal
+      - id: b.failed
+        kind: internal
+      - id: deadLetterNotFound
+        kind: internal
+    steps:
+      - bind: n, err
+        eval: rowsAffected(result, execErr)
+        to: rowsAffected
+      - opt:
+          do:
+            - return: b.failed(step, err)
+              to: b.failed
+          when: err != nil
+      - opt:
+          do:
+            - return: deadLetterNotFound(sqlBrokerName, id)
+              to: deadLetterNotFound
+          when: n == 0
+      - return: nil
+  - of: renderSQLStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderSQLStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+      - id: svcsql
+        kind: package
+    steps:
+      - bind: q
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - bind: p
+        eval: dialect.Placeholder
+      - bind: causeSet
+        eval: "\"dead = 1, due = \" + p(1) + \", lease = NULL, reason = \" + p(2) + \", cause = \" + p(3) + \", code = \" + p(4)"
+      - bind: s
+        eval: |-
+          sqlStatements{
+          		insert: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+          			p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ")",
+          		probe: "SELECT MIN(due) FROM " + q + " WHERE dead = 0",
+          		//: the lease's read locks the rows it returns and skips those another
+          		//: transaction holds, so two consumers never wait on each other's
+          		//: messages and never take the same one; MySQL needs 8.0.1 for it and
+          		//: MariaDB 10.6, and an older server's refusal is QUEUE_BACKEND_FAILED.
+          		//: SQLite has no such clause and needs none: its writer holds the
+          		//: database's only write lock.
+          		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + q + " WHERE dead = 0 AND due <= " + p(1) +
+          			" ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
+          		next:       "SELECT MIN(due) FROM " + q + " WHERE dead = 0 AND due > " + p(1),
+          		ack:        "DELETE FROM " + q + " WHERE " + sqlHeldBy(dialect, 1),
+          		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
+          		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, 5),
+          		extend:     "UPDATE " + q + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
+          		deadList:   "SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
+          		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, reason = NULL, cause = NULL, code = NULL WHERE id = " + p(2) + " AND dead = 1",
+          		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",
+          		table:      q,
+          		dialect:    dialect,
+          		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code) VALUES (" +
+          			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + p(6) + ", " + p(7) + ", " + p(8) + ")",
+          		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + q + " WHERE dead = 0 AND id > " + p(1) +
+          			" ORDER BY id LIMIT " + p(2),
+          		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+          			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
+          	}
+      - opt:
+          do:
+            - set: s.lock
+              to: svcsql
+              value: svcsql.FileLockSQL(q)
+          when: dialect == coresql.DialectSQLite
+      - return: s
+  - of: sqlHeldBy
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlHeldBy
+        kind: self
+      - id: dialect.Placeholder
+        kind: value
+    steps:
+      - bind: p
+        eval:
+          closure:
+            params: n int
+            results: string
+            steps:
+              - return: dialect.Placeholder(first + n)
+                to: dialect.Placeholder
+      - return: "\"id = \" + p(0) + \" AND lease = \" + p(1) + \" AND deliveries = \" + p(2) + \" AND dead = 0 AND due > \" + p(3)"
+  - of: (*sqlStatements).leaseRows
+    steps:
+      - return: |-
+          "UPDATE " + s.table + " SET due = " + s.dialect.Placeholder(1) + ", lease = " + s.dialect.Placeholder(2) +
+          		", deliveries = deliveries + 1 WHERE dead = 0 AND id IN (" + s.list(3, n) + ")"
+  - of: (*sqlStatements).buryRows
+    steps:
+      - bind: p
+        eval: s.dialect.Placeholder
+      - return: |-
+          "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
+          		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
+  - of: (*sqlStatements).list
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).list
+        kind: self
+      - id: s.dialect.Placeholder
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: marks
+        eval: make([]string, n)
+      - loop:
+          do:
+            - set: marks[i]
+              to: s.dialect.Placeholder
+              value: s.dialect.Placeholder(first + i)
+          key: i
+          range: marks
+      - return: strings.Join(marks, ", ")
+        to: strings
+  - of: createQueueTableStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: createQueueTableStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+    steps:
+      - bind: q
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - switch:
+          cases:
+            - case: coresql.DialectMySQL
+              do:
+                - return: |-
+                    []string{"CREATE TABLE IF NOT EXISTS " + q + " (id VARBINARY(" + strconv.Itoa(sqlIDColumnLen) + ") NOT NULL," +
+                    			" dead TINYINT NOT NULL, due BIGINT NOT NULL, enqueued_at BIGINT NOT NULL, deliveries INT NOT NULL," +
+                    			" lease VARBINARY(" + strconv.Itoa(sqlLeaseColumnLen) + ") NULL, payload LONGBLOB NULL," +
+                    			" reason VARBINARY(" + strconv.Itoa(sqlCauseColumnLen) + ") NULL, cause VARBINARY(" + strconv.Itoa(sqlCauseColumnLen) + ") NULL," +
+                    			" code BIGINT NULL, PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB"}
+            - case: coresql.DialectPostgres
+              do:
+                - return: |-
+                    []string{"CREATE TABLE IF NOT EXISTS " + q + " (id bytea NOT NULL PRIMARY KEY, dead smallint NOT NULL," +
+                    			" due bigint NOT NULL, enqueued_at bigint NOT NULL, deliveries integer NOT NULL, lease bytea, payload bytea," +
+                    			" reason bytea, cause bytea, code bigint, UNIQUE (dead, due, id))"}
+            - default: true
+              do:
+                - return: |-
+                    []string{"CREATE TABLE IF NOT EXISTS " + q + " (id BLOB NOT NULL PRIMARY KEY, dead INTEGER NOT NULL," +
+                    			" due INTEGER NOT NULL, enqueued_at INTEGER NOT NULL, deliveries INTEGER NOT NULL, lease BLOB, payload BLOB," +
+                    			" reason BLOB, cause BLOB, code INTEGER, UNIQUE (dead, due, id))"}
+          "on": dialect
+  - of: dropQueueTableStatements
+    steps:
+      - return: "[]string{\"DROP TABLE IF EXISTS \" + dialect.QuoteIdent(table)}"
+  - of: SQLMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: SQLMigration
+        kind: self
+      - id: validateSQLTable
+        kind: internal
+      - id: migration.Validate
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "coresql.MigrationValue{}, sqlMisconfigured(\"Dialect\", \"not one the SDK speaks: \"+dialect.String())"
+          when: "!dialect.Valid()"
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: validateSQLTable(table)
+            to: validateSQLTable
+          when: err != nil
+      - bind: migration
+        eval: |-
+          coresql.MigrationValue{
+          		Version: version,
+          		Name:    sqlMigrationPrefix + table,
+          		Up:      svcsql.Statements(createQueueTableStatements(dialect, table)...),
+          		Down:    svcsql.Statements(dropQueueTableStatements(dialect, table)...),
+          	}
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: migration.Validate()
+            to: migration.Validate
+          when: err != nil
+      - return: migration, nil
+  - of: (*sqlBroker).Receive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Receive
+        kind: self
+      - id: checkBatch
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: clockNow.Add
+        kind: value
+      - id: clockNow.UnixNano
+        kind: value
+      - id: b.tx.join.Join
+        kind: value
+      - id: b.minDue
+        kind: internal
+      - id: b.wake.record
+        kind: internal
+      - id: b.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: checkBatch(max)
+            to: checkBatch
+          when: invalid != nil
+      - opt:
+          do:
+            - return: nil, ctx.Err()
+          when: ctx.Err() != nil
+      - bind: clockNow
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - bind: deadline
+        eval: clockNow.Add(b.policy.VisibilityTimeout)
+        to: clockNow.Add
+      - opt:
+          do:
+            - return: nil, clockRefused(clockNow)
+          when: "!nameable(clockNow) || !nameable(deadline)"
+      - bind: now
+        eval: clockNow.UnixNano()
+        to: clockNow.UnixNano
+      - bind: ex, inTx
+        eval: b.tx.join.Join(ctx)
+        to: b.tx.join.Join
+      - opt:
+          do:
+            - bind: due, probeErr
+              eval: b.minDue(ctx, ex, b.stmts.probe, "probe the queue")
+              to: b.minDue
+            - opt:
+                do:
+                  - return: nil, probeErr
+                when: probeErr != nil
+            - opt:
+                do:
+                  - eval: b.wake.record(due.Int64)
+                    to: b.wake.record
+                  - return: nil, nil
+                when: "!due.Valid || due.Int64 > now"
+          when: "!inTx"
+      - var:
+          name: next
+          type: int64
+      - bind: leaseErr
+        eval: |-
+          b.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+          		var err error
+          		batch, next, err = b.leaseDue(txCtx, ex, sqlInstants{now: now, deadline: deadline.UnixNano()}, max)
+          		//: nil, or QueueBackendFailed.
+          		return err
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: nil, leaseErr
+          when: leaseErr != nil
+      - eval: b.wake.record(next)
+        to: b.wake.record
+      - return: batch, nil
+  - of: (*sqlBroker).leaseDue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).leaseDue
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: b.leaseRound
+        kind: internal
+      - id: b.minDue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, 0, b.failed("lock the queue", lockErr)
+                init:
+                  bind: _, lockErr
+                  eval: ex.ExecContext(ctx, b.stmts.lock)
+                  to: ex.ExecContext
+                when: lockErr != nil
+          when: b.stmts.lock != ""
+      - loop:
+          cond: len(batch) < max
+          do:
+            - bind: want
+              eval: max - len(batch)
+            - bind: round, roundErr
+              eval: b.leaseRound(ctx, ex, at, want)
+              to: b.leaseRound
+            - opt:
+                do:
+                  - return: nil, 0, roundErr
+                when: roundErr != nil
+            - set: batch
+              value: append(batch, round.batch...)
+            - opt:
+                do:
+                  - break: true
+                when: round.read < want
+      - opt:
+          do:
+            - return: batch, at.now, nil
+          when: len(batch) == max
+      - bind: due, err
+        eval: b.minDue(ctx, ex, b.stmts.next, "read the next due instant", at.now)
+        to: b.minDue
+      - return: batch, earliest(due.Int64, at.deadline), err
+  - of: (*sqlBroker).leaseRound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).leaseRound
+        kind: self
+      - id: b.pickDue
+        kind: internal
+      - id: b.buryLapsed
+        kind: internal
+      - id: b.leaseRows
+        kind: internal
+    steps:
+      - bind: picked, err
+        eval: b.pickDue(ctx, ex, at.now, want)
+        to: b.pickDue
+      - opt:
+          do:
+            - return: sqlLeaseRound{}, err
+          when: err != nil
+      - leaf: a var of several names, or of no type
+        stmt: var buried, leasing []sqlPicked
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: buried
+                    value: append(buried, row)
+                  - continue: true
+                when: row.leased && row.deliveries >= int64(b.policy.MaxDeliveries)
+            - set: leasing
+              value: append(leasing, row)
+          key: _
+          range: picked
+          value: row
+      - opt:
+          do:
+            - return: sqlLeaseRound{}, buryErr
+          init:
+            bind: buryErr
+            eval: b.buryLapsed(ctx, ex, at.now, buried)
+            to: b.buryLapsed
+          when: buryErr != nil
+      - bind: batch, leaseErr
+        eval: b.leaseRows(ctx, ex, at.deadline, leasing)
+        to: b.leaseRows
+      - return: "sqlLeaseRound{batch: batch, read: len(picked)}, leaseErr"
+  - of: (*sqlBroker).pickDue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).pickDue
+        kind: self
+      - id: ex.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+    steps:
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, b.stmts.pick, now, int64(want))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, b.failed("read the due messages", err)
+          when: err != nil
+      - defer: func() { err = b.finishRows(rows, "read the due messages", err) }()
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: row
+                type: sqlPicked
+            - var:
+                name: lease
+                type: "[]byte"
+            - opt:
+                do:
+                  - return: nil, b.failed("read the due messages", scanErr)
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&row.id, &row.enqueuedAt, &row.deliveries, &lease, &row.payload)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: row.leased
+              value: lease != nil
+            - set: picked
+              value: append(picked, row)
+      - return: picked, nil
+  - of: (*sqlBroker).buryLapsed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).buryLapsed
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: b.failed
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: args
+              eval: "append(causeArgs(now, causeValue{reason: reasonLeaseExpired}), idArgs(chunk)...)"
+            - opt:
+                do:
+                  - return: b.failed("dead-letter lapsed leases", err)
+                    to: b.failed
+                init:
+                  bind: _, err
+                  eval: ex.ExecContext(ctx, b.stmts.buryRows(len(chunk)), args...)
+                  to: ex.ExecContext
+                when: err != nil
+          key: chunk
+          range: slices.Chunk(rows, sqlRowsPerStatement)
+      - return: nil
+  - of: (*sqlBroker).leaseRows
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).leaseRows
+        kind: self
+      - id: randomHex
+        kind: internal
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(rows) == 0
+      - bind: lease, entropyErr
+        eval: randomHex(sqlLeaseEntropyBytes)
+        to: randomHex
+      - opt:
+          do:
+            - return: nil, backendFailed("rand", "", entropyErr)
+          when: entropyErr != nil
+      - loop:
+          do:
+            - bind: args
+              eval: append([]any{deadline, []byte(lease)}, idArgs(chunk)...)
+            - opt:
+                do:
+                  - return: nil, b.failed("lease the due messages", execErr)
+                init:
+                  bind: _, execErr
+                  eval: ex.ExecContext(ctx, b.stmts.leaseRows(len(chunk)), args...)
+                  to: ex.ExecContext
+                when: execErr != nil
+          key: chunk
+          range: slices.Chunk(rows, sqlRowsPerStatement)
+      - set: batch
+        value: make([]corequeue.DeliveryValue, 0, len(rows))
+      - loop:
+          do:
+            - bind: deliveries
+              eval: int(row.deliveries) + 1
+            - set: batch
+              value: |-
+                append(batch, corequeue.DeliveryValue{
+                			Message: corequeue.MessageValue{ID: row.id, Payload: row.payload, EnqueuedAt: time.Unix(0, row.enqueuedAt)},
+                			Lease: corequeue.LeaseValue{
+                				Receipt: sqlReceiptValue(row.id, deliveries, lease), ExpiresAt: time.Unix(0, deadline),
+                			},
+                			Deliveries: deliveries,
+                		})
+          key: _
+          range: rows
+          value: row
+      - return: batch, nil
+  - of: (*sqlBroker).minDue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).minDue
+        kind: self
+      - id: ex.QueryRowContext(ctx, query, args...).Scan
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: stdsql.NullInt64{}, b.failed(step, scanErr)
+          init:
+            bind: scanErr
+            eval: ex.QueryRowContext(ctx, query, args...).Scan(&due)
+            to: ex.QueryRowContext(ctx, query, args...).Scan
+          when: scanErr != nil
+      - return: due, nil
+  - of: (*sqlBroker).finishRows
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).finishRows
+        kind: self
+      - id: errors
+        kind: stdlib
+      - id: b.failed
+        kind: internal
+    steps:
+      - bind: iterErr, closeErr
+        eval: rows.Err(), rows.Close()
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: b.failed(step, cause)
+              to: b.failed
+          init:
+            bind: cause
+            eval: errors.Join(iterErr, closeErr)
+            to: errors
+          when: cause != nil
+      - return: nil
+  - of: idArgs
+    steps:
+      - bind: args
+        eval: make([]any, len(rows))
+      - loop:
+          do:
+            - set: args[i]
+              value: "[]byte(row.id)"
+          key: i
+          range: rows
+          value: row
+      - return: args
+  - of: newWakeSignal
+    steps:
+      - return: "&wakeSignal{ch: make(chan struct{})}"
+  - of: (*wakeSignal).current
+    steps:
+      - lock:
+          mutex: w.mu
+      - return: w.ch, w.due
+  - of: (*wakeSignal).fire
+    steps:
+      - lock:
+          mutex: w.mu
+      - bind: fired
+        eval: w.ch
+      - set: w.ch
+        value: make(chan struct{})
+      - eval: close(fired)
+  - of: (*wakeSignal).record
+    steps:
+      - lock:
+          mutex: w.mu
+      - set: w.due
+        value: due
+  - of: wakeValue
+    steps:
+      - opt:
+          do:
+            - return: "corequeue.WakeValue{Signal: signal}"
+          when: due.IsZero()
+      - return: "corequeue.WakeValue{Signal: signal, In: due.Sub(now), Scheduled: true}"
+  - of: newWakeTable
+    steps:
+      - return: "&wakeTable[K]{byQueue: make(map[K]weak.Pointer[wakeSignal])}"
+  - of: forDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: forDir
+        kind: self
+      - id: fileWakes.forKey
+        kind: internal
+    steps:
+      - return: fileWakes.forKey(canonicalDir(dir))
+        to: fileWakes.forKey
+  - of: (*wakeTable).forKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wakeTable).forKey
+        kind: self
+      - id: held.Value
+        kind: value
+      - id: newWakeSignal
+        kind: internal
+      - id: weak
+        kind: stdlib
+      - id: runtime
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: d.mu
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: signal
+                init:
+                  bind: signal
+                  eval: held.Value()
+                  to: held.Value
+                when: signal != nil
+          init:
+            bind: held, found
+            eval: d.byQueue[key]
+          when: found
+      - bind: signal
+        eval: newWakeSignal()
+        to: newWakeSignal
+      - set: d.byQueue[key]
+        to: weak
+        value: weak.Make(signal)
+      - eval: runtime.AddCleanup(signal, d.drop, key)
+        to: runtime
+      - return: signal
+  - of: (*wakeTable).drop
+    steps:
+      - lock:
+          mutex: d.mu
+      - opt:
+          do:
+            - eval: delete(d.byQueue, key)
+          init:
+            bind: held, found
+            eval: d.byQueue[key]
+          when: found && held.Value() == nil
+  - of: canonicalDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: canonicalDir
+        kind: self
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: resolved, absErr
+        eval: filepath.Abs(dir)
+        to: filepath
+      - opt:
+          do:
+            - return: filepath.Clean(dir)
+              to: filepath
+          when: absErr != nil
+      - opt:
+          do:
+            - return: linked
+          init:
+            bind: linked, evalErr
+            eval: filepath.EvalSymlinks(resolved)
+            to: filepath
+          when: evalErr == nil
+      - return: resolved

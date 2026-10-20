@@ -1,0 +1,2886 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: openDatabase
+    participants:
+      - id: caller
+        kind: actor
+      - id: openDatabase
+        kind: self
+      - id: dialectOf
+        kind: internal
+      - id: sql
+        kind: package
+    steps:
+      - bind: dialect, err
+        eval: dialectOf(cfg.Dialect)
+        to: dialectOf
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: scfg
+        eval: |-
+          sql.Config{
+          		DB: cfg.DB, Dialect: dialect,
+          		Pool: sql.PoolConfig{MaxOpen: cfg.MaxOpen, MaxIdle: cfg.MaxIdle, MaxLifetime: cfg.MaxLifetime, MaxIdleTime: cfg.MaxIdleTime},
+          		// A database's budgets are the network's, in wall time: a test's
+          		// manual clock would hold a check or a migration lock forever.
+          		Clock:        clock.System,
+          		CheckTimeout: cfg.CheckTimeout,
+          	}
+      - bind: checker, err
+        eval: sql.NewChecker(scfg)
+        to: sql
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - bind: tm, err
+        eval: sql.NewTransactor(scfg)
+        to: sql
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: "&database{cfg: scfg, tm: tm, checker: checker, dialect: dialect}, nil"
+  - of: dialectOf
+    steps:
+      - switch:
+          cases:
+            - case: model.EnginePostgres
+              do:
+                - return: sql.DialectPostgres, nil
+            - case: model.EngineMySQL
+              do:
+                - return: sql.DialectMySQL, nil
+            - case: model.EngineSQLite
+              do:
+                - return: sql.DialectSQLite, nil
+          "on": name
+      - return: 0, errs.Wrap(sql.UnknownDialect, errs.WrapParams{}, errs.String("dialect", name))
+  - of: (*database).Transact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*database).Transact
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: |-
+          said(d.tm.Transact(ctx, sql.TxOptions{}, func(ctx context.Context, _ sql.Executor) error {
+          		return fn(ctx)
+          	}))
+        to: said
+  - of: (*database).InTransaction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*database).InTransaction
+        kind: self
+      - id: j.Join
+        kind: value
+    steps:
+      - bind: j, ok
+        eval: d.tm.(sql.Joiner)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: _, in
+        eval: j.Join(ctx)
+        to: j.Join
+      - return: in
+  - of: (*database).Defer
+    steps:
+      - bind: df, ok
+        eval: d.tm.(sql.Deferrer)
+      - return: ok && df.Defer(ctx, fn)
+  - of: (*database).OnAbort
+    steps:
+      - bind: ab, ok
+        eval: d.tm.(sql.Aborter)
+      - return: ok && ab.OnAbort(ctx, fn)
+  - of: (*database).Check
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*database).Check
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(d.checker.Check(ctx))
+        to: said
+  - of: (*database).Migrator
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*database).Migrator
+        kind: self
+      - id: sql
+        kind: package
+    steps:
+      - bind: m, err
+        eval: "sql.NewMigrator(d.cfg, sql.MigrateConfig{Migrations: sqlMigrations(ms), VersionTable: table})"
+        to: sql
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: "migrator{m: m}, nil"
+  - of: SQLOf
+    steps:
+      - bind: d, ok
+        eval: db.(*database)
+      - opt:
+          do:
+            - return: nil, 0, false
+          when: "!ok"
+      - return: d.tm, d.dialect, true
+  - of: migrator.Plan
+    participants:
+      - id: caller
+        kind: actor
+      - id: migrator.Plan
+        kind: self
+      - id: m.m.Plan
+        kind: value
+      - id: pluggedMigrations
+        kind: internal
+    steps:
+      - bind: pending, err
+        eval: m.m.Plan(ctx)
+        to: m.m.Plan
+      - return: pluggedMigrations(pending), said(err)
+        to: pluggedMigrations
+  - of: migrator.Up
+    participants:
+      - id: caller
+        kind: actor
+      - id: migrator.Up
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(m.m.Up(ctx))
+        to: said
+  - of: migrator.Down
+    participants:
+      - id: caller
+        kind: actor
+      - id: migrator.Down
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(m.m.Down(ctx, version))
+        to: said
+  - of: sqlMigrations
+    steps:
+      - bind: out
+        eval: make([]sql.Migration, len(ms))
+      - loop:
+          do:
+            - set: out[i]
+              value: "sql.Migration{Version: m.Version, Name: m.Name, Up: sqlStep(m.Up), Down: sqlStep(m.Down)}"
+          key: i
+          range: ms
+          value: m
+      - return: out
+  - of: sqlStep
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s == nil
+      - return:
+          closure:
+            params: ctx context.Context, ex sql.Executor
+            results: error
+            steps:
+              - return: s(ctx, ex)
+  - of: pluggedMigrations
+    participants:
+      - id: caller
+        kind: actor
+      - id: pluggedMigrations
+        kind: self
+      - id: pluggedMigration
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ms == nil
+      - bind: out
+        eval: make([]plug.MigrationValue, len(ms))
+      - loop:
+          do:
+            - set: out[i]
+              to: pluggedMigration
+              value: pluggedMigration(m)
+          key: i
+          range: ms
+          value: m
+      - return: out
+  - of: pluggedMigration
+    steps:
+      - return: "plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}"
+  - of: pluggedStep
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s == nil
+      - return:
+          closure:
+            params: ctx context.Context, ex plug.Executor
+            results: error
+            steps:
+              - return: s(ctx, ex)
+  - of: tableMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: tableMigration
+        kind: self
+      - id: dialectOf
+        kind: internal
+      - id: docstore
+        kind: package
+      - id: pluggedMigration
+        kind: internal
+    steps:
+      - bind: d, err
+        eval: dialectOf(dialect)
+        to: dialectOf
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - var:
+          name: m
+          type: sql.Migration
+      - switch:
+          cases:
+            - case: t.VersionsOf != ""
+              do:
+                - set: m, err
+                  to: docstore
+                  value: docstore.SQLVersionsMigration(d, t.VersionsOf, version)
+            - default: true
+              do:
+                - set: m, err
+                  to: docstore
+                  value: docstore.SQLMigration(d, t.Name, version)
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, said(err)
+          when: err != nil
+      - return: pluggedMigration(m), nil
+        to: pluggedMigration
+  - of: docRecord.MarshalJSON
+    steps:
+      - return: d.raw, nil
+  - of: (*docRecord).UnmarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*docRecord).UnmarshalJSON
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - set: d.raw
+        to: bytes
+        value: bytes.Clone(b)
+      - set: d.open
+        value: "&openedDoc{}"
+      - return: nil
+  - of: recordFor
+    steps:
+      - return: "docRecord{raw: d.JSON, open: &openedDoc{v: d.Value, ok: d.Value != nil}}"
+  - of: rawRecord
+    steps:
+      - return: "docRecord{raw: bytes.Clone(raw), open: &openedDoc{}}"
+  - of: docRecord.value
+    steps:
+      - opt:
+          do:
+            - return: "plug.DocumentValue{JSON: d.raw}"
+          when: d.open == nil || !d.open.ok
+      - return: "plug.DocumentValue{JSON: d.raw, Value: d.open.v}"
+  - of: (*docLoad).failed
+    steps:
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - set: l.err
+              value: err
+          when: l.err == nil
+  - of: (*docLoad).loaded
+    steps:
+      - lock:
+          mutex: l.mu
+      - return: l.err
+  - of: (*documents).decoded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*documents).decoded
+        kind: self
+      - id: c.load.failed
+        kind: internal
+      - id: r.value
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.open
+              value: "&openedDoc{}"
+          when: r.open == nil
+      - opt:
+          do:
+            - bind: v, err
+              eval: c.cfg.Decode(r.raw)
+            - opt:
+                do:
+                  - eval: c.load.failed(err)
+                    to: c.load.failed
+                  - return: "plug.DocumentValue{JSON: r.raw}"
+                when: err != nil
+            - set: r.open.v, r.open.ok
+              value: v, true
+          when: "!r.open.ok && c.cfg.Decode != nil"
+      - return: r.value()
+        to: r.value
+  - of: (*documents).keyOf
+    steps:
+      - opt:
+          do:
+            - return: r.open.key
+          when: r.open != nil && r.open.keyed
+      - bind: key, ok
+        eval: "\"\", false"
+      - opt:
+          do:
+            - set: key, ok
+              value: c.cfg.KeyAtRest(r.raw)
+          when: c.cfg.KeyAtRest != nil && (r.open == nil || !r.open.ok)
+      - opt:
+          do:
+            - set: key
+              value: c.cfg.Key(c.decoded(r))
+          when: "!ok"
+      - opt:
+          do:
+            - set: r.open.key, r.open.keyed
+              value: key, true
+          when: r.open != nil
+      - return: key
+  - of: (*documents).writtenKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*documents).writtenKey
+        kind: self
+      - id: c.keyOf
+        kind: internal
+    steps:
+      - defer: |-
+          func() {
+          		if recover() != nil {
+          			key = ""
+          		}
+          	}()
+      - return: c.keyOf(r)
+        to: c.keyOf
+  - of: (*documents).specs
+    steps:
+      - bind: out
+        eval: make([]docstore.IndexSpec[docRecord], len(c.cfg.Indexes))
+      - loop:
+          do:
+            - bind: keys
+              eval: ix.Keys
+            - set: out[i]
+              value: |-
+                docstore.IndexSpec[docRecord]{Name: ix.Name, Unique: ix.Unique, Keys: func(r docRecord) []string {
+                			return keys(c.decoded(r))
+                		}}
+          key: i
+          range: c.cfg.Indexes
+          value: ix
+      - return: out
+  - of: values
+    participants:
+      - id: caller
+        kind: actor
+      - id: values
+        kind: self
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]plug.DocumentValue, len(rs))
+      - loop:
+          do:
+            - set: out[i]
+              to: r.value
+              value: r.value()
+          key: i
+          range: rs
+          value: r
+      - return: out
+  - of: raws
+    steps:
+      - bind: out
+        eval: make([]json.RawMessage, len(entries))
+      - loop:
+          do:
+            - set: out[i]
+              value: en.JSON
+          key: i
+          range: entries
+          value: en
+      - return: out
+  - of: pluggedEntries
+    steps:
+      - bind: out
+        eval: make([]plug.EntryValue, len(entries))
+      - loop:
+          do:
+            - set: out[i]
+              value: "plug.EntryValue{Key: en.Key, JSON: en.JSON}"
+          key: i
+          range: entries
+          value: en
+      - return: out
+  - of: (*documents).stamp
+    steps:
+      - opt:
+          do:
+            - return: docstore.Stamp{}
+          when: c.cfg.Versions == 0 || c.cfg.Stamp == nil
+      - bind: st
+        eval: c.cfg.Stamp(ctx)
+      - return: "docstore.Stamp{Meta: st.Meta, InPlace: st.InPlace}"
+  - of: pluggedVersions
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: vs == nil
+      - bind: out
+        eval: make([]plug.VersionValue, len(vs))
+      - loop:
+          do:
+            - set: out[i]
+              value: "plug.VersionValue{Number: v.Number, At: v.At, Meta: v.Meta, JSON: v.JSON}"
+          key: i
+          range: vs
+          value: v
+      - return: out
+  - of: sdkVersions
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: vs == nil
+      - bind: out
+        eval: make([]docstore.Version, len(vs))
+      - loop:
+          do:
+            - set: out[i]
+              value: "docstore.Version{Number: v.Number, At: v.At, Meta: v.Meta, JSON: v.JSON}"
+          key: i
+          range: vs
+          value: v
+      - return: out
+  - of: rewritingSDK
+    participants:
+      - id: caller
+        kind: actor
+      - id: rewritingSDK
+        kind: self
+      - id: sdkVersions
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: vs []docstore.Version
+            results: "[]docstore.Version, error"
+            steps:
+              - bind: out, err
+                eval: fn(pluggedVersions(vs))
+              - opt:
+                  do:
+                    - return: nil, err
+                  when: err != nil
+              - return: sdkVersions(out), nil
+                to: sdkVersions
+  - of: pluggedTombstones
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: stones == nil
+      - bind: out
+        eval: make([]plug.TombstoneValue, len(stones))
+      - loop:
+          do:
+            - set: out[i]
+              value: "plug.TombstoneValue{Key: st.Key, At: st.At}"
+          key: i
+          range: stones
+          value: st
+      - return: out
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: now == nil
+      - return: clockFunc(now)
+  - of: clockFunc.Now
+    steps:
+      - return: f()
+  - of: clockFunc.Since
+    participants:
+      - id: caller
+        kind: actor
+      - id: clockFunc.Since
+        kind: self
+      - id: f().Sub
+        kind: value
+    steps:
+      - return: f().Sub(t)
+        to: f().Sub
+  - of: pluggedWeight
+    steps:
+      - return: "plug.VersionWeightValue{Former: w.Former, Trashed: w.Trashed, Bytes: w.Bytes}, said(err)"
+  - of: openFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: openFile
+        kind: self
+      - id: e.undoing.Load
+        kind: value
+      - id: docstore
+        kind: package
+      - id: e.docs.load.loaded
+        kind: internal
+    steps:
+      - bind: e
+        eval: "&fileEngine{docs: &documents{cfg: cfg}}"
+      - bind: dcfg
+        eval: "docstore.Config[docRecord]{Key: e.docs.keyOf, Path: cfg.Path}"
+      - opt:
+          do:
+            - bind: fsys, ok
+              eval: cfg.Data.(vfs.FullFS)
+            - opt:
+                do:
+                  - return: |-
+                      nil, plug.Refuse(plug.RefusalLoad, errs.Wrap(docstore.LoadFailed, errs.WrapParams{},
+                      				errs.String("problem", "the data directory is not writable")))
+                when: "!ok"
+            - set: dcfg.FS
+              value: fsys
+          when: cfg.Data != nil
+      - opt:
+          do:
+            - set: dcfg.Versions, dcfg.Clock
+              value: cfg.Versions, clockOf(cfg.Clock)
+            - set: dcfg.Held
+              value:
+                closure:
+                  params: key string
+                  results: bool
+                  steps:
+                    - opt:
+                        do:
+                          - return: "true"
+                        init:
+                          bind: _, undoing
+                          eval: e.undoing.Load(key)
+                          to: e.undoing.Load
+                        when: undoing
+                    - return: cfg.Held != nil && cfg.Held(context.Background(), key)
+          when: cfg.Versions > 0
+      - bind: ds, err
+        eval: docstore.Open(dcfg, e.docs.specs()...)
+        to: docstore
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, errors.Join(lerr, ds.Close())
+                when: err == nil
+            - return: nil, lerr
+          init:
+            bind: lerr
+            eval: e.docs.load.loaded()
+            to: e.docs.load.loaded
+          when: lerr != nil
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - set: e.ds
+        value: ds
+      - return: e, nil
+  - of: (*fileEngine).keep
+    steps:
+      - return: e.docs.cfg.Versions
+  - of: (*fileEngine).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Get
+        kind: self
+      - id: e.ds.Get
+        kind: value
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: r, err
+        eval: e.ds.Get(key)
+        to: e.ds.Get
+      - return: r.value(), said(err)
+        to: r.value
+  - of: (*fileEngine).List
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).List
+        kind: self
+      - id: e.ds.List
+        kind: value
+      - id: values
+        kind: internal
+    steps:
+      - bind: rs, err
+        eval: e.ds.List()
+        to: e.ds.List
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: values(rs), nil
+        to: values
+  - of: (*fileEngine).Filter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Filter
+        kind: self
+      - id: e.List
+        kind: internal
+      - id: filtered
+        kind: internal
+    steps:
+      - bind: all, err
+        eval: e.List(ctx)
+        to: e.List
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: filtered(all, keep), nil
+        to: filtered
+  - of: (*fileEngine).Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Lookup
+        kind: self
+      - id: e.ds.Lookup
+        kind: value
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: r, err
+        eval: e.ds.Lookup(index, key)
+        to: e.ds.Lookup
+      - return: r.value(), said(err)
+        to: r.value
+  - of: (*fileEngine).Find
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Find
+        kind: self
+      - id: e.ds.Find
+        kind: value
+      - id: values
+        kind: internal
+    steps:
+      - bind: rs, err
+        eval: e.ds.Find(index, key)
+        to: e.ds.Find
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: values(rs), nil
+        to: values
+  - of: (*fileEngine).Count
+    steps:
+      - return: e.ds.Stats().Documents, nil
+  - of: (*fileEngine).KeyedEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).KeyedEntries
+        kind: self
+      - id: e.ds.Entries
+        kind: value
+      - id: pluggedEntries
+        kind: internal
+    steps:
+      - bind: entries, err
+        eval: e.ds.Entries(limit)
+        to: e.ds.Entries
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: pluggedEntries(entries), nil
+        to: pluggedEntries
+  - of: (*fileEngine).Entries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Entries
+        kind: self
+      - id: e.KeyedEntries
+        kind: internal
+      - id: raws
+        kind: internal
+    steps:
+      - bind: entries, err
+        eval: e.KeyedEntries(ctx, limit)
+        to: e.KeyedEntries
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: raws(entries), nil
+        to: raws
+  - of: (*fileEngine).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Write
+        kind: self
+      - id: recordFor
+        kind: internal
+      - id: e.docs.writtenKey
+        kind: internal
+      - id: e.before
+        kind: internal
+      - id: e.docs.stamp
+        kind: internal
+      - id: e.ds.InsertStamped
+        kind: value
+      - id: e.ds.ReplaceStamped
+        kind: value
+      - id: e.ds.PutStamped
+        kind: value
+      - id: e.after
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: r
+        eval: recordFor(d)
+        to: recordFor
+      - bind: key
+        eval: e.docs.writtenKey(r)
+        to: e.docs.writtenKey
+      - bind: undo
+        eval: e.before(ctx, key)
+        to: e.before
+      - bind: stamp
+        eval: e.docs.stamp(ctx)
+        to: e.docs.stamp
+      - var:
+          name: err
+          type: error
+      - switch:
+          cases:
+            - case: plug.WriteInsert
+              do:
+                - set: err
+                  to: e.ds.InsertStamped
+                  value: e.ds.InsertStamped(r, stamp)
+            - case: plug.WriteReplace
+              do:
+                - set: err
+                  to: e.ds.ReplaceStamped
+                  value: e.ds.ReplaceStamped(r, stamp)
+            - case: plug.WriteUpsert
+              do:
+                - set: err
+                  to: e.ds.PutStamped
+                  value: e.ds.PutStamped(r, stamp)
+            - default: true
+              do:
+                - set: err
+                  to: e.ds.PutStamped
+                  value: e.ds.PutStamped(r, stamp)
+          "on": mode
+      - eval: e.after(ctx, err, key, false, undo)
+        to: e.after
+      - return: said(err)
+        to: said
+  - of: (*fileEngine).Update
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Update
+        kind: self
+      - id: e.before
+        kind: internal
+      - id: e.ds.UpdateStamped
+        kind: value
+      - id: e.after
+        kind: internal
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: undo
+        eval: e.before(ctx, key)
+        to: e.before
+      - bind: r, err
+        eval: |-
+          e.ds.UpdateStamped(key, e.docs.stamp(ctx), func(r *docRecord) error {
+          		d := r.value()
+          		if err := fn(&d); err != nil {
+          			return err
+          		}
+          		*r = recordFor(d)
+          		return nil
+          	})
+        to: e.ds.UpdateStamped
+      - eval: e.after(ctx, err, key, false, undo)
+        to: e.after
+      - return: r.value(), said(err)
+        to: r.value
+  - of: (*fileEngine).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Delete
+        kind: self
+      - id: e.before
+        kind: internal
+      - id: e.ds.Delete
+        kind: value
+      - id: e.after
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: undo
+        eval: e.before(ctx, key)
+        to: e.before
+      - bind: err
+        eval: e.ds.Delete(key)
+        to: e.ds.Delete
+      - eval: e.after(ctx, err, key, true, undo)
+        to: e.after
+      - return: said(err)
+        to: said
+  - of: (*fileEngine).Watch
+    steps:
+      - set: e.onWrite, e.onDelete
+        value: onWrite, onDelete
+  - of: (*fileEngine).local
+    steps:
+      - bind: tx
+        eval: e.docs.cfg.Transaction
+      - return: tx != nil && tx.Local(ctx)
+  - of: (*fileEngine).before
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).before
+        kind: self
+      - id: e.ds.Get
+        kind: value
+      - id: e.head
+        kind: internal
+      - id: e.undoing.Store
+        kind: value
+      - id: e.undoing.Delete
+        kind: value
+      - id: e.ds.Put
+        kind: value
+      - id: e.tell
+        kind: internal
+      - id: said
+        kind: internal
+      - id: e.uncreate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: key == "" || !e.local(ctx)
+      - bind: prev, err
+        eval: e.ds.Get(key)
+        to: e.ds.Get
+      - switch:
+          cases:
+            - case: err == nil
+              do:
+                - bind: head
+                  eval: e.head(key)
+                  to: e.head
+                - return:
+                    closure:
+                      params: context.Context
+                      results: error
+                      steps:
+                        - eval: e.undoing.Store(key, true)
+                          to: e.undoing.Store
+                        - defer: e.undoing.Delete(key)
+                          to: e.undoing.Delete
+                        - bind: err
+                          eval: e.ds.Put(prev)
+                          to: e.ds.Put
+                        - eval: e.tell(key, false, err)
+                          to: e.tell
+                        - opt:
+                            do:
+                              - return: said(err)
+                                to: said
+                            when: err != nil && !errors.Is(err, docstore.WriteUnconfirmed)
+                        - return: said(errors.Join(err, e.forget(key, head, prev)))
+                          to: said
+            - case: errors.Is(err, docstore.DocumentNotFound)
+              do:
+                - return: e.uncreate(key)
+                  to: e.uncreate
+      - return:
+          closure:
+            params: context.Context
+            results: error
+            steps:
+              - return: said(err)
+                to: said
+  - of: (*fileEngine).uncreate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).uncreate
+        kind: self
+      - id: e.unconfirmed
+        kind: internal
+      - id: e.ds.Delete
+        kind: value
+      - id: e.tell
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return:
+                closure:
+                  params: context.Context
+                  results: error
+                  steps:
+                    - return: e.unconfirmed(e.ds.Trash(key), key, true)
+                      to: e.unconfirmed
+          when: e.trashedNow(key)
+      - return:
+          closure:
+            params: context.Context
+            results: error
+            steps:
+              - bind: err
+                eval: e.ds.Delete(key)
+                to: e.ds.Delete
+              - opt:
+                  do:
+                    - return: nil
+                  when: errors.Is(err, docstore.DocumentNotFound)
+              - eval: e.tell(key, true, err)
+                to: e.tell
+              - return: said(err)
+                to: said
+  - of: (*fileEngine).after
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).after
+        kind: self
+      - id: tx.Undo
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err != nil && !errors.Is(err, docstore.WriteUnconfirmed)
+      - bind: tx
+        eval: e.docs.cfg.Transaction
+      - opt:
+          do:
+            - eval: tx.Undo(ctx, e.docs.cfg.Name, undo)
+              to: tx.Undo
+          when: undo != nil && tx != nil
+      - bind: fn
+        eval: e.onWrite
+      - opt:
+          do:
+            - set: fn
+              value: e.onDelete
+          when: deleted
+      - opt:
+          do:
+            - return: ""
+          when: fn == nil
+      - opt:
+          do:
+            - eval: fn(key)
+          when: tx == nil || !tx.AtCommit(ctx, func() { fn(key) })
+  - of: (*fileEngine).tell
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err != nil && !errors.Is(err, docstore.WriteUnconfirmed)
+      - bind: fn
+        eval: e.onWrite
+      - opt:
+          do:
+            - set: fn
+              value: e.onDelete
+          when: deleted
+      - opt:
+          do:
+            - eval: fn(key)
+          when: fn != nil
+  - of: (*fileEngine).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Close
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.Close())
+        to: said
+  - of: (*fileEngine).Fold
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Fold
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.Fold())
+        to: said
+  - of: (*fileEngine).Keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Keys
+        kind: self
+      - id: saidKeys
+        kind: internal
+    steps:
+      - return: saidKeys(e.ds.Keys(after))
+        to: saidKeys
+  - of: (*fileEngine).StoredVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).StoredVersions
+        kind: self
+      - id: e.ds.Versions
+        kind: value
+      - id: pluggedVersions
+        kind: internal
+    steps:
+      - bind: vs, err
+        eval: e.ds.Versions(key)
+        to: e.ds.Versions
+      - return: pluggedVersions(vs), said(err)
+        to: pluggedVersions
+  - of: (*fileEngine).RewriteVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).RewriteVersions
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.RewriteVersions(key, rewritingSDK(fn)))
+        to: said
+  - of: (*fileEngine).head
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).head
+        kind: self
+      - id: e.ds.Versions
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: e.keep() == 0
+      - bind: all, err
+        eval: e.ds.Versions(key)
+        to: e.ds.Versions
+      - opt:
+          do:
+            - return: "0"
+          when: err != nil || len(all) == 0
+      - return: all[0].Number
+  - of: (*fileEngine).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).forget
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: e.ds.RewriteVersions
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: e.keep() == 0 || head == 0
+      - bind: held, merr
+        eval: json.Marshal(prev)
+        to: json
+      - bind: err
+        eval: |-
+          e.ds.RewriteVersions(key, func(former []docstore.Version) ([]docstore.Version, error) {
+          		former = slices.DeleteFunc(former, func(v docstore.Version) bool { return v.Number > head })
+          		for i := range former {
+          			if former[i].Number == head && merr == nil {
+          				former[i].JSON = held
+          			}
+          		}
+          		return former, nil
+          	})
+        to: e.ds.RewriteVersions
+      - opt:
+          do:
+            - return: nil
+          when: errors.Is(err, docstore.WriteUnconfirmed)
+      - return: err
+  - of: (*fileEngine).VersionWeight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).VersionWeight
+        kind: self
+      - id: pluggedWeight
+        kind: internal
+    steps:
+      - return: pluggedWeight(e.ds.VersionWeight())
+        to: pluggedWeight
+  - of: (*fileEngine).Trash
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Trash
+        kind: self
+      - id: e.unconfirmed
+        kind: internal
+      - id: e.ds.Trash
+        kind: value
+      - id: e.after
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - var:
+          name: undo
+          type: func(context.Context) error
+      - opt:
+          do:
+            - set: undo
+              value:
+                closure:
+                  params: context.Context
+                  results: error
+                  steps:
+                    - return: e.unconfirmed(e.ds.Restore(key), key, false)
+                      to: e.unconfirmed
+          when: key != "" && e.local(ctx)
+      - bind: err
+        eval: e.ds.Trash(key)
+        to: e.ds.Trash
+      - eval: e.after(ctx, err, key, true, undo)
+        to: e.after
+      - return: said(err)
+        to: said
+  - of: (*fileEngine).Untrash
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Untrash
+        kind: self
+      - id: e.unconfirmed
+        kind: internal
+      - id: e.ds.Restore
+        kind: value
+      - id: e.after
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - var:
+          name: undo
+          type: func(context.Context) error
+      - opt:
+          do:
+            - set: undo
+              value:
+                closure:
+                  params: context.Context
+                  results: error
+                  steps:
+                    - return: e.unconfirmed(e.ds.Trash(key), key, true)
+                      to: e.unconfirmed
+          when: key != "" && e.local(ctx)
+      - bind: err
+        eval: e.ds.Restore(key)
+        to: e.ds.Restore
+      - eval: e.after(ctx, err, key, false, undo)
+        to: e.after
+      - return: said(err)
+        to: said
+  - of: (*fileEngine).Purge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Purge
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.Purge(key))
+        to: said
+  - of: (*fileEngine).Tombstones
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Tombstones
+        kind: self
+      - id: e.ds.Tombstones
+        kind: value
+      - id: pluggedTombstones
+        kind: internal
+    steps:
+      - bind: stones, err
+        eval: e.ds.Tombstones()
+        to: e.ds.Tombstones
+      - return: pluggedTombstones(stones), said(err)
+        to: pluggedTombstones
+  - of: (*fileEngine).unconfirmed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).unconfirmed
+        kind: self
+      - id: e.tell
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - eval: e.tell(key, deleted, err)
+        to: e.tell
+      - opt:
+          do:
+            - return: said(err)
+              to: said
+          when: err != nil && !errors.Is(err, docstore.WriteUnconfirmed)
+      - return: nil
+  - of: (*fileEngine).trashedNow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).trashedNow
+        kind: self
+      - id: e.ds.Versions
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: e.keep() == 0
+      - bind: _, err
+        eval: e.ds.Versions(key)
+        to: e.ds.Versions
+      - return: err == nil
+  - of: (*fileEngine).Documents
+    steps:
+      - return: e, true
+  - of: (*fileEngine).KeyList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).KeyList
+        kind: self
+      - id: e.Keys
+        kind: internal
+    steps:
+      - return: e.Keys(ctx, "")
+        to: e.Keys
+  - of: (*fileEngine).TombstoneList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).TombstoneList
+        kind: self
+      - id: e.Tombstones
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: e.keep() == 0
+      - return: e.Tombstones(ctx)
+        to: e.Tombstones
+  - of: (*fileEngine).VersionList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).VersionList
+        kind: self
+      - id: e.StoredVersions
+        kind: internal
+    steps:
+      - return: e.StoredVersions(ctx, key)
+        to: e.StoredVersions
+  - of: (*fileEngine).Current
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).Current
+        kind: self
+      - id: e.ds.Get
+        kind: value
+    steps:
+      - bind: r, err
+        eval: e.ds.Get(key)
+        to: e.ds.Get
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: r.raw, nil
+  - of: (*fileEngine).KeepsVersions
+    steps:
+      - return: e.keep() > 0
+  - of: (*fileEngine).PutDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).PutDocument
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.PutDocument(key, sdkVersions(versions), trashedAt))
+        to: said
+  - of: (*fileEngine).InsertRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileEngine).InsertRaw
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.Insert(rawRecord(raw)))
+        to: said
+  - of: saidKeys
+    steps:
+      - return:
+          closure:
+            params: yield func(string, error) bool
+            steps:
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(key, said(err))"
+                  key: key
+                  range: keys
+                  value: err
+  - of: said
+    participants:
+      - id: caller
+        kind: actor
+      - id: said
+        kind: self
+      - id: errs
+        kind: package
+      - id: plug
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: r, told
+            eval: errors.AsType[*plug.RefusalError](err)
+          when: told && r.Kind != plug.RefusalNone
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!errors.Is(err, s.sentinel)"
+            - opt:
+                do:
+                  - set: err
+                    to: errs
+                    value: errs.Wrap(err, errs.WrapParams{}, errs.String("max", strconv.Itoa(docstore.MaxSQLKeyLen)))
+                when: s.kind == plug.RefusalKeyTooLong
+            - return: plug.Refuse(s.kind, err)
+              to: plug
+          key: _
+          range: sentinels
+          value: s
+      - return: err
+  - of: formerTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: formerTables
+        kind: self
+      - id: renaming
+        kind: internal
+      - id: catalogue
+        kind: internal
+      - id: stillFormer
+        kind: internal
+    steps:
+      - bind: scope, err
+        eval: renaming(db)
+        to: renaming
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: cat, err
+        eval: catalogue(ctx, scope.cfg.DB, scope.dialect)
+        to: catalogue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: stillFormer(cat, plan), nil
+        to: stillFormer
+  - of: renameTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: renameTables
+        kind: self
+      - id: renaming
+        kind: internal
+      - id: catalogue
+        kind: internal
+      - id: refuseTaken
+        kind: internal
+      - id: scope.runMove
+        kind: internal
+      - id: scope.cfg.DB.ExecContext
+        kind: value
+    steps:
+      - bind: scope, err
+        eval: renaming(db)
+        to: renaming
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: cat, err
+        eval: catalogue(ctx, scope.cfg.DB, scope.dialect)
+        to: catalogue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil || len(stillFormer(cat, plan)) == 0
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: refuseTaken(cat, pairs(cat, plan.Tables))
+            to: refuseTaken
+          when: err != nil
+      - bind: moved, err
+        eval: scope.runMove(ctx, plan)
+        to: scope.runMove
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, failedAt(phaseDrop, err)
+          init:
+            bind: _, err
+            eval: scope.cfg.DB.ExecContext(ctx, "DROP TABLE IF EXISTS "+scope.dialect.QuoteIdent(plan.FormerVersions))
+            to: scope.cfg.DB.ExecContext
+          when: err != nil
+      - return: moved, nil
+  - of: (*database).runMove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*database).runMove
+        kind: self
+      - id: sql
+        kind: package
+      - id: present.Plan
+        kind: value
+      - id: move
+        kind: internal
+      - id: m.Up
+        kind: value
+    steps:
+      - bind: present, err
+        eval: "sql.NewMigrator(d.cfg, sql.MigrateConfig{VersionTable: plan.Versions})"
+        to: sql
+      - opt:
+          do:
+            - set: _, err
+              to: present.Plan
+              value: present.Plan(ctx)
+          when: err == nil
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - var:
+          name: moved
+          type: "[]string"
+      - bind: step
+        eval:
+          closure:
+            params: ctx context.Context, ex sql.Executor
+            results: error
+            steps:
+              - var:
+                  name: err
+                  type: error
+              - set: moved, err
+                to: move
+                value: move(ctx, ex, d.dialect, plan)
+              - return: err
+      - bind: m, err
+        eval: |-
+          sql.NewMigrator(d.cfg, sql.MigrateConfig{
+          		VersionTable: plan.FormerVersions,
+          		Migrations:   []sql.Migration{{Version: plan.Version, Name: plan.Name, Up: step, Down: sql.Irreversible}},
+          	})
+        to: sql
+      - opt:
+          do:
+            - set: err
+              to: m.Up
+              value: m.Up(ctx)
+          when: err == nil
+      - return: moved, said(err)
+  - of: renaming
+    steps:
+      - bind: scope, ok
+        eval: db.(*database)
+      - opt:
+          do:
+            - return: |-
+                nil, plug.Refuse(plug.RefusalLoad, errs.Wrap(docstore.LoadFailed, errs.WrapParams{},
+                			errs.String("problem", "the database was not opened by the store subsystem")))
+          when: "!ok"
+      - return: scope, nil
+  - of: catalogue
+    participants:
+      - id: caller
+        kind: actor
+      - id: catalogue
+        kind: self
+      - id: names
+        kind: internal
+    steps:
+      - return: names(ctx, q, catalogueQueries[dialect], phaseCatalogue)
+        to: names
+  - of: names
+    participants:
+      - id: caller
+        kind: actor
+      - id: names
+        kind: self
+      - id: q.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+      - id: rows.Err
+        kind: value
+    steps:
+      - bind: rows, err
+        eval: q.QueryContext(ctx, query, args...)
+        to: q.QueryContext
+      - opt:
+          do:
+            - return: nil, failedAt(phase, err)
+          when: err != nil
+      - defer: |-
+          func() {
+          		if cerr := rows.Close(); cerr != nil && err == nil {
+          			err = failedAt(phase, cerr)
+          		}
+          	}()
+      - bind: out
+        eval: map[string]bool{}
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: name
+                type: string
+            - opt:
+                do:
+                  - return: nil, failedAt(phase, err)
+                init:
+                  bind: err
+                  eval: rows.Scan(&name)
+                  to: rows.Scan
+                when: err != nil
+            - set: out[name]
+              value: "true"
+      - opt:
+          do:
+            - return: nil, failedAt(phase, err)
+          init:
+            bind: err
+            eval: rows.Err()
+            to: rows.Err
+          when: err != nil
+      - return: out, nil
+  - of: failedAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: failedAt
+        kind: self
+      - id: plug
+        kind: package
+    steps:
+      - return: |-
+          plug.Refuse(plug.RefusalStatement, errors.Join(
+          		errs.Wrap(docstore.StatementFailed, errs.WrapParams{}, errs.String("phase", phase)), cause))
+        to: plug
+  - of: stillFormer
+    participants:
+      - id: caller
+        kind: actor
+      - id: stillFormer
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - var:
+          name: out
+          type: "[]string"
+      - opt:
+          do:
+            - set: out
+              value: append(out, plan.FormerVersions)
+          when: cat[plan.FormerVersions]
+      - loop:
+          do:
+            - set: out
+              value: append(out, p.From)
+          key: _
+          range: pairs(cat, plan.Tables)
+          value: p
+      - eval: slices.Sort(out)
+        to: slices
+      - return: slices.Compact(out)
+        to: slices
+  - of: pairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: pairs
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - var:
+          name: out
+          type: "[]plug.RenameValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: t.From == "" || t.From == t.To
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, t)
+                when: cat[t.From]
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: "append(out, plug.RenameValue{From: name, To: t.To + derivedMark + derived})"
+                      init:
+                        bind: derived, ok
+                        eval: strings.CutPrefix(name, t.From+derivedMark)
+                        to: strings
+                      when: ok
+                key: name
+                range: cat
+          key: _
+          range: tables
+          value: t
+      - eval: slices.SortFunc(out, func(x, y plug.RenameValue) int { return strings.Compare(x.From, y.From) })
+        to: slices
+      - return: slices.CompactFunc(out, func(x, y plug.RenameValue) bool { return x.From == y.From })
+        to: slices
+  - of: move
+    participants:
+      - id: caller
+        kind: actor
+      - id: move
+        kind: self
+      - id: catalogue
+        kind: internal
+      - id: pairs
+        kind: internal
+      - id: refuseTaken
+        kind: internal
+      - id: copyHistory
+        kind: internal
+      - id: renameAll
+        kind: internal
+      - id: renameIndexes
+        kind: internal
+      - id: relabel
+        kind: internal
+    steps:
+      - bind: cat, err
+        eval: catalogue(ctx, ex, dialect)
+        to: catalogue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: renames
+        eval: pairs(cat, plan.Tables)
+        to: pairs
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: refuseTaken(cat, renames)
+            to: refuseTaken
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: copyHistory(ctx, ex, dialect, plan, cat[plan.FormerVersions])
+            to: copyHistory
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: renameAll(ctx, ex, dialect, renames)
+            to: renameAll
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: renameIndexes(ctx, ex, dialect, renames)
+            to: renameIndexes
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: relabel(ctx, ex, dialect, plan)
+            to: relabel
+          when: err != nil
+      - bind: out
+        eval: make([]string, 0, len(renames))
+      - loop:
+          do:
+            - set: out
+              value: append(out, p.From)
+          key: _
+          range: renames
+          value: p
+      - return: out, nil
+  - of: refuseTaken
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseTaken
+        kind: self
+      - id: plug
+        kind: package
+    steps:
+      - var:
+          name: taken
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: taken
+                    value: append(taken, p.From+" -> "+p.To)
+                when: cat[p.To]
+          key: _
+          range: renames
+          value: p
+      - opt:
+          do:
+            - return: nil
+          when: len(taken) == 0
+      - return: |-
+          plug.Refuse(plug.RefusalRenameTarget, errs.Wrap(docstore.StatementFailed, errs.WrapParams{},
+          		errs.String("tables", strings.Join(taken, ", "))))
+        to: plug
+  - of: relabel
+    participants:
+      - id: caller
+        kind: actor
+      - id: relabel
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: failedAt
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: _, err
+              eval: |-
+                ex.ExecContext(ctx, "UPDATE "+dialect.QuoteIdent(plan.Versions)+" SET name = "+dialect.Placeholder(1)+
+                			" WHERE name = "+dialect.Placeholder(2), l.To, l.From)
+              to: ex.ExecContext
+            - opt:
+                do:
+                  - return: failedAt(phaseLabels, err)
+                    to: failedAt
+                when: err != nil
+          key: _
+          range: plan.Labels
+          value: l
+      - return: nil
+  - of: copyHistory
+    participants:
+      - id: caller
+        kind: actor
+      - id: copyHistory
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: failedAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!found"
+      - bind: former, present
+        eval: dialect.QuoteIdent(plan.FormerVersions), dialect.QuoteIdent(plan.Versions)
+      - bind: _, err
+        eval: |-
+          ex.ExecContext(ctx, "INSERT INTO "+present+" (version, name, applied_at_unix)"+
+          		" SELECT f.version, f.name, f.applied_at_unix FROM "+former+" f WHERE f.version <> "+dialect.Placeholder(1)+
+          		" AND NOT EXISTS (SELECT 1 FROM "+present+" p WHERE p.version = f.version)", int64(plan.Version))
+        to: ex.ExecContext
+      - opt:
+          do:
+            - return: failedAt(phaseHistory, err)
+              to: failedAt
+          when: err != nil
+      - return: nil
+  - of: renameAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: renameAll
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: failedAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(renames) == 0
+      - var:
+          name: stmts
+          type: "[]string"
+      - alt:
+          - do:
+              - bind: parts
+                eval: make([]string, 0, len(renames))
+              - loop:
+                  do:
+                    - set: parts
+                      value: append(parts, dialect.QuoteIdent(p.From)+" TO "+dialect.QuoteIdent(p.To))
+                  key: _
+                  range: renames
+                  value: p
+              - set: stmts
+                value: "[]string{\"RENAME TABLE \" + strings.Join(parts, \", \")}"
+            when: dialect == sql.DialectMySQL
+          - do:
+              - loop:
+                  do:
+                    - set: stmts
+                      value: append(stmts, "ALTER TABLE "+dialect.QuoteIdent(p.From)+" RENAME TO "+dialect.QuoteIdent(p.To))
+                  key: _
+                  range: renames
+                  value: p
+            else: true
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: failedAt(phaseRename, err)
+                    to: failedAt
+                init:
+                  bind: _, err
+                  eval: ex.ExecContext(ctx, s)
+                  to: ex.ExecContext
+                when: err != nil
+          key: _
+          range: stmts
+          value: s
+      - return: nil
+  - of: renameIndexes
+    participants:
+      - id: caller
+        kind: actor
+      - id: renameIndexes
+        kind: self
+      - id: names
+        kind: internal
+      - id: indexAfter
+        kind: internal
+      - id: ex.ExecContext
+        kind: value
+      - id: failedAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: dialect != sql.DialectPostgres
+      - bind: quote
+        eval: dialect.QuoteIdent
+      - loop:
+          do:
+            - bind: indexes, err
+              eval: names(ctx, ex, "SELECT indexname FROM pg_catalog.pg_indexes WHERE schemaname = current_schema() AND tablename = $1", phaseIndexes, p.To)
+              to: names
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - loop:
+                do:
+                  - bind: to, ok
+                    eval: indexAfter(idx, p)
+                    to: indexAfter
+                  - opt:
+                      do:
+                        - continue: true
+                      when: "!ok"
+                  - opt:
+                      do:
+                        - return: failedAt(phaseIndexes, err)
+                          to: failedAt
+                      init:
+                        bind: _, err
+                        eval: ex.ExecContext(ctx, "ALTER INDEX "+quote(idx)+" RENAME TO "+quote(to))
+                        to: ex.ExecContext
+                      when: err != nil
+                key: _
+                range: slices.Sorted(maps.Keys(indexes))
+                value: idx
+          key: _
+          range: renames
+          value: p
+      - return: nil
+  - of: indexAfter
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(p.From) != len(p.To)
+      - bind: "n"
+        eval: min(len(idx), len(p.From))
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: n == 0 || idx[:n] != p.From[:n]
+      - return: p.To[:n] + idx[n:], true
+  - of: openSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: openSQL
+        kind: self
+      - id: docstore
+        kind: package
+    steps:
+      - bind: db, ok
+        eval: cfg.Database.(*database)
+      - opt:
+          do:
+            - return: |-
+                nil, plug.Refuse(plug.RefusalLoad, errs.Wrap(docstore.LoadFailed, errs.WrapParams{},
+                			errs.String("problem", "the store's database was not opened by the store subsystem")))
+          when: "!ok"
+      - bind: e
+        eval: "&sqlEngine{docs: &documents{cfg: cfg}}"
+      - bind: dcfg
+        eval: "docstore.SQLConfig[docRecord]{Key: e.docs.keyOf, Transactor: db.tm, Dialect: db.dialect, Table: cfg.Table, IndexKey: cfg.IndexKey}"
+      - opt:
+          do:
+            - set: dcfg.Versions, dcfg.Clock, dcfg.Held
+              value: cfg.Versions, clockOf(cfg.Clock), cfg.Held
+          when: cfg.Versions > 0
+      - bind: ds, err
+        eval: docstore.OpenSQL(dcfg, e.docs.specs()...)
+        to: docstore
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - set: e.ds
+        value: ds
+      - return: e, nil
+  - of: (*sqlEngine).call
+    steps:
+      - opt:
+          do:
+            - return: ctx, func() {}, nil
+          when: e.docs.cfg.Call == nil
+      - return: e.docs.cfg.Call(ctx, write)
+  - of: (*sqlEngine).keep
+    steps:
+      - return: e.docs.cfg.Versions
+  - of: (*sqlEngine).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Get
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Get
+        kind: value
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: plug.DocumentValue{}, err
+          when: err != nil
+      - defer: done()
+      - bind: r, err
+        eval: e.ds.Get(c, key)
+        to: e.ds.Get
+      - return: r.value(), said(err)
+        to: r.value
+  - of: (*sqlEngine).List
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).List
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.List
+        kind: value
+      - id: values
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: done()
+      - bind: rs, err
+        eval: e.ds.List(c)
+        to: e.ds.List
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: values(rs), nil
+        to: values
+  - of: (*sqlEngine).Filter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Filter
+        kind: self
+      - id: e.List
+        kind: internal
+      - id: filtered
+        kind: internal
+    steps:
+      - bind: all, err
+        eval: e.List(ctx)
+        to: e.List
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: filtered(all, keep), nil
+        to: filtered
+  - of: (*sqlEngine).Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Lookup
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Lookup
+        kind: value
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: plug.DocumentValue{}, err
+          when: err != nil
+      - defer: done()
+      - bind: r, err
+        eval: e.ds.Lookup(c, index, key)
+        to: e.ds.Lookup
+      - return: r.value(), said(err)
+        to: r.value
+  - of: (*sqlEngine).Find
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Find
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Find
+        kind: value
+      - id: values
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: done()
+      - bind: rs, err
+        eval: e.ds.Find(c, index, key)
+        to: e.ds.Find
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: values(rs), nil
+        to: values
+  - of: (*sqlEngine).Count
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Count
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Count
+        kind: value
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - defer: done()
+      - bind: n, err
+        eval: e.ds.Count(c)
+        to: e.ds.Count
+      - return: n, said(err)
+  - of: (*sqlEngine).Entries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Entries
+        kind: self
+      - id: e.KeyedEntries
+        kind: internal
+      - id: raws
+        kind: internal
+    steps:
+      - bind: entries, err
+        eval: e.KeyedEntries(ctx, limit)
+        to: e.KeyedEntries
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: raws(entries), nil
+        to: raws
+  - of: (*sqlEngine).KeyedEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).KeyedEntries
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Entries
+        kind: value
+      - id: pluggedEntries
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: done()
+      - bind: entries, err
+        eval: e.ds.Entries(c, limit)
+        to: e.ds.Entries
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: pluggedEntries(entries), nil
+        to: pluggedEntries
+  - of: (*sqlEngine).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Write
+        kind: self
+      - id: e.docs.stamp
+        kind: internal
+      - id: e.call
+        kind: internal
+      - id: recordFor
+        kind: internal
+      - id: e.ds.InsertStamped
+        kind: value
+      - id: e.ds.ReplaceStamped
+        kind: value
+      - id: e.ds.PutStamped
+        kind: value
+      - id: e.retold
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: stamp
+        eval: e.docs.stamp(ctx)
+        to: e.docs.stamp
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: done()
+      - bind: r
+        eval: recordFor(d)
+        to: recordFor
+      - switch:
+          cases:
+            - case: plug.WriteInsert
+              do:
+                - set: err
+                  to: e.ds.InsertStamped
+                  value: e.ds.InsertStamped(c, r, stamp)
+            - case: plug.WriteReplace
+              do:
+                - set: err
+                  to: e.ds.ReplaceStamped
+                  value: e.ds.ReplaceStamped(c, r, stamp)
+            - default: true
+              do:
+                - set: err
+                  to: e.ds.PutStamped
+                  value: e.ds.PutStamped(c, r, stamp)
+          "on": mode
+      - opt:
+          do:
+            - eval: e.retold(ctx, e.docs.writtenKey(r))
+              to: e.retold
+          when: err == nil
+      - return: said(err)
+        to: said
+  - of: (*sqlEngine).Update
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Update
+        kind: self
+      - id: e.docs.stamp
+        kind: internal
+      - id: e.call
+        kind: internal
+      - id: e.ds.UpdateStamped
+        kind: value
+      - id: e.retold
+        kind: internal
+      - id: r.value
+        kind: internal
+    steps:
+      - bind: stamp
+        eval: e.docs.stamp(ctx)
+        to: e.docs.stamp
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: plug.DocumentValue{}, err
+          when: err != nil
+      - defer: done()
+      - bind: r, err
+        eval: |-
+          e.ds.UpdateStamped(c, key, stamp, func(r *docRecord) error {
+          		d := r.value()
+          		if err := fn(&d); err != nil {
+          			return err
+          		}
+          		*r = recordFor(d)
+          		return nil
+          	})
+        to: e.ds.UpdateStamped
+      - opt:
+          do:
+            - eval: e.retold(ctx, key)
+              to: e.retold
+          when: err == nil
+      - return: r.value(), said(err)
+        to: r.value
+  - of: (*sqlEngine).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Delete
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Delete
+        kind: value
+      - id: e.retold
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: done()
+      - set: err
+        to: e.ds.Delete
+        value: e.ds.Delete(c, key)
+      - opt:
+          do:
+            - eval: e.retold(ctx, key)
+              to: e.retold
+          when: err == nil
+      - return: said(err)
+        to: said
+  - of: (*sqlEngine).retold
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).retold
+        kind: self
+      - id: tx.Retell
+        kind: value
+    steps:
+      - bind: tx
+        eval: e.docs.cfg.Transaction
+      - opt:
+          do:
+            - eval: tx.Retell(ctx, func() { fn(key) })
+              to: tx.Retell
+          init:
+            bind: fn
+            eval: e.onWrite
+          when: fn != nil && key != "" && tx != nil
+  - of: (*sqlEngine).Watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Watch
+        kind: self
+      - id: e.ds.OnWrite
+        kind: value
+      - id: e.ds.OnDelete
+        kind: value
+    steps:
+      - set: e.onWrite
+        value: onWrite
+      - eval: e.ds.OnWrite(onWrite)
+        to: e.ds.OnWrite
+      - eval: e.ds.OnDelete(onDelete)
+        to: e.ds.OnDelete
+  - of: (*sqlEngine).Close
+    steps:
+      - return: nil
+  - of: (*sqlEngine).Reindex
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Reindex
+        kind: self
+      - id: e.ds.Reindex
+        kind: value
+      - id: e.docs.load.loaded
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: err
+        eval: e.ds.Reindex(ctx)
+        to: e.ds.Reindex
+      - opt:
+          do:
+            - return: lerr
+          init:
+            bind: lerr
+            eval: e.docs.load.loaded()
+            to: e.docs.load.loaded
+          when: lerr != nil
+      - return: said(err)
+        to: said
+  - of: (*sqlEngine).Keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Keys
+        kind: self
+      - id: e.keysChunk
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(string, error) bool
+            steps:
+              - loop:
+                  do:
+                    - bind: chunk, err
+                      eval: e.keysChunk(ctx, after)
+                      to: e.keysChunk
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yieldKeys(yield, chunk, err) || len(chunk) < sqlKeysChunk"
+                    - set: after
+                      value: chunk[len(chunk)-1]
+                  forever: true
+  - of: (*sqlEngine).keysChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).keysChunk
+        kind: self
+      - id: e.call
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: done()
+      - bind: keys
+        eval: make([]string, 0, sqlKeysChunk)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, said(err)
+                when: err != nil
+            - set: keys
+              value: append(keys, key)
+            - opt:
+                do:
+                  - break: true
+                when: len(keys) == sqlKeysChunk
+          key: key
+          range: e.ds.Keys(c, after)
+          value: err
+      - return: keys, nil
+  - of: (*sqlEngine).StoredVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).StoredVersions
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Versions
+        kind: value
+      - id: pluggedVersions
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: done()
+      - bind: vs, err
+        eval: e.ds.Versions(c, key)
+        to: e.ds.Versions
+      - return: pluggedVersions(vs), said(err)
+        to: pluggedVersions
+  - of: (*sqlEngine).RewriteVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).RewriteVersions
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: done()
+      - return: said(e.ds.RewriteVersions(c, key, rewritingSDK(fn)))
+        to: said
+  - of: (*sqlEngine).VersionWeight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).VersionWeight
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: pluggedWeight
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: plug.VersionWeightValue{}, err
+          when: err != nil
+      - defer: done()
+      - return: pluggedWeight(e.ds.VersionWeight(c))
+        to: pluggedWeight
+  - of: (*sqlEngine).Trash
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Trash
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Trash
+        kind: value
+      - id: e.retold
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: done()
+      - set: err
+        to: e.ds.Trash
+        value: e.ds.Trash(c, key)
+      - opt:
+          do:
+            - eval: e.retold(ctx, key)
+              to: e.retold
+          when: err == nil
+      - return: said(err)
+        to: said
+  - of: (*sqlEngine).Untrash
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Untrash
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Restore
+        kind: value
+      - id: e.retold
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: done()
+      - set: err
+        to: e.ds.Restore
+        value: e.ds.Restore(c, key)
+      - opt:
+          do:
+            - eval: e.retold(ctx, key)
+              to: e.retold
+          when: err == nil
+      - return: said(err)
+        to: said
+  - of: (*sqlEngine).Purge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Purge
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: said
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, true)
+        to: e.call
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: done()
+      - return: said(e.ds.Purge(c, key))
+        to: said
+  - of: (*sqlEngine).Tombstones
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Tombstones
+        kind: self
+      - id: e.call
+        kind: internal
+      - id: e.ds.Tombstones
+        kind: value
+      - id: pluggedTombstones
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: done()
+      - bind: stones, err
+        eval: e.ds.Tombstones(c)
+        to: e.ds.Tombstones
+      - return: pluggedTombstones(stones), said(err)
+        to: pluggedTombstones
+  - of: (*sqlEngine).Documents
+    steps:
+      - return: e, true
+  - of: (*sqlEngine).KeyList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).KeyList
+        kind: self
+      - id: saidKeys
+        kind: internal
+    steps:
+      - return: saidKeys(e.ds.Keys(ctx, ""))
+        to: saidKeys
+  - of: (*sqlEngine).TombstoneList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).TombstoneList
+        kind: self
+      - id: e.ds.Tombstones
+        kind: value
+      - id: pluggedTombstones
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: e.keep() == 0
+      - bind: stones, err
+        eval: e.ds.Tombstones(ctx)
+        to: e.ds.Tombstones
+      - return: pluggedTombstones(stones), said(err)
+        to: pluggedTombstones
+  - of: (*sqlEngine).VersionList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).VersionList
+        kind: self
+      - id: e.ds.Versions
+        kind: value
+      - id: pluggedVersions
+        kind: internal
+    steps:
+      - bind: vs, err
+        eval: e.ds.Versions(ctx, key)
+        to: e.ds.Versions
+      - return: pluggedVersions(vs), said(err)
+        to: pluggedVersions
+  - of: (*sqlEngine).Current
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).Current
+        kind: self
+      - id: e.ds.Get
+        kind: value
+    steps:
+      - bind: r, err
+        eval: e.ds.Get(ctx, key)
+        to: e.ds.Get
+      - opt:
+          do:
+            - return: nil, said(err)
+          when: err != nil
+      - return: r.raw, nil
+  - of: (*sqlEngine).KeepsVersions
+    steps:
+      - return: e.keep() > 0
+  - of: (*sqlEngine).PutDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).PutDocument
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.PutDocument(ctx, key, sdkVersions(versions), trashedAt))
+        to: said
+  - of: (*sqlEngine).InsertRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).InsertRaw
+        kind: self
+      - id: said
+        kind: internal
+    steps:
+      - return: said(e.ds.Insert(ctx, rawRecord(raw)))
+        to: said
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Stores.Store
+        kind: value
+    steps:
+      - eval: |-
+          plug.Stores.Store(&plug.StoreDriverConfig{
+          		Open: open, Database: openDatabase, TableMigration: tableMigration,
+          		FormerTables: formerTables, RenameTables: renameTables,
+          	})
+        to: plug.Stores.Store
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: openSQL
+        kind: internal
+      - id: openFile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: openSQL(&cfg)
+              to: openSQL
+          when: cfg.Database != nil
+      - return: openFile(&cfg)
+        to: openFile

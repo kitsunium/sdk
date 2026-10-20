@@ -1,0 +1,130 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*fanoutSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fanoutSink).Write
+        kind: self
+      - id: b.Write
+        kind: value
+    steps:
+      - var:
+          name: errs2
+          type: "[]error"
+      - loop:
+          do:
+            - bind: written, werr
+              eval: b.Write(ctx, r, p)
+              to: b.Write
+            - opt:
+                do:
+                  - set: "n"
+                    value: written
+                  - continue: true
+                when: werr == nil
+            - set: errs2
+              value: append(errs2, werr)
+          key: _
+          range: s.branches
+          value: b
+      - opt:
+          do:
+            - return: |-
+                n, errs.Wrap(errors.Join(errs2...), errs.WrapParams{
+                			Code:    coremulti.CodeFanoutWriteFailed,
+                			Reason:  "FANOUT_WRITE_FAILED",
+                			Public:  "One or more fan-out sinks failed",
+                			Private: "service/observe/logger/middleware/multi.Write aggregated per-sink errors",
+                		}, errs.Int("failed", len(errs2)), errs.Int("level", int(r.Level)))
+          when: len(errs2) > 0
+      - return: n, nil
+  - of: (*fanoutSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fanoutSink).Flush
+        kind: self
+      - id: b.Flush
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: errs2
+        eval: make([]error, 0, len(s.branches))
+      - bind: seen
+        eval: make(map[corelogger.Sink]struct{}, len(s.branches))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[b]
+                when: dup
+            - set: seen[b]
+              value: struct{}{}
+            - opt:
+                do:
+                  - set: errs2
+                    value: append(errs2, ferr)
+                init:
+                  bind: ferr
+                  eval: b.Flush(ctx)
+                  to: b.Flush
+                when: ferr != nil
+          key: _
+          range: s.branches
+          value: b
+      - opt:
+          do:
+            - return: errors.Join(errs2...)
+              to: errors
+          when: len(errs2) > 0
+      - return: nil
+  - of: (*fanoutSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fanoutSink).Close
+        kind: self
+      - id: b.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: errs2
+        eval: make([]error, 0, len(s.branches))
+      - bind: seen
+        eval: make(map[corelogger.Sink]struct{}, len(s.branches))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[b]
+                when: dup
+            - set: seen[b]
+              value: struct{}{}
+            - opt:
+                do:
+                  - set: errs2
+                    value: append(errs2, cerr)
+                init:
+                  bind: cerr
+                  eval: b.Close()
+                  to: b.Close
+                when: cerr != nil
+          key: _
+          range: s.branches
+          value: b
+      - opt:
+          do:
+            - return: errors.Join(errs2...)
+              to: errors
+          when: len(errs2) > 0
+      - return: nil

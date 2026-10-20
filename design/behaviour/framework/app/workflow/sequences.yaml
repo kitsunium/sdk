@@ -1,0 +1,15 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: enable
+        kind: self
+      - id: workflowengine
+        kind: package
+    steps:
+      - eval: workflowengine.Enable()
+        to: workflowengine
+      - return: "true"

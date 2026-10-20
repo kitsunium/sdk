@@ -1,0 +1,230 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: String
+    steps:
+      - return: "AttrValue{Key: key, kind: AttrKindString, str: value}"
+  - of: Bool
+    steps:
+      - opt:
+          do:
+            - return: "AttrValue{Key: key, kind: AttrKindBool, num: 1}"
+          when: value
+      - return: "AttrValue{Key: key, kind: AttrKindBool}"
+  - of: Int64
+    steps:
+      - return: "AttrValue{Key: key, kind: AttrKindInt64, num: uint64(value)}"
+  - of: Float64
+    steps:
+      - return: "AttrValue{Key: key, kind: AttrKindFloat64, num: math.Float64bits(value)}"
+  - of: AttrValue.Kind
+    steps:
+      - return: a.kind
+  - of: AttrValue.Str
+    steps:
+      - return: a.str
+  - of: AttrValue.Bool
+    steps:
+      - return: a.kind == AttrKindBool && a.num != 0
+  - of: AttrValue.Int64
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: a.kind != AttrKindInt64
+      - return: int64(a.num)
+  - of: AttrValue.Float64
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttrValue.Float64
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: a.kind != AttrKindFloat64
+      - return: math.Float64frombits(a.num)
+        to: math
+  - of: AttrValue.AppendIdentity
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttrValue.AppendIdentity
+        kind: self
+      - id: binary
+        kind: stdlib
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, byte(a.kind))
+      - switch:
+          cases:
+            - case: AttrKindString
+              do:
+                - set: dst
+                  to: binary
+                  value: binary.AppendUvarint(dst, uint64(len(a.str)))
+                - return: append(dst, a.str...)
+            - case: AttrKindBool
+              do:
+                - opt:
+                    do:
+                      - return: append(dst, boolTrue)
+                    when: a.num != 0
+                - return: append(dst, boolFalse)
+            - case: AttrKindInt64, AttrKindFloat64
+              do:
+                - return: binary.BigEndian.AppendUint64(dst, a.num)
+                  to: binary.BigEndian.AppendUint64
+            - default: true
+              do:
+                - return: dst
+          "on": a.kind
+  - of: AttrValue.AppendText
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttrValue.AppendText
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: AttrKindString
+              do:
+                - return: append(dst, a.str...)
+            - case: AttrKindBool
+              do:
+                - return: strconv.AppendBool(dst, a.num != 0)
+                  to: strconv
+            - case: AttrKindInt64
+              do:
+                - return: strconv.AppendInt(dst, int64(a.num), decimalBase)
+                  to: strconv
+            - case: AttrKindFloat64
+              do:
+                - return: strconv.AppendFloat(dst, math.Float64frombits(a.num), floatFmt, floatPrec, floatBits)
+                  to: strconv
+            - default: true
+              do:
+                - return: dst
+          "on": a.kind
+  - of: CompareAttrKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: CompareAttrKey
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: strings.Compare(a.Key, b.Key)
+        to: strings
+  - of: CompareAttrValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: CompareAttrValue
+        kind: self
+      - id: cmp
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: cmp.Compare(a.kind, b.kind)
+              to: cmp
+          when: a.kind != b.kind
+      - switch:
+          cases:
+            - case: AttrKindString
+              do:
+                - return: strings.Compare(a.str, b.str)
+                  to: strings
+            - case: AttrKindFloat64
+              do:
+                - opt:
+                    do:
+                      - return: c
+                    init:
+                      bind: c
+                      eval: cmp.Compare(math.Float64frombits(a.num), math.Float64frombits(b.num))
+                      to: cmp
+                    when: c != 0
+                - return: cmp.Compare(a.num, b.num)
+                  to: cmp
+            - case: AttrKindInt64
+              do:
+                - return: cmp.Compare(int64(a.num), int64(b.num))
+                  to: cmp
+            - default: true
+              do:
+                - return: cmp.Compare(a.num, b.num)
+                  to: cmp
+          "on": a.kind
+  - of: SortAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: SortAttrs
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: ValidateAttrs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(attrs) == 0
+      - bind: sorted
+        eval: slices.Clone(attrs)
+        to: slices
+      - eval: slices.SortFunc(sorted, CompareAttrKey)
+        to: slices
+      - eval: ValidateAttrs(sorted, refusal)
+        to: ValidateAttrs
+      - return: sorted
+  - of: NormalizeResource
+    participants:
+      - id: caller
+        kind: actor
+      - id: NormalizeResource
+        kind: self
+      - id: SortAttrs
+        kind: internal
+      - id: String
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: attrs
+        eval: SortAttrs(resource.Attrs, refusal)
+        to: SortAttrs
+      - opt:
+          do:
+            - return: "ResourceValue{Attrs: attrs}"
+          when: slices.ContainsFunc(attrs, isServiceName)
+      - bind: name
+        eval: String(ServiceNameKey, UnknownService)
+        to: String
+      - bind: at, _
+        eval: slices.BinarySearchFunc(attrs, name, CompareAttrKey)
+        to: slices
+      - return: "ResourceValue{Attrs: slices.Insert(attrs, at, name)}"
+  - of: isServiceName
+    steps:
+      - return: a.Key == ServiceNameKey
+  - of: NormalizeScope
+    steps:
+      - opt:
+          do:
+            - return: scope
+          when: scope.Name != ""
+      - return: "ScopeValue{Name: defaultName, Version: scope.Version}"

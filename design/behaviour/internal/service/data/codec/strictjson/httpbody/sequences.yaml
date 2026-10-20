@@ -1,0 +1,86 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: DecodeRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: DecodeRequest
+        kind: self
+      - id: strictjson
+        kind: package
+      - id: bufio
+        kind: stdlib
+      - id: body.Peek
+        kind: value
+      - id: emptyOrUnreadable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: invalid
+          init:
+            bind: invalid
+            eval: strictjson.CheckArguments(v, maxBytes)
+            to: strictjson
+          when: invalid != nil
+      - opt:
+          do:
+            - return: strictjson.Misconfigured("req")
+              to: strictjson
+          when: req == nil || req.Body == nil
+      - bind: body
+        eval: bufio.NewReader(http.MaxBytesReader(w, req.Body, maxBytes))
+        to: bufio
+      - opt:
+          do:
+            - return: emptyOrUnreadable(peekErr)
+              to: emptyOrUnreadable
+          init:
+            bind: _, peekErr
+            eval: body.Peek(1)
+            to: body.Peek
+          when: peekErr != nil
+      - opt:
+          do:
+            - return: corestrictjson.MediaTypeUnsupported
+          when: "!isJSONMediaType(req.Header.Get(\"Content-Type\"))"
+      - return: strictjson.DecodeChecked(body, v, maxBytes, isMaxBytesError)
+        to: strictjson
+  - of: emptyOrUnreadable
+    participants:
+      - id: caller
+        kind: actor
+      - id: emptyOrUnreadable
+        kind: self
+      - id: strictjson
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: corestrictjson.DocumentEmpty
+          when: errors.Is(peekErr, io.EOF)
+      - return: strictjson.Unreadable(peekErr)
+        to: strictjson
+  - of: isJSONMediaType
+    participants:
+      - id: caller
+        kind: actor
+      - id: isJSONMediaType
+        kind: self
+      - id: mime
+        kind: stdlib
+    steps:
+      - bind: media, _, parseErr
+        eval: mime.ParseMediaType(header)
+        to: mime
+      - opt:
+          do:
+            - return: "false"
+          when: parseErr != nil
+      - return: media == jsonMediaType || strings.HasSuffix(media, jsonSuffix)
+  - of: isMaxBytesError
+    steps:
+      - bind: tooLarge, found
+        eval: errors.AsType[*http.MaxBytesError](err)
+      - return: found && tooLarge != nil

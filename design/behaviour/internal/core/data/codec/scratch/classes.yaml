@@ -1,0 +1,78 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      MaxRetainedBufBytes is the project-wide cap-discard threshold for pooled
+      codec buffers. A buffer whose capacity exceeds this is dropped on release
+      rather than re-pooled, so a one-off oversized payload cannot pin a large
+      allocation for the lifetime of the pool's GC window. It bounds the shared
+      *bytes.Buffer pool below, and it is also the ceiling a codec passes to a
+      recycler.CappedPool of its own when it pools a buffer shape this package
+      does not offer — so the codec domain keeps one threshold, not one per codec.
+    items:
+      - name: MaxRetainedBufBytes
+        type: int
+        value: 256 << 10
+    name: MaxRetainedBufBytes
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - MaxRetainedBufBytes
+      - bufferPool
+      - AcquireBuffer
+      - ReleaseBuffer
+      - DetachBuffer
+      - AcquireReader
+      - ReleaseReader
+    name: scratch.go
+functions:
+  - name: AcquireBuffer
+    results: "*bytes.Buffer"
+  - name: ReleaseBuffer
+    params: buf *bytes.Buffer
+  - name: DetachBuffer
+    params: buf *bytes.Buffer
+    results: "[]byte"
+  - name: AcquireReader
+    params: src []byte
+    results: "*bytes.Reader"
+  - name: ReleaseReader
+    params: r *bytes.Reader
+imports:
+  bytes: bytes
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  slices: slices
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  name: scratch
+  purpose: Package scratch provides shared, size-bounded recycling primitives for the service codecs.
+types: []
+vars:
+  - doc: |-
+      Shared recycling pools for the codecs, backed by the kernel recycler. One
+      shared pool per pooled type — sync.Pool is internally per-P sharded, so
+      consolidating across codecs raises the reuse rate without adding contention.
+    grouped: true
+    items:
+      - doc: |-
+          : bufferPool recycles *bytes.Buffer with cap-discard at MaxRetainedBufBytes.
+          : reset-on-Put (b.Reset) keeps the next caller's buffer clean; the
+          : recycler discards before reset, so an over-cap buffer whose Bytes() the
+          : caller still holds is orphaned untouched (detach contract preserved).
+        name: bufferPool
+        value: |-
+          recycler.NewCappedPool[*bytes.Buffer](
+          		func() *bytes.Buffer { return new(bytes.Buffer) },
+          		func(b *bytes.Buffer) { b.Reset() },
+          		func(b *bytes.Buffer) int { return b.Cap() },
+          		MaxRetainedBufBytes,
+          	)
+      - doc: |-
+          : readerPool recycles *bytes.Reader. A bytes.Reader is a fixed-size struct
+          : repositioned by AcquireReader's Reset(src), so it needs neither
+          : cap-discard nor reset-on-Put — a plain Pool is the right fit.
+        name: readerPool
+        value: recycler.NewPool[*bytes.Reader](func() *bytes.Reader { return new(bytes.Reader) })
+    name: bufferPool

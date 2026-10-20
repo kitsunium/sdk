@@ -1,0 +1,20 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: MustStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: MustStart
+        kind: self
+      - id: Start
+        kind: internal
+    steps:
+      - bind: live, err
+        eval: Start(ctx, spec)
+        to: Start
+      - opt:
+          do:
+            - panic: err
+          when: err != nil
+      - return: live

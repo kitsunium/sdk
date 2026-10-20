@@ -1,0 +1,96 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - EveryOption
+      - everyConfig
+      - WithClock
+      - WithDone
+      - Every
+      - resolveEvery
+    name: every.go
+  - decls:
+      - Loop
+      - LoopDaemon
+      - Start
+      - NewLoopDaemon
+      - (*LoopDaemon).Stop
+      - (*LoopDaemon).Done
+    name: worker.go
+functions:
+  - name: WithClock
+    params: w clock.Waiter
+    results: EveryOption
+  - name: WithDone
+    params: done <-chan struct{}
+    results: EveryOption
+  - name: Every
+    params: interval time.Duration, tick func(), opts ...EveryOption
+    results: "*LoopDaemon"
+  - doc: "resolveEvery folds opts onto the defaults: the wall clock and no early end."
+    name: resolveEvery
+    params: opts []EveryOption
+    results: everyConfig
+  - name: Start
+    params: loop Loop
+    results: "*LoopDaemon"
+  - name: NewLoopDaemon
+    params: loop Loop
+    results: "*LoopDaemon"
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/worker
+  name: worker
+  purpose: Package worker — Every layers a ticker loop on top of the LoopDaemon lifecycle.
+types:
+  - kind: named
+    name: EveryOption
+    underlying: func(everyConfig) everyConfig
+  - doc: |-
+      everyConfig is the resolved option set. It is unexported because each zero
+      field has one meaning — the wall clock, no early end — decided in
+      resolveEvery rather than by whoever fills the struct.
+    fields:
+      - doc: waiter builds the ticker. Nil means clock.System.
+        name: waiter
+        type: clock.Waiter
+      - doc: done, when non-nil, ends the loop as soon as it is closed.
+        name: done
+        type: <-chan struct{}
+    kind: struct
+    name: everyConfig
+  - kind: named
+    name: Loop
+    underlying: func(stop <-chan struct{})
+  - fields:
+      - doc: stop is closed once by Stop to signal the loop to exit.
+        name: stop
+        type: chan struct{}
+      - doc: stopOnce guards close(stop) so concurrent Stop calls never panic.
+        name: stopOnce
+        type: sync.Once
+      - doc: |-
+          done is closed by the spawning goroutine once the loop has returned;
+          Stop blocks on it to join.
+        name: done
+        type: chan struct{}
+      - doc: |-
+          doneOnce guards close(done). The spawning goroutine is the sole closer
+          in practice, but the lint heuristic (KTN-GOROUTINE-DOUBLECLOSE) requires
+          an explicit guard on every close(field).
+        name: doneOnce
+        type: sync.Once
+    kind: struct
+    methods:
+      - name: Stop
+        recv: d *LoopDaemon
+      - name: Done
+        recv: d *LoopDaemon
+        results: <-chan struct{}
+    name: LoopDaemon

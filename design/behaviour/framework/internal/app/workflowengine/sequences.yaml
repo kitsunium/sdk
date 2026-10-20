@@ -1,0 +1,436 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c == nil
+      - return: "sdkClock{Clock: c}"
+  - of: sdkClock.NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTimer
+        kind: self
+      - id: c.Clock.NewTimer
+        kind: value
+    steps:
+      - return: c.Clock.NewTimer(d)
+        to: c.Clock.NewTimer
+  - of: sdkClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTicker
+        kind: self
+      - id: c.Clock.NewTicker
+        kind: value
+    steps:
+      - return: c.Clock.NewTicker(d)
+        to: c.Clock.NewTicker
+  - of: (*engine).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Start
+        kind: self
+      - id: x.m.Start
+        kind: value
+    steps:
+      - return: x.m.Start(ctx, e)
+        to: x.m.Start
+  - of: (*engine).Fire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Fire
+        kind: self
+      - id: x.m.Fire
+        kind: value
+    steps:
+      - return: x.m.Fire(ctx, key, event)
+        to: x.m.Fire
+  - of: (*engine).Changed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Changed
+        kind: self
+      - id: x.m.Changed
+        kind: value
+    steps:
+      - return: x.m.Changed(ctx, key)
+        to: x.m.Changed
+  - of: (*engine).Deleted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Deleted
+        kind: self
+      - id: x.m.Deleted
+        kind: value
+    steps:
+      - return: x.m.Deleted(ctx, key)
+        to: x.m.Deleted
+  - of: (*engine).Census
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Census
+        kind: self
+      - id: x.m.Census
+        kind: value
+    steps:
+      - return: x.m.Census()
+        to: x.m.Census
+  - of: (*engine).Records
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Records
+        kind: self
+      - id: x.m.Records
+        kind: value
+      - id: recordOf
+        kind: internal
+    steps:
+      - bind: records
+        eval: x.m.Records()
+        to: x.m.Records
+      - bind: out
+        eval: make([]plug.WorkflowRecordValue, len(records))
+      - loop:
+          do:
+            - set: out[i]
+              to: recordOf
+              value: recordOf(&records[i])
+          key: i
+          range: records
+      - return: out
+  - of: (*engine).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*engine).Run
+        kind: self
+      - id: x.m.Run
+        kind: value
+    steps:
+      - return: x.m.Run(ctx)
+        to: x.m.Run
+  - of: journal.Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: journal.Load
+        kind: self
+      - id: j.j.Load
+        kind: value
+      - id: sdkRecordOf
+        kind: internal
+    steps:
+      - bind: records, err
+        eval: j.j.Load(ctx)
+        to: j.j.Load
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]statemachine.Record[string], len(records))
+      - loop:
+          do:
+            - set: out[i]
+              to: sdkRecordOf
+              value: sdkRecordOf(&records[i])
+          key: i
+          range: records
+      - return: out, nil
+  - of: journal.Save
+    participants:
+      - id: caller
+        kind: actor
+      - id: journal.Save
+        kind: self
+      - id: recordOf
+        kind: internal
+      - id: j.j.Save
+        kind: value
+    steps:
+      - bind: out
+        eval: make([]plug.WorkflowRecordValue, len(records))
+      - loop:
+          do:
+            - set: out[i]
+              to: recordOf
+              value: recordOf(&records[i])
+          key: i
+          range: records
+      - return: j.j.Save(ctx, out...)
+        to: j.j.Save
+  - of: journal.Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: journal.Delete
+        kind: self
+      - id: j.j.Delete
+        kind: value
+    steps:
+      - return: j.j.Delete(ctx, keys...)
+        to: j.j.Delete
+  - of: recordOf
+    steps:
+      - bind: out
+        eval: "plug.WorkflowRecordValue{Key: r.Key, State: r.State, Entered: r.Entered}"
+      - loop:
+          do:
+            - set: out.History
+              value: |-
+                append(out.History, plug.WorkflowStepValue{
+                			Event: s.Event, From: s.From, To: s.To, Trigger: triggerOf(s.Trigger), Actor: s.Actor, At: s.At,
+                		})
+          key: _
+          range: r.History
+          value: s
+      - return: out
+  - of: sdkRecordOf
+    steps:
+      - bind: out
+        eval: "statemachine.Record[string]{Key: r.Key, State: r.State, Entered: r.Entered}"
+      - loop:
+          do:
+            - set: out.History
+              value: |-
+                append(out.History, statemachine.Step[string]{
+                			Event: s.Event, From: s.From, To: s.To, Trigger: sdkTriggerOf(s.Trigger), Actor: s.Actor, At: s.At,
+                		})
+          key: _
+          range: r.History
+          value: s
+      - return: out
+  - of: changeOf
+    steps:
+      - return: |-
+          plug.WorkflowChangeValue{
+          		Key: c.Key, Entity: c.Entity, Event: c.Event, From: c.From, To: c.To,
+          		Trigger: triggerOf(c.Trigger), Actor: c.Actor, At: c.At,
+          	}
+  - of: observeOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: fn == nil
+      - return:
+          closure:
+            params: ctx context.Context, f statemachine.Firing[string]
+            results: context.Context, func(error)
+            steps:
+              - return: "fn(ctx, plug.WorkflowFiringValue{Key: f.Key, Event: f.Event, From: f.From, To: f.To, Trigger: triggerOf(f.Trigger)})"
+  - of: onLoopOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: fn == nil
+      - return:
+          closure:
+            params: e statemachine.LoopEvent
+            steps:
+              - eval: |-
+                  fn(plug.WorkflowLoopEventValue{
+                  			Err: e.Err, Started: e.Started, Ended: e.Ended, Next: e.Next, Kind: loopKindOf(e.Kind), Wake: wakeOf(e.Wake),
+                  		})
+  - of: triggerOf
+    steps:
+      - switch:
+          cases:
+            - case: statemachine.TriggerStart
+              do:
+                - return: plug.WorkflowTriggerStart
+            - case: statemachine.TriggerDelay
+              do:
+                - return: plug.WorkflowTriggerDelay
+            - case: statemachine.TriggerDeadline
+              do:
+                - return: plug.WorkflowTriggerDeadline
+            - case: statemachine.TriggerGuard
+              do:
+                - return: plug.WorkflowTriggerGuard
+          "on": t
+      - return: plug.WorkflowTriggerEvent
+  - of: sdkTriggerOf
+    steps:
+      - switch:
+          cases:
+            - case: plug.WorkflowTriggerStart
+              do:
+                - return: statemachine.TriggerStart
+            - case: plug.WorkflowTriggerDelay
+              do:
+                - return: statemachine.TriggerDelay
+            - case: plug.WorkflowTriggerDeadline
+              do:
+                - return: statemachine.TriggerDeadline
+            - case: plug.WorkflowTriggerGuard
+              do:
+                - return: statemachine.TriggerGuard
+            - default: true
+              do:
+                - return: statemachine.TriggerEvent
+          "on": t
+  - of: wakeOf
+    steps:
+      - switch:
+          cases:
+            - case: statemachine.WakeDue
+              do:
+                - return: plug.WorkflowWakeDue
+            - case: statemachine.WakeChange
+              do:
+                - return: plug.WorkflowWakeChange
+          "on": w
+      - return: plug.WorkflowWakeStart
+  - of: loopKindOf
+    steps:
+      - switch:
+          cases:
+            - case: statemachine.LoopRunStarted
+              do:
+                - return: plug.WorkflowLoopRunStarted
+            - case: statemachine.LoopRunEnded
+              do:
+                - return: plug.WorkflowLoopRunEnded
+            - case: statemachine.LoopWaiting
+              do:
+                - return: plug.WorkflowLoopWaiting
+          "on": k
+      - return: plug.WorkflowLoopOther
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Workflows.Store
+        kind: value
+    steps:
+      - eval: "plug.Workflows.Store(&plug.WorkflowDriverConfig{Open: open, Failed: failed})"
+        to: plug.Workflows.Store
+  - of: stateOf
+    steps:
+      - return: "&e.State"
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: statemachine
+        kind: package
+    steps:
+      - bind: sc
+        eval: |-
+          &statemachine.Config[entity, string]{
+          		Store: cfg.Store, Clock: clockOf(cfg.Clock), Actor: cfg.Actor,
+          		Observe: observeOf(cfg.Observe), Report: cfg.Report, OnLoop: onLoopOf(cfg.OnLoop),
+          		MinGap: cfg.MinGap, MaxHistory: cfg.MaxHistory,
+          		Backoff: resilience.Backoff{BaseDelay: cfg.BackoffBase, MaxDelay: cfg.BackoffMax},
+          	}
+      - opt:
+          do:
+            - set: sc.Journal
+              value: "journal{j: cfg.Journal}"
+          when: cfg.Journal != nil
+      - bind: m, err
+        eval: statemachine.New(ctx, definitionOf(cfg), sc)
+        to: statemachine
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&engine{m: m}, nil"
+  - of: definitionOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: definitionOf
+        kind: self
+      - id: statemachine.Define(stateOf).Initial
+        kind: value
+      - id: declare
+        kind: internal
+      - id: def.OnEnter
+        kind: value
+      - id: def.OnTransition
+        kind: value
+    steps:
+      - bind: def
+        eval: statemachine.Define(stateOf).Initial(cfg.Initial)
+        to: statemachine.Define(stateOf).Initial
+      - loop:
+          do:
+            - eval: declare(def, &cfg.Transitions[i])
+              to: declare
+          key: i
+          range: cfg.Transitions
+      - loop:
+          do:
+            - eval: def.OnEnter(h.State, h.Fn)
+              to: def.OnEnter
+          key: _
+          range: cfg.OnEnter
+          value: h
+      - loop:
+          do:
+            - eval: |-
+                def.OnTransition(func(ctx context.Context, c statemachine.Change[entity, string]) error {
+                			return fn(ctx, changeOf(&c))
+                		})
+              to: def.OnTransition
+          key: _
+          range: cfg.OnTransition
+          value: fn
+      - return: def
+  - of: declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: declare
+        kind: self
+      - id: def.When
+        kind: value
+      - id: def.At
+        kind: value
+      - id: def.After
+        kind: value
+      - id: def.On
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: plug.WorkflowTriggerGuard
+              do:
+                - eval: def.When(t.Event, t.From, t.To, t.Guard)
+                  to: def.When
+            - case: plug.WorkflowTriggerDeadline
+              do:
+                - eval: def.At(t.Event, t.From, t.To, t.Instant)
+                  to: def.At
+            - case: plug.WorkflowTriggerDelay
+              do:
+                - eval: def.After(t.Event, t.Delay, t.From, t.To)
+                  to: def.After
+            - default: true
+              do:
+                - eval: def.On(t.Event, t.From, t.To)
+                  to: def.On
+          "on": t.Trigger
+  - of: failed
+    steps:
+      - bind: s, ok
+        eval: sentinels[kind]
+      - return: ok && errors.Is(err, s)

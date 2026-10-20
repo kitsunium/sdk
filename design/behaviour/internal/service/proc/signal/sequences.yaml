@@ -1,0 +1,163 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Relay
+    participants:
+      - id: caller
+        kind: actor
+      - id: Relay
+        kind: self
+      - id: errs
+        kind: package
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreproc.RelayFailed, errs.WrapParams{
+                			Code:     coreproc.CodeRelayFailed,
+                			Reason:   "RELAY_FAILED",
+                			Public:   "Could not relay the signal to the target",
+                			Private:  "service/proc/signal.Relay: refused reserved target 0 (own process group) or -1 (every permitted process)",
+                			ExitCode: exitOSErr,
+                		}, errs.Int("target", int(target)))
+              to: errs
+          when: target == 0 || target == -1
+      - loop:
+          do:
+            - bind: osSig, ok
+              eval: sig.OS().(syscall.Signal)
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(kerr, errs.WrapParams{
+                      				Code:     coreproc.CodeRelayFailed,
+                      				Reason:   "RELAY_FAILED",
+                      				Public:   "Could not relay the signal to the target",
+                      				Private:  "service/proc/signal.Relay: forwarding the signal to the target failed",
+                      				ExitCode: exitOSErr,
+                      			}, errs.Int("target", int(target)), errs.Int("signal", sig.Int()))
+                    to: errs
+                init:
+                  bind: kerr
+                  eval: syscall.Kill(int(target), osSig)
+                  to: syscall
+                when: kerr != nil
+          key: sig
+          range: src
+      - return: nil
+  - of: Notify
+    participants:
+      - id: caller
+        kind: actor
+      - id: Notify
+        kind: self
+      - id: translate
+        kind: internal
+      - id: once.Do
+        kind: value
+    steps:
+      - bind: buf
+        eval: max(len(sigs), 1)
+      - bind: osCh
+        eval: make(chan os.Signal, buf)
+      - bind: out
+        eval: make(chan coreproc.Signal, buf)
+      - bind: done
+        eval: make(chan struct{})
+      - bind: ready
+        eval: make(chan struct{})
+      - bind: osSigs
+        eval: make([]os.Signal, 0, len(sigs))
+      - loop:
+          do:
+            - set: osSigs
+              value: append(osSigs, s.OS())
+          key: _
+          range: sigs
+          value: s
+      - go: translate(osCh, out, done, ready, osSigs)
+        to: translate
+      - eval: <-ready
+      - var:
+          name: once
+          type: sync.Once
+      - bind: stop
+        eval:
+          closure:
+            steps:
+              - eval: |-
+                  once.Do(func() {
+                  			//: ending done makes the goroutine return; its defer runs signal.Stop
+                  			//: and closes out for readers.
+                  			close(done)
+                  		})
+                to: once.Do
+      - return: out, stop
+  - of: translate
+    participants:
+      - id: caller
+        kind: actor
+      - id: translate
+        kind: self
+      - id: ossignal
+        kind: stdlib
+    steps:
+      - eval: ossignal.Notify(src, osSigs...)
+        to: ossignal
+      - defer: ossignal.Stop(src)
+        to: ossignal
+      - defer: close(dst)
+      - eval: close(ready)
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: s, ok := <-src
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!ok"
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!forward(dst, done, toSignal(s))"
+                  - comm: <-done
+                    do:
+                      - return: ""
+          forever: true
+  - of: toSignal
+    participants:
+      - id: caller
+        kind: actor
+      - id: toSignal
+        kind: self
+      - id: coreproc
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: coreproc.Signal(sys)
+              to: coreproc
+          init:
+            bind: sys, ok
+            eval: s.(syscall.Signal)
+          when: ok
+      - return: coreproc.Signal(0)
+        to: coreproc
+  - of: forward
+    steps:
+      - select:
+          cases:
+            - comm: dst <- sig
+              do:
+                - return: "true"
+            - comm: <-done
+              do:
+                - return: "false"

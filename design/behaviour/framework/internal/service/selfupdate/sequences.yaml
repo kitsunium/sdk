@@ -1,0 +1,2728 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*Service).ListCandidates
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).ListCandidates
+        kind: self
+      - id: u.getReleases
+        kind: internal
+    steps:
+      - bind: releases, err
+        eval: u.getReleases()
+        to: u.getReleases
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!r.Prerelease || r.Draft"
+            - set: candidates
+              value: |-
+                append(candidates, CandidateValue{
+                			Tag:       r.TagName,
+                			Name:      r.Name,
+                			CreatedAt: r.CreatedAt,
+                		})
+          key: _
+          range: releases
+          value: r
+      - return: candidates, nil
+  - of: (*Service).DownloadCandidate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).DownloadCandidate
+        kind: self
+      - id: u.getReleaseByTag
+        kind: internal
+      - id: u.downloadAndReplace
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, classify(CandidateTagRequired, errors.ErrUnsupported)"
+          when: tag == ""
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, refuse(coreupd.InvalidTag, errs.String(\"tag\", tag))"
+          when: "!tagPattern.MatchString(tag)"
+      - bind: release, err
+        eval: u.getReleaseByTag(tag)
+        to: u.getReleaseByTag
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, err"
+          when: err != nil
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, refuse(coreupd.DraftRelease, errs.String(\"tag\", tag))"
+          when: release.Draft
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, refuse(coreupd.NotPrerelease, errs.String(\"tag\", tag))"
+          when: "!release.Prerelease"
+      - set: err
+        to: u.downloadAndReplace
+        value: u.downloadAndReplace(tag)
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, err"
+          when: err != nil
+      - return: |-
+          UpdateValue{
+          		Available:      true,
+          		CurrentVersion: u.version,
+          		LatestVersion:  tag,
+          	}, nil
+  - of: (*Service).getReleases
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).getReleases
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: u.client.Get
+        kind: value
+      - id: decodeJSONBody
+        kind: internal
+    steps:
+      - bind: url
+        eval: fmt.Sprintf(releasesURL, u.src.Owner, u.src.candidateRepo())
+        to: fmt
+      - bind: resp, err
+        eval: u.client.Get(url)
+        to: u.client.Get
+      - opt:
+          do:
+            - return: nil, classify(coreupd.DownloadFailed, err, errs.String("query", "releases"))
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: Prevent resource leaks from unclosed response body.
+          		if cerr := resp.Body.Close(); cerr != nil {
+          			log.Printf("close response body: %v", cerr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreupd.UnexpectedStatus,
+                			errs.String("query", "releases"),
+                			errs.Int("status", resp.StatusCode))
+          when: resp.StatusCode != http.StatusOK
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: |-
+              decodeJSONBody(resp.Body, maxAPIBodyBytes, &releases,
+              		errs.String("query", "releases"))
+            to: decodeJSONBody
+          when: err != nil
+      - return: releases, nil
+  - of: (*Service).getReleaseByTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).getReleaseByTag
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: u.client.Get
+        kind: value
+      - id: decodeJSONBody
+        kind: internal
+    steps:
+      - bind: url
+        eval: fmt.Sprintf(releaseByTagURL, u.src.Owner, u.src.candidateRepo(), tag)
+        to: fmt
+      - bind: resp, err
+        eval: u.client.Get(url)
+        to: u.client.Get
+      - opt:
+          do:
+            - return: |-
+                releaseInfo{}, classify(coreupd.DownloadFailed, err,
+                			errs.String("query", "release_by_tag"),
+                			errs.String("tag", tag))
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: Prevent resource leak from unclosed body.
+          		if cerr := resp.Body.Close(); cerr != nil {
+          			log.Printf("close response body: %v", cerr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: releaseInfo{}, refuse(coreupd.CandidateNotFound, errs.String("tag", tag))
+          when: resp.StatusCode == http.StatusNotFound
+      - opt:
+          do:
+            - return: |-
+                releaseInfo{}, refuse(coreupd.UnexpectedStatus,
+                			errs.String("query", "release_by_tag"),
+                			errs.String("tag", tag),
+                			errs.Int("status", resp.StatusCode))
+          when: resp.StatusCode != http.StatusOK
+      - opt:
+          do:
+            - return: releaseInfo{}, err
+          init:
+            bind: err
+            eval: |-
+              decodeJSONBody(resp.Body, maxAPIBodyBytes, &release,
+              		errs.String("query", "release_by_tag"), errs.String("tag", tag))
+            to: decodeJSONBody
+          when: err != nil
+      - return: release, nil
+  - of: bufferArchive
+    participants:
+      - id: caller
+        kind: actor
+      - id: bufferArchive
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: buf, err
+        eval: io.ReadAll(io.LimitReader(body, capBytes+1))
+        to: io
+      - opt:
+          do:
+            - return: nil, classify(coreupd.DownloadFailed, err, errs.String("stage", "buffer_archive"))
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, refuse(coreupd.ArchiveTooLarge, errs.Int64("cap_bytes", capBytes))
+          when: int64(len(buf)) > capBytes
+      - return: buf, nil
+  - of: (*Service).matchArchiveDigest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).matchArchiveDigest
+        kind: self
+      - id: u.getBinaryName
+        kind: internal
+      - id: findChecksumEntry
+        kind: internal
+      - id: refuse
+        kind: internal
+      - id: hash
+        kind: package
+    steps:
+      - bind: asset
+        eval: u.getBinaryName()
+        to: u.getBinaryName
+      - bind: wantHex, found
+        eval: findChecksumEntry(manifest, asset)
+        to: findChecksumEntry
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.ChecksumMissing,
+                			errs.String("condition", "asset_absent_from_manifest"),
+                			errs.String("asset", asset),
+                			errs.String("manifest", checksumsAssetName),
+                			errs.String("tag", tag))
+              to: refuse
+          when: "!found"
+      - bind: gotHex, sumErr
+        eval: hash.SumHex(hash.SHA256, archive)
+        to: hash
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.ChecksumMismatch,
+                			errs.String("condition", "digest_unavailable"),
+                			errs.String("asset", asset),
+                			errs.String("tag", tag))
+              to: refuse
+          when: sumErr != nil
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.ChecksumMismatch,
+                			errs.String("asset", asset),
+                			errs.String("tag", tag),
+                			errs.String("manifest_digest", wantHex),
+                			errs.String("archive_digest", gotHex))
+              to: refuse
+          when: "!strings.EqualFold(gotHex, wantHex)"
+      - return: nil
+  - of: (*Service).fetchChecksums
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).fetchChecksums
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: u.client.Get
+        kind: value
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: url
+        eval: fmt.Sprintf(downloadURL, u.src.Owner, u.repoForTag(tag), tag, checksumsAssetName)
+        to: fmt
+      - bind: resp, err
+        eval: u.client.Get(url)
+        to: u.client.Get
+      - opt:
+          do:
+            - return: |-
+                "", classify(coreupd.DownloadFailed, err,
+                			errs.String("stage", "get"),
+                			errs.String("asset", checksumsAssetName),
+                			errs.String("tag", tag))
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: Prevent resource leak from unclosed response.
+          		if cerr := resp.Body.Close(); cerr != nil {
+          			log.Printf("close response body: %v", cerr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreupd.ChecksumMissing,
+                			errs.String("condition", "manifest_not_published"),
+                			errs.String("asset", checksumsAssetName),
+                			errs.String("tag", tag))
+          when: resp.StatusCode == http.StatusNotFound
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreupd.DownloadFailed,
+                			errs.String("stage", "get"),
+                			errs.Int("status", resp.StatusCode),
+                			errs.String("asset", checksumsAssetName),
+                			errs.String("tag", tag))
+          when: resp.StatusCode != http.StatusOK
+      - bind: raw, err
+        eval: io.ReadAll(io.LimitReader(resp.Body, maxChecksumsBytes+1))
+        to: io
+      - opt:
+          do:
+            - return: |-
+                "", classify(coreupd.DownloadFailed, err,
+                			errs.String("stage", "read"),
+                			errs.String("asset", checksumsAssetName),
+                			errs.String("tag", tag))
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreupd.ArchiveTooLarge,
+                			errs.String("asset", checksumsAssetName),
+                			errs.String("tag", tag),
+                			errs.Int64("cap_bytes", maxChecksumsBytes))
+          when: int64(len(raw)) > maxChecksumsBytes
+      - return: string(raw), nil
+  - of: findChecksumEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: findChecksumEntry
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: hexPart, namePart, ok
+              eval: strings.Cut(strings.TrimSpace(line), " ")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - bind: name
+              eval: strings.TrimPrefix(strings.TrimSpace(namePart), "*")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: name != asset || !isHexDigest(hexPart)
+            - return: hexPart, true
+          key: line
+          range: strings.SplitSeq(manifest, "\n")
+      - return: "\"\", false"
+  - of: isHexDigest
+    participants:
+      - id: caller
+        kind: actor
+      - id: isHexDigest
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) != sha256HexLen
+      - bind: _, err
+        eval: hex.DecodeString(s)
+        to: hex
+      - return: err == nil
+  - of: (*Service).WithCompanions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).WithCompanions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u == nil
+      - set: u.companions
+        to: slices
+        value: slices.Clone(names)
+      - return: u
+  - of: (*Service).installedCompanions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).installedCompanions
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: u.innerBinaryName
+        kind: internal
+      - id: u.memberName
+        kind: internal
+      - id: u.fs.EvalSymlinks
+        kind: value
+    steps:
+      - bind: dir
+        eval: filepath.Dir(execPath)
+        to: filepath
+      - bind: product
+        eval: u.innerBinaryName()
+        to: u.innerBinaryName
+      - bind: seen
+        eval: "map[string]bool{execPath: true}"
+      - loop:
+          do:
+            - bind: member
+              eval: u.memberName(filepath.Base(name))
+              to: u.memberName
+            - opt:
+                do:
+                  - continue: true
+                when: member == product
+            - bind: resolved, err
+              eval: u.fs.EvalSymlinks(filepath.Join(dir, member))
+              to: u.fs.EvalSymlinks
+            - opt:
+                do:
+                  - continue: true
+                when: errors.Is(err, fs.ErrNotExist)
+            - opt:
+                do:
+                  - return: |-
+                      nil, classify(StagingFailed, err,
+                      				errs.String("step", "resolve_companion"),
+                      				errs.String("path", filepath.Join(dir, member)))
+                when: err != nil
+            - opt:
+                do:
+                  - continue: true
+                when: seen[resolved]
+            - set: seen[resolved]
+              value: "true"
+            - set: installed
+              value: "append(installed, companionTarget{member: member, path: resolved})"
+          key: _
+          range: u.companions
+          value: name
+      - return: installed, nil
+  - of: (*Service).memberName
+    steps:
+      - opt:
+          do:
+            - return: name + ".exe"
+          when: u.goos == "windows"
+      - return: name
+  - of: (*Service).replaceSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).replaceSet
+        kind: self
+      - id: u.stageSet
+        kind: internal
+      - id: u.keepSet
+        kind: internal
+      - id: u.renameSet
+        kind: internal
+      - id: u.probeSet
+        kind: internal
+      - id: u.abandon
+        kind: internal
+      - id: u.dropKept
+        kind: internal
+    steps:
+      - bind: targets
+        eval: "append([]companionTarget{{member: u.innerBinaryName(), path: execPath}}, companions...)"
+      - bind: set, err
+        eval: u.stageSet(archive, targets)
+        to: u.stageSet
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: err
+        to: u.keepSet
+        value: u.keepSet(set)
+      - opt:
+          do:
+            - set: err
+              to: u.renameSet
+              value: u.renameSet(set)
+          when: err == nil
+      - opt:
+          do:
+            - set: err
+              to: u.probeSet
+              value: u.probeSet(execPath, set)
+          when: err == nil
+      - opt:
+          do:
+            - eval: u.abandon(set)
+              to: u.abandon
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - eval: u.dropKept(set)
+              to: u.dropKept
+          when: len(u.probe.args) == 0
+      - return: nil
+  - of: (*Service).stageSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).stageSet
+        kind: self
+      - id: u.stageMember
+        kind: internal
+      - id: u.abandon
+        kind: internal
+    steps:
+      - bind: set
+        eval: make([]stagedFile, 0, len(targets))
+      - loop:
+          do:
+            - bind: tmp, err
+              eval: u.stageMember(archive, target)
+              to: u.stageMember
+            - opt:
+                do:
+                  - eval: u.abandon(set)
+                    to: u.abandon
+                  - return: nil, err
+                when: err != nil
+            - set: set
+              value: "append(set, stagedFile{target: target.path, tmp: tmp})"
+          key: _
+          range: targets
+          value: target
+      - return: set, nil
+  - of: (*Service).renameSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).renameSet
+        kind: self
+      - id: u.fs.Rename
+        kind: value
+      - id: u.restore
+        kind: internal
+      - id: classify
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - bind: rolledBack
+                    eval: u.restore(set)
+                    to: u.restore
+                  - return: |-
+                      classify(ReplacementFailed, err,
+                      				errs.String("step", "rename_set"),
+                      				errs.String("path", set[i].target),
+                      				errs.Bool("rolled_back", rolledBack))
+                    to: classify
+                init:
+                  bind: err
+                  eval: u.fs.Rename(set[i].tmp, set[i].target)
+                  to: u.fs.Rename
+                when: err != nil
+            - set: set[i].tmp, set[i].replaced
+              value: "\"\", true"
+          key: i
+          range: set
+      - return: nil
+  - of: (*Service).stageMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).stageMember
+        kind: self
+      - id: u.openMember
+        kind: internal
+      - id: u.fs.CreateTemp
+        kind: value
+      - id: tmpFile.Name
+        kind: value
+      - id: u.writeTempFileContent
+        kind: internal
+      - id: tmpFile.Close
+        kind: value
+      - id: u.fs.Remove
+        kind: value
+      - id: u.fs.Chmod
+        kind: value
+    steps:
+      - bind: member, cleanup, err
+        eval: u.openMember(bytes.NewReader(archive), target.member)
+        to: u.openMember
+      - opt:
+          do:
+            - return: |-
+                "", classify(ArchiveUnreadable, err,
+                			errs.String("stage", "extract"),
+                			errs.String("member", target.member))
+          when: err != nil
+      - defer: cleanup()
+      - bind: tmpFile, err
+        eval: u.fs.CreateTemp(filepath.Dir(target.path), u.src.Product+"-update-*")
+        to: u.fs.CreateTemp
+      - opt:
+          do:
+            - return: |-
+                "", classify(StagingFailed, err,
+                			errs.String("step", "create_temp"),
+                			errs.String("dir", filepath.Dir(target.path)))
+          when: err != nil
+      - set: tmpPath
+        to: tmpFile.Name
+        value: tmpFile.Name()
+      - bind: writeErr
+        eval: u.writeTempFileContent(tmpFile, member)
+        to: u.writeTempFileContent
+      - bind: closeErr
+        eval: tmpFile.Close()
+        to: tmpFile.Close
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: |-
+                "", classify(StagingFailed, errors.Join(writeErr, closeErr),
+                			errs.String("step", "write_temp"),
+                			errs.String("path", target.path))
+          when: writeErr != nil || closeErr != nil
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: |-
+                "", classify(StagingFailed, chmodErr,
+                			errs.String("step", "chmod_temp"),
+                			errs.String("path", target.path))
+          init:
+            bind: chmodErr
+            eval: u.fs.Chmod(tmpPath, executablePerm)
+            to: u.fs.Chmod
+          when: chmodErr != nil
+      - return: tmpPath, nil
+  - of: (*Service).keepSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).keepSet
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: u.fs.Remove
+        kind: value
+      - id: classify
+        kind: internal
+      - id: l.Link
+        kind: internal
+    steps:
+      - bind: l, ok
+        eval: u.fs.(linker)
+      - opt:
+          do:
+            - return: refuse(StagingFailed, errs.String("step", "keep_previous"), errs.Bool("linkable", false))
+              to: refuse
+          when: "!ok"
+      - loop:
+          do:
+            - bind: prev
+              eval: set[i].target + prevSuffix
+            - opt:
+                do:
+                  - return: classify(StagingFailed, err, errs.String("step", "keep_previous"), errs.String("path", prev))
+                    to: classify
+                init:
+                  bind: err
+                  eval: u.fs.Remove(prev)
+                  to: u.fs.Remove
+                when: err != nil && !errors.Is(err, fs.ErrNotExist)
+            - opt:
+                do:
+                  - return: classify(StagingFailed, err, errs.String("step", "keep_previous"), errs.String("path", prev))
+                    to: classify
+                init:
+                  bind: err
+                  eval: l.Link(set[i].target, prev)
+                  to: l.Link
+                when: err != nil
+            - set: set[i].kept
+              value: "true"
+          key: i
+          range: set
+      - return: nil
+  - of: (*Service).restore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).restore
+        kind: self
+      - id: u.fs.Rename
+        kind: value
+    steps:
+      - bind: restored
+        eval: "true"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!set[i].replaced"
+            - opt:
+                do:
+                  - set: restored
+                    value: "false"
+                  - continue: true
+                init:
+                  bind: err
+                  eval: u.fs.Rename(set[i].target+prevSuffix, set[i].target)
+                  to: u.fs.Rename
+                when: err != nil
+            - set: set[i].replaced, set[i].kept
+              value: false, false
+          key: i
+          range: set
+      - return: restored
+  - of: (*Service).probeSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).probeSet
+        kind: self
+      - id: u.probeOnce
+        kind: internal
+      - id: u.restore
+        kind: internal
+      - id: classify
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(u.probe.args) == 0
+      - bind: err
+        eval: u.probeOnce(execPath)
+        to: u.probeOnce
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - bind: rolledBack
+        eval: u.restore(set)
+        to: u.restore
+      - return: |-
+          classify(ProbeFailed, err, errs.String("path", execPath), errs.Bool("rolled_back", rolledBack),
+          		errs.String("timeout", u.probe.timeout.String()))
+        to: classify
+  - of: (*Service).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).abandon
+        kind: self
+      - id: u.fs.Remove
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: u.fs.Remove(file.tmp)
+                    to: u.fs.Remove
+                when: file.tmp != ""
+            - opt:
+                do:
+                  - eval: u.fs.Remove(file.target + prevSuffix)
+                    to: u.fs.Remove
+                when: file.kept && !file.replaced
+          key: _
+          range: set
+          value: file
+  - of: (*Service).dropKept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).dropKept
+        kind: self
+      - id: u.fs.Remove
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: u.fs.Remove(file.target + prevSuffix)
+                    to: u.fs.Remove
+                when: file.kept
+          key: _
+          range: set
+          value: file
+  - of: SourceValue.AuthoriseUnattendedUpgrade
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.AuthoriseUnattendedUpgrade
+        kind: self
+      - id: consentFromEnv
+        kind: internal
+      - id: askUpgradeConsent
+        kind: internal
+    steps:
+      - bind: granted, decided
+        eval: consentFromEnv(os.Getenv(s.AutoUpgradeEnv()))
+        to: consentFromEnv
+      - opt:
+          do:
+            - return: granted
+          when: decided
+      - opt:
+          do:
+            - return: "false"
+          when: "!interactive"
+      - return: askUpgradeConsent(out, in)
+        to: askUpgradeConsent
+  - of: SourceValue.ExplainUpgradeRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.ExplainUpgradeRefusal
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - eval: fmt.Fprintf(out, "%s does not download and replace its own binary without being asked.\n", s.Product)
+        to: fmt
+      - eval: fmt.Fprintf(out, "  - run `%s upgrade` to install the required version now, or\n", s.Product)
+        to: fmt
+      - eval: fmt.Fprintf(out, "  - set %s=1 to authorise updates that were not explicitly requested\n", s.AutoUpgradeEnv())
+        to: fmt
+      - eval: fmt.Fprintf(out, "    (CI images, devcontainers, hook-driven runs — nothing there can answer a prompt)\n")
+        to: fmt
+      - eval: fmt.Fprintf(out, "  - installing into a directory this user cannot write additionally needs %s=1\n", s.SudoOptInEnv())
+        to: fmt
+  - of: SourceValue.ExplainUpgradeFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.ExplainUpgradeFailure
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: diagnose
+        kind: internal
+    steps:
+      - eval: "fmt.Fprintf(out, \"%s: %v\\n\", action, err)"
+        to: fmt
+      - opt:
+          do:
+            - eval: fmt.Fprintf(out, "  %s\n", detail)
+              to: fmt
+          init:
+            bind: detail
+            eval: diagnose(err)
+            to: diagnose
+          when: detail != ""
+      - switch:
+          cases:
+            - case: errors.Is(err, coreupd.SignatureMissing), errors.Is(err, coreupd.SignatureInvalid)
+              do:
+                - eval: fmt.Fprintln(out, "  this release is not signed by the vendor key this build trusts.")
+                  to: fmt
+                - eval: "fmt.Fprintln(out, \"  do NOT install it by hand: a missing or wrong signature is exactly what a\")"
+                  to: fmt
+                - eval: fmt.Fprintln(out, "  substituted release looks like, and the checksum cannot tell the two apart.")
+                  to: fmt
+            - case: errors.Is(err, coreupd.NoVendorKey)
+              do:
+                - eval: fmt.Fprintln(out, "  this binary was built from source and trusts no release signing key.")
+                  to: fmt
+                - eval: fmt.Fprintln(out, "  rebuild from source rather than self-updating.")
+                  to: fmt
+            - case: errors.Is(err, coreupd.ElevationNotAuthorised)
+              do:
+                - eval: fmt.Fprintf(out, "  set %s=1 to allow `sudo -n mv` into the install directory,\n", s.SudoOptInEnv())
+                  to: fmt
+                - eval: fmt.Fprintln(out, "  or re-run as the owner of that path.")
+                  to: fmt
+            - case: errors.Is(err, coreupd.ChecksumMismatch), errors.Is(err, coreupd.ChecksumMissing)
+              do:
+                - eval: fmt.Fprintln(out, "  the archive does not match the signed manifest — a corrupted download,")
+                  to: fmt
+                - eval: fmt.Fprintln(out, "  or a release whose assets were changed after it was signed.")
+                  to: fmt
+            - default: true
+              do:
+                - eval: fmt.Fprintln(out, "  retry once the problem is resolved.")
+                  to: fmt
+  - of: consentFromEnv
+    participants:
+      - id: caller
+        kind: actor
+      - id: consentFromEnv
+        kind: self
+      - id: truthyEnv
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, false
+          when: strings.TrimSpace(value) == ""
+      - return: truthyEnv(value), true
+        to: truthyEnv
+  - of: askUpgradeConsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: askUpgradeConsent
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: bufio.NewReader(in).ReadString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: in == nil
+      - eval: "fmt.Fprint(out, \"install it now, replacing this binary? [y/N]: \")"
+        to: fmt
+      - bind: answer, err
+        eval: bufio.NewReader(in).ReadString('\n')
+        to: bufio.NewReader(in).ReadString
+      - opt:
+          do:
+            - eval: fmt.Fprintln(out)
+              to: fmt
+            - return: "false"
+          when: err != nil && answer == ""
+      - switch:
+          cases:
+            - case: "\"y\", \"yes\""
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": strings.ToLower(strings.TrimSpace(answer))
+  - of: StdinIsTerminal
+    participants:
+      - id: caller
+        kind: actor
+      - id: StdinIsTerminal
+        kind: self
+      - id: os.Stdin.Stat
+        kind: value
+      - id: isNullDevice
+        kind: internal
+    steps:
+      - bind: info, err
+        eval: os.Stdin.Stat()
+        to: os.Stdin.Stat
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil || !terminalLike(info.Mode())
+      - return: "!isNullDevice(info)"
+        to: isNullDevice
+  - of: isNullDevice
+    participants:
+      - id: caller
+        kind: actor
+      - id: isNullDevice
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: nullInfo, err
+        eval: os.Stat(nullDevicePath)
+        to: os
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - return: os.SameFile(info, nullInfo)
+        to: os
+  - of: terminalLike
+    steps:
+      - return: mode&os.ModeCharDevice != 0
+  - of: SourceValue.consentFromEnvironment
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.consentFromEnvironment
+        kind: self
+      - id: consentFromEnv
+        kind: internal
+    steps:
+      - return: consentFromEnv(os.Getenv(s.AutoUpgradeEnv()))
+        to: consentFromEnv
+  - of: (*Service).WithAutomaticConsent
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u == nil
+      - set: u.automatic
+        value: "true"
+      - return: u
+  - of: (*Service).WithoutElevation
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u == nil
+      - set: u.elevate
+        value: u.src.refusedElevation
+      - return: u
+  - of: (*Service).AuthoriseUnattendedUpgrade
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).AuthoriseUnattendedUpgrade
+        kind: self
+      - id: u.src.consentFromEnvironment
+        kind: internal
+      - id: u.src.AuthoriseUnattendedUpgrade
+        kind: internal
+    steps:
+      - bind: granted, decided
+        eval: u.src.consentFromEnvironment()
+        to: u.src.consentFromEnvironment
+      - opt:
+          do:
+            - return: granted
+          when: decided
+      - opt:
+          do:
+            - return: "true"
+          when: u.automatic
+      - return: u.src.AuthoriseUnattendedUpgrade(out, in, interactive)
+        to: u.src.AuthoriseUnattendedUpgrade
+  - of: diagnose
+    participants:
+      - id: caller
+        kind: actor
+      - id: diagnose
+        kind: self
+      - id: errs
+        kind: package
+      - id: foreignCauses
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: fields
+        eval: errs.FieldsOf(err)
+        to: errs
+      - bind: parts
+        eval: make([]string, 0, len(fields)+1)
+      - loop:
+          do:
+            - set: parts
+              value: append(parts, field.Key()+"="+field.StringValue())
+          key: _
+          range: fields
+          value: field
+      - opt:
+          do:
+            - set: parts
+              value: append(parts, "cause="+strings.Join(causes, "; "))
+          init:
+            bind: causes
+            eval: foreignCauses(err)
+            to: foreignCauses
+          when: len(causes) > 0
+      - return: strings.Join(parts, " ")
+        to: strings
+  - of: foreignCauses
+    participants:
+      - id: caller
+        kind: actor
+      - id: foreignCauses
+        kind: self
+      - id: collectForeign
+        kind: internal
+    steps:
+      - bind: found
+        eval: make([]string, 0, maxForeignCauses)
+      - eval: collectForeign(err, &found)
+        to: collectForeign
+      - return: found
+  - of: collectForeign
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectForeign
+        kind: self
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil || len(*found) >= maxForeignCauses
+      - opt:
+          do:
+            - loop:
+                do:
+                  - eval: collectForeign(member, found)
+                    to: collectForeign
+                key: _
+                range: multi.Unwrap()
+                value: member
+            - return: ""
+          init:
+            bind: multi, ok
+            eval: err.(interface{ Unwrap() []error })
+          when: ok
+      - opt:
+          do:
+            - eval: collectForeign(errors.Unwrap(err), found)
+              to: collectForeign
+            - return: ""
+          init:
+            bind: _, ours
+            eval: err.(*errs.Error)
+          when: ours
+      - set: "*found"
+        value: append(*found, err.Error())
+  - of: truthyEnv
+    steps:
+      - switch:
+          cases:
+            - case: "\"1\", \"true\", \"yes\", \"y\", \"on\""
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": strings.ToLower(strings.TrimSpace(value))
+  - of: SourceValue.guardedSudoMove
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.guardedSudoMove
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: sudoMove
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.ElevationNotAuthorised,
+                			errs.String("path", execPath),
+                			errs.String("opt_in_env", s.SudoOptInEnv()))
+              to: refuse
+          when: "!truthyEnv(os.Getenv(s.SudoOptInEnv()))"
+      - return: sudoMove(tmpPath, execPath)
+        to: sudoMove
+  - of: sudoMove
+    participants:
+      - id: caller
+        kind: actor
+      - id: sudoMove
+        kind: self
+      - id: exec.Command("sudo", "-n", "mv", tmpPath, execPath).CombinedOutput
+        kind: value
+      - id: classify
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: exec.Command("sudo", "-n", "mv", tmpPath, execPath).CombinedOutput()
+        to: exec.Command("sudo", "-n", "mv", tmpPath, execPath).CombinedOutput
+      - opt:
+          do:
+            - return: |-
+                classify(ElevationFailed, err,
+                			errs.String("sudo_output", strings.TrimSpace(string(out))))
+              to: classify
+          when: err != nil
+      - return: nil
+  - of: SourceValue.refusedElevation
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.refusedElevation
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - return: |-
+          refuse(coreupd.ElevationNotAuthorised,
+          		errs.String("path", execPath),
+          		errs.String("condition", "forbidden_by_product"))
+        to: refuse
+  - of: (*Service).WithVendorKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).WithVendorKeys
+        kind: self
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u == nil
+      - opt:
+          do:
+            - eval: "log.Printf(\"selfupdate: %d vendor keys linked, %d kept: the tail is dropped\", len(keys), maxVendorKeys)"
+              to: log
+            - set: keys
+              value: keys[:maxVendorKeys]
+          when: len(keys) > maxVendorKeys
+      - set: u.vendorKeys
+        value: u.vendorKeys[:0]
+      - loop:
+          do:
+            - set: u.vendorKeys
+              value: append(u.vendorKeys, ed25519.PublicKey(k))
+          key: _
+          range: keys
+          value: k
+      - set: u.vendorKey
+        value: nil
+      - opt:
+          do:
+            - set: u.vendorKey
+              value: u.vendorKeys[0]
+          when: len(u.vendorKeys) > 0
+      - return: u
+  - of: (*Service).WithSignatureDomain
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u == nil
+      - set: u.domain
+        value: domain
+      - return: u
+  - of: (*Service).verifiedByAnyKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).verifiedByAnyKey
+        kind: self
+      - id: sign
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: len(k) != ed25519.PublicKeySize
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: verified, verifyErr
+                  eval: sign.Verify(sign.Ed25519, k, message, signature)
+                  to: sign
+                when: verifyErr == nil && verified
+          key: _
+          range: u.keys()
+          value: k
+      - return: "false"
+  - of: (*Service).keys
+    steps:
+      - opt:
+          do:
+            - return: "[]ed25519.PublicKey{u.vendorKey}"
+          when: len(u.vendorKeys) == 0 && u.vendorKey != nil
+      - return: u.vendorKeys
+  - of: (*Service).signedMessage
+    steps:
+      - opt:
+          do:
+            - return: manifest
+          when: u.domain == ""
+      - return: u.domain + "\x00" + manifest
+  - of: (*Service).checkStatement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).checkStatement
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: refuse
+        kind: internal
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u.domain == ""
+      - leaf: a var of several names, or of no type
+        stmt: var signedTag, expires string
+      - loop:
+          do:
+            - set: line
+              to: strings
+              value: strings.TrimSpace(line)
+            - switch:
+                cases:
+                  - case: strings.HasPrefix(line, statementTag)
+                    do:
+                      - set: signedTag
+                        to: strings
+                        value: strings.TrimSpace(strings.TrimPrefix(line, statementTag))
+                  - case: strings.HasPrefix(line, statementExpires)
+                    do:
+                      - set: expires
+                        to: strings
+                        value: strings.TrimSpace(strings.TrimPrefix(line, statementExpires))
+          key: line
+          range: strings.SplitSeq(manifest, "\n")
+      - opt:
+          do:
+            - return: refuse(coreupd.SignatureInvalid, errs.String("condition", "statement_incomplete"), errs.String("tag", tag))
+              to: refuse
+          when: signedTag == "" || expires == ""
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.SignatureInvalid, errs.String("condition", "tag_mismatch"),
+                			errs.String("tag", tag), errs.String("signed_tag", signedTag))
+              to: refuse
+          when: normalizeVersion(signedTag) != normalizeVersion(tag)
+      - bind: until, err
+        eval: time.Parse(time.RFC3339, expires)
+        to: time
+      - opt:
+          do:
+            - return: refuse(coreupd.SignatureInvalid, errs.String("condition", "expiry_unreadable"), errs.String("tag", tag))
+              to: refuse
+          when: err != nil
+      - bind: reader
+        eval: u.clock
+      - opt:
+          do:
+            - set: reader
+              value: clock.System
+          when: reader == nil
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.SignatureInvalid, errs.String("condition", "statement_expired"),
+                			errs.String("tag", tag), errs.String("expired", until.UTC().Format(time.RFC3339)))
+              to: refuse
+          when: "!reader.Now().Before(until)"
+      - return: nil
+  - of: osFileSystem.Executable
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.Executable
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.Executable()
+        to: os
+  - of: osFileSystem.EvalSymlinks
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.EvalSymlinks
+        kind: self
+      - id: filepath
+        kind: stdlib
+    steps:
+      - return: filepath.EvalSymlinks(path)
+        to: filepath
+  - of: osFileSystem.CreateTemp
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.CreateTemp
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.CreateTemp(dir, pattern)
+        to: os
+  - of: osFileSystem.Chmod
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.Chmod
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.Chmod(name, mode)
+        to: os
+  - of: osFileSystem.Rename
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.Rename
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.Rename(oldpath, newpath)
+        to: os
+  - of: osFileSystem.Remove
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.Remove
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.Remove(name)
+        to: os
+  - of: osFileSystem.Link
+    participants:
+      - id: caller
+        kind: actor
+      - id: osFileSystem.Link
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.Link(oldpath, newpath)
+        to: os
+  - of: (*Service).WithProbe
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u == nil
+      - opt:
+          do:
+            - set: timeout
+              value: defaultProbeTimeout
+          when: timeout <= 0
+      - set: u.probe
+        value: "probeSpec{args: slices.Clone(args), timeout: timeout, run: runProbe}"
+      - return: u
+  - of: (*Service).keepPrevious
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).keepPrevious
+        kind: self
+      - id: u.fs.Remove
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(u.probe.args) == 0
+      - bind: l, ok
+        eval: u.fs.(linker)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: prev
+        eval: execPath + prevSuffix
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: err
+            eval: u.fs.Remove(prev)
+            to: u.fs.Remove
+          when: err != nil && !errors.Is(err, os.ErrNotExist)
+      - return: l.Link(execPath, prev) == nil
+  - of: (*Service).probeReplacement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).probeReplacement
+        kind: self
+      - id: u.probeOnce
+        kind: internal
+      - id: classify
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(u.probe.args) == 0
+      - bind: err
+        eval: u.probeOnce(execPath)
+        to: u.probeOnce
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - bind: rolledBack
+        eval: "false"
+      - opt:
+          do:
+            - set: rolledBack
+              value: u.fs.Rename(execPath+prevSuffix, execPath) == nil
+          when: kept
+      - return: |-
+          classify(ProbeFailed, err, errs.String("path", execPath), errs.Bool("rolled_back", rolledBack),
+          		errs.String("timeout", u.probe.timeout.String()))
+        to: classify
+  - of: (*Service).probeOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).probeOnce
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), u.probe.timeout)
+        to: context
+      - defer: cancel()
+      - return: u.probe.run(ctx, execPath, u.probe.args)
+  - of: runProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: runProbe
+        kind: self
+      - id: exec
+        kind: stdlib
+      - id: cmd.Run
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: cmd
+        eval: exec.CommandContext(ctx, path, args...)
+        to: exec
+      - set: cmd.Stdout, cmd.Stderr, cmd.Stdin
+        value: io.Discard, io.Discard, nil
+      - set: cmd.Env
+        value: append(os.Environ(), "SELFUPDATE_PROBE=1")
+      - bind: err
+        eval: cmd.Run()
+        to: cmd.Run
+      - opt:
+          do:
+            - return: errors.Join(err, ctx.Err())
+              to: errors
+          when: ctx.Err() != nil
+      - return: err
+  - of: (*Service).canReplace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).canReplace
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u.goos != "windows"
+      - return: |-
+          refuse(proc.UnsupportedPlatform,
+          		errs.String("goos", u.goos),
+          		errs.String("tag", tag),
+          		errs.String("step", "replace"))
+        to: refuse
+  - of: (*Service).WithVendorKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).WithVendorKey
+        kind: self
+      - id: u.WithVendorKeys
+        kind: internal
+    steps:
+      - return: u.WithVendorKeys(key)
+        to: u.WithVendorKeys
+  - of: (*Service).verifyArchive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).verifyArchive
+        kind: self
+      - id: u.canAuthenticate
+        kind: internal
+      - id: u.fetchChecksums
+        kind: internal
+      - id: u.fetchSignature
+        kind: internal
+      - id: refuse
+        kind: internal
+      - id: u.checkStatement
+        kind: internal
+      - id: u.matchArchiveDigest
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: u.canAuthenticate(tag)
+            to: u.canAuthenticate
+          when: err != nil
+      - bind: manifest, err
+        eval: u.fetchChecksums(tag)
+        to: u.fetchChecksums
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: signature, err
+        eval: u.fetchSignature(tag)
+        to: u.fetchSignature
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.SignatureInvalid,
+                			errs.String("condition", "verify_failed"),
+                			errs.String("asset", checksumsAssetName),
+                			errs.String("tag", tag))
+              to: refuse
+          when: "!u.verifiedByAnyKey([]byte(u.signedMessage(manifest)), signature)"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: u.checkStatement(tag, manifest)
+            to: u.checkStatement
+          when: err != nil
+      - return: u.matchArchiveDigest(tag, manifest, archive)
+        to: u.matchArchiveDigest
+  - of: (*Service).canAuthenticate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).canAuthenticate
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: len(k) == ed25519.PublicKeySize
+          key: _
+          range: u.keys()
+          value: k
+      - return: |-
+          refuse(coreupd.NoVendorKey,
+          		errs.String("tag", tag),
+          		errs.Int("key_bytes", len(u.vendorKey)),
+          		errs.Int("keys", len(u.vendorKeys)))
+        to: refuse
+  - of: (*Service).fetchSignature
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).fetchSignature
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: u.client.Get
+        kind: value
+      - id: io
+        kind: stdlib
+      - id: decodeSignature
+        kind: internal
+    steps:
+      - bind: url
+        eval: fmt.Sprintf(downloadURL, u.src.Owner, u.repoForTag(tag), tag, signatureAssetName)
+        to: fmt
+      - bind: resp, err
+        eval: u.client.Get(url)
+        to: u.client.Get
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreupd.DownloadFailed, err,
+                			errs.String("stage", "get"),
+                			errs.String("asset", signatureAssetName),
+                			errs.String("tag", tag))
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: Prevent resource leak from unclosed response.
+          		if cerr := resp.Body.Close(); cerr != nil {
+          			log.Printf("close response body: %v", cerr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreupd.SignatureMissing,
+                			errs.String("asset", signatureAssetName),
+                			errs.String("tag", tag))
+          when: resp.StatusCode == http.StatusNotFound
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreupd.DownloadFailed,
+                			errs.String("stage", "get"),
+                			errs.Int("status", resp.StatusCode),
+                			errs.String("asset", signatureAssetName),
+                			errs.String("tag", tag))
+          when: resp.StatusCode != http.StatusOK
+      - bind: raw, err
+        eval: io.ReadAll(io.LimitReader(resp.Body, maxSignatureBytes+1))
+        to: io
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreupd.DownloadFailed, err,
+                			errs.String("stage", "read"),
+                			errs.String("asset", signatureAssetName),
+                			errs.String("tag", tag))
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                nil, refuse(coreupd.SignatureInvalid,
+                			errs.String("condition", "oversized_asset"),
+                			errs.String("asset", signatureAssetName),
+                			errs.String("tag", tag),
+                			errs.Int64("cap_bytes", maxSignatureBytes))
+          when: int64(len(raw)) > maxSignatureBytes
+      - bind: signature, decodeErr
+        eval: decodeSignature(raw)
+        to: decodeSignature
+      - opt:
+          do:
+            - return: nil, classify(coreupd.SignatureInvalid, decodeErr, errs.String("tag", tag))
+          when: decodeErr != nil
+      - return: signature, nil
+  - of: decodeSignature
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSignature
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: encoding.DecodeString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: raw, nil
+          when: len(raw) == ed25519.SignatureSize
+      - bind: text
+        eval: strings.TrimSpace(string(raw))
+        to: strings
+      - loop:
+          do:
+            - bind: decoded, err
+              eval: encoding.DecodeString(text)
+              to: encoding.DecodeString
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil || len(decoded) != ed25519.SignatureSize
+            - return: decoded, nil
+          key: _
+          range: "[]*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding}"
+          value: encoding
+      - return: |-
+          nil, refuse(coreupd.SignatureInvalid,
+          		errs.String("condition", "undecodable_asset"),
+          		errs.String("asset", signatureAssetName),
+          		errs.Int("want_bytes", ed25519.SignatureSize),
+          		errs.Int("got_bytes", len(raw)))
+  - of: SourceValue.candidateRepo
+    steps:
+      - opt:
+          do:
+            - return: s.StableRepo
+          when: s.DevRepo == ""
+      - return: s.DevRepo
+  - of: SourceValue.envPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: SourceValue.envPrefix
+        kind: self
+      - id: b.WriteRune
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: defaultProductEnvPrefix
+          when: s.Product == ""
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteRune(r)
+                    to: b.WriteRune
+                  - continue: true
+                when: (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+            - eval: b.WriteByte('_')
+              to: b.WriteByte
+          key: _
+          range: strings.ToUpper(s.Product)
+          value: r
+      - return: b.String()
+        to: b.String
+  - of: SourceValue.AutoUpgradeEnv
+    steps:
+      - return: s.envPrefix() + envSuffixAutoUpgrade
+  - of: SourceValue.SudoOptInEnv
+    steps:
+      - return: s.envPrefix() + envSuffixAllowSudo
+  - of: stdIOCopier.Copy
+    participants:
+      - id: caller
+        kind: actor
+      - id: stdIOCopier.Copy
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - return: io.Copy(dst, src)
+        to: io
+  - of: newReleaseHTTPClient
+    steps:
+      - return: |-
+          &http.Client{
+          		Transport:     releaseTransport(),
+          		Timeout:       httpTimeout,
+          		CheckRedirect: checkReleaseRedirect,
+          	}
+  - of: releaseTransport
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseTransport
+        kind: self
+      - id: base.Clone
+        kind: value
+    steps:
+      - bind: base, isStd
+        eval: http.DefaultTransport.(*http.Transport)
+      - opt:
+          do:
+            - return: "&http.Transport{Proxy: http.ProxyFromEnvironment}"
+          when: "!isStd"
+      - return: base.Clone()
+        to: base.Clone
+  - of: checkReleaseRedirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkReleaseRedirect
+        kind: self
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refuse(coreupd.InsecureRedirect, errs.String("condition", "unreadable_target"))
+              to: refuse
+          when: req == nil || req.URL == nil
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.InsecureRedirect,
+                			errs.String("condition", "hop_bound"),
+                			errs.Int("hops", len(via)),
+                			errs.Int("limit", maxRedirects),
+                			errs.String("url", req.URL.Redacted()))
+              to: refuse
+          when: len(via) >= maxRedirects
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.InsecureRedirect,
+                			errs.String("condition", "scheme_downgrade"),
+                			errs.String("scheme", req.URL.Scheme),
+                			errs.String("url", req.URL.Redacted()))
+              to: refuse
+          when: req.URL.Scheme != "https"
+      - return: nil
+  - of: decodeJSONBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeJSONBody
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: classify
+        kind: internal
+      - id: refuse
+        kind: internal
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: raw, err
+        eval: io.ReadAll(io.LimitReader(body, capBytes+1))
+        to: io
+      - opt:
+          do:
+            - return: |-
+                classify(coreupd.DownloadFailed, err,
+                			slices.Concat(fields, []errs.FieldValue{errs.String("stage", "read_api_response")})...)
+              to: classify
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                refuse(coreupd.APIBodyTooLarge,
+                			slices.Concat(fields, []errs.FieldValue{errs.Int64("cap_bytes", capBytes)})...)
+              to: refuse
+          when: int64(len(raw)) > capBytes
+      - opt:
+          do:
+            - return: classify(ReleaseMetadataUnreadable, unmarshalErr, fields...)
+              to: classify
+          init:
+            bind: unmarshalErr
+            eval: json.Unmarshal(raw, into)
+            to: json
+          when: unmarshalErr != nil
+      - return: nil
+  - of: NewService
+    steps:
+      - return: |-
+          &Service{
+          		version: version,
+          		src:     src,
+          		//: Snapshot the host platform once at construction so parallel
+          		//: tests that mutate runtimeGOOS/GOARCH don't race with this Service.
+          		goos:   runtimeGOOS(),
+          		goarch: runtimeGOARCH(),
+          		//: Not http.DefaultClient's policy: ten hops and an allowed
+          		//: https->http downgrade are not bounds anyone chose for a path that
+          		//: ends in chmod 0755 over the running binary. See transport.go.
+          		client:  newReleaseHTTPClient(),
+          		fs:      osFileSystem{},
+          		copier:  stdIOCopier{},
+          		elevate: src.guardedSudoMove,
+          	}
+  - of: NewUpdaterWithDeps
+    steps:
+      - return: |-
+          &Service{
+          		version: version,
+          		src:     src,
+          		goos:    runtimeGOOS(),
+          		goarch:  runtimeGOARCH(),
+          		client:  client,
+          		fs:      fs,
+          		copier:  copier,
+          		elevate: src.guardedSudoMove,
+          	}
+  - of: (*Service).CheckForUpdate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).CheckForUpdate
+        kind: self
+      - id: u.getLatestVersion
+        kind: internal
+      - id: u.isNewer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, coreupd.DevBuild"
+          when: u.version == "" || u.version == "dev"
+      - bind: latest, err
+        eval: u.getLatestVersion()
+        to: u.getLatestVersion
+      - opt:
+          do:
+            - return: "UpdateValue{CurrentVersion: u.version}, err"
+          when: err != nil
+      - bind: available
+        eval: u.isNewer(latest)
+        to: u.isNewer
+      - return: |-
+          UpdateValue{
+          		Available:      available,
+          		CurrentVersion: u.version,
+          		LatestVersion:  latest,
+          	}, nil
+  - of: (*Service).Upgrade
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).Upgrade
+        kind: self
+      - id: u.CheckForUpdate
+        kind: internal
+      - id: u.downloadAndReplace
+        kind: internal
+    steps:
+      - bind: info, err
+        eval: u.CheckForUpdate()
+        to: u.CheckForUpdate
+      - opt:
+          do:
+            - return: info, err
+          when: err != nil
+      - opt:
+          do:
+            - return: info, nil
+          when: "!info.Available"
+      - set: err
+        to: u.downloadAndReplace
+        value: u.downloadAndReplace(info.LatestVersion)
+      - opt:
+          do:
+            - return: info, err
+          when: err != nil
+      - return: info, nil
+  - of: (*Service).repoForTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).repoForTag
+        kind: self
+      - id: u.src.candidateRepo
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: u.src.candidateRepo()
+              to: u.src.candidateRepo
+          when: semver.Prerelease(normalizeVersion(tag)) != ""
+      - return: u.src.StableRepo
+  - of: (*Service).getLatestVersion
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).getLatestVersion
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: u.client.Get
+        kind: value
+      - id: decodeJSONBody
+        kind: internal
+    steps:
+      - bind: url
+        eval: fmt.Sprintf(apiURL, u.src.Owner, u.src.StableRepo)
+        to: fmt
+      - bind: resp, err
+        eval: u.client.Get(url)
+        to: u.client.Get
+      - opt:
+          do:
+            - return: "\"\", classify(coreupd.DownloadFailed, err, errs.String(\"query\", \"latest_release\"))"
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: Prevent resource leak from unclosed response.
+          		if cerr := resp.Body.Close(); cerr != nil {
+          			log.Printf("close response body: %v", cerr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: |-
+                "", refuse(coreupd.UnexpectedStatus,
+                			errs.String("query", "latest_release"),
+                			errs.Int("status", resp.StatusCode))
+          when: resp.StatusCode != http.StatusOK
+      - var:
+          name: release
+          type: releaseInfo
+      - opt:
+          do:
+            - return: "\"\", err"
+          init:
+            bind: err
+            eval: |-
+              decodeJSONBody(resp.Body, maxAPIBodyBytes, &release,
+              		errs.String("query", "latest_release"))
+            to: decodeJSONBody
+          when: err != nil
+      - return: release.TagName, nil
+  - of: (*Service).isNewer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).isNewer
+        kind: self
+      - id: normalizeVersion
+        kind: internal
+    steps:
+      - bind: current
+        eval: normalizeVersion(u.version)
+        to: normalizeVersion
+      - bind: remote
+        eval: normalizeVersion(latest)
+        to: normalizeVersion
+      - opt:
+          do:
+            - return: "false"
+          when: "!semver.IsValid(current) || !semver.IsValid(remote)"
+      - return: semver.Compare(remote, current) > 0
+  - of: normalizeVersion
+    steps:
+      - opt:
+          do:
+            - return: "\"v\" + v"
+          when: "!strings.HasPrefix(v, \"v\")"
+      - return: v
+  - of: (*Service).downloadAndReplace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).downloadAndReplace
+        kind: self
+      - id: u.canAuthenticate
+        kind: internal
+      - id: u.canReplace
+        kind: internal
+      - id: u.downloadBinary
+        kind: internal
+      - id: u.resolveExecutablePath
+        kind: internal
+      - id: bufferArchive
+        kind: internal
+      - id: u.verifyArchive
+        kind: internal
+      - id: u.installedCompanions
+        kind: internal
+      - id: u.replaceSet
+        kind: internal
+      - id: u.openInnerBinary
+        kind: internal
+      - id: classify
+        kind: internal
+      - id: u.writeAndReplaceBinary
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: u.canAuthenticate(version)
+            to: u.canAuthenticate
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: u.canReplace(version)
+            to: u.canReplace
+          when: err != nil
+      - bind: resp, err
+        eval: u.downloadBinary(version)
+        to: u.downloadBinary
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: Prevent resource leak from unclosed response.
+          		if cerr := resp.Body.Close(); cerr != nil {
+          			log.Printf("close response body: %v", cerr)
+          		}
+          	}()
+      - bind: execPath, err
+        eval: u.resolveExecutablePath()
+        to: u.resolveExecutablePath
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: archive, err
+        eval: bufferArchive(resp.Body, maxArchiveBytes)
+        to: bufferArchive
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: u.verifyArchive(version, archive)
+            to: u.verifyArchive
+          when: err != nil
+      - bind: installed, err
+        eval: u.installedCompanions(execPath)
+        to: u.installedCompanions
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: u.replaceSet(archive, execPath, installed)
+              to: u.replaceSet
+          when: len(installed) > 0
+      - bind: binReader, cleanup, err
+        eval: u.openInnerBinary(bytes.NewReader(archive))
+        to: u.openInnerBinary
+      - opt:
+          do:
+            - return: classify(ArchiveUnreadable, err, errs.String("stage", "extract"))
+              to: classify
+          when: err != nil
+      - defer: cleanup()
+      - return: u.writeAndReplaceBinary(binReader, execPath)
+        to: u.writeAndReplaceBinary
+  - of: (*Service).openInnerBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).openInnerBinary
+        kind: self
+      - id: u.openMember
+        kind: internal
+    steps:
+      - return: u.openMember(body, u.innerBinaryName())
+        to: u.openMember
+  - of: (*Service).openMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).openMember
+        kind: self
+      - id: u.getArchiveSuffix
+        kind: internal
+      - id: openFromTarGz
+        kind: internal
+      - id: openFromZip
+        kind: internal
+    steps:
+      - bind: suffix
+        eval: u.getArchiveSuffix()
+        to: u.getArchiveSuffix
+      - switch:
+          cases:
+            - case: "\"tar.gz\""
+              do:
+                - return: openFromTarGz(body, want)
+                  to: openFromTarGz
+            - case: "\"zip\""
+              do:
+                - return: openFromZip(body, want)
+                  to: openFromZip
+            - default: true
+              do:
+                - return: nil, func() {}, refuse(coreupd.UnknownArchive, errs.String("format", suffix))
+          "on": suffix
+  - of: openFromTarGz
+    participants:
+      - id: caller
+        kind: actor
+      - id: openFromTarGz
+        kind: self
+      - id: gzip
+        kind: stdlib
+      - id: tar
+        kind: stdlib
+      - id: tarReader.Next
+        kind: value
+      - id: closeBestEffort
+        kind: internal
+    steps:
+      - bind: gz, err
+        eval: gzip.NewReader(body)
+        to: gzip
+      - opt:
+          do:
+            - return: |-
+                nil, func() {}, classify(ArchiveUnreadable, err,
+                			errs.String("stage", "open_gzip"),
+                			errs.String("format", "tar.gz"))
+          when: err != nil
+      - bind: tarReader
+        eval: tar.NewReader(gz)
+        to: tar
+      - loop:
+          do:
+            - bind: hdr, err
+              eval: tarReader.Next()
+              to: tarReader.Next
+            - opt:
+                do:
+                  - eval: closeBestEffort(gz, "gzip reader")
+                    to: closeBestEffort
+                  - return: |-
+                      nil, func() {}, refuse(coreupd.BinaryNotInArchive,
+                      				errs.String("want", want),
+                      				errs.String("format", "tar.gz"))
+                when: errors.Is(err, io.EOF)
+            - opt:
+                do:
+                  - eval: closeBestEffort(gz, "gzip reader")
+                    to: closeBestEffort
+                  - return: |-
+                      nil, func() {}, classify(ArchiveUnreadable, err,
+                      				errs.String("stage", "read_tar"),
+                      				errs.String("format", "tar.gz"))
+                when: err != nil
+            - opt:
+                do:
+                  - continue: true
+                when: hdr.Typeflag != tar.TypeReg || filepath.Base(hdr.Name) != want
+            - return: tarReader, func() { closeBestEffort(gz, "gzip reader") }, nil
+          forever: true
+  - of: openFromZip
+    participants:
+      - id: caller
+        kind: actor
+      - id: openFromZip
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: zip
+        kind: stdlib
+      - id: f.Open
+        kind: value
+    steps:
+      - bind: buf, err
+        eval: io.ReadAll(body)
+        to: io
+      - opt:
+          do:
+            - return: |-
+                nil, func() {}, classify(ArchiveUnreadable, err,
+                			errs.String("stage", "buffer_zip"),
+                			errs.String("format", "zip"))
+          when: err != nil
+      - bind: zr, err
+        eval: zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
+        to: zip
+      - opt:
+          do:
+            - return: |-
+                nil, func() {}, classify(ArchiveUnreadable, err,
+                			errs.String("stage", "open_zip"),
+                			errs.String("format", "zip"))
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: filepath.Base(f.Name) != want
+            - opt:
+                do:
+                  - continue: true
+                when: "!f.FileInfo().Mode().IsRegular()"
+            - bind: rc, err
+              eval: f.Open()
+              to: f.Open
+            - opt:
+                do:
+                  - return: |-
+                      nil, func() {}, classify(ArchiveUnreadable, err,
+                      				errs.String("stage", "open_zip_entry"),
+                      				errs.String("format", "zip"),
+                      				errs.String("entry", f.Name))
+                when: err != nil
+            - return: rc, func() { closeBestEffort(rc, "zip entry") }, nil
+          key: _
+          range: zr.File
+          value: f
+      - return: |-
+          nil, func() {}, refuse(coreupd.BinaryNotInArchive,
+          		errs.String("want", want),
+          		errs.String("format", "zip"))
+  - of: closeBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeBestEffort
+        kind: self
+      - id: c.Close
+        kind: value
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: "log.Printf(\"close %s: %v\", what, cerr)"
+              to: log
+          init:
+            bind: cerr
+            eval: c.Close()
+            to: c.Close
+          when: cerr != nil
+  - of: (*Service).downloadBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).downloadBinary
+        kind: self
+      - id: u.getBinaryName
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: u.client.Get
+        kind: value
+      - id: resp.Body.Close
+        kind: value
+      - id: log
+        kind: stdlib
+    steps:
+      - bind: binaryName
+        eval: u.getBinaryName()
+        to: u.getBinaryName
+      - bind: url
+        eval: fmt.Sprintf(downloadURL, u.src.Owner, u.repoForTag(version), version, binaryName)
+        to: fmt
+      - bind: resp, err
+        eval: u.client.Get(url)
+        to: u.client.Get
+      - opt:
+          do:
+            - return: |-
+                nil, classify(coreupd.DownloadFailed, err,
+                			errs.String("stage", "get"),
+                			errs.String("asset", binaryName))
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: "log.Printf(\"close response body: %v\", cerr)"
+                    to: log
+                init:
+                  bind: cerr
+                  eval: resp.Body.Close()
+                  to: resp.Body.Close
+                when: cerr != nil
+            - return: |-
+                nil, refuse(coreupd.DownloadFailed,
+                			errs.String("stage", "get"),
+                			errs.String("asset", binaryName),
+                			errs.Int("status", resp.StatusCode))
+          when: resp.StatusCode != http.StatusOK
+      - return: resp, nil
+  - of: (*Service).resolveExecutablePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).resolveExecutablePath
+        kind: self
+      - id: u.fs.Executable
+        kind: value
+      - id: u.fs.EvalSymlinks
+        kind: value
+    steps:
+      - bind: execPath, err
+        eval: u.fs.Executable()
+        to: u.fs.Executable
+      - opt:
+          do:
+            - return: "\"\", classify(ExecutablePathUnresolved, err, errs.String(\"step\", \"executable\"))"
+          when: err != nil
+      - bind: resolved, err
+        eval: u.fs.EvalSymlinks(execPath)
+        to: u.fs.EvalSymlinks
+      - opt:
+          do:
+            - return: |-
+                "", classify(ExecutablePathUnresolved, err,
+                			errs.String("step", "eval_symlinks"),
+                			errs.String("path", execPath))
+          when: err != nil
+      - return: resolved, nil
+  - of: (*Service).writeAndReplaceBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).writeAndReplaceBinary
+        kind: self
+      - id: u.fs.CreateTemp
+        kind: value
+      - id: classify
+        kind: internal
+      - id: tmpFile.Name
+        kind: value
+      - id: u.writeTempFileContent
+        kind: internal
+      - id: u.fs.Remove
+        kind: value
+      - id: tmpFile.Close
+        kind: value
+      - id: u.finalizeReplacement
+        kind: internal
+    steps:
+      - bind: tmpFile, err
+        eval: u.fs.CreateTemp(filepath.Dir(execPath), u.src.Product+"-update-*")
+        to: u.fs.CreateTemp
+      - opt:
+          do:
+            - set: tmpFile, err
+              to: u.fs.CreateTemp
+              value: u.fs.CreateTemp("", u.src.Product+"-update-*")
+          when: errors.Is(err, os.ErrPermission)
+      - opt:
+          do:
+            - return: |-
+                classify(StagingFailed, err,
+                			errs.String("step", "create_temp"),
+                			errs.String("dir", filepath.Dir(execPath)))
+              to: classify
+          when: err != nil
+      - bind: tmpPath
+        eval: tmpFile.Name()
+        to: tmpFile.Name
+      - bind: closed
+        eval: "false"
+      - defer: |-
+          func() {
+          		//: An already-closed file must not be closed twice.
+          		if closed {
+          			return
+          		}
+          		err = errors.Join(err, tmpFile.Close())
+          	}()
+      - set: err
+        to: u.writeTempFileContent
+        value: u.writeTempFileContent(tmpFile, content)
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: err
+          when: err != nil
+      - set: closed
+        value: "true"
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: classify(StagingFailed, closeErr, errs.String("step", "close_temp"))
+              to: classify
+          init:
+            bind: closeErr
+            eval: tmpFile.Close()
+            to: tmpFile.Close
+          when: closeErr != nil
+      - return: u.finalizeReplacement(tmpPath, execPath)
+        to: u.finalizeReplacement
+  - of: (*Service).writeTempFileContent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).writeTempFileContent
+        kind: self
+      - id: u.copier.Copy
+        kind: value
+      - id: classify
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: u.copier.Copy(writer, content)
+        to: u.copier.Copy
+      - opt:
+          do:
+            - return: classify(StagingFailed, err, errs.String("step", "write_temp"))
+              to: classify
+          when: err != nil
+      - return: nil
+  - of: (*Service).finalizeReplacement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).finalizeReplacement
+        kind: self
+      - id: u.fs.Chmod
+        kind: value
+      - id: u.fs.Remove
+        kind: value
+      - id: classify
+        kind: internal
+      - id: u.keepPrevious
+        kind: internal
+      - id: u.fs.Rename
+        kind: value
+      - id: u.probeReplacement
+        kind: internal
+    steps:
+      - bind: err
+        eval: u.fs.Chmod(tmpPath, executablePerm)
+        to: u.fs.Chmod
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: classify(StagingFailed, err, errs.String("step", "chmod_temp"))
+              to: classify
+          when: err != nil
+      - bind: kept
+        eval: u.keepPrevious(execPath)
+        to: u.keepPrevious
+      - set: err
+        to: u.fs.Rename
+        value: u.fs.Rename(tmpPath, execPath)
+      - opt:
+          do:
+            - return: u.probeReplacement(execPath, kept)
+              to: u.probeReplacement
+          when: err == nil
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: |-
+                classify(ReplacementFailed, err,
+                			errs.String("step", "rename"),
+                			errs.Bool("elevated", false))
+              to: classify
+          when: "!errors.Is(err, os.ErrPermission)"
+      - opt:
+          do:
+            - eval: u.fs.Remove(tmpPath)
+              to: u.fs.Remove
+            - return: |-
+                classify(ReplacementFailed, errors.Join(err, elevateErr),
+                			errs.String("step", "rename"),
+                			errs.Bool("elevated", true))
+              to: classify
+          init:
+            bind: elevateErr
+            eval: u.elevate(tmpPath, execPath)
+          when: elevateErr != nil
+      - return: u.probeReplacement(execPath, kept)
+        to: u.probeReplacement
+  - of: (*Service).getBinaryName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Service).getBinaryName
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: fmt.Sprintf("%s_%s_%s.%s", u.src.Product, u.goos, u.goarch, u.getArchiveSuffix())
+        to: fmt
+  - of: (*Service).getArchiveSuffix
+    steps:
+      - opt:
+          do:
+            - return: "\"zip\""
+          when: u.goos == "windows"
+      - return: "\"tar.gz\""
+  - of: (*Service).innerBinaryName
+    steps:
+      - opt:
+          do:
+            - return: u.src.Product + ".exe"
+          when: u.goos == "windows"
+      - return: u.src.Product
+  - of: refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuse
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+        to: errs
+  - of: classify
+    participants:
+      - id: caller
+        kind: actor
+      - id: classify
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(cause, errs.WrapParams{}, fields...)
+              to: errs
+          when: sentinel == nil
+      - bind: code, _
+        eval: errs.CodeOf(sentinel)
+        to: errs
+      - bind: reason, _
+        eval: errs.ReasonOf(sentinel)
+        to: errs
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     code,
+          		Reason:   reason,
+          		Public:   errs.PublicOf(sentinel),
+          		Private:  errs.PrivateOf(sentinel),
+          		ExitCode: errs.ExitCodeOf(sentinel),
+          	}, fields...)
+        to: errs

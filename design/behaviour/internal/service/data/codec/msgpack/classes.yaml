@@ -1,0 +1,2629 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Pair arithmetic of the map family.
+    grouped: true
+    items:
+      - doc: |-
+          mapEntryMinBytes is the fewest bytes one map pair can occupy: a
+          one-byte key and a one-byte value.
+        name: mapEntryMinBytes
+        type: uint64
+        value: "2"
+      - doc: "valuesPerPair is how many values one map pair holds: a key and a value."
+        name: valuesPerPair
+        type: uint64
+        value: "2"
+    name: mapEntryMinBytes
+  - doc: |-
+      anyPreallocElems is how many []any slots a declared count may reserve
+      before its elements are read (preallocBytes / 16-byte interface).
+    items:
+      - name: anyPreallocElems
+        type: uint64
+        value: uint64(preallocBytes) / anySlotBytes
+    name: anyPreallocElems
+  - doc: anySlotBytes is the size of one interface value.
+    items:
+      - name: anySlotBytes
+        type: uint64
+        value: "16"
+    name: anySlotBytes
+  - doc: Map preallocation bounds.
+    grouped: true
+    items:
+      - doc: |-
+          mapPairEstimate is the bytes assumed per reserved pair when sizing a
+          map.
+        name: mapPairEstimate
+        type: uint64
+        value: "64"
+      - doc: mapPreallocPairs bounds the pairs a declared count may reserve.
+        name: mapPreallocPairs
+        type: uint64
+        value: uint64(preallocBytes) / mapPairEstimate
+    name: mapPairEstimate
+  - doc: streamBufSize is the read-ahead the decoder keeps over its reader.
+    items:
+      - name: streamBufSize
+        type: int
+        value: 4 << 10
+    name: streamBufSize
+  - doc: Reasons and public messages, shared by every failure of one direction.
+    grouped: true
+    items:
+      - doc: reasonMarshal is the reason every encode failure carries.
+        name: reasonMarshal
+        type: string
+        value: "\"MARSHAL_FAILED\""
+      - doc: reasonUnmarshal is the reason every decode failure carries.
+        name: reasonUnmarshal
+        type: string
+        value: "\"UNMARSHAL_FAILED\""
+      - doc: publicMarshal is the wire-safe message of an encode failure.
+        name: publicMarshal
+        type: string
+        value: "\"MessagePack encoding failed\""
+      - doc: publicUnmarshal is the wire-safe message of a decode failure.
+        name: publicUnmarshal
+        type: string
+        value: "\"MessagePack decoding failed\""
+      - doc: privatePrefix opens every log-only message.
+        name: privatePrefix
+        type: string
+        value: "\"service/data/codec/msgpack: \""
+    name: reasonMarshal
+  - doc: Field keys attached to failures.
+    grouped: true
+    items:
+      - doc: fieldOffset is the byte offset in the input where a decode failed.
+        name: fieldOffset
+        type: string
+        value: "\"offset\""
+      - doc: fieldType is the Go type the codec was encoding or decoding into.
+        name: fieldType
+        type: string
+        value: "\"type\""
+      - doc: fieldWire is the MessagePack family the input carried.
+        name: fieldWire
+        type: string
+        value: "\"wire\""
+      - doc: fieldLimit is the bound a value exceeded.
+        name: fieldLimit
+        type: string
+        value: "\"limit\""
+      - doc: fieldLen is a length the input declared or the value had.
+        name: fieldLen
+        type: string
+        value: "\"len\""
+      - doc: fieldName is a struct field name.
+        name: fieldName
+        type: string
+        value: "\"field\""
+    name: fieldOffset
+  - doc: Struct-tag vocabulary.
+    grouped: true
+    items:
+      - doc: tagKey is the struct tag this codec reads.
+        name: tagKey
+        type: string
+        value: "\"msgpack\""
+      - doc: markerField is the field whose tag carries struct-wide options.
+        name: markerField
+        type: string
+        value: "\"_msgpack\""
+      - doc: optOmitEmpty leaves an empty field out.
+        name: optOmitEmpty
+        type: string
+        value: "\"omitempty\""
+      - doc: optAsArray encodes the struct as an array.
+        name: optAsArray
+        type: string
+        value: "\"as_array\""
+      - doc: optAsArrayCamel is the camel-case spelling of optAsArray.
+        name: optAsArrayCamel
+        type: string
+        value: "\"asArray\""
+      - doc: optInline forces an embedded struct's fields inline.
+        name: optInline
+        type: string
+        value: "\"inline\""
+      - doc: optNoInline keeps an embedded struct as one field.
+        name: optNoInline
+        type: string
+        value: "\"noinline\""
+      - doc: optAlias names an extra key the field decodes from.
+        name: optAlias
+        type: string
+        value: "\"alias\""
+      - doc: tagSkip is the tag name that leaves a field out.
+        name: tagSkip
+        type: string
+        value: "\"-\""
+      - doc: detailDuplicateKey is the failure of a type two fields share a key in.
+        name: detailDuplicateKey
+        type: string
+        value: "\"two struct fields claim the same MessagePack key\""
+    name: tagKey
+  - doc: Timestamp layout constants.
+    grouped: true
+    items:
+      - doc: ts32Len is the payload length of timestamp 32.
+        name: ts32Len
+        type: uint64
+        value: "4"
+      - doc: ts64Len is the payload length of timestamp 64.
+        name: ts64Len
+        type: uint64
+        value: "8"
+      - doc: ts96Len is the payload length of timestamp 96.
+        name: ts96Len
+        type: uint64
+        value: "12"
+      - doc: ts64SecBits is how many low bits of timestamp 64 hold the seconds.
+        name: ts64SecBits
+        type: uint
+        value: "34"
+      - doc: ts64SecMask keeps the seconds of timestamp 64.
+        name: ts64SecMask
+        type: uint64
+        value: 1<<ts64SecBits - 1
+      - doc: |-
+          ts32Mask is the part of timestamp 64's word that must be zero for the
+          instant to fit timestamp 32.
+        name: ts32Mask
+        type: uint64
+        value: "0xffffffff00000000"
+      - doc: maxNanos is the largest nanosecond count the specification allows.
+        name: maxNanos
+        type: uint64
+        value: "999_999_999"
+      - doc: ts96NsecLen is the size of timestamp 96's nanosecond field.
+        name: ts96NsecLen
+        type: int
+        value: "4"
+    name: ts32Len
+  - doc: |-
+      Fix-form prefixes, masks and bounds (spec.md §Formats). A fix form carries
+      its value or length inside the header byte itself.
+    grouped: true
+    items:
+      - doc: posFixintMax is the largest positive fixint, 0xxxxxxx.
+        name: posFixintMax
+        type: byte
+        value: "0x7f"
+      - doc: fixmapPrefix is the high nibble of a fixmap, 1000xxxx.
+        name: fixmapPrefix
+        type: byte
+        value: "0x80"
+      - doc: fixarrayPrefix is the high nibble of a fixarray, 1001xxxx.
+        name: fixarrayPrefix
+        type: byte
+        value: "0x90"
+      - doc: fixstrPrefix is the high three bits of a fixstr, 101xxxxx.
+        name: fixstrPrefix
+        type: byte
+        value: "0xa0"
+      - doc: negFixintMin is the first negative fixint, 111xxxxx.
+        name: negFixintMin
+        type: byte
+        value: "0xe0"
+      - doc: fixCountMask extracts a fixmap's or fixarray's element count.
+        name: fixCountMask
+        type: byte
+        value: "0x0f"
+      - doc: fixstrLenMask extracts a fixstr's byte length.
+        name: fixstrLenMask
+        type: byte
+        value: "0x1f"
+      - doc: fixCountMax is the largest count a fixmap or fixarray can carry.
+        name: fixCountMax
+        type: int
+        value: "15"
+      - doc: fixstrMax is the largest byte length a fixstr can carry.
+        name: fixstrMax
+        type: int
+        value: "31"
+      - doc: noFixForm marks a family (bin) that has no fix form at all.
+        name: noFixForm
+        type: int
+        value: "-1"
+      - doc: negFixintFloor is the smallest value a negative fixint can carry.
+        name: negFixintFloor
+        type: int64
+        value: "-32"
+    name: posFixintMax
+  - doc: Format bytes of the 0xc0–0xdf block, in specification order.
+    grouped: true
+    items:
+      - doc: codeNil is nil.
+        name: codeNil
+        type: byte
+        value: "0xc0"
+      - doc: codeFalse is false.
+        name: codeFalse
+        type: byte
+        value: "0xc2"
+      - doc: codeTrue is true.
+        name: codeTrue
+        type: byte
+        value: "0xc3"
+      - doc: codeBin8 is bin 8.
+        name: codeBin8
+        type: byte
+        value: "0xc4"
+      - doc: codeBin16 is bin 16.
+        name: codeBin16
+        type: byte
+        value: "0xc5"
+      - doc: codeBin32 is bin 32.
+        name: codeBin32
+        type: byte
+        value: "0xc6"
+      - doc: codeExt8 is ext 8.
+        name: codeExt8
+        type: byte
+        value: "0xc7"
+      - doc: codeFloat32 is float 32.
+        name: codeFloat32
+        type: byte
+        value: "0xca"
+      - doc: codeFloat64 is float 64.
+        name: codeFloat64
+        type: byte
+        value: "0xcb"
+      - doc: codeUint8 is uint 8.
+        name: codeUint8
+        type: byte
+        value: "0xcc"
+      - doc: codeUint16 is uint 16.
+        name: codeUint16
+        type: byte
+        value: "0xcd"
+      - doc: codeUint32 is uint 32.
+        name: codeUint32
+        type: byte
+        value: "0xce"
+      - doc: codeUint64 is uint 64.
+        name: codeUint64
+        type: byte
+        value: "0xcf"
+      - doc: codeInt8 is int 8.
+        name: codeInt8
+        type: byte
+        value: "0xd0"
+      - doc: codeInt16 is int 16.
+        name: codeInt16
+        type: byte
+        value: "0xd1"
+      - doc: codeInt32 is int 32.
+        name: codeInt32
+        type: byte
+        value: "0xd2"
+      - doc: codeInt64 is int 64.
+        name: codeInt64
+        type: byte
+        value: "0xd3"
+      - doc: codeFixext4 is fixext 4, the form of a 32-bit timestamp.
+        name: codeFixext4
+        type: byte
+        value: "0xd6"
+      - doc: codeFixext8 is fixext 8, the form of a 64-bit timestamp.
+        name: codeFixext8
+        type: byte
+        value: "0xd7"
+      - doc: codeStr8 is str 8.
+        name: codeStr8
+        type: byte
+        value: "0xd9"
+      - doc: codeStr16 is str 16.
+        name: codeStr16
+        type: byte
+        value: "0xda"
+      - doc: codeStr32 is str 32.
+        name: codeStr32
+        type: byte
+        value: "0xdb"
+      - doc: codeArray16 is array 16.
+        name: codeArray16
+        type: byte
+        value: "0xdc"
+      - doc: codeArray32 is array 32.
+        name: codeArray32
+        type: byte
+        value: "0xdd"
+      - doc: codeMap16 is map 16.
+        name: codeMap16
+        type: byte
+        value: "0xde"
+      - doc: codeMap32 is map 32.
+        name: codeMap32
+        type: byte
+        value: "0xdf"
+    name: codeNil
+  - doc: |-
+      Widths, in bytes, of the field that follows a header byte: each family's
+      fields double from one width to the next.
+    grouped: true
+    items:
+      - doc: width8 is a one-byte field.
+        name: width8
+        type: uint8
+        value: 1 << iota
+      - doc: width16 is a two-byte big-endian field.
+        name: width16
+      - doc: width32 is a four-byte big-endian field.
+        name: width32
+      - doc: width64 is an eight-byte big-endian field.
+        name: width64
+    name: width8
+  - doc: fixext16Size is the payload size of fixext 16.
+    items:
+      - name: fixext16Size
+        type: uint64
+        value: "16"
+    name: fixext16Size
+  - doc: The timestamp extension type (spec.md §Timestamp extension type).
+    grouped: true
+    items:
+      - doc: |-
+          extTimestamp is the extension type the specification reserves for the
+          timestamp.
+        name: extTimestamp
+        type: int8
+        value: "-1"
+      - doc: extTimestampByte is extTimestamp as the byte on the wire.
+        name: extTimestampByte
+        type: byte
+        value: "0xff"
+    name: extTimestamp
+  - doc: Bounds every encode and decode is held to.
+    grouped: true
+    items:
+      - doc: |-
+          maxMsgPackBytes caps the Unmarshal input and the whole of one stream at
+          10 MiB, which comfortably covers every realistic configuration or event
+          document while bounding what one hostile input can make the process
+          hold (CWE-400).
+        name: maxMsgPackBytes
+        type: int
+        value: 10 << 20
+      - doc: |-
+          maxDepth bounds how deeply containers nest — arrays, maps and structs
+          on decode, and every pointer, interface and container on encode — so
+          neither recursion can exhaust a goroutine's stack (CWE-674) and a
+          cyclic value fails instead of recursing forever. Encode counts at least
+          as many levels as the decode of its output, so anything Marshal writes,
+          Unmarshal reads back.
+        name: maxDepth
+        type: int
+        value: "1000"
+      - doc: |-
+          preallocBytes is the most memory a DECLARED length may reserve before
+          the elements behind it have been read; past it, a slice or map grows as
+          elements actually arrive (CWE-1284).
+        name: preallocBytes
+        type: int
+        value: 64 << 10
+      - doc: |-
+          frameChunk is the largest read the stream framer issues for one string,
+          binary or extension payload, so a declared length is paid for only as
+          its bytes arrive.
+        name: frameChunk
+        type: uint64
+        value: 64 << 10
+      - doc: formatBlockLen is the number of format bytes in 0xc0–0xdf.
+        name: formatBlockLen
+        type: int
+        value: "32"
+      - doc: headerTableLen is the number of possible header bytes.
+        name: headerTableLen
+        type: int
+        value: "256"
+    name: maxMsgPackBytes
+  - doc: |-
+      The families of the MessagePack type system, plus famInvalid for the byte
+      the specification never uses.
+    grouped: true
+    items:
+      - doc: famInvalid is 0xc1, never used.
+        name: famInvalid
+        type: family
+        value: iota
+      - doc: famNil is nil.
+        name: famNil
+      - doc: famBool is true or false.
+        name: famBool
+      - doc: "famInt is a signed integer: negative fixint, positive fixint or int 8–64."
+        name: famInt
+      - doc: "famUint is an unsigned integer: uint 8–64."
+        name: famUint
+      - doc: famFloat32 is float 32.
+        name: famFloat32
+      - doc: famFloat64 is float 64.
+        name: famFloat64
+      - doc: famStr is a UTF-8 string.
+        name: famStr
+      - doc: famBin is a byte array.
+        name: famBin
+      - doc: famArray is an array.
+        name: famArray
+      - doc: famMap is a map.
+        name: famMap
+      - doc: "famExt is an extension: a type byte and an opaque payload."
+        name: famExt
+    name: famInvalid
+files:
+  - decls:
+      - Codec
+      - msgpackCodec
+      - New
+      - (*msgpackCodec).Name
+      - (*msgpackCodec).MIMETypes
+      - (*msgpackCodec).Extensions
+      - (*msgpackCodec).Marshal
+      - (*msgpackCodec).Unmarshal
+      - (*msgpackCodec).Append
+      - (*msgpackCodec).NewEncoder
+      - (*msgpackCodec).NewDecoder
+      - retain
+    name: codec.go
+  - decls:
+      - _
+    name: codec_compliance.go
+  - decls:
+      - mapEntryMinBytes
+      - decodeState
+      - (*decodeState).truncated
+      - (*decodeState).remaining
+      - (*decodeState).readHeader
+      - (*decodeState).readField
+      - beUint
+      - widen
+      - (*decodeState).readExtType
+      - (*decodeState).take
+      - (*decodeState).checkCount
+      - (*decodeState).enter
+      - (*decodeState).leave
+      - (*decodeState).peekNil
+      - (*decodeState).skip
+      - (*decodeState).skipBody
+      - valueExtent
+      - extentStep
+      - extentBody
+    name: decode.go
+  - decls:
+      - anyPreallocElems
+      - anySlotBytes
+      - (*decodeState).decodeAny
+      - scalarAny
+      - signedAny
+      - unsignedAny
+      - (*decodeState).decodePayloadAny
+      - extAny
+      - (*decodeState).decodeArrayAny
+      - (*decodeState).decodeMapAny
+      - (*decodeState).fillMapAny
+      - (*decodeState).readKeyString
+      - (*decodeState).readKey
+      - cloneBytes
+    name: decode_any.go
+  - decls:
+      - pointerToAnyType
+      - unmarshalInto
+      - (*decodeState).decodeTarget
+      - pointerDecoder
+      - interfaceDecoder
+      - heldPointer
+      - decodeEmptyInterface
+      - decodeErrorValue
+      - decodeNonEmptyInterface
+      - selfTarget
+      - decodeSelfMsgpack
+      - callUnmarshalMsgpack
+      - decodeSelfBinary
+      - decodeSelfText
+      - (*decodeState).selfPayload
+    name: decode_hook.go
+  - decls:
+      - sliceDecoder
+      - arrayDecoder
+      - newListDecoder
+      - (*listDecoder).decodeSlice
+      - (*listDecoder).fillSlice
+      - (*listDecoder).decodeArray
+      - (*listDecoder).fillArray
+      - decodeByteSlice
+      - decodeByteArray
+    name: decode_list.go
+  - decls:
+      - mapPairEstimate
+      - mapDecoder
+      - newMapDecoder
+      - stringMapDecoder
+      - (*mapDecoder).decode
+      - (*mapDecoder).fill
+      - (*mapDecoder).pair
+      - directMapDecoder
+      - fillDirectMap
+      - decodeAnyElem
+      - decodeStringElem
+      - decodeIntElem
+      - decodeFloat64Elem
+      - decodeBoolElem
+      - mayBeUnhashable
+      - structMayBeUnhashable
+    name: decode_map.go
+  - decls:
+      - decodeFunc
+      - unmarshalMsgpacker
+      - listDecoder
+      - decodedError
+      - decoders
+      - (*decodedError).Error
+      - decoderFor
+      - buildDecoder
+      - hookDecoder
+      - scalarDecoder
+      - compositeDecoder
+      - failingDecoder
+      - (*decodeState).mismatch
+      - zeroValue
+      - decodeBoolValue
+      - boolArg
+      - decodeIntValue
+      - decodeUintValue
+      - decodeFloatValue
+      - (*decodeState).rangeOrMismatch
+      - isInteger
+      - signedArg
+      - unsignedArg
+      - floatArg
+      - decodeStringValue
+      - (*decodeState).readBytesOrNil
+      - decodeTimeValue
+      - (*decodeState).timeOf
+      - (*decodeState).timestampPayload
+      - (*decodeState).timeFromText
+    name: decode_plan.go
+  - decls:
+      - fieldDecoder
+      - structDecoder
+      - newStructDecoder
+      - fieldDecoderOf
+      - (*structDecoder).decode
+      - (*structDecoder).decodeMap
+      - (*structDecoder).decodePair
+      - (*structDecoder).decodeArray
+      - (*fieldDecoder).decodeInto
+      - (*structDecoder).zero
+      - fieldForDecode
+      - allocEmbedded
+    name: decode_struct.go
+  - decls:
+      - streamBufSize
+      - msgpackDecoder
+      - framer
+      - newDecoder
+      - (*msgpackDecoder).Decode
+      - (*msgpackDecoder).decodeNext
+      - (*msgpackDecoder).bufferedValue
+      - (*msgpackDecoder).decodeBuffered
+      - (*msgpackDecoder).decodeFramed
+      - (*msgpackDecoder).More
+      - (*msgpackDecoder).finish
+      - (*msgpackDecoder).ending
+      - (*framer).run
+      - (*framer).body
+      - (*framer).owe
+      - (*framer).budget
+      - (*framer).copyField
+      - (*framer).copyPayload
+      - (*framer).read
+      - (*framer).readBuffered
+      - (*framer).readFailure
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - lengthForms
+      - strForms
+      - appendNil
+      - appendBool
+      - appendUint
+      - appendInt
+      - appendFloat32
+      - appendFloat64
+      - appendLength
+      - checkLength
+      - appendString
+      - appendBinary
+      - appendBytes
+      - appendArrayHeader
+      - appendMapHeader
+    name: encode.go
+  - decls:
+      - appendAny
+      - appendScalarAny
+      - appendNumberAny
+      - appendAnySlice
+      - addressEncoder
+      - encodeSelfMsgpack
+      - appendMarshalled
+      - encodeSelfBinary
+      - encodeSelfText
+      - isSingleValue
+    name: encode_hook.go
+  - decls:
+      - newMapEncoder
+      - stringMapEncoder
+      - directMapEncoder
+      - appendStringMap
+      - appendAnyElem
+      - appendStringElem
+      - appendIntElem
+      - appendFloat64Elem
+      - appendBoolElem
+      - (*mapEncoder).encode
+      - (*mapEncoder).encodePairsInPlace
+      - (*mapEncoder).encodePairsCopied
+      - (*mapEncoder).encodePair
+    name: encode_map.go
+  - decls:
+      - encodeFunc
+      - emptyFunc
+      - marshalMsgpacker
+      - isZeroer
+      - listEncoder
+      - mapEncoder
+      - fieldEncoder
+      - structEncoder
+      - encoders
+      - encoderFor
+      - buildEncoder
+      - hookEncoder
+      - methodEncoder
+      - scalarEncoder
+      - compositeEncoder
+      - failingEncoder
+      - encodeBool
+      - encodeIntValue
+      - encodeUintValue
+      - encodeFloat32Value
+      - encodeFloat64Value
+      - encodeStringValue
+      - encodeTime
+      - sliceEncoder
+      - arrayEncoder
+      - encodeByteSlice
+      - encodeByteArray
+      - (*listEncoder).encodeSlice
+      - (*listEncoder).encodeList
+      - pointerEncoder
+      - interfaceEncoder
+      - encodeInterface
+      - encodeError
+      - interfaceOf
+      - readOnly
+    name: encode_plan.go
+  - decls:
+      - newStructEncoder
+      - (*structEncoder).encode
+      - (*structEncoder).encodeArray
+      - (*structEncoder).encodeMap
+      - (*structEncoder).keptCount
+      - (*fieldEncoder).omitted
+      - (*fieldEncoder).encodeValue
+      - fieldValue
+      - emptyFor
+      - kindEmpty
+      - scalarEmpty
+      - isEmptyValue
+      - zeroerEmpty
+      - lenEmpty
+      - neverEmpty
+      - structEmpty
+      - isNilable
+    name: encode_struct.go
+  - decls:
+      - msgpackEncoder
+      - newEncoder
+      - (*msgpackEncoder).Encode
+      - (*msgpackEncoder).write
+      - (*msgpackEncoder).Close
+    name: encoder.go
+  - decls:
+      - reasonMarshal
+      - fieldOffset
+      - familyNames
+      - family.String
+      - marshalFault
+      - unmarshalFault
+      - wrapMarshal
+      - wrapUnmarshal
+      - typeField
+      - unsupportedType
+      - depthExceeded
+    name: fault.go
+  - decls:
+      - tagKey
+      - structField
+      - structLayout
+      - tagSpec
+      - layoutBuilder
+      - layouts
+      - layoutOf
+      - buildLayout
+      - (*layoutBuilder).addField
+      - (*layoutBuilder).applyMarker
+      - (*layoutBuilder).inline
+      - (*layoutBuilder).collides
+      - (*layoutBuilder).add
+      - (*layoutBuilder).alias
+      - (*layoutBuilder).fail
+      - (*structLayout).defect
+      - hasCustomCodec
+      - parseTag
+      - (*tagSpec).setOption
+      - (*tagSpec).has
+      - cmpOrName
+    name: struct.go
+  - decls:
+      - ts32Len
+      - appendTimestamp
+      - decodeTimestamp
+      - timeFromParts
+    name: timestamp.go
+  - decls:
+      - posFixintMax
+      - codeNil
+      - width8
+      - fixext16Size
+      - extTimestamp
+      - maxMsgPackBytes
+      - family
+      - famInvalid
+      - headerInfo
+      - header
+      - formatBlock
+      - buildHeaderTable
+      - classifyHeader
+    name: wire.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: |-
+      retain hands b's backing array to buf, so a buffer that grew while encoding
+      returns to the pool at its new size — scratch discards it past
+      MaxRetainedBufBytes.
+    name: retain
+    params: buf *bytes.Buffer, b []byte
+  - doc: beUint reads a big-endian unsigned field of 1, 2, 4 or 8 bytes.
+    name: beUint
+    params: p []byte
+    results: uint64
+  - doc: |-
+      widen turns a field's raw bits into the header's argument: a signed field is
+      sign-extended to 64 bits, every other field is already its value.
+    name: widen
+    params: raw uint64, info *headerInfo
+    results: uint64
+  - doc: |-
+      valueExtent reports the length of the first value in p when p holds all of
+      it, and false when p ends inside it or the value is malformed. It allocates
+      nothing and decides nothing about a failure — a caller that needs the
+      reason decodes or frames the bytes, which give it.
+    name: valueExtent
+    params: p []byte
+    results: int, bool
+  - doc: |-
+      extentStep steps over the header at off and its payload, adding a
+      container's elements to what is owed.
+    name: extentStep
+    params: p []byte, off int, owed uint64
+    results: next int, stillOwed uint64, ok bool
+  - doc: |-
+      extentBody steps over a payload, or owes a container's elements; every
+      length and count is checked against the bytes that remain.
+    name: extentBody
+    params: p []byte, off int, owed uint64, fam family, arg uint64
+    results: next int, stillOwed uint64, ok bool
+  - doc: scalarAny converts a scalar header into the Go value an interface receives.
+    name: scalarAny
+    params: h header
+    results: any
+  - doc: |-
+      signedAny returns n as the signed Go type of the field it was read from; a
+      fixint (width 0) and int 8 are both int8.
+    name: signedAny
+    params: n int64, width uint8
+    results: any
+  - doc: unsignedAny returns n as the unsigned Go type of the field it was read from.
+    name: unsignedAny
+    params: n uint64, width uint8
+    results: any
+  - doc: |-
+      extAny decodes an extension payload: the timestamp becomes a time.Time,
+      every other type is refused by name.
+    name: extAny
+    params: ext int8, p []byte
+    results: any, error
+  - doc: |-
+      cloneBytes copies p into a fresh slice the caller owns. p is a payload of
+      the input and never nil, so an empty bin decodes to an empty slice rather
+      than to nil.
+    name: cloneBytes
+    params: p []byte
+    results: "[]byte"
+  - doc: |-
+      unmarshalInto decodes data — exactly one value — into the value v points
+      at.
+    name: unmarshalInto
+    params: data []byte, v any
+    results: error
+  - doc: |-
+      pointerDecoder builds the decoder of pointer type t: nil sets the pointer
+      to nil, anything else is decoded into what it points at, allocated when
+      nil.
+    name: pointerDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: interfaceDecoder builds the decoder of interface type t.
+    name: interfaceDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: |-
+      heldPointer returns the non-nil pointer interface v holds, when the next
+      value is not nil — the one case where a decode goes INTO what an interface
+      holds instead of replacing it.
+    name: heldPointer
+    params: d *decodeState, v reflect.Value
+    results: reflect.Value, bool
+  - doc: |-
+      decodeEmptyInterface decodes into an empty interface: into the pointer it
+      holds, else the untyped value replaces what it holds.
+    name: decodeEmptyInterface
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      decodeErrorValue decodes into the error interface: a string becomes an
+      error with that text, nil a nil error.
+    name: decodeErrorValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      decodeNonEmptyInterface decodes into an interface with methods: into the
+      pointer it holds, or nil; no concrete type can be chosen for anything else.
+    name: decodeNonEmptyInterface
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      selfTarget returns the address of v as T, the interface a self-decoding
+      type implements through its pointer.
+    name: selfTarget
+    params: v reflect.Value
+    results: T, error
+    typeParams: T any
+  - doc: |-
+      decodeSelfMsgpack hands UnmarshalMsgpack a copy of the next value's bytes;
+      nil zeroes the target without calling it.
+    name: decodeSelfMsgpack
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: callUnmarshalMsgpack hands raw to the method, wrapping its failure.
+    name: callUnmarshalMsgpack
+    params: u unmarshalMsgpacker, raw []byte, t reflect.Type
+    results: error
+  - doc: |-
+      decodeSelfBinary hands UnmarshalBinary a copy of a bin or str payload; nil
+      zeroes the target without calling it.
+    name: decodeSelfBinary
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      decodeSelfText hands UnmarshalText a copy of a str or bin payload; nil
+      zeroes the target without calling it.
+    name: decodeSelfText
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: sliceDecoder builds the decoder of slice type t.
+    name: sliceDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: arrayDecoder builds the decoder of array type t.
+    name: arrayDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: newListDecoder builds the element plan of a slice or array.
+    name: newListDecoder
+    params: elem reflect.Type
+    results: "*listDecoder"
+  - doc: |-
+      decodeByteSlice decodes a bin or str into a byte slice that owns a copy;
+      nil is a nil slice, an empty payload an empty one.
+    name: decodeByteSlice
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      decodeByteArray decodes a bin or str of at most N bytes into a [N]byte,
+      zeroing the bytes past it; nil zeroes the array.
+    name: decodeByteArray
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: newMapDecoder builds the decoder of map type t.
+    name: newMapDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: |-
+      stringMapDecoder returns the direct decoder of one of the common
+      string-keyed map types — the ones encode_map.go ranges over directly — or
+      nil. Only the exact unnamed types qualify; a named map type takes the
+      reflective path, which decodes the same.
+    name: stringMapDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: |-
+      directMapDecoder returns the decoder of a map[string]V that stores each
+      pair with a plain Go assignment.
+    name: directMapDecoder
+    params: elem func(*decodeState) (V, error)
+    results: decodeFunc
+    typeParams: V any
+  - doc: fillDirectMap adds h's pairs to the map[string]V v, creating it when nil.
+    name: fillDirectMap
+    params: d *decodeState, v reflect.Value, h header, elem func(*decodeState) (V, error)
+    results: error
+    typeParams: V any
+  - doc: decodeAnyElem decodes a map[string]any element.
+    name: decodeAnyElem
+    params: d *decodeState
+    results: any, error
+  - doc: decodeStringElem decodes a map[string]string element from str, bin or nil.
+    name: decodeStringElem
+    params: d *decodeState
+    results: string, error
+  - doc: decodeIntElem decodes a signed element, refusing a value it cannot hold.
+    name: decodeIntElem
+    params: d *decodeState
+    results: T, error
+    typeParams: T int | int64
+  - doc: decodeFloat64Elem decodes a float64 element; integers are accepted.
+    name: decodeFloat64Elem
+    params: d *decodeState
+    results: float64, error
+  - doc: decodeBoolElem decodes a bool element; nil is false.
+    name: decodeBoolElem
+    params: d *decodeState
+    results: bool, error
+  - doc: |-
+      mayBeUnhashable reports whether a value of key type t can hold something
+      that is not hashable: an interface, or an array or struct containing one.
+    name: mayBeUnhashable
+    params: t reflect.Type
+    results: bool
+  - doc: structMayBeUnhashable reports whether any field of t may be unhashable.
+    name: structMayBeUnhashable
+    params: t reflect.Type
+    results: bool
+  - doc: decoderFor returns the cached decoder of t, building it on first use.
+    name: decoderFor
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: |-
+      buildDecoder chooses the decoder of t: a self-decoding type first, then its
+      kind.
+    name: buildDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: hookDecoder returns the decoder of a type that decodes itself, or nil.
+    name: hookDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: scalarDecoder returns the decoder of a bool, number or string kind, or nil.
+    name: scalarDecoder
+    params: k reflect.Kind
+    results: decodeFunc
+  - doc: |-
+      compositeDecoder returns the decoder of a container, pointer or interface
+      kind, and a refusal for the kinds MessagePack cannot fill.
+    name: compositeDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: failingDecoder returns a decoder that always fails with err.
+    name: failingDecoder
+    params: err error
+    results: decodeFunc
+  - doc: zeroValue sets v to its zero value.
+    name: zeroValue
+    params: v reflect.Value
+    results: error
+  - doc: decodeBoolValue decodes into a bool kind.
+    name: decodeBoolValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: boolArg reads a boolean header; nil is false.
+    name: boolArg
+    params: h header
+    results: value, ok bool
+  - doc: decodeIntValue decodes into a signed kind, refusing a value it cannot hold.
+    name: decodeIntValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      decodeUintValue decodes into an unsigned kind, refusing a value it cannot
+      hold.
+    name: decodeUintValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: decodeFloatValue decodes into a float kind; integers are accepted.
+    name: decodeFloatValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      isInteger reports whether a family is one of the integer families, so a
+      refusal can say "does not fit" rather than "wrong type".
+    name: isInteger
+    params: f family
+    results: bool
+  - doc: signedArg reads an integer header as an int64; nil is 0.
+    name: signedArg
+    params: h header
+    results: int64, bool
+  - doc: |-
+      unsignedArg reads an integer header as a uint64; nil is 0, a negative value
+      does not fit.
+    name: unsignedArg
+    params: h header
+    results: uint64, bool
+  - doc: floatArg reads a numeric header as a float64; nil is 0.
+    name: floatArg
+    params: h header
+    results: float64, bool
+  - doc: decodeStringValue decodes into a string kind from str or bin; nil is "".
+    name: decodeStringValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: |-
+      decodeTimeValue decodes into a time.Time from the timestamp extension, an
+      RFC 3339 string, or nil (the zero time).
+    name: decodeTimeValue
+    params: d *decodeState, v reflect.Value
+    results: error
+  - doc: newStructDecoder builds the decoder of struct type t from its layout.
+    name: newStructDecoder
+    params: t reflect.Type
+    results: decodeFunc
+  - doc: fieldDecoderOf returns the one fieldDecoder of f, building it once.
+    name: fieldDecoderOf
+    params: f *structField, built map[*structField]*fieldDecoder
+    results: "*fieldDecoder"
+  - doc: |-
+      fieldForDecode follows index from struct v, allocating nil embedded
+      pointers on the way.
+    name: fieldForDecode
+    params: v reflect.Value, index []int
+    results: reflect.Value, error
+  - doc: |-
+      allocEmbedded allocates a nil embedded pointer, refusing one that
+      reflection may not set.
+    name: allocEmbedded
+    params: v reflect.Value
+    results: error
+  - doc: newDecoder returns the streaming decoder over r.
+    name: newDecoder
+    params: r io.Reader
+    results: "*msgpackDecoder"
+  - doc: appendNil appends nil.
+    name: appendNil
+    params: b []byte
+    results: "[]byte"
+  - doc: appendBool appends true or false.
+    name: appendBool
+    params: b []byte, v bool
+    results: "[]byte"
+  - doc: appendUint appends n in the shortest unsigned form it fits.
+    name: appendUint
+    params: b []byte, n uint64
+    results: "[]byte"
+  - doc: |-
+      appendInt appends n in the shortest form it fits: a non-negative value is
+      written as unsigned, exactly as the vendor-backed codec wrote it.
+    name: appendInt
+    params: b []byte, n int64
+    results: "[]byte"
+  - doc: appendFloat32 appends a float 32, bit for bit.
+    name: appendFloat32
+    params: b []byte, f float32
+    results: "[]byte"
+  - doc: appendFloat64 appends a float 64, bit for bit.
+    name: appendFloat64
+    params: b []byte, f float64
+    results: "[]byte"
+  - doc: |-
+      appendLength appends the header of a length-prefixed item in its shortest
+      form. The caller has checked n with checkLength.
+    name: appendLength
+    params: b []byte, n int, forms *lengthForms
+    results: "[]byte"
+  - doc: |-
+      checkLength refuses a length MessagePack cannot represent: every length
+      field is at most 32 bits.
+    name: checkLength
+    params: n int
+    results: error
+  - doc: appendString appends s as a str.
+    name: appendString
+    params: b []byte, s string
+    results: "[]byte, error"
+  - doc: appendBinary appends p as a bin.
+    name: appendBinary
+    params: b, p []byte
+    results: "[]byte, error"
+  - doc: |-
+      appendBytes appends p as a bin, or nil when p is a nil slice — the
+      distinction the vendor-backed codec drew, kept so a nil []byte and an empty
+      one round-trip as themselves.
+    name: appendBytes
+    params: b, p []byte
+    results: "[]byte, error"
+  - doc: appendArrayHeader appends the header of an array of n elements.
+    name: appendArrayHeader
+    params: b []byte, n int
+    results: "[]byte, error"
+  - doc: appendMapHeader appends the header of a map of n pairs.
+    name: appendMapHeader
+    params: b []byte, n int
+    results: "[]byte, error"
+  - doc: appendAny appends the encoding of x, whatever its dynamic type.
+    name: appendAny
+    params: b []byte, x any, depth int
+    results: "[]byte, error"
+  - doc: |-
+      appendScalarAny writes the scalar dynamic types without a plan and reports
+      whether it handled x.
+    name: appendScalarAny
+    params: b []byte, x any
+    results: encoded []byte, handled bool, err error
+  - doc: |-
+      appendNumberAny writes the common number types without a plan. A float32
+      is written from the value itself, bit for bit — a signalling NaN included —
+      as the vendor-backed codec did for an untyped float32.
+    name: appendNumberAny
+    params: b []byte, x any
+    results: "[]byte, bool"
+  - doc: "appendAnySlice writes a []any: nil for a nil slice, else an array."
+    name: appendAnySlice
+    params: b []byte, s []any, depth int
+    results: "[]byte, error"
+  - doc: |-
+      addressEncoder calls a pointer-receiver method: on the value's address when
+      it has one, on an addressable copy otherwise — so a value passed directly
+      to Marshal encodes exactly as the same value inside a struct.
+    name: addressEncoder
+    params: method encodeFunc
+    results: encodeFunc
+  - doc: |-
+      encodeSelfMsgpack writes what MarshalMsgpack returns, once it is known to
+      be exactly one well-formed value: bytes written as-is cannot be allowed to
+      desynchronise everything after them.
+    name: encodeSelfMsgpack
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: |-
+      appendMarshalled appends what m.MarshalMsgpack returns, refusing anything
+      but exactly one well-formed value.
+    name: appendMarshalled
+    params: b []byte, m marshalMsgpacker, t reflect.Type
+    results: "[]byte, error"
+  - doc: encodeSelfBinary writes what MarshalBinary returns, as a bin.
+    name: encodeSelfBinary
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: |-
+      encodeSelfText writes what MarshalText returns, as a bin — not a str: the
+      vendor-backed codec wrote text as binary, and a reader in another language
+      would see the type change if this did not.
+    name: encodeSelfText
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: isSingleValue reports whether raw is exactly one well-formed value.
+    name: isSingleValue
+    params: raw []byte
+    results: bool
+  - doc: newMapEncoder builds the encoder of map type t.
+    name: newMapEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: |-
+      stringMapEncoder returns the direct encoder of one of the common
+      string-keyed map types, or nil. Only the exact unnamed types qualify; a
+      named map type takes the reflective path, which writes the same bytes.
+    name: stringMapEncoder
+    params: t reflect.Type, fallback encodeFunc
+    results: encodeFunc
+  - doc: |-
+      directMapEncoder returns an encoder that ranges over a map[string]V with a
+      plain Go loop, falling back to reflection for a map reached through an
+      unexported field (whose value reflection may not hand out).
+    name: directMapEncoder
+    params: elem func([]byte, V, int) ([]byte, error), fallback encodeFunc
+    results: encodeFunc
+    typeParams: V any
+  - doc: "appendStringMap writes a map[string]V: nil for a nil map, else a map."
+    name: appendStringMap
+    params: b []byte, m map[string]V, elem func([]byte, V, int) ([]byte, error), depth int
+    results: "[]byte, error"
+    typeParams: V any
+  - doc: appendAnyElem writes a map[string]any element by its dynamic type.
+    name: appendAnyElem
+    params: b []byte, x any, depth int
+    results: "[]byte, error"
+  - doc: appendStringElem writes a map[string]string element.
+    name: appendStringElem
+    params: b []byte, s string, _ int
+    results: "[]byte, error"
+  - doc: appendIntElem writes a signed element in its shortest form.
+    name: appendIntElem
+    params: b []byte, n T, _ int
+    results: "[]byte, error"
+    typeParams: T int | int64
+  - doc: appendFloat64Elem writes a float64 element.
+    name: appendFloat64Elem
+    params: b []byte, f float64, _ int
+    results: "[]byte, error"
+  - doc: appendBoolElem writes a bool element.
+    name: appendBoolElem
+    params: b []byte, x bool, _ int
+    results: "[]byte, error"
+  - doc: encoderFor returns the cached encoder of t, building it on first use.
+    name: encoderFor
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: |-
+      buildEncoder chooses the encoder of t: a self-encoding type first, then its
+      kind.
+    name: buildEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: |-
+      hookEncoder returns the encoder of a type that encodes itself, or nil.
+      Pointers and interfaces defer to what they hold.
+    name: hookEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: |-
+      methodEncoder returns the encoder calling the first self-encoding method t
+      implements, in the vendor's order, or nil.
+    name: methodEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: scalarEncoder returns the encoder of a bool, number or string kind, or nil.
+    name: scalarEncoder
+    params: k reflect.Kind
+    results: encodeFunc
+  - doc: |-
+      compositeEncoder returns the encoder of a container, pointer or interface
+      kind, and a refusal for the kinds MessagePack cannot carry.
+    name: compositeEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: failingEncoder returns an encoder that always fails with err.
+    name: failingEncoder
+    params: err error
+    results: encodeFunc
+  - doc: encodeBool writes a bool kind.
+    name: encodeBool
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeIntValue writes a signed kind in its shortest form.
+    name: encodeIntValue
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeUintValue writes an unsigned kind in its shortest form.
+    name: encodeUintValue
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeFloat32Value writes a float32 kind as float 32.
+    name: encodeFloat32Value
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeFloat64Value writes a float64 kind as float 64.
+    name: encodeFloat64Value
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeStringValue writes a string kind as str.
+    name: encodeStringValue
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeTime writes a time.Time as the timestamp extension.
+    name: encodeTime
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: sliceEncoder builds the encoder of slice type t.
+    name: sliceEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: arrayEncoder builds the encoder of array type t.
+    name: arrayEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: encodeByteSlice writes a byte slice as bin, a nil one as nil.
+    name: encodeByteSlice
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: encodeByteArray writes a byte array as bin.
+    name: encodeByteArray
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: "pointerEncoder builds the encoder of pointer type t: nil, or the element."
+    name: pointerEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: interfaceEncoder builds the encoder of interface type t.
+    name: interfaceEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: encodeInterface writes an interface value by its dynamic type.
+    name: encodeInterface
+    params: b []byte, v reflect.Value, depth int
+    results: "[]byte, error"
+  - doc: encodeError writes an error-typed value as its message, nil as nil.
+    name: encodeError
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: |-
+      interfaceOf returns v as T when the value may be handed out — it was not
+      reached through an unexported field — and holds a T.
+    name: interfaceOf
+    params: v reflect.Value
+    results: T, bool
+    typeParams: T any
+  - doc: |-
+      readOnly is the encode failure for a value the codec may not call a method
+      on, because it was reached through an unexported embedded field.
+    name: readOnly
+    params: t reflect.Type
+    results: error
+  - doc: newStructEncoder builds the encoder of struct type t from its layout.
+    name: newStructEncoder
+    params: t reflect.Type
+    results: encodeFunc
+  - doc: |-
+      fieldValue follows index from struct value v, through embedded pointers,
+      and reports false when a nil one stands in the way.
+    name: fieldValue
+    params: v reflect.Value, index []int
+    results: reflect.Value, bool
+  - doc: emptyFor returns the omitempty test of type t.
+    name: emptyFor
+    params: t reflect.Type
+    results: emptyFunc
+  - doc: kindEmpty returns the omitempty test of a kind.
+    name: kindEmpty
+    params: k reflect.Kind
+    results: emptyFunc
+  - doc: |-
+      scalarEmpty reports whether a bool or number is false or compares equal to
+      zero — so a negative zero is empty, as the vendor-backed codec decided.
+    name: scalarEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: isEmptyValue is the omitempty test decided on the value's dynamic type.
+    name: isEmptyValue
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroerEmpty asks the value's IsZero method; a nil pointer or map is empty
+      without asking.
+    name: zeroerEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: lenEmpty reports whether a string, slice, map or array has no elements.
+    name: lenEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: neverEmpty is the test of a kind omitempty never leaves out.
+    name: neverEmpty
+    params: _ reflect.Value
+    results: bool
+  - doc: |-
+      structEmpty reports whether every field of a struct value would be left
+      out, which with no omitempty field means only a struct with no fields.
+    name: structEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: isNilable reports whether a kind has a nil value.
+    name: isNilable
+    params: k reflect.Kind
+    results: bool
+  - doc: newEncoder returns the streaming encoder over w.
+    name: newEncoder
+    params: w io.Writer
+    results: "*msgpackEncoder"
+  - doc: |-
+      marshalFault is the MARSHAL_FAILED error for an encode failure the codec
+      detected itself.
+    name: marshalFault
+    params: detail string, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      unmarshalFault is the UNMARSHAL_FAILED error for a decode failure the codec
+      detected itself.
+    name: unmarshalFault
+    params: detail string, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapMarshal attaches MARSHAL_FAILED to a cause the codec did not produce —
+      a writer's failure, or a marshaler method's. An SDK error as the cause keeps
+      its own code (origin wins).
+    name: wrapMarshal
+    params: cause error, detail string, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapUnmarshal attaches UNMARSHAL_FAILED to a cause the codec did not
+      produce — a reader's failure, or an unmarshaler method's.
+    name: wrapUnmarshal
+    params: cause error, detail string, fields ...errs.FieldValue
+    results: error
+  - doc: typeField names a Go type in a failure's fields.
+    name: typeField
+    params: t reflect.Type
+    results: errs.FieldValue
+  - doc: |-
+      unsupportedType is the encode failure for a kind MessagePack cannot carry:
+      a channel, a function, a complex number or an unsafe pointer.
+    name: unsupportedType
+    params: t reflect.Type
+    results: error
+  - doc: |-
+      depthExceeded is the failure for a value nested past maxDepth, on either
+      side: on encode it is usually a cycle, on decode a hostile input.
+    name: depthExceeded
+    params: encode bool
+    results: error
+  - doc: layoutOf returns the cached layout of struct type t, building it once.
+    name: layoutOf
+    params: t reflect.Type
+    results: "*structLayout"
+  - doc: buildLayout computes the map form of struct type t.
+    name: buildLayout
+    params: t reflect.Type, visiting map[reflect.Type]bool
+    results: "*structLayout"
+  - doc: |-
+      hasCustomCodec reports whether t, or a pointer to it, encodes or decodes
+      itself, which keeps it from being inlined.
+    name: hasCustomCodec
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      parseTag reads `name,opt,key:value`. A first element containing a colon is
+      an option, not a name, as the vendor's tag parser read it.
+    name: parseTag
+    params: s string
+    results: tagSpec
+  - doc: cmpOrName returns the tag name when set, else the Go field name.
+    name: cmpOrName
+    params: tagName, fieldName string
+    results: string
+  - doc: appendTimestamp appends t as the shortest timestamp form its instant fits.
+    name: appendTimestamp
+    params: b []byte, t time.Time
+    results: "[]byte"
+  - doc: decodeTimestamp reads a timestamp extension's payload into a UTC time.
+    name: decodeTimestamp
+    params: p []byte
+    results: time.Time, error
+  - doc: |-
+      timeFromParts builds the UTC time of sec and nsec, refusing a nanosecond
+      count the specification forbids instead of letting time.Unix carry it into
+      the seconds.
+    name: timeFromParts
+    params: sec int64, nsec uint64
+    results: time.Time, error
+  - doc: |-
+      buildHeaderTable classifies each of the 256 header bytes once, so the hot
+      path is one indexed load per value instead of a cascade of comparisons.
+    name: buildHeaderTable
+    results: "[headerTableLen]headerInfo"
+  - doc: classifyHeader describes one header byte from the ranges of spec.md.
+    name: classifyHeader
+    params: c byte
+    results: headerInfo
+imports:
+  binary: encoding/binary
+  bufio: bufio
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coremsgpack: github.com/kitsunium/sdk/internal/core/data/codec/msgpack
+  encoding: encoding
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  math: math
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/msgpack
+  name: msgpack
+  purpose: Package msgpack is the MessagePack codec — a native implementation of the specification (github.com/msgpack/msgpack/blob/master/spec.md) on the standard library alone, registered as the "msgpack" Format.
+types:
+  - doc: msgpackCodec is the concrete Codec implementation for MessagePack.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*msgpackCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*msgpackCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*msgpackCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal serialises v as MessagePack bytes. The value is encoded into a
+          pooled scratch buffer and the result is one exact-size copy, so a call
+          costs one allocation plus whatever v's own marshal methods allocate.
+        name: Marshal
+        params: v any
+        recv: "*msgpackCodec"
+        results: encoded []byte, err error
+      - doc: |-
+          Unmarshal parses data — exactly one MessagePack value, at most
+          maxMsgPackBytes long — into the value v points at.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*msgpackCodec"
+        results: error
+      - doc: |-
+          Append encodes v as MessagePack and appends the bytes to dst, encoding
+          straight onto it: no intermediate buffer and no copy. On failure dst is
+          returned with its original length.
+        name: Append
+        params: dst []byte, v any
+        recv: "*msgpackCodec"
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder: each Encode writes one
+          complete value with a single Write, and a value that fails to encode writes
+          nothing.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*msgpackCodec"
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder. The whole stream is held to
+          one byte past maxMsgPackBytes — the bound Unmarshal enforces on one input —
+          and a declared length beyond what the stream can still deliver is refused
+          before anything is read or reserved for it (CWE-400 / CWE-1284).
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*msgpackCodec"
+        results: codec.Decoder
+    name: msgpackCodec
+  - doc: decodeState is the cursor over one input.
+    fields:
+      - doc: data is the whole input.
+        name: data
+        type: "[]byte"
+      - doc: off is the next unread byte.
+        name: "off"
+        type: int
+      - doc: depth counts the containers currently open.
+        name: depth
+        type: int
+    kind: struct
+    methods:
+      - doc: truncated is the failure for an input that ends inside a value.
+        name: truncated
+        recv: d *decodeState
+        results: error
+      - doc: remaining is how many bytes are left to read.
+        name: remaining
+        recv: d *decodeState
+        results: uint64
+      - doc: |-
+          readHeader reads one header: the format byte and, when the family has one,
+          its length or value field (and an extension's type byte).
+        name: readHeader
+        recv: d *decodeState
+        results: header, error
+      - doc: readField reads a big-endian field of width bytes.
+        name: readField
+        params: width uint8
+        recv: d *decodeState
+        results: uint64, error
+      - doc: readExtType completes an extension header with its type byte.
+        name: readExtType
+        params: h header
+        recv: d *decodeState
+        results: header, error
+      - doc: |-
+          take returns the next n bytes, refusing a length the input cannot satisfy.
+          The slice aliases the input; a caller that keeps it copies it.
+        name: take
+        params: n uint64
+        recv: d *decodeState
+        results: "[]byte, error"
+      - doc: |-
+          checkCount refuses an array or map count the remaining input cannot hold,
+          before anything is allocated for it: an element needs at least one byte, a
+          map pair at least two.
+        name: checkCount
+        params: h header
+        recv: d *decodeState
+        results: error
+      - doc: enter opens one container level, refusing input nested past maxDepth.
+        name: enter
+        recv: d *decodeState
+        results: error
+      - doc: leave closes one container level.
+        name: leave
+        recv: d *decodeState
+      - doc: peekNil reports whether the next value is nil, without consuming it.
+        name: peekNil
+        recv: d *decodeState
+        results: bool
+      - doc: |-
+          skip consumes one complete value without materialising it. It is
+          iterative — a count of values still owed, not recursion — so even the
+          deepest input costs no stack, and every count is checked against what
+          remains so the tally stays bounded by the input's length.
+        name: skip
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          skipBody steps over what follows a header and returns the updated count of
+          values still owed.
+        name: skipBody
+        params: h header, owed uint64
+        recv: d *decodeState
+        results: uint64, error
+      - doc: decodeAny reads one value into the Go type an empty interface receives.
+        name: decodeAny
+        recv: d *decodeState
+        results: any, error
+      - doc: decodePayloadAny reads a str, bin or ext payload into its untyped Go value.
+        name: decodePayloadAny
+        params: h header
+        recv: d *decodeState
+        results: any, error
+      - doc: decodeArrayAny reads an array into a []any.
+        name: decodeArrayAny
+        params: h header
+        recv: d *decodeState
+        results: any, error
+      - doc: decodeMapAny reads a map into a map[string]any.
+        name: decodeMapAny
+        params: h header
+        recv: d *decodeState
+        results: any, error
+      - doc: fillMapAny reads n string-keyed pairs into m.
+        name: fillMapAny
+        params: m map[string]any, n uint64
+        recv: d *decodeState
+        results: error
+      - doc: readKeyString reads a map key that must be a string, as a Go string.
+        name: readKeyString
+        recv: d *decodeState
+        results: string, error
+      - doc: |-
+          readKey reads a map key that must be a string: a str or a bin, or nil for
+          the empty string, as the vendor-backed codec accepted. The slice aliases
+          the input.
+        name: readKey
+        recv: d *decodeState
+        results: "[]byte, error"
+      - doc: decodeTarget decodes the next value into what the pointer v points at.
+        name: decodeTarget
+        params: v any
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          selfPayload reads the payload a Binary/TextUnmarshaler receives: a copy of
+          a bin or str. For nil it zeroes v and reports isNil.
+        name: selfPayload
+        params: v reflect.Value
+        recv: d *decodeState
+        results: payload []byte, isNil bool, err error
+      - doc: mismatch is the failure for a value of the wrong family for the target.
+        name: mismatch
+        params: h header, t reflect.Type
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          rangeOrMismatch is the failure for a number that does not fit (numeric is
+          set) or a value that is not a number of an acceptable family.
+        name: rangeOrMismatch
+        params: h header, t reflect.Type, numeric bool
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          readBytesOrNil reads a str or bin payload, or nil as no bytes; any other
+          family is a mismatch for target type t. The slice aliases the input.
+        name: readBytesOrNil
+        params: t reflect.Type
+        recv: d *decodeState
+        results: "[]byte, error"
+      - doc: timeOf reads the time a header announces.
+        name: timeOf
+        params: h header, t reflect.Type
+        recv: d *decodeState
+        results: time.Time, error
+      - doc: |-
+          timestampPayload reads the payload of an extension that must be the
+          timestamp.
+        name: timestampPayload
+        params: h header
+        recv: d *decodeState
+        results: time.Time, error
+      - doc: timeFromText parses an RFC 3339 string as a UTC time.
+        name: timeFromText
+        params: h header
+        recv: d *decodeState
+        results: time.Time, error
+    name: decodeState
+  - doc: mapDecoder decodes a map pair by pair, through reflection.
+    fields:
+      - doc: typ is the map type.
+        name: typ
+        type: reflect.Type
+      - doc: keyType is the key type.
+        name: keyType
+        type: reflect.Type
+      - doc: elemType is the element type.
+        name: elemType
+        type: reflect.Type
+      - doc: key decodes one key.
+        name: key
+        type: decodeFunc
+      - doc: elem decodes one element.
+        name: elem
+        type: decodeFunc
+      - doc: checkHashable is set when a decoded key may be unhashable.
+        name: checkHashable
+        type: bool
+    kind: struct
+    methods:
+      - doc: decode decodes a map into a map, or nil into a nil map.
+        name: decode
+        params: d *decodeState, v reflect.Value
+        recv: m *mapDecoder
+        results: error
+      - doc: fill adds h's pairs to the map v, creating it when nil.
+        name: fill
+        params: d *decodeState, v reflect.Value, h header
+        recv: m *mapDecoder
+        results: error
+      - doc: pair decodes one key and value into the scratch values and stores them.
+        name: pair
+        params: d *decodeState, v, key, val reflect.Value
+        recv: m *mapDecoder
+        results: error
+    name: mapDecoder
+  - doc: decodeFunc decodes the next value of d into v, which is settable.
+    kind: named
+    name: decodeFunc
+    underlying: func(d *decodeState, v reflect.Value) error
+  - doc: |-
+      unmarshalMsgpacker is the method a type implements to read its own
+      MessagePack. It receives a copy of exactly one value's bytes.
+    kind: named
+    name: unmarshalMsgpacker
+    underlying: |-
+      interface {
+      	// UnmarshalMsgpack decodes the value's MessagePack encoding.
+      	UnmarshalMsgpack(data []byte) error
+      }
+  - doc: listDecoder decodes a slice or an array element by element.
+    fields:
+      - doc: elem decodes one element.
+        name: elem
+        type: decodeFunc
+      - doc: firstCap is how many elements a declared count may reserve up front.
+        name: firstCap
+        type: uint64
+    kind: struct
+    methods:
+      - doc: decodeSlice decodes an array into a slice, or nil into a nil slice.
+        name: decodeSlice
+        params: d *decodeState, v reflect.Value
+        recv: l *listDecoder
+        results: error
+      - doc: fillSlice replaces v's elements with the array's.
+        name: fillSlice
+        params: d *decodeState, v reflect.Value, h header
+        recv: l *listDecoder
+        results: error
+      - doc: |-
+          decodeArray decodes an array into a Go array of at least as many elements,
+          zeroing the ones the input does not reach; nil zeroes the whole array.
+        name: decodeArray
+        params: d *decodeState, v reflect.Value
+        recv: l *listDecoder
+        results: error
+      - doc: fillArray decodes h's elements into the Go array v.
+        name: fillArray
+        params: d *decodeState, v reflect.Value, h header
+        recv: l *listDecoder
+        results: error
+    name: listDecoder
+  - doc: |-
+      decodedError is what a string decodes to when the target is the error
+      interface: the message, and nothing else.
+    fields:
+      - doc: msg is the decoded text.
+        name: msg
+        type: string
+    kind: struct
+    methods:
+      - doc: Error implements error.
+        name: Error
+        recv: e *decodedError
+        results: string
+    name: decodedError
+  - doc: fieldDecoder is one struct key with its decoder.
+    fields:
+      - doc: field is the layout entry.
+        name: field
+        type: "*structField"
+      - doc: dec decodes the field's value.
+        name: dec
+        type: decodeFunc
+    kind: struct
+    methods:
+      - doc: decodeInto decodes the next value into this field of struct v.
+        name: decodeInto
+        params: d *decodeState, v reflect.Value
+        recv: f *fieldDecoder
+        results: error
+    name: fieldDecoder
+  - doc: structDecoder decodes a struct from a map or an array.
+    fields:
+      - doc: byName finds the field a key addresses, aliases included.
+        name: byName
+        type: map[string]*fieldDecoder
+      - doc: fields are the struct's keys in encode order, for the array form.
+        name: fields
+        type: "[]*fieldDecoder"
+    kind: struct
+    methods:
+      - doc: decode decodes a map, an array or nil into the struct v.
+        name: decode
+        params: d *decodeState, v reflect.Value
+        recv: s *structDecoder
+        results: error
+      - doc: |-
+          decodeMap decodes the map form: each key finds its field, unknown keys are
+          stepped over.
+        name: decodeMap
+        params: d *decodeState, v reflect.Value, h header
+        recv: s *structDecoder
+        results: error
+      - doc: decodePair decodes one key and the value of the field it names.
+        name: decodePair
+        params: d *decodeState, v reflect.Value
+        recv: s *structDecoder
+        results: error
+      - doc: |-
+          decodeArray decodes the array form: one element per field, in order. An
+          empty array is the zero struct; any other count must match the fields.
+        name: decodeArray
+        params: d *decodeState, v reflect.Value, h header
+        recv: s *structDecoder
+        results: error
+      - doc: |-
+          zero sets the struct v to its zero value — field by field when v itself
+          may not be set, which only a struct reached through an unexported
+          embedding is.
+        name: zero
+        params: v reflect.Value
+        recv: s *structDecoder
+        results: error
+    name: structDecoder
+  - doc: msgpackDecoder reads one MessagePack value per Decode from a stream.
+    fields:
+      - doc: |-
+          src is the stream, limited to one byte past maxMsgPackBytes in all;
+          nil when the decoder was built over a nil reader.
+        name: src
+        type: "*io.LimitedReader"
+      - doc: r buffers src.
+        name: r
+        type: "*bufio.Reader"
+      - doc: err is the failure that ended the stream; nil once it ended cleanly.
+        name: err
+        type: error
+      - doc: done latches once the stream has ended, cleanly or not.
+        name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode reads the next value into the value v points at. It returns io.EOF,
+          untouched, once the stream ends cleanly between two values.
+        name: Decode
+        params: v any
+        recv: d *msgpackDecoder
+        results: error
+      - doc: |-
+          decodeNext decodes the next value in place when the read-ahead already
+          holds all of it — the common case for a stream of documents smaller than
+          the read-ahead — and frames it into a scratch buffer otherwise. Both paths
+          decode exactly as Unmarshal does, and a value the fast path cannot vouch
+          for (incomplete, or malformed) takes the framed path, which says why.
+        name: decodeNext
+        params: v any
+        recv: d *msgpackDecoder
+        results: error
+      - doc: |-
+          bufferedValue returns the next value when the read-ahead holds all of it.
+          The slice aliases the read-ahead and is valid until the next read.
+        name: bufferedValue
+        recv: d *msgpackDecoder
+        results: "[]byte, bool"
+      - doc: |-
+          decodeBuffered decodes a value lying in the read-ahead, then consumes it.
+          The decode copies everything it keeps, so the read-ahead may be reused.
+        name: decodeBuffered
+        params: frame []byte, v any
+        recv: d *msgpackDecoder
+        results: error
+      - doc: decodeFramed reads one value into a pooled scratch buffer and decodes it.
+        name: decodeFramed
+        params: v any
+        recv: d *msgpackDecoder
+        results: error
+      - doc: More reports whether the stream has not ended yet.
+        name: More
+        recv: d *msgpackDecoder
+        results: bool
+      - doc: finish latches the end of the stream; io.EOF is a clean end.
+        name: finish
+        params: err error
+        recv: d *msgpackDecoder
+      - doc: ending is what Decode returns once the stream has ended.
+        name: ending
+        recv: d *msgpackDecoder
+        results: error
+    name: msgpackDecoder
+  - doc: framer reads the bytes of exactly one value.
+    fields:
+      - doc: src reports how much of the stream's bound is left.
+        name: src
+        type: "*io.LimitedReader"
+      - doc: r is the buffered stream.
+        name: r
+        type: "*bufio.Reader"
+      - doc: out accumulates the value's bytes.
+        name: out
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          run frames one value: it owes one value, and each header read either
+          settles what it owes (a scalar, a payload copied whole) or adds the
+          elements of an array or map to the count.
+        name: run
+        recv: f *framer
+        results: error
+      - doc: |-
+          body copies what follows a header and returns the updated count of values
+          still owed.
+        name: body
+        params: info *headerInfo, owed uint64
+        recv: f *framer
+        results: uint64, error
+      - doc: |-
+          owe adds n values to the count, refusing more than the stream could still
+          deliver one byte each. owed still counts the container being read, whose
+          header is already consumed, hence the −1.
+        name: owe
+        params: owed, n uint64
+        recv: f *framer
+        results: uint64, error
+      - doc: budget is how many bytes the stream can still deliver under its bound.
+        name: budget
+        recv: f *framer
+        results: uint64
+      - doc: copyField copies a big-endian field of width bytes and returns its value.
+        name: copyField
+        params: width uint8
+        recv: f *framer
+        results: uint64, error
+      - doc: |-
+          copyPayload copies n payload bytes, refusing a length the stream cannot
+          deliver before reading or reserving anything for it.
+        name: copyPayload
+        params: n uint64
+        recv: f *framer
+        results: error
+      - doc: read appends exactly n bytes from the stream to out.
+        name: read
+        params: n uint64
+        recv: f *framer
+        results: error
+      - doc: |-
+          readBuffered appends n bytes the read-ahead is known to hold — the common
+          case for the headers and short payloads of a document — without the read
+          loop io.ReadFull runs.
+        name: readBuffered
+        params: n int
+        recv: f *framer
+        results: error
+      - doc: |-
+          readFailure classifies a read error: io.EOF before a value's first byte is
+          the clean end of the stream; an end anywhere else is a truncated value; any
+          other error is the reader's, wrapped.
+        name: readFailure
+        params: err error, atStart bool
+        recv: f *framer
+        results: error
+    name: framer
+  - doc: |-
+      lengthForms lists, for one length-prefixed family, the header byte of each
+      width and the largest length its fix form holds.
+    fields:
+      - doc: fixMax is the largest length the fix form holds, or noFixForm.
+        name: fixMax
+        type: int
+      - doc: fixPrefix is the fix form's prefix, ORed with the length.
+        name: fixPrefix
+        type: byte
+      - doc: code8 is the 8-bit-length form, or 0 when the family has none.
+        name: code8
+        type: byte
+      - doc: code16 is the 16-bit-length form.
+        name: code16
+        type: byte
+      - doc: code32 is the 32-bit-length form.
+        name: code32
+        type: byte
+    kind: struct
+    name: lengthForms
+  - doc: |-
+      encodeFunc appends the encoding of v to b. depth counts the levels already
+      entered; a container, a pointer or an interface checks it before going one
+      deeper.
+    kind: named
+    name: encodeFunc
+    underlying: func(b []byte, v reflect.Value, depth int) ([]byte, error)
+  - doc: emptyFunc reports whether a field value counts as empty for omitempty.
+    kind: named
+    name: emptyFunc
+    underlying: func(v reflect.Value) bool
+  - doc: |-
+      marshalMsgpacker is the method a type implements to write its own
+      MessagePack. The returned bytes must be exactly one well-formed value; they
+      are checked before they are written.
+    kind: named
+    name: marshalMsgpacker
+    underlying: |-
+      interface {
+      	// MarshalMsgpack returns the value's MessagePack encoding.
+      	MarshalMsgpack() ([]byte, error)
+      }
+  - doc: isZeroer is the method omitempty consults first, as time.Time implements.
+    kind: named
+    name: isZeroer
+    underlying: |-
+      interface {
+      	// IsZero reports whether the value is its type's zero.
+      	IsZero() bool
+      }
+  - doc: listEncoder encodes a slice or an array element by element.
+    fields:
+      - doc: elem encodes one element.
+        name: elem
+        type: encodeFunc
+    kind: struct
+    methods:
+      - doc: encodeSlice writes a slice as an array, a nil one as nil.
+        name: encodeSlice
+        params: b []byte, v reflect.Value, depth int
+        recv: l *listEncoder
+        results: "[]byte, error"
+      - doc: encodeList writes the elements of a slice or array as an array.
+        name: encodeList
+        params: b []byte, v reflect.Value, depth int
+        recv: l *listEncoder
+        results: "[]byte, error"
+    name: listEncoder
+  - doc: mapEncoder encodes a map pair by pair, through reflection.
+    fields:
+      - doc: keyType is the map's key type.
+        name: keyType
+        type: reflect.Type
+      - doc: elemType is the map's element type.
+        name: elemType
+        type: reflect.Type
+      - doc: key encodes one key.
+        name: key
+        type: encodeFunc
+      - doc: elem encodes one element.
+        name: elem
+        type: encodeFunc
+    kind: struct
+    methods:
+      - doc: encode writes any map through reflection.
+        name: encode
+        params: b []byte, v reflect.Value, depth int
+        recv: m *mapEncoder
+        results: "[]byte, error"
+      - doc: |-
+          encodePairsInPlace writes every pair through two values reused for the whole
+          map, so a pair costs no allocation.
+        name: encodePairsInPlace
+        params: b []byte, iter *reflect.MapIter, depth int
+        recv: m *mapEncoder
+        results: "[]byte, error"
+      - doc: encodePairsCopied writes every pair from the iterator's own copies.
+        name: encodePairsCopied
+        params: b []byte, iter *reflect.MapIter, depth int
+        recv: m *mapEncoder
+        results: "[]byte, error"
+      - doc: encodePair writes one key and its value.
+        name: encodePair
+        params: b []byte, key, val reflect.Value, depth int
+        recv: m *mapEncoder
+        results: "[]byte, error"
+    name: mapEncoder
+  - doc: fieldEncoder is one struct field with its encoder.
+    fields:
+      - doc: field is the layout entry.
+        name: field
+        type: "*structField"
+      - doc: enc encodes the field's value.
+        name: enc
+        type: encodeFunc
+      - doc: empty decides omitempty.
+        name: empty
+        type: emptyFunc
+    kind: struct
+    methods:
+      - doc: |-
+          omitted reports whether the field is left out of struct value v: when it is
+          empty under omitempty, or when it sits behind a nil embedded pointer.
+        name: omitted
+        params: v reflect.Value
+        recv: f *fieldEncoder
+        results: bool
+      - doc: encodeValue writes the field's value from struct value v.
+        name: encodeValue
+        params: b []byte, v reflect.Value, depth int
+        recv: f *fieldEncoder
+        results: "[]byte, error"
+    name: fieldEncoder
+  - doc: structEncoder encodes a struct as a map, or as an array with as_array.
+    fields:
+      - doc: fields are the struct's keys in encode order.
+        name: fields
+        type: "[]fieldEncoder"
+      - doc: asArray writes an array of every field instead of a map.
+        name: asArray
+        type: bool
+      - doc: hasOmitEmpty takes the counting path that leaves empty fields out.
+        name: hasOmitEmpty
+        type: bool
+    kind: struct
+    methods:
+      - doc: encode writes the struct as a map, or as an array with as_array.
+        name: encode
+        params: b []byte, v reflect.Value, depth int
+        recv: s *structEncoder
+        results: "[]byte, error"
+      - doc: encodeArray writes every field, in order, as an array.
+        name: encodeArray
+        params: b []byte, v reflect.Value, depth int
+        recv: s *structEncoder
+        results: "[]byte, error"
+      - doc: encodeMap writes the fields that are not left out, as a map.
+        name: encodeMap
+        params: b []byte, v reflect.Value, depth int
+        recv: s *structEncoder
+        results: "[]byte, error"
+      - doc: keptCount counts the fields omitempty does not leave out.
+        name: keptCount
+        params: v reflect.Value
+        recv: s *structEncoder
+        results: int
+    name: structEncoder
+  - doc: msgpackEncoder writes one MessagePack value per Encode to w.
+    fields:
+      - doc: w receives each encoded value in one Write.
+        name: w
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Encode serialises v and writes it to the wrapped writer.
+        name: Encode
+        params: v any
+        recv: e *msgpackEncoder
+        results: error
+      - doc: write hands one complete value to the writer.
+        name: write
+        params: b []byte
+        recv: e *msgpackEncoder
+        results: error
+      - doc: |-
+          Close is a no-op: the encoder owns neither the writer nor a buffer between
+          calls.
+        name: Close
+        recv: "*msgpackEncoder"
+        results: error
+    name: msgpackEncoder
+  - doc: structField is one key of a struct's map form.
+    fields:
+      - doc: typ is the field's Go type.
+        name: typ
+        type: reflect.Type
+      - doc: name is the key.
+        name: name
+        type: string
+      - doc: wireName is the key already encoded as a str, appended as-is.
+        name: wireName
+        type: "[]byte"
+      - doc: index is the path from the outer struct through any inlined embeddings.
+        name: index
+        type: "[]int"
+      - doc: omitEmpty leaves the field out when it is empty.
+        name: omitEmpty
+        type: bool
+    kind: struct
+    name: structField
+  - doc: structLayout is the cached map form of one struct type.
+    fields:
+      - doc: |-
+          dupName is a key two fields claim — a defect of the type itself,
+          reported by every encode and decode of it — or "".
+        name: dupName
+        type: string
+      - doc: byName finds the field a decoded key addresses, aliases included.
+        name: byName
+        type: map[string]*structField
+      - doc: fields are the keys in encode order.
+        name: fields
+        type: "[]*structField"
+      - doc: asArray encodes the struct as an array.
+        name: asArray
+        type: bool
+      - doc: hasOmitEmpty is set when any field may be left out.
+        name: hasOmitEmpty
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          defect returns the type's defect as an encode or a decode failure, or nil
+          when the type has none.
+        name: defect
+        params: t reflect.Type, encode bool
+        recv: l *structLayout
+        results: error
+    name: structLayout
+  - doc: tagSpec is a parsed struct tag.
+    fields:
+      - doc: opts are the options after the name; a bare option maps to "".
+        name: opts
+        type: map[string]string
+      - doc: name is the key, or "" for the Go field name.
+        name: name
+        type: string
+    kind: struct
+    methods:
+      - doc: setOption records one option, bare or key:value.
+        name: setOption
+        params: opt string
+        recv: s *tagSpec
+      - doc: has reports whether the option is present.
+        name: has
+        params: opt string
+        recv: s *tagSpec
+        results: bool
+    name: tagSpec
+  - doc: layoutBuilder accumulates one struct's layout.
+    fields:
+      - doc: layout is the result being built.
+        name: layout
+        type: "*structLayout"
+      - doc: |-
+          visiting holds the struct types on the current embedding path, so a
+          type that embeds itself through a pointer is not inlined forever.
+        name: visiting
+        type: map[reflect.Type]bool
+      - doc: omitAll is set once a _msgpack marker carried omitempty.
+        name: omitAll
+        type: bool
+    kind: struct
+    methods:
+      - doc: addField places one declared field into the layout.
+        name: addField
+        params: f reflect.StructField
+        recv: b *layoutBuilder
+      - doc: applyMarker reads the struct-wide options of a _msgpack field.
+        name: applyMarker
+        params: tag tagSpec
+        recv: b *layoutBuilder
+      - doc: |-
+          inline places an embedded struct's fields in the layout when the rules
+          allow it, and reports whether it did. forced is the inline option: it
+          inlines whatever collides and drops the colliding names; otherwise one
+          collision keeps the embedded struct as a single field.
+        name: inline
+        params: field *structField, forced bool
+        recv: b *layoutBuilder
+        results: bool
+      - doc: collides reports whether any of sub's keys is already taken.
+        name: collides
+        params: sub *structLayout
+        recv: b *layoutBuilder
+        results: bool
+      - doc: add appends a field to the encode order and the decode index.
+        name: add
+        params: field *structField
+        recv: b *layoutBuilder
+      - doc: alias makes name decode into field, unless a real field already owns it.
+        name: alias
+        params: name string, field *structField
+        recv: b *layoutBuilder
+      - doc: fail records the type's first defect.
+        name: fail
+        params: name string
+        recv: b *layoutBuilder
+    name: layoutBuilder
+  - doc: family is what a header byte announces.
+    kind: named
+    methods:
+      - doc: String names the family for a failure's fields.
+        name: String
+        recv: f family
+        results: string
+    name: family
+    underlying: uint8
+  - doc: headerInfo describes one header byte.
+    fields:
+      - doc: |-
+          inline is what the byte itself carries: a fixint's value (two's
+          complement), a fix form's count or length, or a fixext's payload size.
+        name: inline
+        type: uint64
+      - doc: fam is the family the byte announces.
+        name: fam
+        type: family
+      - doc: |-
+          width is the size of the length or value field after the byte; zero
+          when the byte carries everything itself.
+        name: width
+        type: uint8
+    kind: struct
+    name: headerInfo
+  - doc: |-
+      header is one decoded header: the family, and the value or length it
+      carries.
+    fields:
+      - doc: |-
+          arg is a number's raw value (an int's two's complement, a float's
+          bits), or the length of a str, bin or ext payload, or the element count
+          of an array or map.
+        name: arg
+        type: uint64
+      - doc: fam is the family the header announced.
+        name: fam
+        type: family
+      - doc: |-
+          width is the size of the field the value was read from — zero for a
+          fix form — which tells an untyped decode which Go width to produce.
+        name: width
+        type: uint8
+      - doc: ext is an extension's type; meaningful only when fam is famExt.
+        name: ext
+        type: int8
+    kind: struct
+    name: header
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME / extension
+      tables.
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&msgpackCodec{})
+      - doc: ": MIME table hoisted."
+        name: mimeTypes
+        value: "[]string{\"application/msgpack\", \"application/x-msgpack\"}"
+      - doc: ": extension table hoisted for the same reason."
+        name: extensions
+        value: "[]string{\".msgpack\", \".mpk\"}"
+    name: Codec
+  - doc: Compile-time conformance.
+    grouped: true
+    items:
+      - doc: the codec is a StreamingCodec and an Appender.
+        name: _
+        type: codec.StreamingCodec
+        value: (*msgpackCodec)(nil)
+      - doc: the codec appends onto a caller's buffer.
+        name: _
+        type: codec.Appender
+        value: (*msgpackCodec)(nil)
+      - doc: the streaming encoder.
+        name: _
+        type: codec.Encoder
+        value: (*msgpackEncoder)(nil)
+      - doc: the streaming decoder.
+        name: _
+        type: codec.Decoder
+        value: (*msgpackDecoder)(nil)
+      - doc: what a string decodes to in an error-typed target.
+        name: _
+        type: error
+        value: (*decodedError)(nil)
+      - doc: "time.Time is the IsZero type omitempty meets most: a zero time is left out."
+        name: _
+        type: isZeroer
+        value: time.Time{}
+    name: _
+  - doc: pointerToAnyType is *any, the target of an untyped Unmarshal.
+    items:
+      - name: pointerToAnyType
+        value: reflect.TypeFor[*any]()
+    name: pointerToAnyType
+  - doc: Plan cache and the interfaces the builders look for.
+    grouped: true
+    items:
+      - doc: decoders caches decodeFunc per reflect.Type.
+        name: decoders
+        type: sync.Map
+      - doc: unmarshalMsgpackerType is the UnmarshalMsgpack method.
+        name: unmarshalMsgpackerType
+        value: reflect.TypeFor[unmarshalMsgpacker]()
+      - doc: binaryUnmarshalerType is encoding.BinaryUnmarshaler.
+        name: binaryUnmarshalerType
+        value: reflect.TypeFor[encoding.BinaryUnmarshaler]()
+      - doc: textUnmarshalerType is encoding.TextUnmarshaler.
+        name: textUnmarshalerType
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - doc: |-
+          stringType, float64Type and boolType name the targets of the direct
+          map decoders in their failures.
+        name: stringType
+        value: reflect.TypeFor[string]()
+      - doc: float64Type is float64.
+        name: float64Type
+        value: reflect.TypeFor[float64]()
+      - doc: boolType is bool.
+        name: boolType
+        value: reflect.TypeFor[bool]()
+    name: decoders
+  - doc: The four length-prefixed families.
+    grouped: true
+    items:
+      - doc: "strForms are the forms of str: fixstr, str 8, str 16, str 32."
+        name: strForms
+        value: "lengthForms{fixMax: fixstrMax, fixPrefix: fixstrPrefix, code8: codeStr8, code16: codeStr16, code32: codeStr32}"
+      - doc: "binForms are the forms of bin: bin 8, bin 16, bin 32."
+        name: binForms
+        value: "lengthForms{fixMax: noFixForm, code8: codeBin8, code16: codeBin16, code32: codeBin32}"
+      - doc: "arrayForms are the forms of array: fixarray, array 16, array 32."
+        name: arrayForms
+        value: "lengthForms{fixMax: fixCountMax, fixPrefix: fixarrayPrefix, code16: codeArray16, code32: codeArray32}"
+      - doc: "mapForms are the forms of map: fixmap, map 16, map 32."
+        name: mapForms
+        value: "lengthForms{fixMax: fixCountMax, fixPrefix: fixmapPrefix, code16: codeMap16, code32: codeMap32}"
+    name: strForms
+  - doc: Plan cache and the types the builders compare against.
+    grouped: true
+    items:
+      - doc: encoders caches encodeFunc per reflect.Type.
+        name: encoders
+        type: sync.Map
+      - doc: timeType is time.Time, encoded as the timestamp extension.
+        name: timeType
+        value: reflect.TypeFor[time.Time]()
+      - doc: errorType is the error interface, encoded as its message.
+        name: errorType
+        value: reflect.TypeFor[error]()
+      - doc: isZeroerType is the IsZero method omitempty consults.
+        name: isZeroerType
+        value: reflect.TypeFor[isZeroer]()
+      - doc: marshalMsgpackerType is the MarshalMsgpack method.
+        name: marshalMsgpackerType
+        value: reflect.TypeFor[marshalMsgpacker]()
+      - doc: binaryMarshalerType is encoding.BinaryMarshaler.
+        name: binaryMarshalerType
+        value: reflect.TypeFor[encoding.BinaryMarshaler]()
+      - doc: textMarshalerType is encoding.TextMarshaler.
+        name: textMarshalerType
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+    name: encoders
+  - doc: familyNames is what a failure calls each family.
+    items:
+      - name: familyNames
+        value: |-
+          [...]string{
+          	famInvalid: "never-used byte 0xc1",
+          	famNil:     "nil",
+          	famBool:    "boolean",
+          	famInt:     "integer",
+          	famUint:    "unsigned integer",
+          	famFloat32: "float 32",
+          	famFloat64: "float 64",
+          	famStr:     "string",
+          	famBin:     "binary",
+          	famArray:   "array",
+          	famMap:     "map",
+          	famExt:     "extension",
+          }
+    name: familyNames
+  - doc: Interfaces whose presence makes a type encode or decode itself.
+    grouped: true
+    items:
+      - doc: layouts caches *structLayout per struct type.
+        name: layouts
+        type: sync.Map
+      - doc: |-
+          customCodecTypes are the interfaces that make a struct its own codec,
+          and so not a candidate for inlining.
+        name: customCodecTypes
+        value: |-
+          []reflect.Type{
+          		reflect.TypeFor[marshalMsgpacker](),
+          		reflect.TypeFor[unmarshalMsgpacker](),
+          		reflect.TypeFor[encoding.BinaryMarshaler](),
+          		reflect.TypeFor[encoding.BinaryUnmarshaler](),
+          		reflect.TypeFor[encoding.TextMarshaler](),
+          		reflect.TypeFor[encoding.TextUnmarshaler](),
+          	}
+    name: layouts
+  - doc: Package-level lookup tables, built once at initialisation.
+    grouped: true
+    items:
+      - doc: formatBlock describes 0xc0–0xdf, indexed by byte − codeNil.
+        name: formatBlock
+        value: |-
+          [formatBlockLen]headerInfo{
+          		{fam: famNil},
+          		{fam: famInvalid},
+          		{fam: famBool},
+          		{fam: famBool, inline: 1},
+          		{fam: famBin, width: width8},
+          		{fam: famBin, width: width16},
+          		{fam: famBin, width: width32},
+          		{fam: famExt, width: width8},
+          		{fam: famExt, width: width16},
+          		{fam: famExt, width: width32},
+          		{fam: famFloat32, width: width32},
+          		{fam: famFloat64, width: width64},
+          		{fam: famUint, width: width8},
+          		{fam: famUint, width: width16},
+          		{fam: famUint, width: width32},
+          		{fam: famUint, width: width64},
+          		{fam: famInt, width: width8},
+          		{fam: famInt, width: width16},
+          		{fam: famInt, width: width32},
+          		{fam: famInt, width: width64},
+          		{fam: famExt, inline: uint64(width8)},
+          		{fam: famExt, inline: uint64(width16)},
+          		{fam: famExt, inline: uint64(width32)},
+          		{fam: famExt, inline: uint64(width64)},
+          		{fam: famExt, inline: fixext16Size},
+          		{fam: famStr, width: width8},
+          		{fam: famStr, width: width16},
+          		{fam: famStr, width: width32},
+          		{fam: famArray, width: width16},
+          		{fam: famArray, width: width32},
+          		{fam: famMap, width: width16},
+          		{fam: famMap, width: width32},
+          	}
+      - doc: headerTable describes every possible header byte.
+        name: headerTable
+        value: buildHeaderTable()
+    name: formatBlock

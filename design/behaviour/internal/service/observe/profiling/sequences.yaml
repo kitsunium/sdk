@@ -1,0 +1,2335 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: CanonicalName
+    participants:
+      - id: caller
+        kind: actor
+      - id: CanonicalName
+        kind: self
+      - id: generics.ReplaceAllString
+        kind: value
+      - id: receiverFirst
+        kind: internal
+      - id: closure.ReplaceAllString
+        kind: value
+    steps:
+      - bind: generics, closure
+        eval: canonicalPatterns()
+      - set: name
+        to: generics.ReplaceAllString
+        value: generics.ReplaceAllString(name, "")
+      - opt:
+          do:
+            - set: name
+              to: receiverFirst
+              value: receiverFirst(name)
+          when: strings.HasPrefix(name, "(")
+      - return: closure.ReplaceAllString(name, "")
+        to: closure.ReplaceAllString
+  - of: receiverFirst
+    participants:
+      - id: caller
+        kind: actor
+      - id: receiverFirst
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: end
+        eval: strings.Index(name, ").")
+        to: strings
+      - opt:
+          do:
+            - return: name
+          when: end <= 0
+      - bind: recv, method
+        eval: name[1:end], name[end+2:]
+      - bind: pointer
+        eval: strings.HasPrefix(recv, "*")
+        to: strings
+      - set: recv
+        to: strings
+        value: strings.TrimPrefix(recv, "*")
+      - bind: dot
+        eval: strings.LastIndex(recv, ".")
+        to: strings
+      - opt:
+          do:
+            - return: name
+          when: dot <= 0
+      - bind: pkg, typ
+        eval: recv[:dot], recv[dot+1:]
+      - opt:
+          do:
+            - return: pkg + ".(*" + typ + ")." + method
+          when: pointer
+      - return: pkg + "." + typ + "." + method
+  - of: CaptureCPU
+    participants:
+      - id: caller
+        kind: actor
+      - id: CaptureCPU
+        kind: self
+      - id: captureCPU
+        kind: internal
+    steps:
+      - return: captureCPU(ctx, clock.System, window)
+        to: captureCPU
+  - of: captureCPU
+    participants:
+      - id: caller
+        kind: actor
+      - id: captureCPU
+        kind: self
+      - id: pprof
+        kind: stdlib
+      - id: clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: Parse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreprofiling.WindowInvalid, errs.WrapParams{}, errs.String("window", window.String()))
+          when: window <= 0 || window > MaxCPUWindow
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - opt:
+          do:
+            - return: nil, errors.Join(coreprofiling.ProfilerBusy, err)
+          init:
+            bind: err
+            eval: pprof.StartCPUProfile(&buf)
+            to: pprof
+          when: err != nil
+      - bind: timer
+        eval: clk.NewTimer(window)
+        to: clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+            - comm: <-ctx.Done()
+              do:
+                - eval: pprof.StopCPUProfile()
+                  to: pprof
+                - return: nil, errors.Join(coreprofiling.CaptureCanceled, ctx.Err())
+      - eval: pprof.StopCPUProfile()
+        to: pprof
+      - return: Parse(buf.Bytes())
+        to: Parse
+  - of: CaptureHeap
+    participants:
+      - id: caller
+        kind: actor
+      - id: CaptureHeap
+        kind: self
+      - id: runtime
+        kind: stdlib
+      - id: pprof.Lookup("heap").WriteTo
+        kind: value
+      - id: Parse
+        kind: internal
+    steps:
+      - eval: runtime.GC()
+        to: runtime
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(err, errs.WrapParams{
+                			Code:    coreprofiling.CodeCaptureFailed,
+                			Reason:  "CAPTURE_FAILED",
+                			Public:  coreprofiling.CaptureFailed.Public(),
+                			Private: coreprofiling.CaptureFailed.Private(),
+                		}, errs.String("profile", "heap"))
+          init:
+            bind: err
+            eval: pprof.Lookup("heap").WriteTo(&buf, 0)
+            to: pprof.Lookup("heap").WriteTo
+          when: err != nil
+      - return: Parse(buf.Bytes())
+        to: Parse
+  - of: Fold
+    participants:
+      - id: caller
+        kind: actor
+      - id: Fold
+        kind: self
+      - id: cfg.normal
+        kind: internal
+      - id: resolveSampleType
+        kind: internal
+      - id: newFolder
+        kind: internal
+      - id: f.add
+        kind: internal
+      - id: f.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coreprofiling.FoldedValue{}, malformed("profile")
+          when: p == nil
+      - set: cfg
+        to: cfg.normal
+        value: cfg.normal()
+      - bind: typ, idx
+        eval: resolveSampleType(p, cfg.SampleType)
+        to: resolveSampleType
+      - opt:
+          do:
+            - return: coreprofiling.FoldedValue{}, errs.Wrap(coreprofiling.SampleTypeMissing, errs.WrapParams{}, errs.String("sample_type", typ))
+          when: idx < 0
+      - bind: f
+        eval: newFolder(p)
+        to: newFolder
+      - loop:
+          do:
+            - bind: s
+              eval: "&p.Samples[i]"
+            - opt:
+                do:
+                  - return: coreprofiling.FoldedValue{}, malformed("sample values")
+                when: idx >= len(s.Values)
+            - opt:
+                do:
+                  - continue: true
+                when: s.Values[idx] == 0
+            - bind: owner
+              eval: "\"\""
+            - opt:
+                do:
+                  - set: owner
+                    value: cfg.Attribute(*s)
+                when: cfg.Attribute != nil
+            - eval: f.add(s.Stack, owner, s.Values[idx], cfg.FlameMaxDepth)
+              to: f.add
+          key: i
+          range: p.Samples
+      - return: f.finish(p.SampleTypes[idx], cfg), nil
+        to: f.finish
+  - of: FoldConfig.normal
+    steps:
+      - opt:
+          do:
+            - set: c.TopFunctions
+              value: DefaultTopFunctions
+          when: c.TopFunctions <= 0
+      - opt:
+          do:
+            - set: c.TopPerOwner
+              value: DefaultTopPerOwner
+          when: c.TopPerOwner <= 0
+      - opt:
+          do:
+            - set: c.FlameMinShare
+              value: DefaultFlameMinShare
+          when: math.IsNaN(c.FlameMinShare) || c.FlameMinShare <= 0 || c.FlameMinShare >= 1
+      - opt:
+          do:
+            - set: c.FlameMaxDepth
+              value: DefaultFlameMaxDepth
+          when: c.FlameMaxDepth <= 0
+      - return: c
+  - of: newCosts
+    steps:
+      - return: "&costs{flat: make(map[string]int64), cum: make(map[string]int64)}"
+  - of: newFolder
+    steps:
+      - return: |-
+          &folder{
+          		all: newCosts(), owners: make(map[string]*costs), ownerValue: make(map[string]int64),
+          		sources: make(map[string]coreprofiling.FrameValue), seen: make(map[string]struct{}),
+          		flame: &flameFold{name: coreprofiling.FlameRoot, children: make(map[string]*flameFold)},
+          		names: make([]string, 0, len(p.Samples)),
+          	}
+  - of: (*folder).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*folder).add
+        kind: self
+      - id: newCosts
+        kind: internal
+      - id: f.namesOf
+        kind: internal
+      - id: f.cumulate
+        kind: internal
+      - id: f.climb
+        kind: internal
+    steps:
+      - op: +=
+        set: f.total
+        value: v
+      - var:
+          name: mine
+          type: "*costs"
+      - alt:
+          - do:
+              - op: +=
+                set: f.unattributed
+                value: v
+            when: owner == ""
+          - do:
+              - set: mine
+                value: f.owners[owner]
+              - opt:
+                  do:
+                    - set: mine
+                      to: newCosts
+                      value: newCosts()
+                    - set: f.owners[owner]
+                      value: mine
+                  when: mine == nil
+              - op: +=
+                set: f.ownerValue[owner]
+                value: v
+            else: true
+      - bind: names
+        eval: f.namesOf(stack)
+        to: f.namesOf
+      - opt:
+          do:
+            - op: +=
+              set: f.all.flat[names[0]]
+              value: v
+            - opt:
+                do:
+                  - op: +=
+                    set: mine.flat[names[0]]
+                    value: v
+                when: mine != nil
+          when: len(names) > 0
+      - eval: f.cumulate(names, mine, v)
+        to: f.cumulate
+      - eval: f.climb(names, v, depth)
+        to: f.climb
+  - of: (*folder).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*folder).finish
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: f.top
+        kind: internal
+      - id: prune
+        kind: internal
+    steps:
+      - bind: out
+        eval: "coreprofiling.FoldedValue{SampleType: typ, Total: f.total, Unattributed: f.unattributed}"
+      - loop:
+          do:
+            - set: out.Owners
+              value: "append(out.Owners, coreprofiling.OwnerCostValue{Owner: owner, Value: f.ownerValue[owner], Top: f.top(c, cfg.TopPerOwner)})"
+          key: owner
+          range: f.owners
+          value: c
+      - eval: |-
+          slices.SortFunc(out.Owners, func(x, y coreprofiling.OwnerCostValue) int {
+          		//: costliest first; the name orders equal costs.
+          		return cmp.Or(cmp.Compare(y.Value, x.Value), cmp.Compare(x.Owner, y.Owner))
+          	})
+        to: slices
+      - set: out.Top
+        to: f.top
+        value: f.top(f.all, cfg.TopFunctions)
+      - opt:
+          do:
+            - set: out.Flame
+              to: prune
+              value: prune(f.flame, float64(f.total)*cfg.FlameMinShare)
+          when: f.total > 0
+      - return: out
+  - of: (*folder).top
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*folder).top
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: names
+        eval: slices.Collect(maps.Keys(c.cum))
+        to: slices
+      - eval: |-
+          slices.SortFunc(names, func(x, y string) int {
+          		//: flat first: where the time is spent, not merely passed through.
+          		return cmp.Or(cmp.Compare(c.flat[y], c.flat[x]), cmp.Compare(c.cum[y], c.cum[x]), cmp.Compare(x, y))
+          	})
+        to: slices
+      - bind: out
+        eval: make([]coreprofiling.FunctionCostValue, 0, min(n, len(names)))
+      - loop:
+          do:
+            - bind: src
+              eval: f.sources[name]
+            - set: out
+              value: "append(out, coreprofiling.FunctionCostValue{Function: name, Flat: c.flat[name], Cum: c.cum[name], File: src.File, StartLine: src.StartLine})"
+          key: _
+          range: names[:min(n, len(names))]
+          value: name
+      - return: out
+  - of: prune
+    participants:
+      - id: caller
+        kind: actor
+      - id: prune
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: "&coreprofiling.FlameNodeValue{Name: ff.name, Value: ff.value}"
+      - bind: kids
+        eval: make([]*flameFold, 0, len(ff.children))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: kids
+                    value: append(kids, c)
+                when: float64(c.value) >= cutoff
+          key: _
+          range: ff.children
+          value: c
+      - eval: |-
+          slices.SortFunc(kids, func(x, y *flameFold) int {
+          		//: costliest first; the name orders equal costs.
+          		return cmp.Or(cmp.Compare(y.value, x.value), cmp.Compare(x.name, y.name))
+          	})
+        to: slices
+      - loop:
+          do:
+            - set: out.Children
+              value: append(out.Children, prune(c, cutoff))
+          key: _
+          range: kids
+          value: c
+      - return: out
+  - of: Goroutines
+    participants:
+      - id: caller
+        kind: actor
+      - id: Goroutines
+        kind: self
+      - id: goroutinesFrom
+        kind: internal
+    steps:
+      - return: goroutinesFrom(goroutineProfile)
+        to: goroutinesFrom
+  - of: goroutinesFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: goroutinesFrom
+        kind: self
+      - id: ParseGoroutines
+        kind: internal
+      - id: joinLabels
+        kind: internal
+    steps:
+      - bind: dump, err
+        eval: profile(debugTraceback)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: gs
+        eval: ParseGoroutines(dump)
+        to: ParseGoroutines
+      - opt:
+          do:
+            - return: gs, nil
+          when: slices.ContainsFunc(gs, func(g coreprofiling.GoroutineValue) bool { return len(g.Labels) > 0 })
+      - bind: counts, err
+        eval: profile(debugCounts)
+      - opt:
+          do:
+            - return: gs, nil
+          when: err != nil
+      - eval: joinLabels(gs, parseCounts(counts))
+        to: joinLabels
+      - return: gs, nil
+  - of: goroutineProfile
+    participants:
+      - id: caller
+        kind: actor
+      - id: goroutineProfile
+        kind: self
+      - id: pprof.Lookup("goroutine").WriteTo
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(err, errs.WrapParams{
+                			Code:    coreprofiling.CodeCaptureFailed,
+                			Reason:  "CAPTURE_FAILED",
+                			Public:  coreprofiling.CaptureFailed.Public(),
+                			Private: coreprofiling.CaptureFailed.Private(),
+                		}, errs.String("profile", "goroutine"))
+          init:
+            bind: err
+            eval: pprof.Lookup("goroutine").WriteTo(&buf, debug)
+            to: pprof.Lookup("goroutine").WriteTo
+          when: err != nil
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
+  - of: ParseGoroutines
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseGoroutines
+        kind: self
+      - id: bufio
+        kind: stdlib
+      - id: sc.Buffer
+        kind: value
+      - id: p.line
+        kind: internal
+    steps:
+      - var:
+          name: p
+          type: dumpParser
+      - bind: sc
+        eval: bufio.NewScanner(bytes.NewReader(dump))
+        to: bufio
+      - eval: sc.Buffer(make([]byte, 0, 64<<10), dumpLineMax)
+        to: sc.Buffer
+      - loop:
+          cond: sc.Scan()
+          do:
+            - eval: p.line(sc.Text())
+              to: p.line
+      - return: p.out
+  - of: (*dumpParser).line
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dumpParser).line
+        kind: self
+      - id: p.header
+        kind: internal
+      - id: p.location
+        kind: internal
+      - id: p.createdBy
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: p.header(line)
+              to: p.header
+            - return: ""
+          when: strings.HasPrefix(line, "goroutine ")
+      - switch:
+          cases:
+            - case: p.cur != nil && strings.HasPrefix(line, "\t")
+              do:
+                - eval: p.location(line)
+                  to: p.location
+            - case: p.cur != nil && strings.HasPrefix(line, "created by ")
+              do:
+                - eval: p.createdBy(line)
+                  to: p.createdBy
+            - case: p.cur != nil && strings.Contains(line, "(") && !strings.HasPrefix(line, "...")
+              do:
+                - set: p.cur.Stack
+                  value: "append(p.cur.Stack, coreprofiling.FrameValue{Function: functionOf(line)})"
+                - set: p.pending
+                  value: "&p.cur.Stack[len(p.cur.Stack)-1]"
+            - default: true
+              do:
+                - set: p.pending
+                  value: nil
+  - of: (*dumpParser).header
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dumpParser).header
+        kind: self
+      - id: parseHeader
+        kind: internal
+    steps:
+      - bind: g, ok
+        eval: parseHeader(line)
+        to: parseHeader
+      - set: p.pending
+        value: nil
+      - opt:
+          do:
+            - set: p.cur
+              value: nil
+            - return: ""
+          when: "!ok"
+      - set: p.out
+        value: append(p.out, g)
+      - set: p.cur
+        value: "&p.out[len(p.out)-1]"
+  - of: (*dumpParser).location
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dumpParser).location
+        kind: self
+      - id: fileLine
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: p.pending == nil
+      - set: p.pending.File, p.pending.Line
+        to: fileLine
+        value: fileLine(strings.TrimPrefix(line, "\t"))
+      - set: p.pending
+        value: nil
+  - of: (*dumpParser).createdBy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dumpParser).createdBy
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: rest
+        eval: strings.TrimPrefix(line, "created by ")
+        to: strings
+      - bind: fn, creator, found
+        eval: strings.Cut(rest, " in goroutine ")
+        to: strings
+      - set: p.cur.CreatedBy
+        value: "coreprofiling.FrameValue{Function: fn}"
+      - opt:
+          do:
+            - set: p.cur.Creator
+              value: id
+          init:
+            bind: id, err
+            eval: strconv.ParseInt(creator, 10, 64)
+            to: strconv
+          when: found && err == nil
+      - set: p.pending
+        value: "&p.cur.CreatedBy"
+  - of: parseHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseHeader
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: readState
+        kind: internal
+      - id: parseTracebackLabels
+        kind: internal
+    steps:
+      - bind: rest
+        eval: strings.TrimPrefix(line, "goroutine ")
+        to: strings
+      - bind: idText, _, _
+        eval: strings.Cut(rest, " ")
+        to: strings
+      - bind: id, err
+        eval: strconv.ParseInt(idText, 10, 64)
+        to: strconv
+      - bind: open
+        eval: strings.Index(rest, " [")
+        to: strings
+      - opt:
+          do:
+            - return: coreprofiling.GoroutineValue{}, false
+          when: err != nil || open < 0
+      - bind: shut
+        eval: strings.IndexByte(rest[open:], ']')
+        to: strings
+      - opt:
+          do:
+            - return: coreprofiling.GoroutineValue{}, false
+          when: shut < 0
+      - bind: g
+        eval: "coreprofiling.GoroutineValue{ID: id}"
+      - eval: readState(&g, rest[open+2:open+shut])
+        to: readState
+      - bind: tail
+        eval: strings.TrimSuffix(strings.TrimSpace(rest[open+shut+1:]), ":")
+        to: strings
+      - opt:
+          do:
+            - set: g.Labels
+              to: parseTracebackLabels
+              value: "parseTracebackLabels(tail[1 : len(tail)-1])"
+          when: strings.HasPrefix(tail, "{") && strings.HasSuffix(tail, "}")
+      - return: g, true
+  - of: readState
+    participants:
+      - id: caller
+        kind: actor
+      - id: readState
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.Split(bracket, ", ")
+        to: strings
+      - bind: state
+        eval: parts[0]
+      - loop:
+          do:
+            - set: state
+              to: strings
+              value: strings.TrimSuffix(state, flag)
+          key: _
+          range: stateFlags
+          value: flag
+      - set: g.State
+        value: state
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: g.Waiting
+                    value: time.Duration(n) * time.Minute
+                init:
+                  bind: n, err
+                  eval: strconv.Atoi(strings.TrimSuffix(part, " minutes"))
+                  to: strconv
+                when: err == nil && strings.HasSuffix(part, " minutes")
+            - opt:
+                do:
+                  - set: g.LockedToThread
+                    value: "true"
+                when: part == "locked to thread"
+          key: _
+          range: parts[1:]
+          value: part
+  - of: functionOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: functionOf
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: line[:i]
+          init:
+            bind: i
+            eval: strings.LastIndex(line, "(")
+            to: strings
+          when: i > 0
+      - return: line
+  - of: fileLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: fileLine
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: loc, _, _
+        to: strings
+        value: strings.Cut(loc, " +0x")
+      - bind: colon
+        eval: strings.LastIndex(loc, ":")
+        to: strings
+      - opt:
+          do:
+            - return: loc, 0
+          when: colon < 0
+      - bind: n, err
+        eval: strconv.Atoi(loc[colon+1:])
+        to: strconv
+      - opt:
+          do:
+            - return: loc, 0
+          when: err != nil
+      - return: loc[:colon], n
+  - of: GroupGoroutines
+    participants:
+      - id: caller
+        kind: actor
+      - id: GroupGoroutines
+        kind: self
+      - id: topFrame
+        kind: internal
+      - id: groupKey
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: index
+        eval: make(map[string]int, len(gs))
+      - var:
+          name: groups
+          type: "[]coreprofiling.GoroutineGroupValue"
+      - loop:
+          do:
+            - bind: g
+              eval: "&gs[i]"
+            - bind: top
+              eval: topFrame(g.Stack)
+              to: topFrame
+            - bind: key
+              eval: groupKey(g, cfg.Labels, top)
+              to: groupKey
+            - opt:
+                do:
+                  - op: ++
+                    set: groups[at].Count
+                  - continue: true
+                init:
+                  bind: at, seen
+                  eval: index[key]
+                when: seen
+            - set: index[key]
+              value: len(groups)
+            - set: groups
+              value: |-
+                append(groups, coreprofiling.GoroutineGroupValue{
+                			Labels: pick(g.Labels, cfg.Labels), State: g.State, Top: top, Count: 1, Stack: cut(g.Stack, cfg.MaxStack),
+                		})
+          key: i
+          range: gs
+      - eval: |-
+          slices.SortFunc(groups, func(x, y coreprofiling.GoroutineGroupValue) int {
+          		//: largest first, then a total order over the key.
+          		return cmp.Or(cmp.Compare(y.Count, x.Count), compareLabels(x.Labels, y.Labels, cfg.Labels),
+          			cmp.Compare(x.State, y.State), cmp.Compare(x.Top, y.Top))
+          	})
+        to: slices
+      - opt:
+          do:
+            - set: groups
+              value: groups[:cfg.MaxGroups]
+          when: cfg.MaxGroups > 0 && len(groups) > cfg.MaxGroups
+      - return: groups
+  - of: groupKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: groupKey
+        kind: self
+      - id: appendPart
+        kind: internal
+    steps:
+      - bind: key
+        eval: make([]byte, 0, keyRoom)
+      - loop:
+          do:
+            - bind: v, has
+              eval: g.Labels[k]
+            - bind: mark
+              eval: labelAbsent
+            - opt:
+                do:
+                  - set: mark
+                    value: labelPresent
+                when: has
+            - set: key
+              to: appendPart
+              value: appendPart(append(key, mark), v)
+          key: _
+          range: keys
+          value: k
+      - set: key
+        to: appendPart
+        value: appendPart(appendPart(key, g.State), top)
+      - return: string(key)
+  - of: appendPart
+    steps:
+      - return: append(binary.AppendUvarint(key, uint64(len(s))), s...)
+  - of: compareLabels
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareLabels
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: xv, xHas
+              eval: x[k]
+            - bind: yv, yHas
+              eval: y[k]
+            - opt:
+                do:
+                  - return: c
+                init:
+                  bind: c
+                  eval: cmp.Or(cmpBool(xHas, yHas), cmp.Compare(xv, yv))
+                  to: cmp
+                when: c != 0
+          key: _
+          range: keys
+          value: k
+      - return: "0"
+  - of: cmpBool
+    steps:
+      - switch:
+          cases:
+            - case: x == y
+              do:
+                - return: "0"
+            - case: "!x"
+              do:
+                - return: "-1"
+      - return: "1"
+  - of: cut
+    participants:
+      - id: caller
+        kind: actor
+      - id: cut
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: slices.Clone(stack)
+              to: slices
+          when: n <= 0 || len(stack) <= n
+      - return: slices.Clone(stack[:n])
+        to: slices
+  - of: runtimeFrame
+    steps:
+      - return: |-
+          strings.HasPrefix(fn, "runtime.") || strings.HasPrefix(fn, "runtime/") ||
+          		strings.HasPrefix(fn, "internal/") || strings.Contains(fn, ".runtime_")
+  - of: parseTracebackLabels
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTracebackLabels
+        kind: self
+      - id: labelToken
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make(map[string]string)
+      - loop:
+          cond: s != ""
+          do:
+            - bind: key, rest, ok
+              eval: labelToken(s)
+              to: labelToken
+            - opt:
+                do:
+                  - return: out
+                when: "!ok || !strings.HasPrefix(rest, \": \")"
+            - bind: value, rest, ok
+              eval: labelToken(rest[2:])
+              to: labelToken
+            - opt:
+                do:
+                  - return: out
+                when: "!ok"
+            - set: out[key]
+              value: value
+            - set: s
+              to: strings
+              value: strings.TrimPrefix(rest, ", ")
+      - return: out
+  - of: labelToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: labelToken
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - loop:
+                cond: i < len(s)
+                do:
+                  - switch:
+                      cases:
+                        - case: "'\\\\'"
+                          do:
+                            - op: ++
+                              set: i
+                        - case: "'\"'"
+                          do:
+                            - bind: v, err
+                              eval: strconv.Unquote(s[:i+1])
+                              to: strconv
+                            - return: v, s[i+1:], err == nil
+                      "on": s[i]
+                init: i := 1
+                post: i++
+            - return: "\"\", \"\", false"
+          when: strings.HasPrefix(s, `"`)
+      - bind: end
+        eval: strings.IndexAny(s, ":,")
+        to: strings
+      - opt:
+          do:
+            - return: s, "", true
+          when: end < 0
+      - return: s[:end], s[end:], true
+  - of: parseCounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseCounts
+        kind: self
+      - id: bufio
+        kind: stdlib
+      - id: sc.Buffer
+        kind: value
+      - id: sc.Text
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: parseCountLabels
+        kind: internal
+      - id: appendCountFrame
+        kind: internal
+    steps:
+      - var:
+          name: out
+          type: "[]countRecord"
+      - var:
+          name: cur
+          type: "*countRecord"
+      - bind: sc
+        eval: bufio.NewScanner(bytes.NewReader(text))
+        to: bufio
+      - eval: sc.Buffer(make([]byte, 0, 64<<10), dumpLineMax)
+        to: sc.Buffer
+      - loop:
+          cond: sc.Scan()
+          do:
+            - bind: line
+              eval: sc.Text()
+              to: sc.Text
+            - switch:
+                cases:
+                  - case: strings.Contains(line, " @ ")
+                    do:
+                      - bind: n, err
+                        eval: strconv.Atoi(strings.TrimSpace(line[:strings.Index(line, " @ ")]))
+                        to: strconv
+                      - set: cur
+                        value: nil
+                      - opt:
+                          do:
+                            - set: out
+                              value: "append(out, countRecord{count: n})"
+                            - set: cur
+                              value: "&out[len(out)-1]"
+                          when: err == nil
+                  - case: cur == nil
+                  - case: "strings.HasPrefix(line, \"# labels: \")"
+                    do:
+                      - set: cur.labels
+                        to: parseCountLabels
+                        value: "parseCountLabels(strings.TrimPrefix(line, \"# labels: \"))"
+                  - case: strings.HasPrefix(line, "#\t")
+                    do:
+                      - set: cur.stack
+                        to: appendCountFrame
+                        value: appendCountFrame(cur.stack, line)
+      - return: out
+  - of: appendCountFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendCountFrame
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: column
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: part == ""
+            - opt:
+                do:
+                  - bind: fn, _, _
+                    eval: strings.Cut(part, "+0x")
+                    to: strings
+                  - return: append(stack, fn)
+                when: column == countFunctionColumn
+            - op: ++
+              set: column
+          key: part
+          range: strings.SplitSeq(line, "\t")
+      - return: stack
+  - of: parseCountLabels
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseCountLabels
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: quotedToken
+        kind: internal
+    steps:
+      - set: s
+        to: strings
+        value: strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(s), "{"), "}")
+      - bind: out
+        eval: make(map[string]string)
+      - loop:
+          cond: s != ""
+          do:
+            - bind: key, rest, ok
+              eval: quotedToken(s)
+              to: quotedToken
+            - opt:
+                do:
+                  - return: out
+                when: "!ok || !strings.HasPrefix(rest, \":\")"
+            - bind: value, rest, ok
+              eval: quotedToken(rest[1:])
+              to: quotedToken
+            - opt:
+                do:
+                  - return: out
+                when: "!ok"
+            - set: out[key]
+              value: value
+            - set: s
+              to: strings
+              value: strings.TrimLeft(strings.TrimPrefix(strings.TrimSpace(rest), ","), " ")
+      - return: out
+  - of: quotedToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: quotedToken
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: labelToken
+        kind: internal
+    steps:
+      - set: s
+        to: strings
+        value: strings.TrimSpace(s)
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: "!strings.HasPrefix(s, `\"`)"
+      - return: labelToken(s)
+        to: labelToken
+  - of: stackKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: stackKey
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - set: stack
+        to: slices
+        value: slices.DeleteFunc(slices.Clone(stack), func(fn string) bool { return fn == "runtime.goexit" })
+      - return: strings.Join(stack[:min(joinDepth, len(stack))], "\n")
+        to: strings
+  - of: joinLabels
+    participants:
+      - id: caller
+        kind: actor
+      - id: joinLabels
+        kind: self
+      - id: stackKey
+        kind: internal
+      - id: maps
+        kind: stdlib
+    steps:
+      - bind: byStack
+        eval: make(map[string][]*countRecord, len(records))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - bind: k
+                    eval: stackKey(records[i].stack)
+                    to: stackKey
+                  - set: byStack[k]
+                    value: append(byStack[k], &records[i])
+                when: len(records[i].labels) > 0
+          key: i
+          range: records
+      - var:
+          name: names
+          type: "[]string"
+      - loop:
+          do:
+            - set: names
+              value: names[:0]
+            - loop:
+                do:
+                  - set: names
+                    value: append(names, f.Function)
+                key: _
+                range: gs[i].Stack
+                value: f
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - op: "--"
+                          set: rec.count
+                        - set: gs[i].Labels
+                          to: maps
+                          value: maps.Clone(rec.labels)
+                        - break: true
+                      when: rec.count > 0
+                key: _
+                range: byStack[stackKey(names)]
+                value: rec
+          key: i
+          range: gs
+  - of: Parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: Parse
+        kind: self
+      - id: inflate
+        kind: internal
+      - id: fields
+        kind: internal
+      - id: d.resolve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreprofiling.ProfileTooLarge, errs.WrapParams{}, errs.Int("bytes", len(data)))
+          when: len(data) > MaxProfileBytes
+      - bind: raw, err
+        eval: inflate(data)
+        to: inflate
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: d
+        eval: "&decoder{locations: make(map[uint64]rawLocation), functions: make(map[uint64]rawFunction)}"
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: fields(raw, d.profileField)
+            to: fields
+          when: err != nil
+      - return: d.resolve(MaxFrames)
+        to: d.resolve
+  - of: inflate
+    participants:
+      - id: caller
+        kind: actor
+      - id: inflate
+        kind: self
+      - id: coretransform
+        kind: package
+      - id: bounded.DecompressBounded
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: data, nil
+          when: "!bytes.HasPrefix(data, gzipMagic)"
+      - bind: scheme, found
+        eval: coretransform.Lookup(gzipAlgorithm)
+        to: coretransform
+      - bind: bounded, isBounded
+        eval: scheme.(coretransform.BoundedDecompressor)
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretransform.UnknownCompressor, errs.WrapParams{},
+                			errs.String("algorithm", string(gzipAlgorithm)))
+          when: "!found || !isBounded"
+      - bind: out, err
+        eval: bounded.DecompressBounded(nil, data, int64(MaxProfileBytes))
+        to: bounded.DecompressBounded
+      - opt:
+          do:
+            - return: out, nil
+          when: err == nil
+      - opt:
+          do:
+            - return: nil, coreprofiling.ProfileTooLarge
+          when: errs.HasCode(err, coretransform.CodeDecompressedTooLarge)
+      - return: nil, errs.Wrap(libraryCause(err), malformedParams("gzip"))
+  - of: libraryCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: libraryCause
+        kind: self
+      - id: sdkErr.Source
+        kind: value
+    steps:
+      - bind: cause
+        eval: err
+      - loop:
+          do:
+            - bind: sdkErr, isSDK
+              eval: cause.(*errs.Error)
+            - opt:
+                do:
+                  - return: cause
+                when: "!isSDK || sdkErr == nil"
+            - set: cause
+              to: sdkErr.Source
+              value: sdkErr.Source()
+          forever: true
+  - of: malformedParams
+    steps:
+      - return: |-
+          errs.WrapParams{
+          		Code: coreprofiling.CodeProfileMalformed, Reason: "PROFILE_MALFORMED", Public: coreprofiling.ProfileMalformed.Public(),
+          		Private: coreprofiling.ProfileMalformed.Private() + " (" + what + ")",
+          	}
+  - of: fields
+    participants:
+      - id: caller
+        kind: actor
+      - id: fields
+        kind: self
+      - id: w.key
+        kind: internal
+      - id: w.skip
+        kind: internal
+    steps:
+      - bind: w
+        eval: "wire{buf: buf}"
+      - loop:
+          cond: w.more()
+          do:
+            - bind: field, kind, err
+              eval: w.key()
+              to: w.key
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - bind: handled, err
+              eval: read(&w, field, kind)
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: err
+                        eval: w.skip(kind)
+                        to: w.skip
+                      when: err != nil
+                when: "!handled"
+      - return: nil
+  - of: scalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: scalar
+        kind: self
+      - id: w.varint
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, malformed("scalar")
+          when: kind != wireVarint
+      - bind: v, err
+        eval: w.varint()
+        to: w.varint
+      - return: int64(v), err
+  - of: payload
+    participants:
+      - id: caller
+        kind: actor
+      - id: payload
+        kind: self
+      - id: w.bytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, malformed("message")
+          when: kind != wireBytes
+      - return: w.bytes()
+        to: w.bytes
+  - of: (*decoder).profileField
+    steps:
+      - bind: read, known
+        eval: profileReaders[field]
+      - opt:
+          do:
+            - return: false, nil
+          when: "!known"
+      - return: true, read(d, w, kind)
+  - of: (*decoder).readString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readString
+        kind: self
+      - id: payload
+        kind: internal
+    steps:
+      - bind: s, err
+        eval: payload(w, kind)
+        to: payload
+      - set: d.strings
+        value: append(d.strings, string(s))
+      - return: err
+  - of: (*decoder).readComment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readComment
+        kind: self
+      - id: w.varints
+        kind: internal
+    steps:
+      - bind: values, err
+        eval: w.varints(nil, kind)
+        to: w.varints
+      - loop:
+          do:
+            - set: d.comments
+              value: append(d.comments, int64(v))
+          key: _
+          range: values
+          value: v
+      - return: err
+  - of: (*decoder).readSampleType
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readSampleType
+        kind: self
+      - id: valueType
+        kind: internal
+    steps:
+      - bind: t, err
+        eval: valueType(w, kind)
+        to: valueType
+      - set: d.types
+        value: append(d.types, t)
+      - return: err
+  - of: (*decoder).readPeriodType
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readPeriodType
+        kind: self
+      - id: valueType
+        kind: internal
+    steps:
+      - bind: t, err
+        eval: valueType(w, kind)
+        to: valueType
+      - set: d.periodType
+        value: t
+      - return: err
+  - of: (*decoder).readTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readTime
+        kind: self
+      - id: scalar
+        kind: internal
+    steps:
+      - bind: v, err
+        eval: scalar(w, kind)
+        to: scalar
+      - set: d.timeNanos
+        value: v
+      - return: err
+  - of: (*decoder).readDuration
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readDuration
+        kind: self
+      - id: scalar
+        kind: internal
+    steps:
+      - bind: v, err
+        eval: scalar(w, kind)
+        to: scalar
+      - set: d.durationNanos
+        value: v
+      - return: err
+  - of: (*decoder).readPeriod
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readPeriod
+        kind: self
+      - id: scalar
+        kind: internal
+    steps:
+      - bind: v, err
+        eval: scalar(w, kind)
+        to: scalar
+      - set: d.period
+        value: v
+      - return: err
+  - of: (*decoder).readDefaultType
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readDefaultType
+        kind: self
+      - id: scalar
+        kind: internal
+    steps:
+      - bind: v, err
+        eval: scalar(w, kind)
+        to: scalar
+      - set: d.defaultType
+        value: v
+      - return: err
+  - of: valueType
+    participants:
+      - id: caller
+        kind: actor
+      - id: valueType
+        kind: self
+      - id: payload
+        kind: internal
+      - id: fields
+        kind: internal
+    steps:
+      - bind: buf, err
+        eval: payload(w, kind)
+        to: payload
+      - opt:
+          do:
+            - return: rawType{}, err
+          when: err != nil
+      - var:
+          name: t
+          type: rawType
+      - set: err
+        to: fields
+        value: |-
+          fields(buf, func(w *wire, field, kind uint64) (bool, error) {
+          		//: the two fields of a ValueType.
+          		switch field {
+          		//: what is measured.
+          		case 1:
+          			var ferr error
+          			t.typ, ferr = scalar(w, kind)
+          			//: read.
+          			return true, ferr
+          		//: its unit.
+          		case 2:
+          			var ferr error
+          			t.unit, ferr = scalar(w, kind)
+          			//: read.
+          			return true, ferr
+          		}
+          		//: anything else is skipped.
+          		return false, nil
+          	})
+      - return: t, err
+  - of: timeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeOf
+        kind: self
+      - id: time.Unix(0, nanos).UTC
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}
+          when: nanos == 0
+      - return: time.Unix(0, nanos).UTC()
+        to: time.Unix(0, nanos).UTC
+  - of: (*resolver).spend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).spend
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coreprofiling.ProfileTooLarge, errs.WrapParams{}, errs.Int("max_frames", r.limit))
+              to: errs
+          when: n > r.budget
+      - op: "-="
+        set: r.budget
+        value: "n"
+      - return: nil
+  - of: (*resolver).str
+    steps:
+      - opt:
+          do:
+            - return: "\"\", malformed(\"string index\")"
+          when: i < 0 || i >= int64(len(r.d.strings))
+      - return: r.d.strings[i], nil
+  - of: (*resolver).valueType
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).valueType
+        kind: self
+      - id: r.str
+        kind: internal
+    steps:
+      - bind: typ, err
+        eval: r.str(t.typ)
+        to: r.str
+      - opt:
+          do:
+            - return: coreprofiling.SampleTypeValue{}, err
+          when: err != nil
+      - bind: unit, err
+        eval: r.str(t.unit)
+        to: r.str
+      - return: "coreprofiling.SampleTypeValue{Type: typ, Unit: unit}, err"
+  - of: (*resolver).header
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).header
+        kind: self
+      - id: r.valueType
+        kind: internal
+      - id: r.str
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: st, err
+              eval: r.valueType(t)
+              to: r.valueType
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: p.SampleTypes
+              value: append(p.SampleTypes, st)
+          key: _
+          range: r.d.types
+          value: t
+      - var:
+          name: err
+          type: error
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: p.PeriodType, err
+            eval: r.valueType(r.d.periodType)
+            op: =
+            to: r.valueType
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: p.DefaultSampleType, err
+            eval: r.str(r.d.defaultType)
+            op: =
+            to: r.str
+          when: err != nil
+      - loop:
+          do:
+            - bind: text, err
+              eval: r.str(c)
+              to: r.str
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: p.Comments
+              value: append(p.Comments, text)
+          key: _
+          range: r.d.comments
+          value: c
+      - return: nil
+  - of: (*resolver).sample
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).sample
+        kind: self
+      - id: r.location
+        kind: internal
+      - id: r.spend
+        kind: internal
+      - id: r.labels
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coreprofiling.SampleValue{}, malformed("sample values")
+          when: len(raw.values) != types
+      - bind: stack
+        eval: make([]coreprofiling.FrameValue, 0, min(len(raw.locations), r.budget))
+      - loop:
+          do:
+            - bind: frames, err
+              eval: r.location(id)
+              to: r.location
+            - opt:
+                do:
+                  - return: coreprofiling.SampleValue{}, err
+                when: err != nil
+            - opt:
+                do:
+                  - return: coreprofiling.SampleValue{}, err
+                init:
+                  bind: err
+                  eval: r.spend(len(frames))
+                  to: r.spend
+                when: err != nil
+            - set: stack
+              value: append(stack, frames...)
+          key: _
+          range: raw.locations
+          value: id
+      - bind: labels, numbers, err
+        eval: r.labels(raw.labels)
+        to: r.labels
+      - return: "coreprofiling.SampleValue{Labels: labels, NumLabels: numbers, Stack: stack, Values: raw.values}, err"
+  - of: (*resolver).location
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).location
+        kind: self
+      - id: r.spend
+        kind: internal
+      - id: r.frame
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: frames, nil
+          init:
+            bind: frames, done
+            eval: r.frames[id]
+          when: done
+      - bind: loc, known
+        eval: r.d.locations[id]
+      - opt:
+          do:
+            - return: nil, malformed("location id")
+          when: "!known"
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: r.spend(max(len(loc.lines), 1))
+            to: r.spend
+          when: err != nil
+      - var:
+          name: frames
+          type: "[]coreprofiling.FrameValue"
+      - opt:
+          do:
+            - set: frames
+              value: "[]coreprofiling.FrameValue{{Address: loc.address}}"
+          when: len(loc.lines) == 0
+      - loop:
+          do:
+            - bind: frame, err
+              eval: r.frame(line)
+              to: r.frame
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: frames
+              value: append(frames, frame)
+          key: _
+          range: loc.lines
+          value: line
+      - set: r.frames[id]
+        value: frames
+      - return: frames, nil
+  - of: (*resolver).frame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).frame
+        kind: self
+      - id: r.str
+        kind: internal
+    steps:
+      - bind: fn, known
+        eval: r.d.functions[line.function]
+      - opt:
+          do:
+            - return: coreprofiling.FrameValue{}, malformed("function id")
+          when: "!known"
+      - bind: name, err
+        eval: r.str(fn.name)
+        to: r.str
+      - opt:
+          do:
+            - return: coreprofiling.FrameValue{}, err
+          when: err != nil
+      - bind: file, err
+        eval: r.str(fn.file)
+        to: r.str
+      - return: "coreprofiling.FrameValue{Function: name, File: file, Line: int(line.line), StartLine: int(fn.start)}, err"
+  - of: (*resolver).labels
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*resolver).labels
+        kind: self
+      - id: r.str
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil, nil
+          when: len(raw) == 0
+      - bind: labels, numbers
+        eval: make(map[string][]string, len(raw)), make(map[string][]int64, len(raw))
+      - loop:
+          do:
+            - bind: key, err
+              eval: r.str(l.key)
+              to: r.str
+            - opt:
+                do:
+                  - return: nil, nil, err
+                when: err != nil
+            - opt:
+                do:
+                  - set: numbers[key]
+                    value: append(numbers[key], l.num)
+                  - continue: true
+                when: l.str == 0
+            - bind: value, err
+              eval: r.str(l.str)
+              to: r.str
+            - opt:
+                do:
+                  - return: nil, nil, err
+                when: err != nil
+            - set: labels[key]
+              value: append(labels[key], value)
+          key: _
+          range: raw
+          value: l
+      - return: labels, numbers, nil
+  - of: (*decoder).readSample
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readSample
+        kind: self
+      - id: payload
+        kind: internal
+      - id: fields
+        kind: internal
+    steps:
+      - bind: buf, err
+        eval: payload(w, kind)
+        to: payload
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - var:
+          name: s
+          type: rawSample
+      - set: err
+        to: fields
+        value: |-
+          fields(buf, func(w *wire, field, kind uint64) (bool, error) {
+          		//: one reader per field.
+          		switch field {
+          		//: innermost location first.
+          		case fieldSampleLocation:
+          			var ferr error
+          			s.locations, ferr = w.varints(s.locations, kind)
+          			//: read.
+          			return true, ferr
+          		//: one value per sample type.
+          		case fieldSampleValue:
+          			values, ferr := w.varints(nil, kind)
+          			//: two's complement, as every int64.
+          			for _, v := range values {
+          				s.values = append(s.values, int64(v))
+          			}
+          			//: read.
+          			return true, ferr
+          		//: a label.
+          		case fieldSampleLabel:
+          			label, ferr := readLabel(w, kind)
+          			s.labels = append(s.labels, label)
+          			//: read.
+          			return true, ferr
+          		}
+          		//: anything else is skipped.
+          		return false, nil
+          	})
+      - set: d.samples
+        value: append(d.samples, s)
+      - return: err
+  - of: readLabel
+    participants:
+      - id: caller
+        kind: actor
+      - id: readLabel
+        kind: self
+      - id: payload
+        kind: internal
+      - id: fields
+        kind: internal
+    steps:
+      - bind: buf, err
+        eval: payload(w, kind)
+        to: payload
+      - opt:
+          do:
+            - return: rawLabel{}, err
+          when: err != nil
+      - var:
+          name: l
+          type: rawLabel
+      - set: err
+        to: fields
+        value: |-
+          fields(buf, func(w *wire, field, kind uint64) (bool, error) {
+          		var target *int64
+          		//: which of the three the field fills.
+          		switch field {
+          		//: the label's key, a string index.
+          		case fieldLabelKey:
+          			target = &l.key
+          		//: a string value, a string index.
+          		case fieldLabelStr:
+          			target = &l.str
+          		//: a numeric value.
+          		case fieldLabelNum:
+          			target = &l.num
+          		//: anything else is skipped.
+          		default:
+          			//: not read.
+          			return false, nil
+          		}
+          		var ferr error
+          		*target, ferr = scalar(w, kind)
+          		//: read.
+          		return true, ferr
+          	})
+      - return: l, err
+  - of: (*decoder).readLocation
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readLocation
+        kind: self
+      - id: payload
+        kind: internal
+      - id: fields
+        kind: internal
+    steps:
+      - bind: buf, err
+        eval: payload(w, kind)
+        to: payload
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - var:
+          name: id
+          type: uint64
+      - var:
+          name: loc
+          type: rawLocation
+      - set: err
+        to: fields
+        value: |-
+          fields(buf, func(w *wire, field, kind uint64) (bool, error) {
+          		//: one reader per field.
+          		switch field {
+          		//: the id samples refer to.
+          		case fieldLocationID:
+          			v, ferr := scalar(w, kind)
+          			id = uint64(v)
+          			//: read.
+          			return true, ferr
+          		//: the program counter.
+          		case fieldLocationAddr:
+          			v, ferr := scalar(w, kind)
+          			loc.address = uint64(v)
+          			//: read.
+          			return true, ferr
+          		//: a line, innermost inlined call first.
+          		case fieldLocationLine:
+          			line, ferr := readLine(w, kind)
+          			loc.lines = append(loc.lines, line)
+          			//: read.
+          			return true, ferr
+          		}
+          		//: anything else is skipped.
+          		return false, nil
+          	})
+      - set: d.locations[id]
+        value: loc
+      - return: err
+  - of: readLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: readLine
+        kind: self
+      - id: payload
+        kind: internal
+      - id: fields
+        kind: internal
+    steps:
+      - bind: buf, err
+        eval: payload(w, kind)
+        to: payload
+      - opt:
+          do:
+            - return: rawLine{}, err
+          when: err != nil
+      - var:
+          name: l
+          type: rawLine
+      - set: err
+        to: fields
+        value: |-
+          fields(buf, func(w *wire, field, kind uint64) (bool, error) {
+          		//: one reader per field.
+          		switch field {
+          		//: the function id.
+          		case fieldLineFunction:
+          			v, ferr := scalar(w, kind)
+          			l.function = uint64(v)
+          			//: read.
+          			return true, ferr
+          		//: the line executing.
+          		case fieldLineLine:
+          			var ferr error
+          			l.line, ferr = scalar(w, kind)
+          			//: read.
+          			return true, ferr
+          		}
+          		//: anything else is skipped.
+          		return false, nil
+          	})
+      - return: l, err
+  - of: (*decoder).readFunction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).readFunction
+        kind: self
+      - id: payload
+        kind: internal
+      - id: fields
+        kind: internal
+    steps:
+      - bind: buf, err
+        eval: payload(w, kind)
+        to: payload
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - var:
+          name: id
+          type: int64
+      - var:
+          name: fn
+          type: rawFunction
+      - set: err
+        to: fields
+        value: |-
+          fields(buf, func(w *wire, field, kind uint64) (bool, error) {
+          		var target *int64
+          		//: which field the value fills.
+          		switch field {
+          		//: the id lines refer to.
+          		case fieldFunctionID:
+          			target = &id
+          		//: the name, a string index.
+          		case fieldFunctionName:
+          			target = &fn.name
+          		//: the file, a string index.
+          		case fieldFunctionFile:
+          			target = &fn.file
+          		//: the first line.
+          		case fieldFunctionStart:
+          			target = &fn.start
+          		//: anything else is skipped.
+          		default:
+          			//: not read.
+          			return false, nil
+          		}
+          		var ferr error
+          		*target, ferr = scalar(w, kind)
+          		//: read.
+          		return true, ferr
+          	})
+      - set: d.functions[uint64(id)]
+        value: fn
+      - return: err
+  - of: (*decoder).resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).resolve
+        kind: self
+      - id: r.header
+        kind: internal
+      - id: r.sample
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, malformed("string table")
+          when: len(d.strings) == 0 || d.strings[0] != ""
+      - bind: r
+        eval: "resolver{d: d, frames: make(map[uint64][]coreprofiling.FrameValue, len(d.locations)), budget: frames, limit: frames}"
+      - bind: p
+        eval: "&coreprofiling.ProfileValue{Time: timeOf(d.timeNanos), Duration: time.Duration(d.durationNanos), Period: d.period}"
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: r.header(p)
+            to: r.header
+          when: err != nil
+      - set: p.Samples
+        value: make([]coreprofiling.SampleValue, 0, len(d.samples))
+      - loop:
+          do:
+            - bind: s, err
+              eval: r.sample(&d.samples[i], len(p.SampleTypes))
+              to: r.sample
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: p.Samples
+              value: append(p.Samples, s)
+          key: i
+          range: d.samples
+      - return: p, nil
+  - of: (*wire).more
+    steps:
+      - return: len(w.buf) > 0
+  - of: (*wire).key
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wire).key
+        kind: self
+      - id: w.varint
+        kind: internal
+    steps:
+      - bind: k, err
+        eval: w.varint()
+        to: w.varint
+      - opt:
+          do:
+            - return: 0, 0, err
+          when: err != nil
+      - return: k >> fieldShift, k & wireMask, nil
+  - of: (*wire).bytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wire).bytes
+        kind: self
+      - id: w.varint
+        kind: internal
+    steps:
+      - bind: n, err
+        eval: w.varint()
+        to: w.varint
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, malformed("length")
+          when: n > uint64(len(w.buf))
+      - bind: out
+        eval: w.buf[:n]
+      - set: w.buf
+        value: w.buf[n:]
+      - return: out, nil
+  - of: (*wire).skip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wire).skip
+        kind: self
+      - id: w.varint
+        kind: internal
+      - id: w.bytes
+        kind: internal
+      - id: w.advance
+        kind: internal
+      - id: malformed
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: wireVarint
+              do:
+                - bind: _, err
+                  eval: w.varint()
+                  to: w.varint
+                - return: err
+            - case: wireBytes
+              do:
+                - bind: _, err
+                  eval: w.bytes()
+                  to: w.bytes
+                - return: err
+            - case: wireFixed64
+              do:
+                - return: w.advance(fixed64Size)
+                  to: w.advance
+            - case: wireFixed32
+              do:
+                - return: w.advance(fixed32Size)
+                  to: w.advance
+          "on": kind
+      - return: malformed("wire type")
+        to: malformed
+  - of: (*wire).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wire).advance
+        kind: self
+      - id: malformed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: malformed("fixed")
+              to: malformed
+          when: n > len(w.buf)
+      - set: w.buf
+        value: w.buf[n:]
+      - return: nil
+  - of: (*wire).varints
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wire).varints
+        kind: self
+      - id: w.varint
+        kind: internal
+      - id: w.bytes
+        kind: internal
+      - id: packed.varint
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: v, err
+              eval: w.varint()
+              to: w.varint
+            - return: append(dst, v), err
+          when: kind == wireVarint
+      - opt:
+          do:
+            - return: dst, malformed("repeated")
+          when: kind != wireBytes
+      - bind: run, err
+        eval: w.bytes()
+        to: w.bytes
+      - opt:
+          do:
+            - return: dst, err
+          when: err != nil
+      - bind: packed
+        eval: "wire{buf: run}"
+      - loop:
+          cond: packed.more()
+          do:
+            - bind: v, err
+              eval: packed.varint()
+              to: packed.varint
+            - opt:
+                do:
+                  - return: dst, err
+                when: err != nil
+            - set: dst
+              value: append(dst, v)
+      - return: dst, nil
+  - of: malformed
+    participants:
+      - id: caller
+        kind: actor
+      - id: malformed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coreprofiling.ProfileMalformed, errs.WrapParams{}, errs.String("reading", what))
+        to: errs

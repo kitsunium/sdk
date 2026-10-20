@@ -1,0 +1,47 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Seal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Seal
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.Seal(corecrypto.Algorithm(defaultAlgorithm), k, plaintext, aad)
+        to: corecrypto
+  - of: SealAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: SealAs
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.Seal(corecrypto.Algorithm(a), k, plaintext, aad)
+        to: corecrypto
+  - of: SealStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: SealStream
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.SealStream(corecrypto.Algorithm(streamAlgorithm), k, dst, aad)
+        to: corecrypto
+  - of: OpenStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: OpenStream
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.OpenStream(corecrypto.Algorithm(streamAlgorithm), k, src, aad)
+        to: corecrypto

@@ -1,0 +1,20 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Transact
+    name: sql.go
+functions:
+  - name: Transact
+    params: ctx context.Context, tm Transactor, fn TxFunc
+    results: error
+imports:
+  context: context
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/sql
+  name: sql
+  purpose: "Package sql is the public facade for the SDK's relational-database domain: transaction ownership, a pool policy, a health check and a migration runner, over the standard library's database/sql."
+types: []

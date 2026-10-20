@@ -1,0 +1,906 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      boundarySniffWindow caps how many leading bytes are scanned for the first
+      delimiter line. RFC 2046 allows an arbitrary preamble before it; a bounded
+      window keeps the scan O(1) against a hostile body that never emits one.
+    items:
+      - name: boundarySniffWindow
+        type: int
+        value: "4096"
+    name: boundarySniffWindow
+  - doc: maxBoundaryLen is the RFC 2046 ceiling on a boundary (70 characters).
+    items:
+      - name: maxBoundaryLen
+        type: int
+        value: "70"
+    name: maxBoundaryLen
+  - doc: |-
+      boundaryChars is the RFC 2046 bchars set, matching what
+      mime/multipart.Writer.SetBoundary accepts. SPACE is legal except as the last
+      character, which validateBoundary checks separately.
+    items:
+      - name: boundaryChars
+        type: string
+        value: |-
+          "" +
+          	"ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+          	"abcdefghijklmnopqrstuvwxyz" +
+          	"0123456789'()+_,-./:=? "
+    name: boundaryChars
+  - doc: delimiterPrefix is the two hyphens every delimiter line starts with.
+    items:
+      - name: delimiterPrefix
+        type: string
+        value: "\"--\""
+    name: delimiterPrefix
+  - doc: |-
+      JSONPartName is the field name of the part the JSON-mediated shape writes
+      and reads. It matches pkg/v1/data/codec's csv promotion header for the same
+      reason: one recognisable label for "the SDK put a JSON document here".
+    items:
+      - name: JSONPartName
+        type: string
+        value: "\"_json\""
+    name: JSONPartName
+  - doc: mimeFormData is the canonical media type of the format.
+    items:
+      - name: mimeFormData
+        type: string
+        value: "\"multipart/form-data\""
+    name: mimeFormData
+  - doc: mimeJSON is the Content-Type stamped on the JSON-mediated part.
+    items:
+      - name: mimeJSON
+        type: string
+        value: "\"application/json\""
+    name: mimeJSON
+  - doc: |-
+      formDataDisposition is the disposition type RFC 7578 §4.2 requires of every
+      part; a part carrying any other has no form-data name.
+    items:
+      - name: formDataDisposition
+        type: string
+        value: "\"form-data\""
+    name: formDataDisposition
+  - doc: |-
+      pathSeparators are the two octets a filename= parameter can separate path
+      elements with. Both are read as separators on every OS, because the sender
+      wrote the path with ITS separator, not with the receiver's.
+    items:
+      - name: pathSeparators
+        type: string
+        value: "`/\\`"
+    name: pathSeparators
+  - doc: |-
+      partHeaderFields is the number of headers a part carries at most —
+      Content-Disposition plus an optional Content-Type. Used to size the map in
+      one shot rather than letting it grow.
+    items:
+      - name: partHeaderFields
+        type: int
+        value: "2"
+    name: partHeaderFields
+  - doc: |-
+      forbiddenHeaderOctets are the three octets no part header value may carry.
+      mime/multipart.Writer.CreatePart writes every header value verbatim, so a CR
+      or an LF inside one does not corrupt the field — it ENDS the line, and the
+      rest of the value is read back as a header line of its own or, after an
+      empty line, as the start of the body. NUL ends the value for any consumer
+      written in C. The same three octets ADR 0064's mail header gate refuses.
+    items:
+      - name: forbiddenHeaderOctets
+        type: string
+        value: "\"\\r\\n\\x00\""
+    name: forbiddenHeaderOctets
+  - doc: |-
+      DefaultMaxPartBytes caps one part body at 32 MiB. Generous for a form field
+      or a document upload, and small enough that a single part cannot exhaust a
+      container's memory budget. Callers moving larger objects raise the bound
+      explicitly through NewWithLimits.
+    items:
+      - comment: 32 MiB
+        name: DefaultMaxPartBytes
+        type: int64
+        value: 32 << 20
+    name: DefaultMaxPartBytes
+  - doc: |-
+      DefaultMaxParts caps a body at 1024 parts. A boundary flood costs the
+      attacker one header line per part while costing the decoder a header parse
+      and a slice entry each, so the part COUNT needs its own ceiling — the byte
+      bounds alone do not constrain it on a streaming reader.
+    items:
+      - name: DefaultMaxParts
+        type: int
+        value: "1024"
+    name: DefaultMaxParts
+  - doc: |-
+      DefaultMaxTotalBytes caps the sum of every part body at 64 MiB. Without it
+      the real ceiling would be DefaultMaxPartBytes × DefaultMaxParts, which is
+      not a bound anybody chose.
+    items:
+      - comment: 64 MiB
+        name: DefaultMaxTotalBytes
+        type: int64
+        value: 64 << 20
+    name: DefaultMaxTotalBytes
+files:
+  - decls:
+      - boundarySniffWindow
+      - maxBoundaryLen
+      - boundaryChars
+      - delimiterPrefix
+      - Boundary
+      - candidateOrRefusal
+      - ContentType
+      - firstDelimiterLine
+      - scanDelimiterLine
+      - nextLine
+      - closesWith
+      - validateBoundary
+      - boundaryInvalid
+    name: boundary.go
+  - decls:
+      - JSONPartName
+      - mimeFormData
+      - mimeJSON
+      - BoundaryCodec
+      - BoundaryProvider
+      - Codec
+      - multipartCodec
+      - defaultLimits
+      - New
+      - NewWithLimits
+      - (*multipartCodec).Name
+      - (*multipartCodec).MIMETypes
+      - (*multipartCodec).Extensions
+      - (*multipartCodec).Marshal
+      - (*multipartCodec).Unmarshal
+      - (*multipartCodec).Append
+      - (*multipartCodec).NewEncoder
+      - (*multipartCodec).NewDecoder
+      - (*multipartCodec).NewEncoderWithBoundary
+      - (*multipartCodec).NewDecoderWithBoundary
+      - (*multipartCodec).encoderFor
+      - (*multipartCodec).pinnedEncoder
+      - (*multipartCodec).decoderFor
+      - (*multipartCodec).encodeForm
+      - (*multipartCodec).formEncoder
+      - asForm
+      - readForm
+      - readJSONMediated
+    name: codec.go
+  - decls:
+      - counter
+      - (*counter).readBudget
+      - (*counter).admitPart
+    name: counter.go
+  - decls:
+      - multipartDecoder
+      - (*multipartDecoder).Decode
+      - (*multipartDecoder).More
+      - (*multipartDecoder).fetch
+      - (*multipartDecoder).readInto
+      - (*multipartDecoder).readBody
+      - readBounded
+      - probeSize
+      - publishPart
+      - assignPart
+      - errIsEOF
+      - isSettablePointer
+      - sniffReader
+      - peekHead
+      - peeker
+      - delimiterLineComplete
+      - unmarshalFailed
+    name: decoder.go
+  - decls:
+      - formDataDisposition
+      - pathSeparators
+      - dispositionOf
+      - lastElement
+    name: disposition.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - partHeaderFields
+      - forbiddenHeaderOctets
+      - quoteEscaper
+      - multipartEncoder
+      - (*multipartEncoder).Encode
+      - (*multipartEncoder).Close
+      - (*multipartEncoder).Boundary
+      - (*multipartEncoder).writePart
+      - injectedHeaderField
+      - partHeader
+      - asPart
+      - marshalFailed
+      - valueInvalid
+    name: encoder.go
+  - decls:
+      - FormValue
+      - PartValue
+    name: form.go
+  - decls:
+      - DefaultMaxPartBytes
+      - DefaultMaxParts
+      - DefaultMaxTotalBytes
+      - LimitsConfig
+      - LimitsConfig.resolve
+      - LimitsConfig.negativeKnob
+      - clampInt64
+      - clampInt
+      - limitExceeded
+    name: limits.go
+  - decls:
+      - _
+    name: multipart_compliance.go
+functions:
+  - name: Boundary
+    params: data []byte
+    results: boundary string, err error
+  - doc: |-
+      candidateOrRefusal hands over a structurally valid candidate whose closing
+      delimiter was not confirmed, or refuses one that is not a boundary at all.
+    name: candidateOrRefusal
+    params: candidate string
+    results: boundary string, err error
+  - name: ContentType
+    params: data []byte
+    results: value string, err error
+  - doc: |-
+      firstDelimiterLine returns the text following the "--" prefix of the first
+      delimiter-looking line inside the sniff window, with the trailing CR removed.
+    name: firstDelimiterLine
+    params: data []byte
+    results: candidate string, found bool
+  - doc: |-
+      scanDelimiterLine walks the bounded sniff window and returns the bytes after
+      the "--" prefix of the first delimiter-looking line.
+    name: scanDelimiterLine
+    params: data []byte
+    results: rest []byte, found bool
+  - doc: |-
+      nextLine returns the bytes of the line starting at cursor (CR stripped) and
+      the offset of the following line.
+    name: nextLine
+    params: data []byte, cursor int
+    results: line []byte, next int
+  - doc: closesWith reports whether data carries the closing delimiter for boundary.
+    name: closesWith
+    params: data []byte, boundary string
+    results: bool
+  - doc: |-
+      validateBoundary enforces the RFC 2046 shape mime/multipart.Writer accepts:
+      1-70 characters drawn from bchars, with SPACE barred from the last position.
+      Checking here rather than deferring to SetBoundary keeps the failure a typed
+      BOUNDARY_INVALID at the SDK's own edge instead of a bare stdlib error.
+    name: validateBoundary
+    params: boundary string
+    results: error
+  - doc: |-
+      boundaryInvalid builds the typed BoundaryInvalid error with a call-site
+      specific Private diagnostic. The boundary itself is never echoed — it is
+      attacker-controlled on the decode path.
+    name: boundaryInvalid
+    params: detail string
+    results: error
+  - doc: defaultLimits returns the resolved package defaults.
+    name: defaultLimits
+    results: LimitsConfig
+  - name: New
+    results: codec.Codec
+  - name: NewWithLimits
+    params: l LimitsConfig
+    results: c codec.Codec, err error
+  - doc: asForm resolves an arbitrary value to the container shape Marshal writes.
+    name: asForm
+    params: v any
+    results: form *FormValue, err error
+  - doc: |-
+      readForm drains every part of dec into form, stamping the delimiter that
+      framed them so the form re-encodes to the same framing.
+    name: readForm
+    params: dec *multipartDecoder, boundary string, form *FormValue
+    results: error
+  - doc: readJSONMediated finds the JSONPartName part and decodes it into v.
+    name: readJSONMediated
+    params: dec *multipartDecoder, v any
+    results: error
+  - doc: |-
+      readBounded drains r into a fresh buffer, refusing to materialise more than
+      max bytes. Mirrors internal/service/data/transform.readAllBounded: the extra byte
+      on the LimitReader is what separates a legitimately cap-sized payload from
+      one that wanted to exceed the cap. See probeSize for the one max that gets
+      no extra byte.
+    name: readBounded
+    params: r io.Reader, max int64
+    results: body []byte, overflow bool, err error
+  - doc: |-
+      probeSize returns bound+1 — the read limit that makes a body over bound
+      observable — or bound itself when bound is math.MaxInt64.
+
+      bound+1 wraps to math.MinInt64 there, and io.LimitReader reads nothing at all
+      through a negative limit: with MaxPartBytes at MaxInt64, which resolve
+      accepts, every part decoded silently empty. No []byte can hold more than
+      MaxInt64 bytes, so at that bound there is no overflow for the probe to see.
+    name: probeSize
+    params: bound int64
+    results: int64
+  - doc: publishPart copies part through the caller's *PartValue, refusing a nil one.
+    name: publishPart
+    params: part, target *PartValue
+    results: error
+  - doc: |-
+      assignPart decodes a part body as JSON into the caller's value — the read
+      side of the JSON-mediated shape.
+    name: assignPart
+    params: part *PartValue, v any
+    results: error
+  - doc: |-
+      errIsEOF reports whether err is the clean end-of-stream signal the Decoder
+      contract propagates verbatim.
+    name: errIsEOF
+    params: err error
+    results: bool
+  - doc: |-
+      isSettablePointer reports whether v is a non-nil pointer encoding/json can
+      write through.
+    name: isSettablePointer
+    params: v any
+    results: bool
+  - doc: |-
+      sniffReader wraps r in a bufio.Reader and recovers the boundary from the
+      stream WITHOUT consuming it: Peek leaves the delimiter line in the buffer so
+      mime/multipart.Reader still sees a complete body.
+
+      It reads no further than the answer needs. The head is examined as it
+      arrives, and the sniff returns once the first delimiter line is complete, so
+      a producer that sends a short prefix and then pauses is not made to fill the
+      whole window first — it used to be, which stalled NewDecoder on a live
+      stream until 4 KiB or the end arrived.
+    name: sniffReader
+    params: r io.Reader
+    results: buffered *bufio.Reader, boundary string, err error
+  - doc: |-
+      peekHead peeks at br until the first delimiter line is complete, the sniff
+      window is full, or the stream ends — whichever comes first.
+
+      A first line ending in "--" is not complete for this purpose. It can be a
+      zero-part body's close delimiter or a boundary that itself ends in "--", and
+      telling those apart needs the bytes after it, so that one line still waits
+      for the window or the end of the stream, exactly as every line used to.
+    name: peekHead
+    params: br peeker
+    results: head []byte, err error
+  - doc: |-
+      delimiterLineComplete reports whether head already holds the whole first
+      "--" line — terminated by its LF — and that line does not end in "--".
+    name: delimiterLineComplete
+    params: head []byte
+    results: bool
+  - doc: |-
+      unmarshalFailed wraps cause with the UnmarshalFailed sentinel and a
+      call-site specific Private diagnostic.
+    name: unmarshalFailed
+    params: cause error, detail string
+    results: error
+  - doc: |-
+      dispositionOf reads a part's form-data name and its filename, parsing the
+      Content-Disposition header once.
+
+      It replaces (*mime/multipart.Part).FileName, which passes the parameter
+      through filepath.Base — and filepath.Base is PLATFORM-DEPENDENT: it splits
+      on '\' on Windows and not on Unix. The same bytes therefore decoded to
+      `te.txt` on Windows and to `q"uo\te.txt` on Linux, and to `a.txt` or to
+      `C:\Users\ada\a.txt` depending on the host for a path an old browser sent in
+      full. A codec whose Unmarshal answers differently per operating system is
+      not one codec, so the parameter is read here and reduced by [lastElement],
+      whose rule does not depend on the host.
+
+      The name follows mime/multipart.Part.FormName exactly: empty unless the
+      disposition is form-data. A header that does not parse yields neither, which
+      the caller refuses as a part with no form-data name.
+    name: dispositionOf
+    params: src *stdmp.Part
+    results: name, fileName string
+  - doc: |-
+      lastElement reduces a filename= parameter to its last path element, reading
+      '/' and '\' as separators whatever the OS this runs on.
+
+      RFC 7578 §4.2 has the receiver drop "directory path information that may be
+      present", and a sender writes that information with its OWN separator: a
+      browser on Windows that sends a full path sends backslashes, and a server on
+      Linux has to strip them just the same. So both octets separate, everywhere.
+      Trailing separators are dropped first, as filepath.Base drops them, so
+      `dir/` names `dir`; a value made of nothing else has no element and yields
+      "", the value a part with no usable filename already carries.
+
+      It removes directory information and nothing else. A colon is not a
+      separator — it is an ordinary filename octet on Unix — and "." or ".." are
+      returned as they came: a caller who turns FileName into a path still has
+      its own name to validate, exactly as before.
+    name: lastElement
+    params: fileName string
+    results: string
+  - doc: |-
+      injectedHeaderField reports the first of the three caller-supplied header
+      values carrying a forbidden octet, in declaration order, so a part with two
+      bad values still names one of them deterministically. It reports the FIELD
+      and never the value: the value is exactly the string an attacker chose.
+    name: injectedHeaderField
+    params: part *PartValue
+    results: field string, found bool
+  - doc: partHeader builds the RFC 7578 header block for part.
+    name: partHeader
+    params: part *PartValue
+    results: textproto.MIMEHeader
+  - doc: asPart resolves an arbitrary value to the part the encoder will write.
+    name: asPart
+    params: v any
+    results: part *PartValue, err error
+  - doc: |-
+      marshalFailed wraps cause with the MarshalFailed sentinel and a call-site
+      specific Private diagnostic.
+    name: marshalFailed
+    params: cause error, detail string
+    results: error
+  - doc: |-
+      valueInvalid builds the typed ValueInvalid error for a rejected argument
+      shape, with a call-site specific Private diagnostic and any fields that
+      locate the problem (never a caller-supplied value).
+    name: valueInvalid
+    params: detail string, fields ...errs.FieldValue
+    results: error
+  - doc: clampInt64 returns v when the caller chose one, else the supplied default.
+    name: clampInt64
+    params: v, fallback int64
+    results: int64
+  - doc: clampInt returns v when the caller chose one, else the supplied default.
+    name: clampInt
+    params: v, fallback int
+    results: int
+  - doc: |-
+      limitExceeded builds the typed LimitExceeded error for knob, carrying the
+      ceiling and the observed magnitude as fields.
+    name: limitExceeded
+    params: knob string, bound, got int64
+    results: error
+imports:
+  bufio: bufio
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coremultipart: github.com/kitsunium/sdk/internal/core/data/codec/multipart
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  math: math
+  mime: mime
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  stdjson: encoding/json
+  stdmp: mime/multipart
+  strings: strings
+  textproto: net/textproto
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/multipart
+  name: multipart
+  purpose: Package multipart — boundary recovery and validation.
+types:
+  - kind: named
+    name: BoundaryCodec
+    underlying: |-
+      interface {
+      	codec.Codec
+      	// NewEncoderWithBoundary streams a body framed by the given boundary.
+      	NewEncoderWithBoundary(w io.Writer, boundary string) (enc codec.Encoder, err error)
+      	// NewDecoderWithBoundary streams a body framed by the given boundary,
+      	// bypassing recovery from the wire entirely.
+      	NewDecoderWithBoundary(r io.Reader, boundary string) (dec codec.Decoder, err error)
+      }
+  - kind: named
+    name: BoundaryProvider
+    underlying: |-
+      interface {
+      	// Boundary returns the delimiter the encoder writes.
+      	Boundary() string
+      }
+  - doc: multipartCodec is the concrete Codec implementation for multipart/form-data.
+    fields:
+      - doc: limits bounds every encode and every decode this instance drives.
+        name: limits
+        type: LimitsConfig
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*multipartCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*multipartCodec"
+        results: "[]string"
+      - doc: |-
+          Extensions reports no file extension.
+
+          multipart/form-data is a transport container: nothing writes it to disk
+          under an agreed suffix, so inventing one would make codec.FromExtension
+          resolve a name no producer emits. An empty list is the honest answer.
+        name: Extensions
+        recv: "*multipartCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal encodes v as a multipart/form-data body.
+
+          FormValue / *FormValue / []PartValue / PartValue / *PartValue encode
+          natively; every other value takes the JSON-mediated single-part shape. The
+          returned bytes carry the delimiter on every line, so [ContentType] can
+          recover the header value the caller must send alongside them.
+        name: Marshal
+        params: v any
+        recv: c *multipartCodec
+        results: encoded []byte, err error
+      - doc: |-
+          Unmarshal parses a multipart/form-data body into v.
+
+          A *FormValue receives every part plus the recovered delimiter. Any other
+          non-nil pointer receives encoding/json's decode of the [JSONPartName] part —
+          the read side of the JSON-mediated shape. A body carrying no such part is a
+          typed UNMARSHAL_FAILED naming *FormValue as the target that would work.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: c *multipartCodec
+        results: error
+      - doc: |-
+          Append encodes v and appends the bytes onto dst, implementing
+          codec.Appender. On failure dst is returned with its prior contents intact.
+        name: Append
+        params: dst []byte, v any
+        recv: c *multipartCodec
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder with a generated boundary.
+          The returned Encoder satisfies [BoundaryProvider], which is the only way to
+          learn the delimiter it chose.
+        name: NewEncoder
+        params: w io.Writer
+        recv: c *multipartCodec
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder, recovering the boundary
+          from the head of the stream without consuming it.
+
+          codec.Decoder has no error channel, so a stream whose delimiter cannot be
+          recovered yields a decoder that reports the typed BOUNDARY_INVALID from its
+          first Decode (and answers More() true exactly once, so a More/Decode loop
+          cannot swallow it).
+        name: NewDecoder
+        params: r io.Reader
+        recv: c *multipartCodec
+        results: codec.Decoder
+      - doc: NewEncoderWithBoundary implements [BoundaryCodec].
+        name: NewEncoderWithBoundary
+        params: w io.Writer, boundary string
+        recv: c *multipartCodec
+        results: enc codec.Encoder, err error
+      - doc: NewDecoderWithBoundary implements [BoundaryCodec].
+        name: NewDecoderWithBoundary
+        params: r io.Reader, boundary string
+        recv: c *multipartCodec
+        results: dec codec.Decoder, err error
+      - doc: encoderFor builds the concrete encoder over w with a generated boundary.
+        name: encoderFor
+        params: w io.Writer
+        recv: c *multipartCodec
+        results: "*multipartEncoder"
+      - doc: pinnedEncoder builds the concrete encoder over w framed by boundary.
+        name: pinnedEncoder
+        params: w io.Writer, boundary string
+        recv: c *multipartCodec
+        results: enc *multipartEncoder, err error
+      - doc: decoderFor builds the concrete decoder over r for an already-known boundary.
+        name: decoderFor
+        params: r io.Reader, boundary string
+        recv: c *multipartCodec
+        results: "*multipartDecoder"
+      - doc: |-
+          encodeForm writes form to w through the streaming encoder — the single
+          write path Marshal, Append and NewEncoder all funnel through.
+        name: encodeForm
+        params: w io.Writer, form *FormValue
+        recv: c *multipartCodec
+        results: error
+      - doc: formEncoder builds the encoder for a form, honouring an explicit boundary.
+        name: formEncoder
+        params: w io.Writer, boundary string
+        recv: c *multipartCodec
+        results: enc *multipartEncoder, err error
+    name: multipartCodec
+  - doc: |-
+      counter tracks the running part count and aggregate byte total against a
+      resolved LimitsConfig. Shared by the encode and decode paths so both refuse
+      on exactly the same arithmetic — a bound the encoder ignored would produce
+      bodies this package cannot read back.
+    fields:
+      - doc: limits is the resolved ceiling set; never a raw caller value.
+        name: limits
+        type: LimitsConfig
+      - doc: parts is the number of parts admitted so far.
+        name: parts
+        type: int
+      - doc: total is the sum of the admitted part bodies.
+        name: total
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          readBudget returns how many body bytes the next part may materialise — the
+          tighter of the per-part cap and what is left of the aggregate — with the
+          knob that sets it and that knob's configured ceiling, so a refusal names the
+          bound that actually stopped the read.
+
+          The decoder used to read a part up to MaxPartBytes and only then charge the
+          aggregate, so the last part could overrun MaxTotalBytes by up to a whole
+          part: 1.5× the aggregate with the defaults, and without limit when
+          MaxPartBytes exceeds MaxTotalBytes, which resolve accepts. On a tie the
+          per-part cap is named, matching the order admitPart checks them in.
+        name: readBudget
+        recv: c *counter
+        results: knob string, ceiling, budget int64
+      - doc: |-
+          admitPart charges one part of size n against the counter, returning a typed
+          LimitExceeded error when any of the three ceilings is crossed.
+        name: admitPart
+        params: n int64
+        recv: c *counter
+        results: error
+    name: counter
+  - doc: |-
+      multipartDecoder adapts *mime/multipart.Reader to codec.Decoder. One Decode
+      call consumes exactly one part; the parts are streamed, so the decoder holds
+      at most one part body in memory at a time regardless of how many arrive.
+    fields:
+      - doc: inner is the stdlib reader; nil when construction failed.
+        name: inner
+        type: "*stdmp.Reader"
+      - doc: count charges the bounds per part, identical to the encoder's set.
+        name: count
+        type: counter
+      - doc: pending is the one-part look-ahead so More can answer without consuming.
+        name: pending
+        type: "*PartValue"
+      - doc: |-
+          pendErr is the one error waiting to be surfaced by the next Decode.
+          codec.Decoder's More returns a bare bool, so a failure discovered during
+          look-ahead is parked here rather than dropped.
+        name: pendErr
+        type: error
+      - doc: done latches once the stream is drained or has terminally failed.
+        name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode reads the next part into v.
+
+          A *PartValue receives the part verbatim (headers plus body). Any other
+          non-nil pointer receives encoding/json's decode of the part body — the read
+          side of the JSON-mediated shape Encode writes. io.EOF is returned verbatim
+          once the stream is drained, matching every other streaming codec here.
+        name: Decode
+        params: v any
+        recv: d *multipartDecoder
+        results: error
+      - doc: |-
+          More reports whether another Decode call will produce a value or an error.
+          A parked failure counts as "more": answering false there would let the
+          idiomatic `for dec.More() { dec.Decode(&v) }` loop swallow it in silence.
+        name: More
+        recv: d *multipartDecoder
+        results: bool
+      - doc: |-
+          fetch populates the look-ahead slot from the reader. It is a no-op once the
+          slot is occupied, an error is parked, or the stream has latched.
+        name: fetch
+        recv: d *multipartDecoder
+      - doc: |-
+          readInto drains one *mime/multipart.Part into the look-ahead slot, refusing
+          an over-budget body rather than materialising it.
+        name: readInto
+        params: src *stdmp.Part
+        recv: d *multipartDecoder
+      - doc: |-
+          readBody materialises one part body under the tighter of the two byte
+          bounds — MaxPartBytes, or what is left of MaxTotalBytes — and charges it
+          against the counter. At most one byte past that budget is pulled from src,
+          so the aggregate holds for the LAST part too, and an over-budget body is
+          refused naming the bound that stopped it.
+        name: readBody
+        params: src io.Reader
+        recv: d *multipartDecoder
+        results: body []byte, err error
+    name: multipartDecoder
+  - doc: |-
+      peeker is the part of *bufio.Reader peekHead reads through: a look at the
+      buffered bytes that consumes none of them.
+    kind: named
+    name: peeker
+    underlying: |-
+      interface {
+      	// Peek returns the next n bytes without advancing the reader.
+      	Peek(n int) ([]byte, error)
+      	// Buffered returns how many bytes can be peeked without a read.
+      	Buffered() int
+      }
+  - doc: |-
+      multipartEncoder adapts *mime/multipart.Writer to codec.Encoder. One Encode
+      call writes exactly one part; Close writes the terminating delimiter.
+    fields:
+      - doc: inner is the stdlib writer that owns the delimiter and the framing.
+        name: inner
+        type: "*stdmp.Writer"
+      - doc: |-
+          count charges the bounds per part — identical to the decoder's set, so
+          the encoder never emits a body this package would refuse to read back.
+        name: count
+        type: counter
+    kind: struct
+    methods:
+      - doc: |-
+          Encode writes v as one part of the multipart body.
+
+          A PartValue (or *PartValue) is written verbatim. Any other value takes the
+          JSON-mediated shape: a part named JSONPartName carrying encoding/json's
+          output — the same JSON bridge pkg/v1/data/codec's promotion path would build,
+          applied inside the codec so Marshal(F, anyValue) holds natively.
+        name: Encode
+        params: v any
+        recv: e *multipartEncoder
+        results: error
+      - doc: |-
+          Close writes the closing delimiter. The wrapped io.Writer is NOT closed —
+          the encoder never owns it, matching every other streaming codec here.
+        name: Close
+        recv: e *multipartEncoder
+        results: error
+      - doc: |-
+          Boundary returns the delimiter this encoder writes, so a caller streaming a
+          request body can set its Content-Type header BEFORE the first byte goes out.
+          Reachable through the BoundaryProvider assertion on the codec.Encoder.
+        name: Boundary
+        recv: e *multipartEncoder
+        results: string
+      - doc: writePart emits one part's header block followed by its body.
+        name: writePart
+        params: part *PartValue
+        recv: e *multipartEncoder
+        results: error
+    name: multipartEncoder
+  - fields:
+      - doc: Boundary is the RFC 2046 delimiter framing the parts.
+        name: Boundary
+        type: string
+      - doc: Parts are the body's sections, in wire order.
+        name: Parts
+        type: "[]PartValue"
+    kind: struct
+    name: FormValue
+  - fields:
+      - doc: |-
+          Name is the form field name (Content-Disposition name=). Required: Encode
+          refuses a part without one, and decoding refuses a body carrying one.
+        name: Name
+        type: string
+      - doc: |-
+          FileName is the optional filename= parameter; empty for a plain field.
+          UTF-8 is written as-is (RFC 7578 §4.2); only CR, LF and NUL are refused.
+
+          Decoding keeps only its LAST PATH ELEMENT, and reads both '/' and '\' as
+          separators on every operating system: RFC 7578 §4.2 has the receiver drop
+          the directory information a sender may include, and the sender writes it
+          with its own separator. `C:\Users\ada\cv.pdf` and `dir/cv.pdf` both
+          decode to `cv.pdf`, wherever the decoder runs. Nothing else is removed —
+          "." and ".." come back as sent — so a caller turning it into a path still
+          validates it first.
+        name: FileName
+        type: string
+      - doc: ContentType is the optional per-part media type; empty omits the header.
+        name: ContentType
+        type: string
+      - doc: Data is the part body.
+        name: Data
+        type: "[]byte"
+    kind: struct
+    name: PartValue
+  - fields:
+      - doc: MaxPartBytes caps a single part body; 0 selects DefaultMaxPartBytes.
+        name: MaxPartBytes
+        type: int64
+      - doc: MaxParts caps the number of parts; 0 selects DefaultMaxParts.
+        name: MaxParts
+        type: int
+      - doc: MaxTotalBytes caps the sum of part bodies; 0 selects DefaultMaxTotalBytes.
+        name: MaxTotalBytes
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          resolve returns l with every zero field replaced by its documented default,
+          or a typed LimitsInvalid error when any field is negative.
+
+          Refusal happens HERE, at construction, rather than at first use: unlike the
+          resilience constructors ADR 0031 amends, NewWithLimits is a new API with no
+          existing call sites, so the (value, error) shape the ADR records as the
+          preferred v2 form costs nothing to adopt now.
+        name: resolve
+        recv: l LimitsConfig
+        results: resolved LimitsConfig, err error
+      - doc: |-
+          negativeKnob reports the first field carrying a negative bound, in
+          declaration order, so a struct with two mistakes still names one of them.
+        name: negativeKnob
+        recv: l LimitsConfig
+        results: knob string, found bool
+    name: LimitsConfig
+vars:
+  - doc: "Package-level state: the codec singleton plus the hoisted MIME table."
+    grouped: true
+    items:
+      - doc: |-
+          : register the singleton and expose it as a typed package var. The
+          : registered instance carries the package defaults; a caller needing
+          : other bounds builds an unregistered one with NewWithLimits.
+        name: Codec
+        type: codec.Codec
+        value: "codec.Register(&multipartCodec{limits: defaultLimits()})"
+      - doc: |-
+          : MIME table hoisted. Registration normalises the key, so a header
+          : carrying the boundary parameter still resolves through FromMIME.
+        name: mimeTypes
+        value: "[]string{mimeFormData}"
+    name: Codec
+  - doc: |-
+      quoteEscaper escapes the two characters that can end or bend a quoted header
+      parameter: the backslash and the double quote.
+
+      It is deliberately NOT a copy of mime/multipart's own (unexported) escaper,
+      which also percent-encodes CR and LF. That encoding is a REPAIR — the part
+      would carry a filename the caller never supplied while Encode reported
+      success. This package refuses those octets instead, before any header is
+      built (see forbiddenHeaderOctets), so a value reaching this replacer holds no
+      CR, LF or NUL left to encode.
+    items:
+      - name: quoteEscaper
+        value: strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+    name: quoteEscaper
+  - doc: |-
+      The registered codec satisfies the base contract plus the two optional
+      extensions consumers assert on, and the encoder exposes the delimiter a
+      streaming caller needs for its Content-Type header.
+    grouped: true
+    items:
+      - name: _
+        type: codec.Codec
+        value: (*multipartCodec)(nil)
+      - name: _
+        type: codec.StreamingCodec
+        value: (*multipartCodec)(nil)
+      - name: _
+        type: codec.Appender
+        value: (*multipartCodec)(nil)
+      - name: _
+        type: BoundaryCodec
+        value: (*multipartCodec)(nil)
+      - name: _
+        type: codec.Encoder
+        value: (*multipartEncoder)(nil)
+      - name: _
+        type: codec.Decoder
+        value: (*multipartDecoder)(nil)
+      - name: _
+        type: BoundaryProvider
+        value: (*multipartEncoder)(nil)
+    name: _

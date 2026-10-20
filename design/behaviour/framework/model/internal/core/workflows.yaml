@@ -1,0 +1,165 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: connectorsFor
+    steps:
+      - var:
+          name: out
+          type: "[]*ConnectorSpec"
+      - loop:
+          do:
+            - bind: c
+              eval: "&builtin[i]"
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, c)
+                when: slices.Contains(c.Declares, n.Kind) && (c.brings == nil || c.brings(n))
+          key: i
+          range: builtin
+      - return: out
+  - of: (*GraphMessage).Node
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "&g.Nodes[i]"
+                when: g.Nodes[i].ID == id
+          key: i
+          range: g.Nodes
+      - return: nil
+  - of: (*GraphMessage).Edge
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "&g.Edges[i]"
+                when: g.Edges[i].ID == id
+          key: i
+          range: g.Edges
+      - return: nil
+  - of: chosenByBase
+    steps:
+      - bind: ports, watches
+        eval: map[string]bool{}, map[string]bool{}
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: n.Kind == KindPort
+                    do:
+                      - set: ports[n.ID]
+                        value: "true"
+                  - case: n.Subscription != nil && n.Subscription.Mark != ""
+                    do:
+                      - set: watches[n.ID]
+                        value: "true"
+          key: _
+          range: nodes
+          value: "n"
+      - return:
+          closure:
+            params: e EdgeMessage
+            results: bool
+            steps:
+              - return: e.Declared && (ports[e.From] || watches[e.To])
+  - of: mergedDiagnostics
+    steps:
+      - var:
+          name: out
+          type: "[]DiagnosticMessage"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, d)
+                when: d.Node == "" || known[d.Node]
+          key: _
+          range: extra.Diagnostics
+          value: d
+      - return: append(out, unmountedNodes(known, extra)...)
+  - of: transitionSource
+    steps:
+      - loop:
+          do:
+            - bind: xt
+              eval: "&found[i]"
+            - opt:
+                do:
+                  - return: xt.Source
+                when: xt.Event == t.Event && xt.From == t.From && xt.To == t.To
+          key: i
+          range: found
+      - return: nil
+  - of: wordOf
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == "" || len(s) > maxWord || !first(s[0])
+      - loop:
+          cond: i < len(s)
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!rest(s[i])"
+          init: i := 1
+          post: i++
+      - return: "true"
+  - of: (*GraphMessage).ModuleOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "&g.Modules[i]"
+                when: g.Modules[i].Name == name
+          key: i
+          range: g.Modules
+      - return: nil
+  - of: unmountedNodes
+    steps:
+      - var:
+          name: out
+          type: "[]DiagnosticMessage"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: known[n.ID] || n.Module == "" || n.Service == "" || !known[n.Service]
+            - set: out
+              value: |-
+                append(out, DiagnosticMessage{
+                			Severity: "warning", Node: n.Service, Source: n.Source,
+                			Message: n.ID + " is declared on module " + n.Module + "'s service " + n.Service +
+                				" by a package the binary does not link: import it where the module is declared, or it is not part of the product",
+                		})
+          key: _
+          range: extra.Nodes
+          value: "n"
+      - return: out
+  - of: (*StorePrivacyMessage).sources
+    steps:
+      - bind: out
+        eval: "[]*SourceMessage{pv.Anonymise}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, r.Since, r.At)
+                when: r != nil
+          key: _
+          range: "[]*RetentionSpec{pv.Erase, pv.Delete}"
+          value: r
+      - opt:
+          do:
+            - set: out
+              value: append(out, pv.HeldUntil.At)
+          when: pv.HeldUntil != nil
+      - return: out

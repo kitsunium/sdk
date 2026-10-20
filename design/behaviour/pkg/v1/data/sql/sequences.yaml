@@ -1,0 +1,14 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Transact
+    participants:
+      - id: caller
+        kind: actor
+      - id: Transact
+        kind: self
+      - id: tm.Transact
+        kind: value
+    steps:
+      - return: tm.Transact(ctx, TxOptions{}, fn)
+        to: tm.Transact

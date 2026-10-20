@@ -1,0 +1,811 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: rootName is the one name that always exists in an in-memory filesystem.
+    items:
+      - name: rootName
+        type: string
+        value: "\".\""
+    name: rootName
+  - doc: |-
+      rootPerm is the mode the implicit root directory reports. It is never
+      applied to anything on a device — nothing here touches one — and exists so
+      fs.WalkDir sees a plausible directory at the top of the tree.
+    items:
+      - name: rootPerm
+        type: fs.FileMode
+        value: "0o755"
+    name: rootPerm
+  - doc: |-
+      tempPrefix and tempSuffix bracket the name of a temporary that has not been
+      published yet. The leading dot keeps it out of an ordinary listing and the
+      suffix makes an orphan — which only a crashed process can leave — obvious to
+      whoever finds one.
+    grouped: true
+    items:
+      - name: tempPrefix
+        type: string
+        value: "\".vfs-\""
+      - name: tempSuffix
+        type: string
+        value: "\".tmp\""
+    name: tempPrefix
+  - doc: |-
+      tempNameBytes is the entropy in a temporary's name. Sixteen bytes makes a
+      collision with a concurrent publisher in the same directory not worth
+      reasoning about, and O_EXCL turns the impossible case into an error rather
+      than a silent overwrite.
+    items:
+      - name: tempNameBytes
+        type: int
+        value: "16"
+    name: tempNameBytes
+  - doc: |-
+      platformNative reports that this GOOS has every mechanic the disk filesystem
+      requires. NewOS reads it and refuses where it is false, rather than building
+      a filesystem that would silently provide neither durability nor a meaningful
+      permission mode.
+    items:
+      - name: platformNative
+        type: bool
+        value: "true"
+    name: platformNative
+  - doc: exitIOErr matches sysexits EX_IOERR (74). The filesystem itself failed.
+    items:
+      - name: exitIOErr
+        type: int
+        value: "74"
+    name: exitIOErr
+  - doc: |-
+      exitConfig matches sysexits EX_CONFIG (78). A root that cannot be opened is
+      a wiring fault: the same constructor call will fail identically forever.
+    items:
+      - name: exitConfig
+        type: int
+        value: "78"
+    name: exitConfig
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - rootName
+      - rootPerm
+      - memFS
+      - NewMem
+      - (*memFS).Open
+      - (*memFS).Stat
+      - (*memFS).ReadDir
+      - (*memFS).ReadFile
+      - (*memFS).entriesLocked
+      - infoOf
+      - notExist
+      - (*memFS).dirExistsLocked
+      - (*memFS).blockedAncestorLocked
+      - (*memFS).hasChildrenLocked
+    name: mem.go
+  - decls:
+      - memDir
+      - (*memDir).Stat
+      - (*memDir).Read
+      - (*memDir).Close
+      - (*memDir).ReadDir
+    name: mem_dir.go
+  - decls:
+      - memFile
+      - (*memFile).Stat
+      - (*memFile).Read
+      - (*memFile).Close
+    name: mem_file.go
+  - decls:
+      - memInfo
+      - memInfo.Name
+      - memInfo.Size
+      - memInfo.Mode
+      - memInfo.ModTime
+      - memInfo.IsDir
+      - memInfo.Sys
+    name: mem_info.go
+  - decls:
+      - memNode
+    name: mem_node.go
+  - decls:
+      - (*memFS).WriteFile
+      - (*memFS).WriteAtomic
+      - (*memFS).checkFileTargetLocked
+      - (*memFS).storeLocked
+      - (*memFS).MkdirAll
+      - (*memFS).createChainLocked
+      - (*memFS).Remove
+      - (*memFS).RemoveAll
+    name: mem_write.go
+  - decls:
+      - osFS
+      - NewOS
+      - (*osFS).Close
+      - failRoot
+      - (*osFS).Open
+      - (*osFS).Stat
+      - (*osFS).ReadDir
+      - (*osFS).ReadFile
+      - (*osFS).guardFileTarget
+      - (*osFS).guardDirTarget
+      - (*osFS).blockedAncestor
+      - (*osFS).classifyBlocked
+      - guardNameAndPerm
+      - refuseKind
+    name: os.go
+  - decls:
+      - tempPrefix
+      - tempNameBytes
+      - tempFile
+      - atomicOps
+      - (*osFS).WriteAtomic
+      - publish
+      - writeAndSync
+      - syncPublished
+      - discard
+      - tempPath
+      - (*osFS).nativeOps
+      - (*osFS).syncDir
+    name: os_publish.go
+  - decls:
+      - (*osFS).WriteFile
+      - (*osFS).MkdirAll
+      - (*osFS).Remove
+      - (*osFS).classifyRemove
+      - (*osFS).RemoveAll
+    name: os_write.go
+  - decls:
+      - platformNative
+      - syncDirHandle
+    name: osguard_unix.go
+  - decls:
+      - exitIOErr
+      - exitConfig
+      - verdict
+      - failRead
+      - failWrite
+      - failPublish
+    name: vfs.go
+functions:
+  - name: NewMem
+    results: corevfs.FullFS
+  - doc: infoOf builds the fs.FileInfo for one node.
+    name: infoOf
+    params: name string, node *memNode
+    results: memInfo
+  - doc: |-
+      notExist builds the *fs.PathError an absent name produces, so the in-memory
+      filesystem answers errors.Is(err, fs.ErrNotExist) exactly as the disk one
+      does. That single sentence is most of what makes it a usable double.
+    name: notExist
+    params: op, name string
+    results: error
+  - name: NewOS
+    params: root string
+    results: filesystem corevfs.FullFS, err error
+  - doc: |-
+      failRoot wraps a constructor cause onto [corevfs.RootUnavailable] by
+      restating it, so the operating-system error survives in the chain.
+    name: failRoot
+    params: cause error, fields ...kerrs.FieldValue
+    results: error
+  - doc: guardNameAndPerm applies the two core guards both write paths share.
+    name: guardNameAndPerm
+    params: name string, perm fs.FileMode
+    results: error
+  - doc: |-
+      refuseKind turns an observed file mode into the verdict for it. acceptable
+      is what the calling verb considers a legal existing object.
+    name: refuseKind
+    params: name string, mode fs.FileMode, acceptable bool
+    results: error
+  - doc: |-
+      publish runs the five steps over ops. It is deliberately free of any
+      reference to os.Root, so the test that proves its guarantee can substitute
+      mechanics that fail.
+    name: publish
+    params: ops atomicOps, name string, data []byte, perm fs.FileMode
+    results: error
+  - doc: |-
+      writeAndSync writes the payload, flushes it to the device, and closes the
+      handle. It never renames: the caller owns the ordering.
+    name: writeAndSync
+    params: file tempFile, data []byte
+    results: error
+  - doc: syncPublished performs step 5 and reports its distinct verdict.
+    name: syncPublished
+    params: ops atomicOps, dir, name string
+    results: error
+  - doc: |-
+      discard removes an abandoned temporary and returns the failure that caused
+      it to be abandoned.
+
+      The removal is CHECKED rather than discarded, and then deliberately
+      subordinate to cause: replacing "the disk is full" with "the orphan would
+      not unlink" would report the consequence instead of the problem. The
+      destination is not touched on any path through here — that is the guarantee
+      [failPublish] hands to the caller.
+    name: discard
+    params: ops atomicOps, tempName, name string, cause error
+    results: error
+  - doc: |-
+      tempPath returns an unused name in dir.
+
+      Returning a name in DIR and nowhere else is the same-filesystem guarantee:
+      a rename between two entries of one directory cannot cross a device, so
+      EXDEV is unreachable rather than handled. TestTheTemporaryLivesBesideItsTarget
+      pins it, because the day someone "tidies" this into os.TempDir the failure
+      is a cross-device rename in production and nothing at all in the tests.
+    name: tempPath
+    params: dir string
+    results: name string, err error
+  - doc: |-
+      syncDirHandle flushes a directory's own entries to the device.
+
+      It is the step people leave out, and leaving it out produces the exact
+      failure atomic publication exists to prevent: after a crash the rename may
+      be visible while the directory entry naming it is not, so the file has
+      content and no name — or a name and no content. fsync(2) on the directory
+      descriptor is what orders the two.
+    name: syncDirHandle
+    params: dir *os.File
+    results: error
+  - doc: |-
+      verdict returns a core sentinel as the error ORIGIN — its code, reason,
+      public and private win under errs' origin-wins rule — with any extra fields
+      attached.
+
+      It is the shape used for the domain's OWN judgements: a path this package
+      declined, a mode it refused, a kind of file it will not overwrite. Those have
+      no operating-system cause to preserve, so there is nothing to wrap.
+    name: verdict
+    params: sentinel *kerrs.Error, fields ...kerrs.FieldValue
+    results: error
+  - doc: |-
+      failRead wraps a filesystem cause onto the core ReadFailed sentinel by
+      restating its Reason/Public/Private/ExitCode.
+
+      Restating rather than passing the sentinel is the whole point, and it is the
+      one place this domain deliberately diverges from internal/service/security/session.
+      A session store hides the operating-system cause on purpose. A filesystem
+      must NOT: errors.Is(err, fs.ErrNotExist) is the sentence every Go program
+      that touches files already contains, and a filesystem that breaks it is a
+      filesystem nobody can adopt incrementally. Wrapping the *fs.PathError as the
+      CAUSE keeps that answer true and adds the dotted-quad code on top.
+
+      TestWrapHelpersRestateTheirSentinelExactly pins the restatement to the
+      sentinel, so the two cannot drift.
+    name: failRead
+    params: cause error, fields ...kerrs.FieldValue
+    results: error
+  - doc: |-
+      failWrite wraps a filesystem cause onto the core WriteFailed sentinel, for
+      the same reason and in the same shape as [failRead].
+    name: failWrite
+    params: cause error, fields ...kerrs.FieldValue
+    results: error
+  - doc: |-
+      failPublish wraps a filesystem cause onto the core PublishFailed sentinel.
+
+      Returning it is an ASSERTION, not a description: the caller may read it as
+      "the previous bytes are still there and no temporary survives". Every path
+      that produces it has already cleaned up, and publish_internal_test.go proves
+      it by hashing the destination before and after a failure injected at each
+      step.
+    name: failPublish
+    params: cause error, fields ...kerrs.FieldValue
+    results: error
+imports:
+  cmp: cmp
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+  errors: errors
+  fs: io/fs
+  hex: encoding/hex
+  io: io
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  os: os
+  path: path
+  rand: crypto/rand
+  slices: slices
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/vfs
+  name: vfs
+  purpose: Package vfs — the in-memory filesystem, and the read half of its contract.
+types:
+  - doc: |-
+      memFS is a filesystem held entirely in a map, for the code that would
+      otherwise need a temporary directory to be testable.
+
+      It answers the SAME typed refusals as the disk filesystem, which is the only
+      thing that makes it a double rather than a different filesystem that happens
+      to have the same method names. Three differences are real and are stated
+      rather than hidden:
+
+        - There are no symbolic links, so [corevfs.PathEscaped] is unreachable
+          here. Confinement is total instead: a name is a map key, and a map key
+          cannot address anything the map does not hold.
+        - ModTime is the zero time — see [memInfo].
+        - WriteAtomic is atomic with respect to readers of this filesystem and
+          makes no durability claim, because there is no device to make one about.
+    fields:
+      - doc: |-
+          mu guards nodes. It is an RWMutex because reads dominate in the usage
+          this type exists for — a test that writes a fixture once and then walks
+          it — and because, unlike a cache, a read here genuinely does not mutate.
+        name: mu
+        type: sync.RWMutex
+      - doc: nodes maps a clean path to its entry. The root "." is always present.
+        name: nodes
+        type: map[string]*memNode
+    kind: struct
+    methods:
+      - doc: Open resolves name and returns it as an fs.File.
+        name: Open
+        params: name string
+        recv: m *memFS
+        results: file fs.File, err error
+      - doc: Stat implements fs.StatFS.
+        name: Stat
+        params: name string
+        recv: m *memFS
+        results: info fs.FileInfo, err error
+      - doc: ReadDir implements fs.ReadDirFS, sorted by filename as io/fs requires.
+        name: ReadDir
+        params: name string
+        recv: m *memFS
+        results: entries []fs.DirEntry, err error
+      - doc: ReadFile implements fs.ReadFileFS.
+        name: ReadFile
+        params: name string
+        recv: m *memFS
+        results: content []byte, err error
+      - doc: |-
+          entriesLocked lists the DIRECT children of dir, sorted by name. The caller
+          MUST hold at least the read lock.
+        name: entriesLocked
+        params: dir string
+        recv: m *memFS
+        results: "[]fs.DirEntry"
+      - doc: |-
+          dirExistsLocked reports whether dir is present and is a directory. The caller
+          MUST hold at least the read lock.
+        name: dirExistsLocked
+        params: dir string
+        recv: m *memFS
+        results: bool
+      - doc: |-
+          blockedAncestorLocked reports the first component of name's PARENT chain
+          that exists and is not a directory. It is the in-memory twin of
+          osFS.blockedAncestor, and exists so both filesystems name the blocker rather
+          than reporting a bare "no such directory". The caller MUST hold at least the
+          read lock.
+        name: blockedAncestorLocked
+        params: name string
+        recv: m *memFS
+        results: blocker string, blocked bool
+      - doc: |-
+          hasChildrenLocked reports whether dir still holds an entry. The caller MUST
+          hold at least the read lock.
+        name: hasChildrenLocked
+        params: dir string
+        recv: m *memFS
+        results: bool
+      - doc: WriteFile writes data to name, creating it with perm or replacing it.
+        name: WriteFile
+        params: name string, data []byte, perm fs.FileMode
+        recv: m *memFS
+        results: error
+      - doc: |-
+          WriteAtomic publishes data at name.
+
+          In memory the whole thing is one map assignment taken under the exclusive
+          lock, so a concurrent reader observes the previous node or the new one and
+          never a partial write. There is no temporary, because there is nothing a
+          temporary would protect against: every refusal happens before the single
+          mutation, so a failure genuinely cannot leave a half-written entry.
+
+          It makes NO durability claim. There is no device, and an in-memory
+          filesystem that talked about surviving a crash would be exactly the
+          "filesystem that pretends" this domain refuses to ship.
+        name: WriteAtomic
+        params: name string, data []byte, perm fs.FileMode
+        recv: m *memFS
+        results: error
+      - doc: |-
+          checkFileTargetLocked rejects every reason a file write cannot proceed. The
+          caller MUST hold the write lock.
+        name: checkFileTargetLocked
+        params: name string
+        recv: m *memFS
+        results: error
+      - doc: |-
+          storeLocked performs the mutation. The caller MUST hold the write lock and
+          MUST have run [memFS.checkFileTargetLocked] first.
+        name: storeLocked
+        params: name string, data []byte, perm fs.FileMode
+        recv: m *memFS
+      - doc: MkdirAll creates name and every missing parent.
+        name: MkdirAll
+        params: name string, perm fs.FileMode
+        recv: m *memFS
+        results: error
+      - doc: |-
+          createChainLocked adds every missing component. The caller MUST hold the
+          write lock and MUST have verified the chain.
+        name: createChainLocked
+        params: parts []string, perm fs.FileMode
+        recv: m *memFS
+      - doc: Remove removes one file or one empty directory.
+        name: Remove
+        params: name string
+        recv: m *memFS
+        results: error
+      - doc: RemoveAll removes name and everything beneath it. An absent name is success.
+        name: RemoveAll
+        params: name string
+        recv: m *memFS
+        results: error
+    name: memFS
+  - doc: |-
+      memDir is an open directory. It carries the listing captured at Open, sorted
+      as io/fs requires, so a concurrent write does not change what this handle
+      reports halfway through a walk.
+    fields:
+      - doc: info is the metadata snapshot the handle reports.
+        name: info
+        type: memInfo
+      - doc: entries is the sorted listing captured at Open.
+        name: entries
+        type: "[]fs.DirEntry"
+      - doc: offset is how far a paginated ReadDir has got.
+        name: offset
+        type: int
+    kind: struct
+    methods:
+      - doc: Stat reports the directory's metadata.
+        name: Stat
+        recv: d *memDir
+        results: info fs.FileInfo, err error
+      - doc: |-
+          Read refuses: a directory has no byte stream, and returning zero bytes with
+          no error would make an io.Copy over one look like an empty file.
+        name: Read
+        params: _ []byte
+        recv: d *memDir
+        results: n int, err error
+      - doc: Close releases the handle.
+        name: Close
+        recv: d *memDir
+        results: error
+      - doc: |-
+          ReadDir implements fs.ReadDirFile, which is what makes fs.WalkDir work on a
+          handle obtained from Open alone.
+        name: ReadDir
+        params: n int
+        recv: d *memDir
+        results: entries []fs.DirEntry, err error
+    name: memDir
+  - doc: |-
+      memFile is an open regular file. It holds a COPY of the node's bytes taken
+      at Open, so a reader is never racing a writer over the same slice — which is
+      what an in-memory double has to get right to be usable under -race.
+    fields:
+      - doc: info is the metadata snapshot the handle reports.
+        name: info
+        type: memInfo
+      - doc: data is the private copy this handle reads from.
+        name: data
+        type: "[]byte"
+      - doc: offset is how far Read has got.
+        name: offset
+        type: int
+    kind: struct
+    methods:
+      - doc: Stat reports the metadata captured when the file was opened.
+        name: Stat
+        recv: f *memFile
+        results: info fs.FileInfo, err error
+      - doc: Read copies the next bytes into p.
+        name: Read
+        params: p []byte
+        recv: f *memFile
+        results: n int, err error
+      - doc: Close releases the handle. It holds nothing, so it cannot fail.
+        name: Close
+        recv: f *memFile
+        results: error
+    name: memFile
+  - doc: |-
+      memInfo is the fs.FileInfo the in-memory filesystem reports.
+
+      ModTime is deliberately the ZERO time. A filesystem with no device has no
+      clock either, and inventing one would mean either reaching for the wall
+      clock — which the SDK's test doubles exist to avoid — or carrying an
+      injected clock through a type whose whole appeal is that NewMem takes no
+      arguments. A stated absence beats a plausible fiction: code that depends on
+      modification times depends on a real filesystem, and this says so instead of
+      letting it appear to work.
+    fields:
+      - doc: name is the base name, as fs.FileInfo requires — never the full path.
+        name: name
+        type: string
+      - doc: size is the byte length for a file and zero for a directory.
+        name: size
+        type: int64
+      - doc: mode mirrors the node's.
+        name: mode
+        type: fs.FileMode
+    kind: struct
+    methods:
+      - doc: Name reports the base name of the file.
+        name: Name
+        recv: i memInfo
+        results: string
+      - doc: Size reports the length in bytes; it is zero for a directory.
+        name: Size
+        recv: i memInfo
+        results: int64
+      - doc: Mode reports the file mode bits.
+        name: Mode
+        recv: i memInfo
+        results: fs.FileMode
+      - doc: ModTime reports the zero time — see [memInfo].
+        name: ModTime
+        recv: i memInfo
+        results: time.Time
+      - doc: IsDir reports whether the entry is a directory.
+        name: IsDir
+        recv: i memInfo
+        results: bool
+      - doc: "Sys reports nil: there is no underlying data source to expose."
+        name: Sys
+        recv: i memInfo
+        results: any
+    name: memInfo
+  - doc: |-
+      memNode is one entry in the in-memory tree: a regular file with bytes, or a
+      directory with none. There is no third kind, and that is the point — an
+      in-memory filesystem that grew symbolic links would be a second, different
+      implementation of the resolution rules the operating system already owns,
+      and the two would disagree the first time anyone leaned on them.
+    fields:
+      - doc: mode carries the permission bits, plus fs.ModeDir for a directory.
+        name: mode
+        type: fs.FileMode
+      - doc: data is nil for a directory and the whole content for a file.
+        name: data
+        type: "[]byte"
+    kind: struct
+    name: memNode
+  - doc: osFS is the operating-system filesystem, confined to one directory tree.
+    fields:
+      - doc: |-
+          root holds the directory handle every name is resolved against. It is
+          what makes confinement a kernel property rather than a string check.
+        name: root
+        type: "*os.Root"
+      - doc: |-
+          read is root.FS(), which already implements fs.StatFS, fs.ReadDirFS and
+          fs.ReadFileFS — so the read half delegates instead of reimplementing.
+        name: read
+        type: fs.FS
+      - doc: |-
+          ops carries the publication mechanics. It is a field rather than a set
+          of direct calls so publish() stays a pure function of them, which is
+          what lets the internal test provoke a failure at each step.
+        name: ops
+        type: atomicOps
+    kind: struct
+    methods:
+      - doc: |-
+          Close releases the directory descriptor the filesystem was opened on.
+
+          It satisfies io.Closer, a capability reached by type assertion (ADR 0039)
+          rather than a fifth verb on the frozen WritableFS — the session file store's
+          shape. os.Root also closes itself once it is garbage collected, but a caller
+          opening filesystems in a loop should get its descriptors back when it says
+          so, not at the next collection. Every call after Close fails.
+        name: Close
+        recv: o *osFS
+        results: error
+      - doc: Open resolves name and returns it as an fs.File.
+        name: Open
+        params: name string
+        recv: o *osFS
+        results: file fs.File, err error
+      - doc: |-
+          Stat implements fs.StatFS, so fs.Stat and fs.WalkDir take the fast path.
+
+          It is not a member of [corevfs.WritableFS] and must not become one — it is
+          discovered by the standard library's own type assertion, which is the same
+          sibling mechanism ADR 0039 prescribes, arriving here from the other side.
+        name: Stat
+        params: name string
+        recv: o *osFS
+        results: info fs.FileInfo, err error
+      - doc: |-
+          ReadDir implements fs.ReadDirFS. Entries are sorted by filename, which io/fs
+          requires and the delegate already guarantees.
+        name: ReadDir
+        params: name string
+        recv: o *osFS
+        results: entries []fs.DirEntry, err error
+      - doc: ReadFile implements fs.ReadFileFS.
+        name: ReadFile
+        params: name string
+        recv: o *osFS
+        results: content []byte, err error
+      - doc: |-
+          guardFileTarget is the check every call that writes a FILE runs first.
+
+          It refuses a symbolic link before it refuses anything else, and that order
+          carries the security argument: os.Root would follow the link and would keep
+          the result inside the root, so nothing escapes — but the bytes would land on
+          whatever the link names rather than on the name the caller gave. That is the
+          symlink plant, and it is worth its own verdict.
+
+          The check is an Lstat, so it judges the state it OBSERVED. A link planted
+          between this call and the open that follows is still followed; the property
+          that holds without a race is confinement to the root, and that one belongs
+          to the kernel.
+        name: guardFileTarget
+        params: name string, perm fs.FileMode
+        recv: o *osFS
+        results: error
+      - doc: |-
+          guardDirTarget is guardFileTarget's counterpart for MkdirAll: an existing
+          DIRECTORY is the success case there, not a collision.
+        name: guardDirTarget
+        params: name string, perm fs.FileMode
+        recv: o *osFS
+        results: error
+      - doc: |-
+          blockedAncestor reports the first component of name's PARENT chain that
+          exists and is not a directory.
+
+          The operating system reports ENOTDIR from the middle of a resolution and
+          does not say which component caused it. An in-memory filesystem knows
+          immediately. Walking here is what makes the two answer the same thing, and
+          the answer names the component rather than the request — which is the
+          difference between "that write failed" and "delete the file called blocker".
+        name: blockedAncestor
+        params: name string
+        recv: o *osFS
+        results: blocker string, blocked bool
+      - doc: |-
+          classifyBlocked turns a failure into the most useful verdict available:
+          NotRegularFile naming the component that is in the way, when there is one,
+          and the filesystem's own account otherwise.
+        name: classifyBlocked
+        params: name string, cause error
+        recv: o *osFS
+        results: error
+      - doc: |-
+          WriteAtomic publishes data at name.
+
+          The order is the contract, and every step earns its place:
+
+           1. create a temporary IN THE SAME DIRECTORY as the target. Same directory
+              means same filesystem by construction, so the rename in step 4 cannot
+              fail with EXDEV — a cross-device rename is not handled here because it
+              is not reachable here.
+           2. write the payload into it.
+           3. flush the FILE. A rename over data still sitting in the page cache is
+              atomic about nothing once the machine loses power.
+           4. rename. This is the indivisible step: POSIX requires rename(2) to
+              replace atomically, so a concurrent reader gets the old inode or the
+              new one and never a partial file.
+           5. flush the DIRECTORY. Without it the entry naming the new inode may not
+              survive a crash, and the file would come back with content and no name.
+
+          Steps 1–4 failing means nothing was published: the temporary is removed and
+          the previous bytes are untouched. Step 5 failing means the opposite and gets
+          its own code, [corevfs.DirectorySyncFailed].
+        name: WriteAtomic
+        params: name string, data []byte, perm fs.FileMode
+        recv: o *osFS
+        results: error
+      - doc: |-
+          nativeOps binds the five mechanics to this filesystem's os.Root, so every
+          one of them is confined to the same tree the rest of the package is.
+        name: nativeOps
+        recv: o *osFS
+        results: atomicOps
+      - doc: syncDir opens a directory through the root and flushes its entries.
+        name: syncDir
+        params: dir string
+        recv: o *osFS
+        results: error
+      - doc: |-
+          WriteFile writes data to name, creating it with perm or truncating it.
+
+          It is NOT atomic and does not pretend to be: a reader that opens the file
+          while this is running can see a truncated one. [osFS.WriteAtomic] is the
+          call for content anyone else may be reading. This one exists because not
+          every write is a publication, and paying for a temporary file plus two
+          flushes to drop a scratch file is a cost with nothing on the other side.
+        name: WriteFile
+        params: name string, data []byte, perm fs.FileMode
+        recv: o *osFS
+        results: error
+      - doc: MkdirAll creates name and every missing parent.
+        name: MkdirAll
+        params: name string, perm fs.FileMode
+        recv: o *osFS
+        results: error
+      - doc: |-
+          Remove removes one file or one empty directory.
+
+          An absent name is an ERROR here and success in [osFS.RemoveAll]. That
+          asymmetry is os.Remove's and os.RemoveAll's, kept deliberately: a precise
+          removal that names something that is not there is usually a mistake worth
+          hearing about, while a recursive one is a cleanup whose whole point is to be
+          safe to run twice.
+        name: Remove
+        params: name string
+        recv: o *osFS
+        results: error
+      - doc: |-
+          classifyRemove separates "that directory still has entries" from every other
+          removal failure, because only the first one has an obvious next call.
+        name: classifyRemove
+        params: name string, cause error
+        recv: o *osFS
+        results: error
+      - doc: RemoveAll removes name and everything beneath it. An absent name is success.
+        name: RemoveAll
+        params: name string
+        recv: o *osFS
+        results: error
+    name: osFS
+  - doc: |-
+      tempFile is the narrow view of a freshly created temporary that [publish]
+      drives. *os.File satisfies it; nothing else in the SDK does.
+
+      It is an interface rather than the concrete handle for exactly one reason,
+      and it is the reason the whole domain exists: it makes the FAILURE paths
+      reachable. A write that stops halfway, a Sync that errors, a Close that
+      refuses — none of those can be provoked on a real file without a hostile
+      filesystem, and all of them are paths on which the previous content must
+      still be intact afterwards. An untested cleanup is a cleanup that has never
+      run.
+    kind: named
+    name: tempFile
+    underlying: |-
+      interface {
+      	// Write appends part of the payload.
+      	Write(payload []byte) (n int, err error)
+      	// Sync flushes it to the device, BEFORE the rename.
+      	Sync() error
+      	// Close releases the descriptor.
+      	Close() error
+      }
+  - doc: |-
+      atomicOps is the set of filesystem mechanics [publish] drives.
+
+      Holding them as a struct of functions is what keeps publish a pure function
+      of its dependencies: production supplies the ones backed by os.Root, and
+      publish_internal_test.go supplies ones that fail at a chosen step and then
+      checks, by hash, that the destination did not move.
+    fields:
+      - doc: create makes a new file at an unused path with mode perm.
+        name: create
+        type: func(name string, perm fs.FileMode) (tempFile, error)
+      - doc: rename replaces to with from in one indivisible step.
+        name: rename
+        type: func(from, to string) error
+      - doc: remove unlinks an abandoned temporary.
+        name: remove
+        type: func(name string) error
+      - doc: syncDir flushes a directory's entries to the device.
+        name: syncDir
+        type: func(dir string) error
+    kind: struct
+    name: atomicOps

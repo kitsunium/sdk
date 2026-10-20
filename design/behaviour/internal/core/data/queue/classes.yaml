@@ -1,0 +1,378 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      exitDataErr matches sysexits EX_DATAERR (65). A failure a handler declares
+      no retry can fix is almost always the message itself — a payload that does
+      not decode, a reference to something since deleted — and the same bytes are
+      refused the same way however often they are delivered.
+    items:
+      - name: exitDataErr
+        type: int
+        value: "65"
+    name: exitDataErr
+  - doc: |-
+      DefaultMaxMessageBytes bounds a payload when [PolicyValue.MaxMessageBytes]
+      is left at zero. One mebibyte is the value the industry converged on —
+      NATS's default, Kafka's default `message.max.bytes`, four times SQS's
+      maximum — and the reason it is a CLAMP rather than a refusal is that its
+      zero has exactly one sensible reading and the wrong answer is survivable:
+      too small is a refused publish at the call site that made the mistake, and
+      the alternative to any bound at all is one producer filling a disk.
+    items:
+      - name: DefaultMaxMessageBytes
+        type: int
+        value: 1 << 20
+    name: DefaultMaxMessageBytes
+  - doc: |-
+      MaxDeadlineOffset is the furthest ahead of now a deadline built from a
+      policy may lie: the ceiling on [PolicyValue.VisibilityTimeout] and
+      [PolicyValue.RetryDelay], REFUSED above it rather than clamped.
+
+      It is not a judgement about how long a lease should last — ADR 0054 argues
+      against even an hour. It is the representable range, with a margin. Every
+      deadline is now plus one of these durations, and a durable broker records it
+      as Unix nanoseconds in an int64 — that is the form a filename carries, and
+      time.Time.UnixNano's own range — which ends on 2262-04-11. Past that instant
+      the number wraps negative, and a name carrying it cannot be read back: the
+      message it names is never reclaimed and never delivered, and its receipt
+      reads [UnknownReceipt]. math.MaxInt64, the value somebody reaches for to
+      mean "never", is 292 years, so it wraps a deadline set today.
+
+      A century keeps every deadline representable for any clock reading before
+      2162, and no lease or retry delay has a reading anywhere near it. Validate
+      has no clock, so a fixed ceiling is the only bound it can check; an
+      implementation that computes a deadline from its own clock at runtime — a
+      lease extension, whose duration Validate never sees — checks the instant
+      itself.
+    items:
+      - name: MaxDeadlineOffset
+        type: time.Duration
+        value: 100 * 365 * 24 * time.Hour
+    name: MaxDeadlineOffset
+files:
+  - decls:
+      - DeadLetterValue
+    name: capability.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - exitDataErr
+    name: errors.go
+  - decls:
+      - LiveMessageValue
+      - MessageValue
+      - ReceiptValue
+      - LeaseValue
+      - DeliveryValue
+    name: message.go
+  - decls:
+      - DefaultMaxMessageBytes
+      - MaxDeadlineOffset
+      - PolicyValue
+      - PolicyValue.Validate
+      - PolicyValue.validateRetryGrowth
+      - PolicyValue.Normalized
+    name: policy.go
+  - decls:
+      - Handler
+      - NackValue
+    name: queue.go
+  - decls:
+      - DoNotRetry
+    name: retry.go
+  - decls:
+      - WakeValue
+    name: wake.go
+functions:
+  - name: DoNotRetry
+    params: cause error
+    results: error
+imports:
+  context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/queue
+  name: queue
+  purpose: Package queue — the ADR 0039 capability siblings of the frozen [Broker] port, and the dead-letter record one of them returns.
+types:
+  - fields:
+      - doc: FailedAt is when the last attempt failed and the message was moved.
+        name: FailedAt
+        type: time.Time
+      - doc: |-
+          Reason is the SCREAMING_SNAKE identifier of the failure — the
+          errs.Error Reason of the cause, NOT_RETRYABLE for a handler's
+          [DoNotRetry] around an error that carried none, or LEASE_EXPIRED when
+          the message died by exhausting its deliveries without any consumer ever
+          reporting anything.
+        name: Reason
+        type: string
+      - doc: |-
+          Cause is the wire-safe Public half of the last failure, or an empty
+          string when the consumer reported no cause at all. It never carries
+          the message payload, which is a security property this domain shares
+          with the rest of the SDK: a queue moves bytes a consumer must not
+          leak, and an error message is the classic place they leak from.
+        name: Cause
+        type: string
+      - doc: |-
+          Message is the work, unmodified, with the identifier it was published
+          under.
+        name: Message
+        type: MessageValue
+      - doc: |-
+          Code is the dotted-quad errs.Code of the last failure, or 0 when the
+          cause carried none. It is a uint32 rather than an errs.Code so that
+          this package's values stay free of the kernel's error type in a shape
+          a consumer may serialise; errs.Code(dl.Code) converts.
+        name: Code
+        type: uint32
+      - doc: |-
+          Deliveries is how many times the message was delivered before it was
+          abandoned. It equals [PolicyValue.MaxDeliveries] for every dead letter
+          this SDK's brokers produce by running out of attempts, and is the count
+          the message had for one a handler rejected ([Rejecter]).
+        name: Deliveries
+        type: int
+    kind: struct
+    name: DeadLetterValue
+  - fields:
+      - doc: |-
+          VisibleAt is when the message may next be delivered: its visibility
+          for a waiting one — now, or later after a retry delay —, the deadline
+          of its lease for a leased one. An instant already past means
+          receivable now.
+        name: VisibleAt
+        type: time.Time
+      - doc: Message is the work, with the identifier it was published under.
+        name: Message
+        type: MessageValue
+      - doc: |-
+          Deliveries is how many times the message has been delivered: 0 for
+          one never leased, the count a retry or a lapsed lease left.
+        name: Deliveries
+        type: int
+      - doc: |-
+          Leased reports that a consumer holds the message's lease. Such a
+          message is still alive: it comes back at VisibleAt unless it is
+          acknowledged.
+        name: Leased
+        type: bool
+    kind: struct
+    name: LiveMessageValue
+  - fields:
+      - doc: |-
+          EnqueuedAt is when the broker accepted the message. It is the ordering
+          key a FIFO implementation sorts on, and it is the broker's clock, not
+          the producer's.
+        name: EnqueuedAt
+        type: time.Time
+      - doc: |-
+          ID identifies the message for the life of the queue and beyond it: a
+          dead letter carries the same value, so the log line the failing
+          consumer wrote and the record left on disk can be joined without either
+          one carrying the other's half of the story (CLAUDE.md rule 4).
+
+          It is opaque. Its shape is the implementation's, it is unique within
+          one queue, and nothing outside the broker that minted it may parse it.
+        name: ID
+        type: string
+      - doc: |-
+          Payload is the caller's bytes, unmodified and uninterpreted. This
+          domain does not encode: pick a codec, marshal, publish the bytes.
+
+          The slice belongs to the receiver — a durable broker read it from a
+          device, and an in-memory one copies before handing it over, so a
+          handler may keep it, mutate it, or hold it past the acknowledgement
+          without corrupting a redelivery.
+        name: Payload
+        type: "[]byte"
+    kind: struct
+    name: MessageValue
+  - kind: named
+    name: ReceiptValue
+    underlying: string
+  - fields:
+      - doc: |-
+          ExpiresAt is when the claim lapses and the message becomes eligible for
+          redelivery. It is the broker's clock.
+
+          It is a promise about VISIBILITY and not about mutual exclusion: after
+          this instant another consumer may hold the same message while this one
+          is still running. A handler that is still working past it is producing
+          a duplicate, which the at-least-once guarantee already permits — see
+          [LeaseExtender] for the way to avoid producing one on purpose.
+        name: ExpiresAt
+        type: time.Time
+      - doc: Receipt names this lease to [Broker.Ack] and [Broker.Nack].
+        name: Receipt
+        type: ReceiptValue
+    kind: struct
+    name: LeaseValue
+  - fields:
+      - doc: Lease is the claim this delivery grants and the receipt that ends it.
+        name: Lease
+        type: LeaseValue
+      - doc: Message is the work.
+        name: Message
+        type: MessageValue
+      - doc: |-
+          Deliveries counts how many times this message has been handed to a
+          consumer, INCLUDING this one. It is 1 on the first delivery.
+
+          It is a field of the port rather than a note in the documentation
+          because it is the at-least-once guarantee made unignorable: a consumer
+          cannot read a delivery without reading the number that says this may
+          not be the first time. A value above 1 means a previous consumer
+          failed, timed out, or died — the three are indistinguishable from
+          here, deliberately, since none of them changes what the handler must
+          do.
+
+          It is also the number [PolicyValue.MaxDeliveries] is compared against:
+          a delivery whose count already equals the maximum is the last one this
+          message gets before the dead-letter store.
+        name: Deliveries
+        type: int
+    kind: struct
+    name: DeliveryValue
+  - fields:
+      - doc: |-
+          VisibilityTimeout is how long a [Broker.Receive] hides a message from
+          every other consumer. It is the deadline the consumer is racing, and
+          it must be longer than the slowest run of the handler — or the handler
+          must renew it through [LeaseExtender].
+
+          It is the single knob that sets how quickly a dead consumer's work is
+          picked up: a message held by a process that has been SIGKILLed
+          reappears exactly this long after it was leased, and not before.
+
+          A non-positive value is refused ([QueueMisconfigured]), and so is one
+          above [MaxDeadlineOffset].
+        name: VisibilityTimeout
+        type: time.Duration
+      - doc: |-
+          RetryDelay is how long a NACKED message stays invisible before it
+          becomes eligible again, measured from the nack.
+
+          It does NOT apply to a lease that simply lapsed: that message has
+          already been invisible for a whole visibility timeout, and charging it
+          a second wait would punish a crashed consumer more than a failing one.
+
+          Zero is a working value and means "eligible as soon as the nack
+          returns". Negative is read as zero. Above [MaxDeadlineOffset] it is
+          refused ([QueueMisconfigured]).
+
+          It is the same wait after every failure unless [PolicyValue]
+          .MaxRetryDelay makes it grow.
+        name: RetryDelay
+        type: time.Duration
+      - doc: |-
+          MaxRetryDelay makes the retry delay GROW, and is where the growth
+          stops. When it is positive, a message nacked on its n-th delivery waits
+          RetryDelay × 2^(n−1), held at MaxRetryDelay — the SDK's one backoff
+          curve (kernel/backoff, ADR 0103), keyed on the delivery that failed,
+          so a downstream that is down is asked less and less often instead of at
+          a fixed cadence it is already failing to keep up with (ADR 0151).
+
+          Zero keeps RetryDelay constant, which is what every policy did before
+          this field existed: a policy that does not name it behaves exactly as
+          it did. That is the zero's one reading — a ceiling nobody set is not a
+          request for unbounded growth, which could not be recorded anyway.
+
+          A negative value is refused, because it is not a ceiling and the caller
+          who wrote it meant something; so is one above [MaxDeadlineOffset],
+          whose deadline a durable broker could not record; so is a ceiling with
+          no RetryDelay to grow from, which would leave every retry at zero while
+          reading like a backoff; and so is a ceiling below RetryDelay, which
+          would silently shorten every wait the caller asked for
+          ([QueueMisconfigured], naming the field).
+        name: MaxRetryDelay
+        type: time.Duration
+      - doc: |-
+          MaxDeliveries is how many times one message may be handed to a
+          consumer before the broker gives up and dead-letters it. It is
+          compared against [DeliveryValue.Deliveries], which counts from 1, so a
+          value of 1 means "one attempt, then the dead-letter store" and is a
+          legitimate configuration rather than an off-by-one.
+
+          A non-positive value is refused ([QueueMisconfigured]).
+        name: MaxDeliveries
+        type: int
+      - doc: |-
+          MaxMessageBytes bounds one payload. A larger payload is refused at
+          [Broker.Publish] with [MessageTooLarge], at the call site that built
+          it, rather than accepted and discovered by a consumer that cannot read
+          it back.
+
+          Zero means [DefaultMaxMessageBytes]. Negative is refused, because it
+          is not a bound at all and the caller who wrote it meant something.
+        name: MaxMessageBytes
+        type: int
+    kind: struct
+    methods:
+      - name: Validate
+        recv: p PolicyValue
+        results: error
+      - doc: |-
+          validateRetryGrowth refuses a MaxRetryDelay that is not a ceiling a retry
+          delay can grow to. Zero asks for no growth and is accepted.
+        name: validateRetryGrowth
+        recv: p PolicyValue
+        results: error
+      - name: Normalized
+        recv: p PolicyValue
+        results: PolicyValue
+    name: PolicyValue
+  - kind: named
+    name: Handler
+    underlying: func(ctx context.Context, delivery DeliveryValue) error
+  - fields:
+      - doc: |-
+          Deliveries is how many times the message had been delivered when it
+          failed, counting from 1.
+        name: Deliveries
+        type: int
+      - doc: |-
+          VisibleAt is when the message becomes available again. It is the zero
+          Time when DeadLettered is true.
+        name: VisibleAt
+        type: time.Time
+      - doc: |-
+          DeadLettered reports that the message exhausted
+          [PolicyValue.MaxDeliveries] and was moved to the dead-letter store
+          with its cause. It will not be delivered again, unless somebody replays
+          it ([DeadLetterManager]).
+        name: DeadLettered
+        type: bool
+    kind: struct
+    name: NackValue
+  - fields:
+      - doc: |-
+          Signal is closed by the next event that may make a message receivable
+          through this broker in this process: a Publish, or a Nack that hands a
+          message back. It is never nil, and it is never closed by a publication
+          made in another process.
+        name: Signal
+        type: <-chan struct{}
+      - doc: |-
+          In is how long, measured on the broker's own clock at the moment Wake
+          was called, until a message the broker already holds becomes
+          receivable with no further event: a retry delay ending, or a lease
+          lapsing because its consumer died. It is meaningful only when
+          Scheduled is true; zero or less means now.
+
+          It is a duration and not an instant so that a consumer whose clock is
+          not the broker's still waits the right length of time rather than
+          comparing two clocks that disagree.
+        name: In
+        type: time.Duration
+      - doc: |-
+          Scheduled reports that In names such a moment. It is false when the
+          broker holds nothing that will become receivable on its own.
+        name: Scheduled
+        type: bool
+    kind: struct
+    name: WakeValue

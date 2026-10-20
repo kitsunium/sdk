@@ -1,0 +1,48 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Listen
+    participants:
+      - id: caller
+        kind: actor
+      - id: Listen
+        kind: self
+      - id: svcipc
+        kind: package
+    steps:
+      - bind: ln, err
+        eval: svcipc.NewListener(&cfg)
+        to: svcipc
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: ln, nil
+  - of: NewDialer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDialer
+        kind: self
+      - id: svcipc
+        kind: package
+    steps:
+      - bind: d, err
+        eval: svcipc.NewDialer(&cfg)
+        to: svcipc
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: d, nil
+  - of: Dial
+    participants:
+      - id: caller
+        kind: actor
+      - id: Dial
+        kind: self
+      - id: svcipc
+        kind: package
+    steps:
+      - return: svcipc.Dial(ctx, &cfg)
+        to: svcipc

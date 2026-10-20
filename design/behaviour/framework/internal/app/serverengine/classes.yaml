@@ -1,0 +1,107 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - sampleProcess
+      - millis
+      - round2
+    name: sampler.go
+  - decls:
+      - httpServer
+      - Enable
+      - newHTTPServer
+      - newStaticFiles
+      - httpServer.Start
+      - httpServer.State
+      - httpServer.Shutdown
+    name: serverengine.go
+  - decls:
+      - _
+    name: serverengine_compliance.go
+functions:
+  - doc: |-
+      sampleProcess is the SDK's snapshot of the running process (process.Self)
+      as the model says it. Latency percentiles come from the runtime's
+      histograms, which count since the process started. The time is the wall
+      clock's: a process sample is about the machine, not the product's clock.
+
+      It lives here rather than in kit because process.Self is runtime/metrics,
+      whose initialisation every process importing it pays at start, and the spawn
+      engine beside it in pkg/v1/proc/process: only a serving app answers the
+      runtime graph that carries a sample (ADR 0172).
+    name: sampleProcess
+    results: "*model.Process"
+  - doc: millis is d in milliseconds, to two decimals.
+    name: millis
+    params: d time.Duration
+    results: float64
+  - doc: round2 is f to two decimals, as kit rounds every figure it shows.
+    name: round2
+    params: f float64
+    results: float64
+  - name: Enable
+  - doc: |-
+      newHTTPServer builds the engine cfg describes: its engine accepts, bounds
+      and drains the connections, net/http speaks the protocol.
+
+      IFACE-PLUGIN: kit reaches the engine through plug.HTTPServer; this is its
+      one implementation.
+    name: newHTTPServer
+    params: cfg plug.HTTPConfig
+    results: plug.HTTPServer
+  - doc: |-
+      newStaticFiles serves the tree fsys as a single-page application, under
+      the content security policy csp.
+    name: newStaticFiles
+    params: fsys fs.FS, csp string
+    results: http.Handler, error
+imports:
+  context: context
+  fs: io/fs
+  http: net/http
+  math: math
+  model: github.com/kitsunium/sdk/framework/model
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  process: github.com/kitsunium/sdk/pkg/v1/proc/process
+  runtime: runtime
+  server: github.com/kitsunium/sdk/pkg/v1/net/server
+  static: github.com/kitsunium/sdk/pkg/v1/net/static
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/serverengine
+  name: serverengine
+  purpose: "Package serverengine is what framework/app/server plugs into kit: the HTTP engine an app in the server profile serves on (the SDK's net/server), the frontends' file server (the SDK's net/static), and the process sampler of the runtime graph a serving app answers (the SDK's proc/process, and through it runtime/metrics and the spawn engine)."
+types:
+  - doc: httpServer is the SDK's server engine, one group of one listener.
+    fields:
+      - name: srv
+        type: "*server.Server"
+    kind: struct
+    methods:
+      - doc: Start binds the address and serves, returning once bound.
+        name: Start
+        params: ctx context.Context
+        recv: h httpServer
+        results: error
+      - doc: State says what the engine binds and serves.
+        name: State
+        recv: h httpServer
+        results: plug.HTTPState
+      - doc: Shutdown drains the engine within ctx.
+        name: Shutdown
+        params: ctx context.Context
+        recv: h httpServer
+        results: error
+    name: httpServer
+vars:
+  - doc: |-
+      : Asserts at compile time that httpServer is the engine plug.HTTPServer
+      describes.
+    items:
+      - name: _
+        type: plug.HTTPServer
+        value: httpServer{}
+    name: _

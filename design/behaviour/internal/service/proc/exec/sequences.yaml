@@ -1,0 +1,2403 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: applyNice
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyNice
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: wrapRlimit
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: nice == nil
+      - opt:
+          do:
+            - return: wrapRlimit(err, errs.Int("pid", pid), errs.Int("nice", *nice))
+              to: wrapRlimit
+          init:
+            bind: err
+            eval: syscall.Setpriority(prioProcess, pid, *nice)
+            to: syscall
+          when: err != nil
+      - return: nil
+  - of: applyOOMScoreAdj
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyOOMScoreAdj
+        kind: self
+      - id: writeProcFile
+        kind: internal
+      - id: wrapRlimit
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: adj == nil
+      - bind: path
+        eval: "\"/proc/\" + strconv.Itoa(pid) + \"/oom_score_adj\""
+      - opt:
+          do:
+            - return: wrapRlimit(err, errs.Int("pid", pid), errs.Int("oom_score_adj", *adj))
+              to: wrapRlimit
+          init:
+            bind: err
+            eval: writeProcFile(path, strconv.Itoa(*adj))
+            to: writeProcFile
+          when: err != nil
+      - return: nil
+  - of: containsESRCH
+    participants:
+      - id: caller
+        kind: actor
+      - id: containsESRCH
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: errors.Is(err, syscall.ESRCH)
+        to: errors
+  - of: validateCgroupPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateCgroupPath
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: wrapCgroupUnavailable
+        kind: internal
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: path == ""
+      - bind: info, err
+        eval: os.Stat(path)
+        to: os
+      - opt:
+          do:
+            - return: wrapCgroupUnavailable(err, errs.String("cgroup_path", path))
+              to: wrapCgroupUnavailable
+          when: err != nil || !info.IsDir()
+      - var:
+          name: st
+          type: syscall.Statfs_t
+      - opt:
+          do:
+            - return: wrapCgroupUnavailable(serr, errs.String("cgroup_path", path))
+              to: wrapCgroupUnavailable
+          init:
+            bind: serr
+            eval: syscall.Statfs(path, &st)
+            to: syscall
+          when: serr != nil
+      - opt:
+          do:
+            - return: |-
+                wrapCgroupUnavailable(nil, errs.String("cgroup_path", path),
+                			errs.String("reason", "path is not on a cgroup2 filesystem"))
+              to: wrapCgroupUnavailable
+          when: uint64(st.Type) != cgroup2SuperMagic
+      - return: nil
+  - of: applyCgroupPlacement
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyCgroupPlacement
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: path == ""
+      - bind: procs
+        eval: filepath.Join(path, cgroupProcsFile)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"cgroup placement \" + procs + \": \" + err.Error()"
+          init:
+            bind: err
+            eval: os.WriteFile(procs, []byte(strconv.Itoa(os.Getpid())), cgroupProcsPerm)
+            to: os
+          when: err != nil
+      - return: "\"\""
+  - of: wantsIdentity
+    steps:
+      - return: spec.User != "" || spec.Group != "" || len(spec.Groups) > 0
+  - of: resolveCredential
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveCredential
+        kind: self
+      - id: applyUserGroup
+        kind: internal
+      - id: resolveGroups
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!wantsIdentity(spec)"
+      - bind: out
+        eval: "&syscall.Credential{}"
+      - opt:
+          do:
+            - return: nil, rErr
+          init:
+            bind: rErr
+            eval: applyUserGroup(spec, out)
+            to: applyUserGroup
+          when: rErr != nil
+      - bind: groups, sErr
+        eval: resolveGroups(spec.Groups)
+        to: resolveGroups
+      - opt:
+          do:
+            - return: nil, sErr
+          when: sErr != nil
+      - set: out.Groups
+        value: groups
+      - return: out, nil
+  - of: applyUserGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyUserGroup
+        kind: self
+      - id: resolveUser
+        kind: internal
+      - id: resolveGroup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: uid, gid, uErr
+              eval: resolveUser(spec.User)
+              to: resolveUser
+            - opt:
+                do:
+                  - return: uErr
+                when: uErr != nil
+            - set: out.Uid
+              value: uid
+            - set: out.Gid
+              value: gid
+          when: spec.User != ""
+      - opt:
+          do:
+            - bind: gid, gErr
+              eval: resolveGroup(spec.Group)
+              to: resolveGroup
+            - opt:
+                do:
+                  - return: gErr
+                when: gErr != nil
+            - set: out.Gid
+              value: gid
+          when: spec.Group != ""
+      - return: nil
+  - of: resolveUser
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveUser
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: user
+        kind: stdlib
+      - id: parseUserIDs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: usr, lookErr
+              eval: user.LookupId(name)
+              to: user
+            - opt:
+                do:
+                  - return: uint32(n), 0, nil
+                when: lookErr != nil
+            - return: parseUserIDs(usr)
+              to: parseUserIDs
+          init:
+            bind: n, convErr
+            eval: strconv.ParseUint(name, idBase, idBits)
+            to: strconv
+          when: convErr == nil
+      - bind: usr, lookErr
+        eval: user.Lookup(name)
+        to: user
+      - opt:
+          do:
+            - return: 0, 0, wrapUnknownUser(lookErr, errs.String("user", name))
+          when: lookErr != nil
+      - return: parseUserIDs(usr)
+        to: parseUserIDs
+  - of: parseUserIDs
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseUserIDs
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: uid64, uErr
+        eval: strconv.ParseUint(usr.Uid, idBase, idBits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, 0, wrapUnknownUser(uErr, errs.String("uid", usr.Uid))
+          when: uErr != nil
+      - bind: gid64, gErr
+        eval: strconv.ParseUint(usr.Gid, idBase, idBits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, 0, wrapUnknownGroup(gErr, errs.String("gid", usr.Gid))
+          when: gErr != nil
+      - return: uint32(uid64), uint32(gid64), nil
+  - of: resolveGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveGroup
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: user
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: uint32(n), nil
+          init:
+            bind: n, convErr
+            eval: strconv.ParseUint(name, idBase, idBits)
+            to: strconv
+          when: convErr == nil
+      - bind: grp, lookErr
+        eval: user.LookupGroup(name)
+        to: user
+      - opt:
+          do:
+            - return: 0, wrapUnknownGroup(lookErr, errs.String("group", name))
+          when: lookErr != nil
+      - bind: gid64, pErr
+        eval: strconv.ParseUint(grp.Gid, idBase, idBits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, wrapUnknownGroup(pErr, errs.String("gid", grp.Gid))
+          when: pErr != nil
+      - return: uint32(gid64), nil
+  - of: resolveGroups
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveGroups
+        kind: self
+      - id: resolveGroup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(names) == 0
+      - bind: out
+        eval: make([]uint32, 0, len(names))
+      - loop:
+          do:
+            - bind: gid, gErr
+              eval: resolveGroup(name)
+              to: resolveGroup
+            - opt:
+                do:
+                  - return: nil, gErr
+                when: gErr != nil
+            - set: out
+              value: append(out, gid)
+          key: _
+          range: names
+          value: name
+      - return: out, nil
+  - of: validateSpec
+    steps:
+      - opt:
+          do:
+            - return: coreproc.InvalidSpec
+          when: spec.Path == ""
+      - return: nil
+  - of: Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: Start
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: validateSpec
+        kind: internal
+      - id: resolveSpec
+        kind: internal
+      - id: checkLimits
+        kind: internal
+      - id: validateCgroupPath
+        kind: internal
+      - id: buildStdio
+        kind: internal
+      - id: spawn
+        kind: internal
+      - id: newHandle
+        kind: internal
+      - id: applyPostStart
+        kind: internal
+      - id: teardown
+        kind: internal
+      - id: sio.closeAll
+        kind: internal
+      - id: sio.afterStart
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, ctxErr
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - opt:
+          do:
+            - return: nil, vErr
+          init:
+            bind: vErr
+            eval: validateSpec(spec)
+            to: validateSpec
+          when: vErr != nil
+      - set: spec, err
+        to: resolveSpec
+        value: resolveSpec(spec)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, lErr
+          init:
+            bind: lErr
+            eval: checkLimits(spec)
+            to: checkLimits
+          when: lErr != nil
+      - opt:
+          do:
+            - return: nil, cErr
+          init:
+            bind: cErr
+            eval: validateCgroupPath(spec.CgroupPath)
+            to: validateCgroupPath
+          when: cErr != nil
+      - bind: sio, ioErr
+        eval: buildStdio(spec)
+        to: buildStdio
+      - opt:
+          do:
+            - return: nil, ioErr
+          when: ioErr != nil
+      - bind: started, claim, sErr
+        eval: spawn(spec, sio)
+        to: spawn
+      - opt:
+          do:
+            - return: nil, sErr
+          when: sErr != nil
+      - bind: live
+        eval: newHandle(started, claim, spec.Setpgid, sio)
+        to: newHandle
+      - opt:
+          do:
+            - eval: teardown(live)
+              to: teardown
+            - eval: sio.closeAll()
+              to: sio.closeAll
+            - return: nil, pErr
+          init:
+            bind: pErr
+            eval: applyPostStart(live.pid, spec)
+            to: applyPostStart
+          when: pErr != nil
+      - eval: sio.afterStart()
+        to: sio.afterStart
+      - return: live, nil
+  - of: teardown
+    participants:
+      - id: caller
+        kind: actor
+      - id: teardown
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(live.killUntilReaped(context.Background()))
+        to: swallowErr
+  - of: spawn
+    participants:
+      - id: caller
+        kind: actor
+      - id: spawn
+        kind: self
+      - id: resolveSpawn
+        kind: internal
+      - id: sio.closeAll
+        kind: internal
+      - id: spawnFiles
+        kind: internal
+      - id: childFileTable
+        kind: internal
+      - id: buildProcAttr
+        kind: internal
+      - id: closeHandshake
+        kind: internal
+      - id: forkClaimed
+        kind: internal
+      - id: awaitTrampoline
+        kind: internal
+    steps:
+      - bind: path, argv, envAddon, rErr
+        eval: resolveSpawn(spec)
+        to: resolveSpawn
+      - opt:
+          do:
+            - eval: sio.closeAll()
+              to: sio.closeAll
+            - return: nil, nil, rErr
+          when: rErr != nil
+      - bind: files, hs, hErr
+        eval: spawnFiles(spec, sio)
+        to: spawnFiles
+      - opt:
+          do:
+            - eval: sio.closeAll()
+              to: sio.closeAll
+            - return: nil, nil, hErr
+          when: hErr != nil
+      - bind: childFiles, hsAddon
+        eval: childFileTable(files, spec.ExtraFiles, hs)
+        to: childFileTable
+      - bind: attr, aErr
+        eval: buildProcAttr(spec, childFiles, append(envAddon, hsAddon...))
+        to: buildProcAttr
+      - opt:
+          do:
+            - eval: closeHandshake(hs)
+              to: closeHandshake
+            - eval: sio.closeAll()
+              to: sio.closeAll
+            - return: nil, nil, aErr
+          when: aErr != nil
+      - bind: proc, claim, sErr
+        eval: forkClaimed(path, argv, attr)
+        to: forkClaimed
+      - opt:
+          do:
+            - eval: closeHandshake(hs)
+              to: closeHandshake
+            - eval: sio.closeAll()
+              to: sio.closeAll
+            - return: nil, nil, wrapSpawn(sErr, errs.String("path", spec.Path))
+          when: sErr != nil
+      - opt:
+          do:
+            - return: nil, nil, awaitErr
+          init:
+            bind: awaitErr
+            eval: awaitTrampoline(hs, proc, claim, sio)
+            to: awaitTrampoline
+          when: awaitErr != nil
+      - return: proc, claim, nil
+  - of: awaitTrampoline
+    participants:
+      - id: caller
+        kind: actor
+      - id: awaitTrampoline
+        kind: self
+      - id: hs.await
+        kind: internal
+      - id: collectExit
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: sio.closeAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: hs == nil
+      - bind: awaitErr
+        eval: hs.await()
+        to: hs.await
+      - opt:
+          do:
+            - return: nil
+          when: awaitErr == nil
+      - bind: _, swept, wErr
+        eval: collectExit(proc, claim)
+        to: collectExit
+      - eval: swallowErr(wErr)
+        to: swallowErr
+      - opt:
+          do:
+            - eval: swallowErr(proc.Release())
+              to: swallowErr
+          when: swept
+      - eval: sio.closeAll()
+        to: sio.closeAll
+      - return: awaitErr
+  - of: forkClaimed
+    participants:
+      - id: caller
+        kind: actor
+      - id: forkClaimed
+        kind: self
+      - id: childwait
+        kind: package
+    steps:
+      - return: |-
+          childwait.Spawn(func() (*os.Process, error) {
+          		//: the one fork/exec of the Unix spawn.
+          		return os.StartProcess(path, argv, attr)
+          	})
+        to: childwait
+  - of: spawnFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: spawnFiles
+        kind: self
+      - id: newHandshake
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sio.files[:], nil, nil
+          when: "!needsTrampoline(spec)"
+      - bind: pipe, hErr
+        eval: newHandshake()
+        to: newHandshake
+      - opt:
+          do:
+            - return: nil, nil, wrapRlimit(hErr, errs.String("path", spec.Path))
+          when: hErr != nil
+      - return: sio.files[:], pipe, nil
+  - of: childFileTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: childFileTable
+        kind: self
+      - id: appendExtraFiles
+        kind: internal
+    steps:
+      - set: files
+        to: appendExtraFiles
+        value: appendExtraFiles(stdio, extra)
+      - opt:
+          do:
+            - return: files, nil
+          when: hs == nil
+      - set: hsAddon
+        value: "[]string{trampolineHsFdEnv + \"=\" + strconv.Itoa(len(files))}"
+      - set: files
+        value: append(files, hs.childFile())
+      - return: files, hsAddon
+  - of: resolveSpawn
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveSpawn
+        kind: self
+      - id: trampolineSpawn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: spec.Path, buildArgv(spec), nil, nil
+          when: "!needsTrampoline(spec)"
+      - bind: self, tArgv, addon, tErr
+        eval: trampolineSpawn(spec)
+        to: trampolineSpawn
+      - opt:
+          do:
+            - return: "\"\", nil, nil, wrapRlimit(tErr, errs.String(\"path\", spec.Path))"
+          when: tErr != nil
+      - return: self, tArgv, addon, nil
+  - of: buildProcAttr
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildProcAttr
+        kind: self
+      - id: resolveCredential
+        kind: internal
+    steps:
+      - bind: cred, cErr
+        eval: resolveCredential(spec)
+        to: resolveCredential
+      - opt:
+          do:
+            - return: nil, cErr
+          when: cErr != nil
+      - bind: sysAttr
+        eval: |-
+          &syscall.SysProcAttr{
+          		Setpgid:    spec.Setpgid,
+          		Setsid:     spec.Setsid,
+          		Credential: cred,
+          	}
+      - bind: env
+        eval: make([]string, 0, len(spec.Env)+len(envAddon))
+      - set: env
+        value: append(env, spec.Env...)
+      - set: env
+        value: append(env, envAddon...)
+      - return: "&os.ProcAttr{Dir: spec.Dir, Env: env, Files: files, Sys: sysAttr}, nil"
+  - of: appendExtraFiles
+    steps:
+      - opt:
+          do:
+            - return: std
+          when: len(extra) == 0
+      - bind: out
+        eval: make([]*os.File, 0, len(std)+len(extra))
+      - set: out
+        value: append(out, std...)
+      - set: out
+        value: append(out, extra...)
+      - return: out
+  - of: buildArgv
+    steps:
+      - opt:
+          do:
+            - return: "[]string{spec.Path}"
+          when: len(spec.Args) == 0
+      - return: spec.Args
+  - of: applyPostStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyPostStart
+        kind: self
+      - id: applyNice
+        kind: internal
+      - id: applyOOMScoreAdj
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: applyNice(pid, spec.Nice)
+            to: applyNice
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: applyOOMScoreAdj(pid, spec.OOMScoreAdj)
+            to: applyOOMScoreAdj
+          when: err != nil
+      - return: nil
+  - of: newHandle
+    steps:
+      - return: |-
+          &handle{
+          		proc: p, claim: claim, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio,
+          		done: make(chan struct{}), clk: clock.System, kill: syscall.Kill,
+          	}
+  - of: (*handle).groupTarget
+    steps:
+      - opt:
+          do:
+            - return: "-h.pgid"
+          when: h.setpgid
+      - return: h.pid
+  - of: (*handle).PID
+    steps:
+      - return: h.pid
+  - of: (*handle).Wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).Wait
+        kind: self
+      - id: h.waitOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          h.waitOnce.Do(func() {
+          		ev, swept, wErr := collectExit(h.proc, h.claim)
+          		//: a swept status leaves proc unwaited: free its handle now.
+          		if swept {
+          			h.releaseProc()
+          		}
+          		//: signal late Stop goroutines that the process has been reaped.
+          		close(h.done)
+          		//: join the capture copiers so every byte the child wrote has reached the
+          		//: caller's writers before Wait returns, and no copier goroutine leaks.
+          		//: the child's exit closed its write ends, so the copiers drain to EOF.
+          		h.stdio.wait()
+          		//: a status nobody could observe (not a non-zero exit) is a typed WAIT_FAILED.
+          		if wErr != nil {
+          			//: wrap the cause under the central WAIT_FAILED fields.
+          			h.waitErr = wrapWait(wErr, errs.Int("pid", h.pid))
+          			//: leave waitVal at its zero value on a reap fault.
+          			return
+          		}
+          		//: a collected status yields the translated exit outcome.
+          		h.waitVal = ev
+          		//: a clean exit whose capture writer failed surfaces the typed capture
+          		//: error (os/exec semantics) — the exit status still stands in waitVal.
+          		if cErr := h.stdio.copyError(); cErr != nil {
+          			//: wrap the writer failure under the central STDIO_CAPTURE_FAILED fields.
+          			h.waitErr = wrapStdioCapture(cErr, errs.Int("pid", h.pid))
+          		}
+          	})
+        to: h.waitOnce.Do
+      - return: h.waitVal, h.waitErr
+  - of: collectExit
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectExit
+        kind: self
+      - id: claim.Collected
+        kind: value
+      - id: exitValue
+        kind: internal
+      - id: proc.Wait
+        kind: internal
+      - id: claim.Release
+        kind: value
+      - id: exitValueFrom
+        kind: internal
+      - id: claim.Reclaim
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: exitValue(status.WaitStatus, &status.Rusage), true, nil
+              to: exitValue
+          init:
+            bind: status, ok
+            eval: claim.Collected()
+            to: claim.Collected
+          when: ok
+      - bind: state, wErr
+        eval: proc.Wait()
+        to: proc.Wait
+      - opt:
+          do:
+            - eval: claim.Release()
+              to: claim.Release
+            - return: exitValueFrom(state), false, nil
+              to: exitValueFrom
+          when: wErr == nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: exitValue(status.WaitStatus, &status.Rusage), true, nil
+                    to: exitValue
+                init:
+                  bind: status, ok
+                  eval: claim.Reclaim()
+                  to: claim.Reclaim
+                when: ok
+          when: errors.Is(wErr, syscall.ECHILD)
+      - eval: claim.Release()
+        to: claim.Release
+      - return: coreproc.ExitValue{}, false, wErr
+  - of: (*handle).releaseProc
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).releaseProc
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - lock:
+          mutex: h.procMu
+      - eval: swallowErr(h.proc.Release())
+        to: swallowErr
+  - of: (*handle).leaderReaped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).leaderReaped
+        kind: self
+      - id: h.claim.Collected
+        kind: value
+    steps:
+      - select:
+          cases:
+            - comm: <-h.done
+              do:
+                - return: "true"
+            - default: true
+      - bind: _, collected
+        eval: h.claim.Collected()
+        to: h.claim.Collected
+      - return: collected
+  - of: (*handle).Signal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).Signal
+        kind: self
+      - id: wrapSignal
+        kind: internal
+      - id: h.proc.Signal
+        kind: value
+    steps:
+      - lock:
+          mutex: h.procMu
+          read: true
+      - opt:
+          do:
+            - return: wrapSignal(os.ErrProcessDone, errs.Int("pid", h.pid), errs.Int("signal", sig.Int()))
+              to: wrapSignal
+          when: h.leaderReaped()
+      - opt:
+          do:
+            - return: wrapSignal(err, errs.Int("pid", h.pid), errs.Int("signal", sig.Int()))
+              to: wrapSignal
+          init:
+            bind: err
+            eval: h.proc.Signal(sig.OS())
+            to: h.proc.Signal
+          when: err != nil
+      - return: nil
+  - of: (*handle).SignalGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).SignalGroup
+        kind: self
+      - id: h.groupTarget
+        kind: internal
+      - id: wrapSignal
+        kind: internal
+    steps:
+      - bind: target
+        eval: h.groupTarget()
+        to: h.groupTarget
+      - bind: reapedBefore
+        eval: zombiesRefused && h.leaderReaped()
+      - opt:
+          do:
+            - return: wrapSignal(syscall.ESRCH, errs.Int("target", target), errs.Int("signal", sig.Int()))
+              to: wrapSignal
+          when: "!h.setpgid && h.leaderReaped()"
+      - opt:
+          do:
+            - bind: failed
+              eval: wrapSignal(err, errs.Int("target", target), errs.Int("signal", sig.Int()))
+              to: wrapSignal
+            - opt:
+                do:
+                  - return: wrapSignal(syscall.ESRCH, errs.Int("target", target), errs.Int("signal", sig.Int()))
+                    to: wrapSignal
+                when: h.zombieGroupRefused(failed, reapedBefore)
+            - return: failed
+          init:
+            bind: err
+            eval: h.kill(target, syscall.Signal(sig.Int()))
+          when: err != nil
+      - return: nil
+  - of: (*handle).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).Stop
+        kind: self
+      - id: h.signalGroupAllowGone
+        kind: internal
+      - id: h.awaitExit
+        kind: internal
+      - id: h.killUntilReaped
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: h.signalGroupAllowGone(sig)
+            to: h.signalGroupAllowGone
+          when: err != nil
+      - opt:
+          do:
+            - bind: settled, gracefulErr
+              eval: h.awaitExit(ctx, grace)
+              to: h.awaitExit
+            - opt:
+                do:
+                  - return: gracefulErr
+                when: settled
+          when: grace > 0
+      - return: h.killUntilReaped(ctx)
+        to: h.killUntilReaped
+  - of: (*handle).killUntilReaped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).killUntilReaped
+        kind: self
+      - id: h.reapInBackground
+        kind: internal
+      - id: h.signalGroupAllowGone
+        kind: internal
+      - id: wrapStop
+        kind: internal
+      - id: h.awaitKill
+        kind: internal
+    steps:
+      - go: h.reapInBackground()
+        to: h.reapInBackground
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: wrapStop(err, errs.Int("pgid", h.pgid))
+                    to: wrapStop
+                init:
+                  bind: err
+                  eval: h.signalGroupAllowGone(coreproc.Signal(syscall.SIGKILL))
+                  to: h.signalGroupAllowGone
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: over, err
+                  eval: h.awaitKill(ctx)
+                  to: h.awaitKill
+                when: over
+          forever: true
+  - of: (*handle).awaitKill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).awaitKill
+        kind: self
+      - id: h.clk.NewTimer
+        kind: value
+      - id: resend.Stop
+        kind: value
+    steps:
+      - bind: resend
+        eval: h.clk.NewTimer(killResendInterval)
+        to: h.clk.NewTimer
+      - defer: resend.Stop()
+        to: resend.Stop
+      - select:
+          cases:
+            - comm: <-h.done
+              do:
+                - return: true, nil
+            - comm: <-ctx.Done()
+              do:
+                - return: true, ctx.Err()
+            - comm: <-resend.C()
+      - select:
+          cases:
+            - comm: <-h.done
+              do:
+                - return: true, nil
+            - default: true
+              do:
+                - return: false, nil
+  - of: (*handle).signalGroupAllowGone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).signalGroupAllowGone
+        kind: self
+      - id: h.SignalGroup
+        kind: internal
+    steps:
+      - bind: err
+        eval: h.SignalGroup(sig)
+        to: h.SignalGroup
+      - opt:
+          do:
+            - return: nil
+          when: err != nil && processGone(err)
+      - return: err
+  - of: (*handle).zombieGroupRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).zombieGroupRefused
+        kind: self
+      - id: h.groupDrains
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!zombiesRefused || !h.setpgid || !errs.HasCode(err, coreproc.CodeSignalFailed) || !errors.Is(err, syscall.EPERM)"
+      - opt:
+          do:
+            - return: h.groupDrains()
+              to: h.groupDrains
+          when: reapedBefore
+      - return: h.leaderReaped() || leaderIsZombie(h.pid)
+  - of: (*handle).groupDrains
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).groupDrains
+        kind: self
+      - id: h.clk.Sleep
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: err
+              eval: h.kill(-h.pgid, 0)
+            - opt:
+                do:
+                  - return: "true"
+                when: errors.Is(err, syscall.ESRCH)
+            - opt:
+                do:
+                  - return: "false"
+                when: "!errors.Is(err, syscall.EPERM)"
+            - eval: h.clk.Sleep(drainPoll)
+              to: h.clk.Sleep
+          range: drainPolls
+      - return: "false"
+  - of: (*handle).awaitExit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).awaitExit
+        kind: self
+      - id: h.reapInBackground
+        kind: internal
+      - id: h.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - go: h.reapInBackground()
+        to: h.reapInBackground
+      - bind: timer
+        eval: h.clk.NewTimer(grace)
+        to: h.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-h.done
+              do:
+                - return: true, nil
+            - comm: <-ctx.Done()
+              do:
+                - return: true, ctx.Err()
+            - comm: <-timer.C()
+              do:
+                - return: false, nil
+  - of: (*handle).reapInBackground
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).reapInBackground
+        kind: self
+      - id: h.Wait
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: h.Wait()
+            to: h.Wait
+          when: err != nil
+  - of: exitValueFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: exitValueFrom
+        kind: self
+      - id: exitValue
+        kind: internal
+      - id: readRusage
+        kind: internal
+    steps:
+      - bind: ru, _
+        eval: state.SysUsage().(*syscall.Rusage)
+      - opt:
+          do:
+            - return: exitValue(ws, ru)
+              to: exitValue
+          init:
+            bind: ws, ok
+            eval: state.Sys().(syscall.WaitStatus)
+          when: ok
+      - bind: out
+        eval: "coreproc.ExitValue{Code: signalledCode}"
+      - opt:
+          do:
+            - eval: readRusage(ru, &out)
+              to: readRusage
+          when: ru != nil
+      - return: out
+  - of: exitValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: exitValue
+        kind: self
+      - id: ws.ExitStatus
+        kind: value
+      - id: coreproc
+        kind: package
+      - id: readRusage
+        kind: internal
+    steps:
+      - bind: out
+        eval: "coreproc.ExitValue{Code: signalledCode}"
+      - opt:
+          do:
+            - set: out.Code
+              to: ws.ExitStatus
+              value: ws.ExitStatus()
+          when: ws.Exited()
+      - opt:
+          do:
+            - set: out.Signaled
+              value: "true"
+            - set: out.Signal
+              to: coreproc
+              value: coreproc.Signal(ws.Signal())
+          when: ws.Signaled()
+      - opt:
+          do:
+            - eval: readRusage(ru, &out)
+              to: readRusage
+          when: ru != nil
+      - return: out
+  - of: readRusage
+    participants:
+      - id: caller
+        kind: actor
+      - id: readRusage
+        kind: self
+      - id: timevalToDuration
+        kind: internal
+      - id: maxRSSKB
+        kind: internal
+    steps:
+      - set: out.UserTime
+        to: timevalToDuration
+        value: timevalToDuration(ru.Utime)
+      - set: out.SystemTime
+        to: timevalToDuration
+        value: timevalToDuration(ru.Stime)
+      - set: out.MaxRSS
+        to: maxRSSKB
+        value: maxRSSKB(ru)
+  - of: timevalToDuration
+    steps:
+      - return: time.Duration(tv.Sec)*time.Second + time.Duration(tv.Usec)*time.Microsecond
+  - of: processGone
+    steps:
+      - return: errs.HasCode(err, coreproc.CodeSignalFailed) && containsESRCH(err)
+  - of: newHandshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: newHandshake
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: r, w, pErr
+        eval: os.Pipe()
+        to: os
+      - opt:
+          do:
+            - return: nil, pErr
+          when: pErr != nil
+      - return: "&handshake{read: r, write: w}, nil"
+  - of: (*handshake).childFile
+    steps:
+      - return: h.write
+  - of: (*handshake).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handshake).await
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: handshakeError
+        kind: internal
+    steps:
+      - eval: swallowErr(h.write.Close())
+        to: swallowErr
+      - bind: status, rErr
+        eval: io.ReadAll(h.read)
+        to: io
+      - eval: swallowErr(rErr)
+        to: swallowErr
+      - eval: swallowErr(h.read.Close())
+        to: swallowErr
+      - opt:
+          do:
+            - return: nil
+          when: len(status) == 0
+      - return: handshakeError(status[0])
+        to: handshakeError
+  - of: (*handshake).closeBoth
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handshake).closeBoth
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(h.read.Close())
+        to: swallowErr
+      - eval: swallowErr(h.write.Close())
+        to: swallowErr
+  - of: closeHandshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeHandshake
+        kind: self
+      - id: hs.closeBoth
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: hs == nil
+      - eval: hs.closeBoth()
+        to: hs.closeBoth
+  - of: handshakeError
+    steps:
+      - switch:
+          cases:
+            - case: handshakeApplyFail
+              do:
+                - return: coreproc.RlimitFailed
+            - case: handshakeCgroupFail
+              do:
+                - return: coreproc.CgroupWriteFailed
+            - case: handshakeExecFail
+              do:
+                - return: coreproc.SpawnFailed
+            - default: true
+              do:
+                - return: coreproc.SpawnFailed
+          "on": code
+  - of: addPlatformLimits
+    steps:
+      - set: limits[coreproc.ResourceAS]
+        value: syscall.RLIMIT_AS
+  - of: buildResourceLimits
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildResourceLimits
+        kind: self
+      - id: addPlatformLimits
+        kind: internal
+    steps:
+      - bind: limits
+        eval: |-
+          map[coreproc.Resource]int{
+          		coreproc.ResourceNoFile: syscall.RLIMIT_NOFILE,
+          		coreproc.ResourceCore:   syscall.RLIMIT_CORE,
+          		coreproc.ResourceCPU:    syscall.RLIMIT_CPU,
+          		coreproc.ResourceFSize:  syscall.RLIMIT_FSIZE,
+          		coreproc.ResourceData:   syscall.RLIMIT_DATA,
+          		coreproc.ResourceStack:  syscall.RLIMIT_STACK,
+          	}
+      - eval: addPlatformLimits(limits)
+        to: addPlatformLimits
+      - return: limits
+  - of: resolveSpec
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveSpec
+        kind: self
+      - id: searchPathOf
+        kind: internal
+      - id: lookPath
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: spec, nil
+          when: isPath(spec.Path)
+      - bind: searchPath, fromSpec
+        eval: searchPathOf(spec.Env)
+        to: searchPathOf
+      - bind: path, lookErr
+        eval: lookPath(spec.Path, searchPath, spec.Env)
+        to: lookPath
+      - opt:
+          do:
+            - return: spec, wrapSpawn(lookErr, errs.String("path", spec.Path), errs.Bool("from_spec_env", fromSpec))
+          when: lookErr != nil
+      - opt:
+          do:
+            - set: spec.Args
+              value: "[]string{spec.Path}"
+          when: len(spec.Args) == 0
+      - set: spec.Path
+        value: path
+      - return: spec, nil
+  - of: searchPathOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: searchPathOf
+        kind: self
+      - id: envValue
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: value, true
+          init:
+            bind: value, named
+            eval: envValue(env, pathVariable)
+            to: envValue
+          when: named
+      - return: os.Getenv(pathVariable), false
+        to: os
+  - of: envValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: envValue
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: name, entryValue, found
+              eval: strings.Cut(entry, "=")
+              to: strings
+            - opt:
+                do:
+                  - set: value, named
+                    value: entryValue, true
+                when: found && sameVariable(name, key)
+          key: _
+          range: env
+          value: entry
+      - return: value, named
+  - of: isExecutable
+    participants:
+      - id: caller
+        kind: actor
+      - id: isExecutable
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: executableMode
+        kind: internal
+    steps:
+      - bind: info, statErr
+        eval: os.Stat(path)
+        to: os
+      - opt:
+          do:
+            - return: "false"
+          when: statErr != nil || !info.Mode().IsRegular()
+      - return: executableMode(info.Mode())
+        to: executableMode
+  - of: candidates
+    steps:
+      - return: "[]string{filepath.Join(dir, name)}"
+  - of: executableMode
+    steps:
+      - return: mode&anyExecuteBit != 0
+  - of: isPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: isPath
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: strings.Contains(name, "/")
+        to: strings
+  - of: sameVariable
+    steps:
+      - return: left == right
+  - of: peakKiB
+    steps:
+      - opt:
+          do:
+            - return: raw
+          when: unitsPerKiB <= 1
+      - opt:
+          do:
+            - return: "0"
+          when: raw <= 0
+      - bind: kib
+        eval: raw / unitsPerKiB
+      - opt:
+          do:
+            - op: ++
+              set: kib
+          when: raw%unitsPerKiB != 0
+      - return: kib
+  - of: maxRSSKB
+    participants:
+      - id: caller
+        kind: actor
+      - id: maxRSSKB
+        kind: self
+      - id: peakKiB
+        kind: internal
+    steps:
+      - return: peakKiB(ru.Maxrss, rssUnitsPerKiB)
+        to: peakKiB
+  - of: writeProcFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeProcFile
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - return: os.WriteFile(path, []byte(data), procFileMode)
+        to: os
+  - of: stdioField
+    participants:
+      - id: caller
+        kind: actor
+      - id: stdioField
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.String("stdio", stream)
+        to: errs
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: (*stdioState).recordCopyErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).recordCopyErr
+        kind: self
+      - id: s.copyMu.Lock
+        kind: value
+      - id: s.copyMu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+      - eval: s.copyMu.Lock()
+        to: s.copyMu.Lock
+      - opt:
+          do:
+            - set: s.copyErr
+              value: err
+          when: s.copyErr == nil
+      - eval: s.copyMu.Unlock()
+        to: s.copyMu.Unlock
+  - of: (*stdioState).copyError
+    steps:
+      - lock:
+          mutex: s.copyMu
+          read: true
+      - return: s.copyErr
+  - of: buildStdio
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildStdio
+        kind: self
+      - id: s.build
+        kind: internal
+      - id: s.closeAll
+        kind: internal
+    steps:
+      - bind: s
+        eval: "&stdioState{}"
+      - switch:
+          cases:
+            - case: coreproc.StdioCapture
+              do:
+                - opt:
+                    do:
+                      - eval: s.closeAll()
+                        to: s.closeAll
+                      - return: nil, berr
+                    init:
+                      bind: berr
+                      eval: s.build(spec.Stdin, spec.Stdout, spec.Stderr)
+                      to: s.build
+                    when: berr != nil
+                - return: s, nil
+            - case: coreproc.StdioNull
+              do:
+                - opt:
+                    do:
+                      - eval: s.closeAll()
+                        to: s.closeAll
+                      - return: nil, berr
+                    init:
+                      bind: berr
+                      eval: s.build(nil, nil, nil)
+                      to: s.build
+                    when: berr != nil
+                - return: s, nil
+            - default: true
+              do:
+                - set: s.files
+                  value: "[stdioFdCount]*os.File{os.Stdin, os.Stdout, os.Stderr}"
+                - return: s, nil
+          "on": spec.Stdio
+  - of: (*stdioState).build
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).build
+        kind: self
+      - id: s.wireInput
+        kind: internal
+      - id: s.wireOutput
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ierr
+          init:
+            bind: ierr
+            eval: s.wireInput(in)
+            to: s.wireInput
+          when: ierr != nil
+      - opt:
+          do:
+            - return: oerr
+          init:
+            bind: oerr
+            eval: s.wireOutput(fdStdout, out)
+            to: s.wireOutput
+          when: oerr != nil
+      - return: s.wireOutput(fdStderr, errw)
+        to: s.wireOutput
+  - of: (*stdioState).wireInput
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).wireInput
+        kind: self
+      - id: s.wireNull
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: wrapSpawn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.wireNull(fdStdin, os.O_RDONLY)
+              to: s.wireNull
+          when: reader == nil
+      - bind: pr, pw, perr
+        eval: os.Pipe()
+        to: os
+      - opt:
+          do:
+            - return: wrapSpawn(perr, stdioField("stdin"))
+              to: wrapSpawn
+          when: perr != nil
+      - set: s.files[fdStdin]
+        value: pr
+      - set: s.opened
+        value: append(s.opened, pr, pw)
+      - set: s.closeChild
+        value: append(s.closeChild, pr)
+      - set: s.inDst, s.inSrc
+        value: pw, reader
+      - return: nil
+  - of: (*stdioState).wireOutput
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).wireOutput
+        kind: self
+      - id: s.wireNull
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: wrapSpawn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.wireNull(idx, os.O_WRONLY)
+              to: s.wireNull
+          when: w == nil
+      - bind: pr, pw, perr
+        eval: os.Pipe()
+        to: os
+      - opt:
+          do:
+            - return: wrapSpawn(perr, stdioField(outName(idx)))
+              to: wrapSpawn
+          when: perr != nil
+      - set: s.files[idx]
+        value: pw
+      - set: s.opened
+        value: append(s.opened, pr, pw)
+      - set: s.closeChild
+        value: append(s.closeChild, pw)
+      - set: s.outSrc
+        value: append(s.outSrc, pr)
+      - set: s.outSink
+        value: append(s.outSink, w)
+      - return: nil
+  - of: (*stdioState).wireNull
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).wireNull
+        kind: self
+      - id: openNull
+        kind: internal
+    steps:
+      - bind: f, oerr
+        eval: openNull(flag)
+        to: openNull
+      - opt:
+          do:
+            - return: oerr
+          when: oerr != nil
+      - set: s.files[idx]
+        value: f
+      - set: s.opened
+        value: append(s.opened, f)
+      - set: s.closeChild
+        value: append(s.closeChild, f)
+      - return: nil
+  - of: openNull
+    participants:
+      - id: caller
+        kind: actor
+      - id: openNull
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: null, oerr
+        eval: os.OpenFile(os.DevNull, flag, 0)
+        to: os
+      - opt:
+          do:
+            - return: nil, wrapSpawn(oerr, stdioField("null"))
+          when: oerr != nil
+      - return: null, nil
+  - of: (*stdioState).afterStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).afterStart
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: s.wg.Add
+        kind: value
+      - id: s.drainOutput
+        kind: internal
+      - id: s.feedInput
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(f.Close())
+              to: swallowErr
+          key: _
+          range: s.closeChild
+          value: f
+      - loop:
+          do:
+            - eval: s.wg.Add(1)
+              to: s.wg.Add
+            - go: s.drainOutput(s.outSrc[i], s.outSink[i])
+              to: s.drainOutput
+          key: i
+          range: s.outSrc
+      - opt:
+          do:
+            - go: s.feedInput(s.inDst, s.inSrc)
+              to: s.feedInput
+          when: s.inDst != nil
+  - of: (*stdioState).drainOutput
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).drainOutput
+        kind: self
+      - id: s.wg.Done
+        kind: value
+      - id: io
+        kind: stdlib
+      - id: s.recordCopyErr
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - defer: s.wg.Done()
+        to: s.wg.Done
+      - bind: _, cerr
+        eval: io.Copy(sink, src)
+        to: io
+      - eval: s.recordCopyErr(cerr)
+        to: s.recordCopyErr
+      - eval: swallowErr(src.Close())
+        to: swallowErr
+  - of: (*stdioState).feedInput
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).feedInput
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: _, cerr
+        eval: io.Copy(dst, src)
+        to: io
+      - eval: swallowErr(cerr)
+        to: swallowErr
+      - eval: swallowErr(dst.Close())
+        to: swallowErr
+  - of: (*stdioState).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).wait
+        kind: self
+      - id: s.wg.Wait
+        kind: value
+    steps:
+      - eval: s.wg.Wait()
+        to: s.wg.Wait
+  - of: (*stdioState).closeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stdioState).closeAll
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(f.Close())
+              to: swallowErr
+          key: _
+          range: s.opened
+          value: f
+  - of: outName
+    steps:
+      - opt:
+          do:
+            - return: "\"stdout\""
+          when: idx == fdStdout
+      - return: "\"stderr\""
+  - of: installTrampoline
+    participants:
+      - id: caller
+        kind: actor
+      - id: installTrampoline
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: runTrampoline
+        kind: internal
+    steps:
+      - bind: payload, isTrampoline
+        eval: os.LookupEnv(trampolineEnv)
+        to: os
+      - opt:
+          do:
+            - return: struct{}{}
+          when: "!isTrampoline"
+      - eval: runTrampoline(payload)
+        to: runTrampoline
+      - return: struct{}{}
+  - of: runTrampoline
+    participants:
+      - id: caller
+        kind: actor
+      - id: runTrampoline
+        kind: self
+      - id: applyTrampoline
+        kind: internal
+      - id: reportHandshake
+        kind: internal
+      - id: stderrLine
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: applyCgroupPlacement
+        kind: internal
+      - id: armHandshakeClose
+        kind: internal
+      - id: environWithout
+        kind: internal
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: reportHandshake(handshakeApplyFail)
+              to: reportHandshake
+            - eval: "stderrLine(\"sdk trampoline: \" + msg)"
+              to: stderrLine
+            - eval: os.Exit(trampolineApplyExit)
+              to: os
+          init:
+            bind: msg
+            eval: applyTrampoline(payload)
+            to: applyTrampoline
+          when: msg != ""
+      - opt:
+          do:
+            - eval: reportHandshake(handshakeCgroupFail)
+              to: reportHandshake
+            - eval: "stderrLine(\"sdk trampoline: \" + msg)"
+              to: stderrLine
+            - eval: os.Exit(trampolineApplyExit)
+              to: os
+          init:
+            bind: msg
+            eval: applyCgroupPlacement(os.Getenv(trampolineCgroupEnv))
+            to: applyCgroupPlacement
+          when: msg != ""
+      - opt:
+          do:
+            - eval: reportHandshake(handshakeExecFail)
+              to: reportHandshake
+            - eval: "stderrLine(\"sdk trampoline: missing target in argv\")"
+              to: stderrLine
+            - eval: os.Exit(trampolineExecExit)
+              to: os
+          when: len(os.Args) < trampolineMinArgs
+      - eval: armHandshakeClose()
+        to: armHandshakeClose
+      - bind: target
+        eval: os.Args[1]
+      - bind: env
+        eval: |-
+          environWithout(environWithout(environWithout(os.Environ(),
+          		trampolineEnv), trampolineCgroupEnv), trampolineHsFdEnv)
+        to: environWithout
+      - opt:
+          do:
+            - eval: reportHandshake(handshakeExecFail)
+              to: reportHandshake
+            - eval: "stderrLine(\"sdk trampoline exec \" + target + \": \" + err.Error())"
+              to: stderrLine
+            - eval: os.Exit(trampolineExecExit)
+              to: os
+          init:
+            bind: err
+            eval: syscall.Exec(target, os.Args[trampolineMinArgs:], env)
+            to: syscall
+          when: err != nil
+  - of: childHandshakeFD
+    participants:
+      - id: caller
+        kind: actor
+      - id: childHandshakeFD
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: os.Getenv(trampolineHsFdEnv)
+        to: os
+      - opt:
+          do:
+            - return: defaultHandshakeFD
+          when: raw == ""
+      - bind: fd, err
+        eval: strconv.Atoi(raw)
+        to: strconv
+      - opt:
+          do:
+            - return: defaultHandshakeFD
+          when: err != nil
+      - return: fd
+  - of: reportHandshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: reportHandshake
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: syscall.Write(childHandshakeFD(), []byte{code})
+            to: syscall
+          when: err != nil
+  - of: armHandshakeClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: armHandshakeClose
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - eval: syscall.CloseOnExec(childHandshakeFD())
+        to: syscall
+  - of: stderrLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: stderrLine
+        kind: self
+      - id: os.Stderr.WriteString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: os.Stderr.WriteString(msg + "\n")
+            to: os.Stderr.WriteString
+          when: err != nil
+  - of: applyTrampoline
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyTrampoline
+        kind: self
+      - id: applyToken
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: tok == ""
+            - opt:
+                do:
+                  - return: msg
+                init:
+                  bind: msg
+                  eval: applyToken(tok)
+                  to: applyToken
+                when: msg != ""
+          key: tok
+          range: strings.SplitSeq(payload, ";")
+      - return: "\"\""
+  - of: applyToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyToken
+        kind: self
+      - id: applyUmaskToken
+        kind: internal
+      - id: applyRlimitToken
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "'u'"
+              do:
+                - return: applyUmaskToken(tok[1:])
+                  to: applyUmaskToken
+            - case: "'r'"
+              do:
+                - return: applyRlimitToken(tok[1:])
+                  to: applyRlimitToken
+            - default: true
+              do:
+                - return: "\"unknown trampoline token\""
+          "on": tok[0]
+  - of: applyUmaskToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyUmaskToken
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: mask, err
+        eval: strconv.Atoi(s)
+        to: strconv
+      - opt:
+          do:
+            - return: "\"malformed umask token\""
+          when: err != nil
+      - eval: syscall.Umask(mask)
+        to: syscall
+      - return: "\"\""
+  - of: applyRlimitToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyRlimitToken
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: numStr, rest, ok1
+        eval: strings.Cut(s, ",")
+        to: strings
+      - bind: softStr, hardStr, ok2
+        eval: strings.Cut(rest, ",")
+        to: strings
+      - opt:
+          do:
+            - return: "\"malformed rlimit token\""
+          when: "!ok1 || !ok2"
+      - bind: num, e1
+        eval: strconv.Atoi(numStr)
+        to: strconv
+      - bind: soft, e2
+        eval: strconv.ParseUint(softStr, decimalRadix, uintBits)
+        to: strconv
+      - bind: hard, e3
+        eval: strconv.ParseUint(hardStr, decimalRadix, uintBits)
+        to: strconv
+      - opt:
+          do:
+            - return: "\"malformed rlimit values\""
+          when: e1 != nil || e2 != nil || e3 != nil
+      - opt:
+          do:
+            - return: |-
+                "setrlimit(" + numStr + ",soft=" + softStr + ",hard=" + hardStr +
+                			"): " + err.Error()
+          init:
+            bind: err
+            eval: syscall.Setrlimit(num, new(rlim.Make(soft, hard)))
+            to: syscall
+          when: err != nil
+      - return: "\"\""
+  - of: environWithout
+    participants:
+      - id: caller
+        kind: actor
+      - id: environWithout
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]string, 0, len(env))
+      - loop:
+          do:
+            - bind: k, _, _
+              eval: strings.Cut(kv, "=")
+              to: strings
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, kv)
+                when: k != key
+          key: _
+          range: env
+          value: kv
+      - return: out
+  - of: needsTrampoline
+    steps:
+      - return: len(spec.Rlimits) > 0 || spec.Umask != nil || spec.CgroupPath != ""
+  - of: encodeTrampoline
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeTrampoline
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - opt:
+          do:
+            - eval: b.WriteString("u" + strconv.Itoa(*spec.Umask) + ";")
+              to: b.WriteString
+          when: spec.Umask != nil
+      - loop:
+          do:
+            - eval: |-
+                b.WriteString("r" + strconv.Itoa(resourceLimits[res]) + "," +
+                			strconv.FormatUint(lim.Soft, decimalRadix) + "," +
+                			strconv.FormatUint(lim.Hard, decimalRadix) + ";")
+              to: b.WriteString
+          key: res
+          range: spec.Rlimits
+          value: lim
+      - return: b.String()
+        to: b.String
+  - of: trampolineSpawn
+    participants:
+      - id: caller
+        kind: actor
+      - id: trampolineSpawn
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: self, eErr
+        eval: os.Executable()
+        to: os
+      - opt:
+          do:
+            - return: "\"\", nil, nil, eErr"
+          when: eErr != nil
+      - set: argv
+        value: append([]string{self, spec.Path}, buildArgv(spec)...)
+      - set: envAddon
+        value: "[]string{trampolineEnv + \"=\" + encodeTrampoline(spec)}"
+      - opt:
+          do:
+            - set: envAddon
+              value: append(envAddon, trampolineCgroupEnv+"="+spec.CgroupPath)
+          when: spec.CgroupPath != ""
+      - return: self, argv, envAddon, nil
+  - of: wrapSpawn
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapSpawn
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeSpawnFailed,
+          		Reason:   "SPAWN_FAILED",
+          		Public:   "Could not start the process",
+          		Private:  "service/proc/exec.Start: fork/exec failed",
+          		ExitCode: exitOSErr,
+          	}, fields...)
+        to: errs
+  - of: wrapWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapWait
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeWaitFailed,
+          		Reason:   "WAIT_FAILED",
+          		Public:   "Could not wait for the process to exit",
+          		Private:  "service/proc/exec.Wait: wait4 returned an unexpected error",
+          		ExitCode: exitOSErr,
+          	}, fields...)
+        to: errs
+  - of: wrapSignal
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapSignal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeSignalFailed,
+          		Reason:   "SIGNAL_FAILED",
+          		Public:   "Could not deliver the signal",
+          		Private:  "service/proc: kill(2) failed for the target pid or process group",
+          		ExitCode: exitOSErr,
+          	}, fields...)
+        to: errs
+  - of: wrapStop
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapStop
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeStopFailed,
+          		Reason:   "STOP_FAILED",
+          		Public:   "Could not stop the process",
+          		Private:  "service/proc/exec.Stop: process group survived signal escalation to SIGKILL",
+          		ExitCode: exitOSErr,
+          	}, fields...)
+        to: errs
+  - of: wrapRlimit
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapRlimit
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeRlimitFailed,
+          		Reason:   "RLIMIT_FAILED",
+          		Public:   "Could not apply the resource limit",
+          		Private:  "service/proc/rlimit.Apply: setrlimit(2) failed",
+          		ExitCode: exitOSErr,
+          	}, fields...)
+        to: errs
+  - of: wrapCgroupUnavailable
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapCgroupUnavailable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupUnavailable,
+          		Reason:   "CGROUP_UNAVAILABLE",
+          		Public:   "cgroup v2 is not available or not delegated",
+          		Private:  "service/proc/exec.Start: Spec.CgroupPath is missing, not a cgroup v2 directory, or not delegated",
+          		ExitCode: exitUnavailable,
+          	}, fields...)
+        to: errs
+  - of: wrapStdioCapture
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapStdioCapture
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeStdioCaptureFailed,
+          		Reason:   "STDIO_CAPTURE_FAILED",
+          		Public:   "Could not deliver the captured output to the writer",
+          		Private:  "service/proc/exec.Wait: a StdioCapture copier failed writing the child's output to the caller's sink",
+          		ExitCode: exitIOErr,
+          	}, fields...)
+        to: errs
+  - of: wrapUnknownUser
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapUnknownUser
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeUnknownUser,
+          		Reason:   "UNKNOWN_USER",
+          		Public:   "The requested user does not exist",
+          		Private:  "service/proc/exec.Start: Spec.User did not resolve to a uid via os/user",
+          		ExitCode: exitNoUser,
+          	}, fields...)
+        to: errs
+  - of: wrapUnknownGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapUnknownGroup
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeUnknownGroup,
+          		Reason:   "UNKNOWN_GROUP",
+          		Public:   "The requested group does not exist",
+          		Private:  "service/proc/exec.Start: Spec.Group/Groups did not resolve to a gid via os/user",
+          		ExitCode: exitNoUser,
+          	}, fields...)
+        to: errs
+  - of: leaderIsZombie
+    steps:
+      - return: "false"

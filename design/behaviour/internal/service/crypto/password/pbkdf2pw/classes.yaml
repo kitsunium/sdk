@@ -1,0 +1,143 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: algorithm is the canonical registry key and PHC id segment.
+        name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"pbkdf2-sha256\""
+      - doc: saltLen is the random salt length in bytes (128-bit).
+        name: saltLen
+        type: int
+        value: "16"
+      - doc: keyLen is the derived digest length in bytes (256-bit).
+        name: keyLen
+        type: int
+        value: "32"
+      - doc: currentIters is the present iteration policy (OWASP 2023 for PBKDF2-SHA256).
+        name: currentIters
+        type: int
+        value: "600_000"
+      - doc: |-
+          maxIters caps the PHC-supplied iteration count accepted on Verify so a
+          hostile or corrupt stored hash cannot force unbounded CPU work. It sits
+          far above currentIters to leave ratchet headroom, yet stays bounded.
+        name: maxIters
+        type: int
+        value: "100_000_000"
+      - doc: phcFields is the number of `$`-delimited fields in a well-formed hash.
+        name: phcFields
+        type: int
+        value: "5"
+      - doc: |-
+          fieldID indexes the scheme id after a split on "$" (index 0 is the empty
+          prefix before the first "$").
+        name: fieldID
+        type: int
+        value: "1"
+      - doc: fieldCost indexes the "i=<n>" iteration-count field.
+        name: fieldCost
+        type: int
+        value: "2"
+      - doc: fieldSalt indexes the base64 salt field.
+        name: fieldSalt
+        type: int
+        value: "3"
+      - doc: fieldDigest indexes the base64 digest field.
+        name: fieldDigest
+        type: int
+        value: "4"
+    name: algorithm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - algorithm
+      - PasswordHasher
+      - pbkdf2PW
+      - pbkdf2PW.Algorithm
+      - pbkdf2PW.Hash
+      - pbkdf2PW.Verify
+      - pbkdf2PW.NeedsRehash
+      - encodePHC
+      - decodePHC
+      - decodeSaltDigest
+    name: pbkdf2pw.go
+functions:
+  - doc: |-
+      encodePHC renders the PHC string `$pbkdf2-sha256$i=<iters>$<b64salt>$<b64digest>`
+      using un-padded base64 (the PHC convention).
+    name: encodePHC
+    params: salt, digest []byte, iters int
+    results: string
+  - doc: |-
+      decodePHC parses a `$pbkdf2-sha256$i=<n>$<b64salt>$<b64digest>` string. It
+      returns ok=false for any field that is missing, mislabelled, or invalid.
+    name: decodePHC
+    params: phc string
+    results: iters int, salt, digest []byte, ok bool
+  - doc: |-
+      decodeSaltDigest base64-decodes the salt + digest PHC fields and enforces the
+      scheme's fixed lengths. It returns ok=false on a decode error or any length
+      other than saltLen / keyLen: this scheme only ever emits a 16-byte salt +
+      32-byte digest, so a deviation is corruption — and pinning the digest length
+      stops Verify from deriving an attacker-chosen, arbitrary-length key.
+    name: decodeSaltDigest
+    params: saltField, digestField string
+    results: salt, digest []byte, ok bool
+imports:
+  base64: encoding/base64
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  pbkdf2: crypto/pbkdf2
+  rand: crypto/rand
+  sha256: crypto/sha256
+  strconv: strconv
+  strings: strings
+  subtle: crypto/subtle
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/password/pbkdf2pw
+  name: pbkdf2pw
+  purpose: Package pbkdf2pw registers the "pbkdf2-sha256" password-hashing scheme (ADR 0013).
+types:
+  - doc: pbkdf2PW implements core/crypto.PasswordHasher over crypto/pbkdf2 with SHA-256.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key (also the PHC id).
+        name: Algorithm
+        recv: pbkdf2PW
+        results: corecrypto.Algorithm
+      - doc: |-
+          Hash draws a fresh salt and returns the PHC-string hash of password at the
+          current iteration policy. The only realistic failure is a crypto/rand fault.
+        name: Hash
+        params: password []byte
+        recv: pbkdf2PW
+        results: phc string, err error
+      - doc: |-
+          Verify recomputes the digest with the stored salt + iteration count and
+          compares in constant time. A malformed phc returns InvalidPasswordHash; a
+          genuine mismatch is (false, nil).
+        name: Verify
+        params: password []byte, phc string
+        recv: pbkdf2PW
+        results: ok bool, err error
+      - doc: |-
+          NeedsRehash reports whether phc was produced below the current iteration
+          policy. A malformed phc reports false (Verify surfaces the real error).
+        name: NeedsRehash
+        params: phc string
+        recv: pbkdf2PW
+        results: bool
+    name: pbkdf2PW
+vars:
+  - doc: |-
+      PasswordHasher is the registered PBKDF2-SHA256 scheme singleton (no init();
+      package-level var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: PasswordHasher
+        value: corecrypto.RegisterPasswordHasher(pbkdf2PW{})
+    name: PasswordHasher

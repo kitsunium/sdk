@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/queue
+  name: queue
+  purpose: "Package queue is the public facade for the SDK's ASYNCHRONOUS, DURABLE message queue: one process publishes work, another process picks it up later, and a crash in between loses nothing."
+types: []

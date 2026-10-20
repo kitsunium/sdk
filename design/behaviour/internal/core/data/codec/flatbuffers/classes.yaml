@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers
+  name: flatbuffers
+  purpose: Package flatbuffers declares the error codes and the sentinels of the FlatBuffers passthrough codec, internal/service/data/codec/flatbuffers — range 0.3.23.* (ADR 0006 service/data/codec/flatbuffers block).
+types: []

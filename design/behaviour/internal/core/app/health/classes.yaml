@@ -1,0 +1,290 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          ProbeStartup asks "is this process still coming up?". While it answers
+          no, the orchestrator must neither route to the replica nor restart it.
+
+          The run starts at iota+1, not at iota: the zero is left unclaimed on
+          purpose, so a Probe nobody set is a value this package never mints
+          rather than the startup question answered by default.
+        name: ProbeStartup
+        type: Probe
+        value: iota + 1
+      - doc: |-
+          ProbeReadiness asks "can this replica take traffic right now?". A no
+          removes it from routing and never restarts it. Dependency checks belong
+          here, and only here.
+        name: ProbeReadiness
+      - doc: |-
+          ProbeLiveness asks "is this process irrecoverable?". A no restarts the
+          replica, so only process-local evidence may contribute to it.
+        name: ProbeLiveness
+    name: ProbeStartup
+  - grouped: true
+    items:
+      - doc: |-
+          StatusUnhealthy is a failing critical check, or a probe with one. The
+          replica must not take traffic (readiness) or is irrecoverable
+          (liveness). It is the ZERO VALUE; see the type comment.
+        name: StatusUnhealthy
+        type: Status
+        value: iota
+      - doc: |-
+          StatusDegraded is a failing NON-critical check, or a probe with one and
+          no critical failure. It is a SERVING state: the replica keeps taking
+          traffic. A degraded replica that stopped serving would make
+          "non-critical" mean nothing.
+        name: StatusDegraded
+      - doc: |-
+          StatusHealthy is every check passing — including the case where there
+          are no checks at all (ADR 0031: an empty registry is legitimate, and
+          the process answering the probe is the evidence).
+        name: StatusHealthy
+    name: StatusUnhealthy
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Check
+      - SelfCheck
+    name: health.go
+  - decls:
+      - StartupCheckValue
+    name: health_check.go
+  - decls:
+      - LivenessCheckValue
+    name: health_check_liveness.go
+  - decls:
+      - ReadinessCheckValue
+    name: health_check_readiness.go
+  - decls:
+      - Probe
+      - ProbeStartup
+      - Probe.String
+    name: health_probe.go
+  - decls:
+      - ResultValue
+      - ResultValue.Age
+      - ReportValue
+    name: health_result.go
+  - decls:
+      - Status
+      - StatusUnhealthy
+      - Status.String
+      - Status.Serving
+      - Worst
+      - ranked
+    name: health_status.go
+functions:
+  - name: Worst
+    params: a, b Status
+    results: Status
+  - doc: ranked returns s, or StatusUnhealthy for a value outside the three.
+    name: ranked
+    params: s Status
+    results: Status
+imports:
+  context: context
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/health
+  name: health
+  purpose: Package health — ranges 0.2.29.* (ADR 0060 core/app/health block) and 0.3.59.* (ADR 0060 service/app/health block, declared here since ADR 0160).
+types:
+  - kind: named
+    name: Check
+    underlying: func(ctx context.Context) error
+  - kind: named
+    name: SelfCheck
+    underlying: func() error
+  - fields:
+      - doc: |-
+          Name identifies the check in the report and in every error field. It
+          must be non-empty and unique among startup checks.
+        name: Name
+        type: string
+      - doc: |-
+          Check is the body. It may reach outside the process; it is given a
+          context carrying its own budget and MUST honour it.
+        name: Check
+        type: Check
+      - doc: |-
+          Timeout is this check's budget. A non-positive value is an unset field
+          and CLAMPS to the registry's configured default — never to zero, which
+          would turn a forgotten line into a check that fails before it runs
+          (ADR 0031).
+
+          A startup check is the one place a long budget is normal: a migration
+          is allowed to take a minute, and the startup probe is precisely the
+          signal that tells the orchestrator to keep waiting.
+        name: Timeout
+        type: time.Duration
+    kind: struct
+    name: StartupCheckValue
+  - fields:
+      - doc: |-
+          Name identifies the check in the report and in every error field. It
+          must be non-empty and unique among liveness checks.
+        name: Name
+        type: string
+      - doc: "Check is the body: process-local evidence only."
+        name: Check
+        type: SelfCheck
+      - doc: |-
+          Timeout is this check's budget, clamped exactly as
+          [StartupCheckValue.Timeout] is.
+
+          A SelfCheck cannot be cancelled — it has no context to cancel — so the
+          budget bounds the WAIT and not the work: the engine stops waiting,
+          reports the check as timed out, and does not start it again until the
+          abandoned run finally returns. A liveness check that can outlive a
+          budget is itself evidence worth reporting.
+        name: Timeout
+        type: time.Duration
+    kind: struct
+    name: LivenessCheckValue
+  - fields:
+      - doc: |-
+          Name identifies the check in the report and in every error field. It
+          must be non-empty and unique among readiness checks.
+        name: Name
+        type: string
+      - doc: |-
+          Check is the body. It is given a context carrying its own budget and
+          MUST honour it: a readiness endpoint that blocks is a second outage on
+          top of the one it was trying to report.
+        name: Check
+        type: Check
+      - doc: |-
+          Timeout is this check's budget, clamped exactly as
+          [StartupCheckValue.Timeout] is.
+        name: Timeout
+        type: time.Duration
+      - doc: |-
+          NonCritical downgrades this check's failure from unhealthy to degraded,
+          so the replica KEEPS taking traffic while the check fails.
+
+          The field is negative — NonCritical rather than Critical — so that its
+          zero value is the strict reading. A `Critical bool` would have made
+          every check somebody forgot to mark into one that can never take a
+          replica out of rotation, which is the failure worth making impossible.
+
+          Use it for a dependency whose absence degrades the response rather than
+          preventing it: a recommendation service, a metrics sink, a warm cache
+          in front of a datastore that also answers directly.
+        name: NonCritical
+        type: bool
+      - doc: |-
+          MaxAge caches this check's LAST SUCCESSFUL result for up to that long,
+          so an expensive check is not paid for on every poll.
+
+          Zero means no cache — every probe runs the check — because a probe that
+          silently reports a measurement nobody asked it to keep is the more
+          surprising of the two behaviours.
+
+          A value above the registry's ceiling is REFUSED at registration
+          (the service's StaleCacheWindow) rather than clamped: the caller asked for a
+          staleness the SDK will not vouch for, and quietly serving a different
+          number is the same lie in a smaller size.
+
+          Only SUCCESSES are cached. A failure is re-measured on every probe,
+          because the answer an operator needs promptly is the one that says the
+          outage ended.
+        name: MaxAge
+        type: time.Duration
+    kind: struct
+    name: ReadinessCheckValue
+  - kind: named
+    methods:
+      - name: String
+        recv: p Probe
+        results: string
+    name: Probe
+    underlying: uint8
+  - fields:
+      - doc: Name is the check's registered name.
+        name: Name
+        type: string
+      - doc: |-
+          Status is this check's verdict. A failing check is StatusUnhealthy, or
+          StatusDegraded when it was registered NonCritical.
+        name: Status
+        type: Status
+      - doc: |-
+          TimedOut reports that the check had not answered when its budget
+          expired. It is a FAILURE, not an unknown — see the package README and
+          ADR 0060 §D4 — and this flag is what distinguishes "the dependency said
+          no" from "the dependency said nothing".
+        name: TimedOut
+        type: bool
+      - doc: |-
+          Cached reports that this answer was not measured during this probe: it
+          is a previous success replayed within the check's MaxAge window. Age
+          says how old it is.
+        name: Cached
+        type: bool
+      - doc: |-
+          At is the instant the answer was MEASURED, read from the injected
+          clock. On a cached result that is when the original run finished, not
+          when the probe was served — reporting the probe's own instant would
+          erase the very staleness the cache introduced.
+        name: At
+        type: time.Time
+      - doc: |-
+          Took is how long the measurement took. On an abandoned check it is the
+          budget, because the engine does not know when the check eventually
+          returned and reporting a guess would be worse than reporting the fact.
+        name: Took
+        type: time.Duration
+      - doc: |-
+          Err is what the check returned, VERBATIM, so the caller's errors.Is
+          keeps working and an observation hook can log its Private half.
+
+          It is never rendered into an HTTP body as-is. A handler renders the
+          deepest errs Public it can find and a fixed SDK string otherwise, so a
+          driver message carrying a host, a port or a query never reaches a probe
+          response. See internal/service/app/health §"what the handler hides".
+        name: Err
+        type: error
+    kind: struct
+    methods:
+      - name: Age
+        params: now time.Time
+        recv: r ResultValue
+        results: time.Duration
+    name: ResultValue
+  - fields:
+      - doc: Probe says which question was asked.
+        name: Probe
+        type: Probe
+      - doc: |-
+          Status is the aggregate: the worst of Results, or the short-circuit
+          verdict when Results is empty. A probe with no checks at all is
+          StatusHealthy — the process answering IS the evidence (ADR 0031).
+        name: Status
+        type: Status
+      - doc: At is the instant the probe was answered, read from the injected clock.
+        name: At
+        type: time.Time
+      - doc: |-
+          Results carries one entry per check that contributed, in registration
+          order — never in completion order, which would make two identical
+          probes render differently and a diff of two responses unreadable.
+        name: Results
+        type: "[]ResultValue"
+    kind: struct
+    name: ReportValue
+  - kind: named
+    methods:
+      - name: String
+        recv: s Status
+        results: string
+      - name: Serving
+        recv: s Status
+        results: bool
+    name: Status
+    underlying: uint8

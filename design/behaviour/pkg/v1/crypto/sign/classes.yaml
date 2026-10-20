@@ -1,0 +1,51 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Ed25519 is the EdDSA signature scheme over Curve25519 (RFC 8032): a 256-bit
+      public key, fast constant-time verification, and no parameter choices.
+    items:
+      - name: Ed25519
+        type: Algorithm
+        value: "\"ed25519\""
+    name: Ed25519
+  - doc: |-
+      ECDSAP256 is ECDSA over NIST P-256 with SHA-256 and ASN.1/DER signatures — the
+      interoperable choice for JWT/X.509 ecosystems. Keys are DER-marshalled.
+    items:
+      - name: ECDSAP256
+        type: Algorithm
+        value: "\"ecdsa-p256\""
+    name: ECDSAP256
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Algorithm
+      - Ed25519
+      - ECDSAP256
+      - GenerateKey
+      - Sign
+      - Verify
+    name: sign.go
+functions:
+  - name: GenerateKey
+    params: a Algorithm
+    results: pub, priv []byte, err error
+  - name: Sign
+    params: a Algorithm, priv, message []byte
+    results: sig []byte, err error
+  - name: Verify
+    params: a Algorithm, pub, message, sig []byte
+    results: ok bool, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto/sign
+  name: sign
+  purpose: Package sign is the detached digital-signature facade.
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

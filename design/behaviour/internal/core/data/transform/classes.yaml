@@ -1,0 +1,64 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - registry
+      - Register
+      - publishCompressor
+      - Lookup
+      - Available
+    name: registry.go
+  - decls:
+      - Algorithm
+      - Algorithm.String
+      - Algorithm.Known
+    name: transform.go
+functions:
+  - name: Register
+    params: c Compressor
+    results: Compressor
+  - doc: |-
+      publishCompressor inserts (name -> c) into the registry. Returns a non-nil
+      error when name is already registered to a different scheme; re-registering
+      the same scheme is an idempotent no-op. The check and the insert are one
+      atomic step of the kernel table.
+    name: publishCompressor
+    params: name Algorithm, c Compressor
+    results: error
+  - name: Lookup
+    params: name Algorithm
+    results: c Compressor, ok bool
+  - name: Available
+    results: "[]Algorithm"
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/transform
+  name: transform
+  purpose: Package transform — range 0.2.5.* (ADR 0014 core/data/transform block), and the stdlib schemes' 0.3.26.* (ADR 0014 service/data/transform block, declared here since ADR 0160).
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: a Algorithm
+        results: string
+      - name: Known
+        recv: a Algorithm
+        results: bool
+    name: Algorithm
+    underlying: string
+vars:
+  - doc: |-
+      registry maps each Algorithm to its Compressor — the kernel's read-mostly,
+      copy-on-write table (kernel/plugin.Registry, ADR 0159): schemes register
+      exactly ONCE at import time and every other access is a lock-free Lookup.
+      What stays here is the domain's refusal: the code and reason a conflict
+      panics with.
+    items:
+      - name: registry
+        type: plugin.Registry[Algorithm, Compressor]
+    name: registry

@@ -1,0 +1,458 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*ndjsonCodec).Name
+    steps:
+      - return: "\"ndjson\""
+  - of: (*ndjsonCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*ndjsonCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*ndjsonCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonCodec).Marshal
+        kind: self
+      - id: marshalRawSliceTo
+        kind: internal
+      - id: asSlice
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: slice.Len
+        kind: value
+      - id: encodeSliceInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: out, nil
+          init:
+            bind: out, ok
+            eval: marshalRawSliceTo(nil, v)
+            to: marshalRawSliceTo
+          when: ok
+      - bind: slice, ok
+        eval: asSlice(v)
+        to: asSlice
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    corendjson.CodeNDJSONValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "NDJSON codec requires a slice value",
+                			Private: "service/data/codec/ndjson.Marshal: argument is not a slice",
+                		})
+          when: "!ok"
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: "n"
+        eval: slice.Len()
+        to: slice.Len
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                nil, errs.Wrap(merr, errs.WrapParams{
+                			Code:    corendjson.CodeNDJSONMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "NDJSON encoding failed",
+                			Private: "service/data/codec/ndjson.Marshal: encoding/json returned an error",
+                		})
+          init:
+            bind: merr
+            eval: encodeSliceInto(buf, n, func(i int) any { return elemForMarshal(slice, i) })
+            to: encodeSliceInto
+          when: merr != nil
+      - bind: out
+        eval: scratch.DetachBuffer(buf)
+        to: scratch
+      - return: out, nil
+  - of: encodeSliceInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeSliceInto
+        kind: self
+      - id: stdjson
+        kind: stdlib
+      - id: buf.Write
+        kind: value
+      - id: buf.WriteByte
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: line, merr
+              eval: stdjson.Marshal(getElem(i))
+              to: stdjson
+            - opt:
+                do:
+                  - return: merr
+                when: merr != nil
+            - eval: buf.Write(line)
+              to: buf.Write
+            - eval: buf.WriteByte('\n')
+              to: buf.WriteByte
+          key: i
+          range: "n"
+      - return: nil
+  - of: marshalRawSliceTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalRawSliceTo
+        kind: self
+      - id: appendNDJSONRaw
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: rows
+          cases:
+            - do:
+                - return: appendNDJSONRaw(dst, rawMessageView(rows))
+                  to: appendNDJSONRaw
+              types: "[]stdjson.RawMessage"
+            - do:
+                - return: appendNDJSONRaw(dst, rows)
+                  to: appendNDJSONRaw
+              types: "[][]byte"
+          "on": v
+      - return: nil, false
+  - of: rawMessageView
+    steps:
+      - return: "*(*[][]byte)(unsafe.Pointer(&rows))"
+  - of: appendNDJSONRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendNDJSONRaw
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: total
+        eval: len(rows)
+      - loop:
+          do:
+            - op: +=
+              set: total
+              value: len(r)
+          key: _
+          range: rows
+          value: r
+      - set: dst
+        to: slices
+        value: slices.Grow(dst, total)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, false
+                when: bytes.IndexByte(r, '\n') >= 0
+            - set: dst
+              value: append(dst, r...)
+            - set: dst
+              value: append(dst, '\n')
+          key: _
+          range: rows
+          value: r
+      - return: dst, true
+  - of: (*ndjsonCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonCodec).Unmarshal
+        kind: self
+      - id: asSlicePointer
+        kind: internal
+      - id: errs
+        kind: package
+      - id: decodeLines
+        kind: internal
+      - id: slicePtr.Elem().Set
+        kind: value
+    steps:
+      - bind: slicePtr, ok
+        eval: asSlicePointer(v)
+        to: asSlicePointer
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corendjson.CodeNDJSONValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "NDJSON codec requires a slice pointer target",
+                			Private: "service/data/codec/ndjson.Unmarshal: target is not a pointer to a slice",
+                		})
+              to: errs
+          when: "!ok"
+      - bind: result, derr
+        eval: decodeLines(data, slicePtr.Type().Elem())
+        to: decodeLines
+      - opt:
+          do:
+            - return: derr
+          when: derr != nil
+      - eval: slicePtr.Elem().Set(result)
+        to: slicePtr.Elem().Set
+      - return: nil
+  - of: decodeLines
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeLines
+        kind: self
+      - id: countNDJSONRecords
+        kind: internal
+      - id: reflect
+        kind: stdlib
+      - id: bytes
+        kind: stdlib
+      - id: stdjson
+        kind: stdlib
+      - id: out.Slice
+        kind: value
+    steps:
+      - bind: recordCount
+        eval: countNDJSONRecords(data)
+        to: countNDJSONRecords
+      - bind: out
+        eval: reflect.MakeSlice(sliceType, recordCount, recordCount)
+        to: reflect
+      - bind: decoded
+        eval: "0"
+      - bind: cursor
+        eval: "0"
+      - loop:
+          cond: cursor < len(data)
+          do:
+            - bind: nlOffset
+              eval: bytes.IndexByte(data[cursor:], '\n')
+              to: bytes
+            - var:
+                name: line
+                type: "[]byte"
+            - alt:
+                - do:
+                    - set: line
+                      value: data[cursor:]
+                    - set: cursor
+                      value: len(data)
+                  when: nlOffset < 0
+                - do:
+                    - set: line
+                      value: "data[cursor : cursor+nlOffset]"
+                    - op: +=
+                      set: cursor
+                      value: nlOffset + 1
+                  else: true
+            - opt:
+                do:
+                  - return: |-
+                      reflect.Value{}, errs.Wrap(nil, errs.WrapParams{
+                      				Code:    corendjson.CodeNDJSONUnmarshalFailed,
+                      				Reason:  "UNMARSHAL_FAILED",
+                      				Public:  "NDJSON record exceeds size limit",
+                      				Private: "service/data/codec/ndjson.Unmarshal: line length exceeds scannerMaxCapacity",
+                      			}, errs.Int("len", len(line)), errs.Int("cap", scannerMaxCapacity))
+                when: len(line) > scannerMaxCapacity
+            - set: line
+              to: bytes
+              value: bytes.TrimSpace(line)
+            - opt:
+                do:
+                  - continue: true
+                when: len(line) == 0
+            - opt:
+                do:
+                  - return: |-
+                      reflect.Value{}, errs.Wrap(uerr, errs.WrapParams{
+                      				Code:    corendjson.CodeNDJSONUnmarshalFailed,
+                      				Reason:  "UNMARSHAL_FAILED",
+                      				Public:  "NDJSON decoding failed",
+                      				Private: "service/data/codec/ndjson.Unmarshal: encoding/json returned an error",
+                      			})
+                init:
+                  bind: uerr
+                  eval: stdjson.Unmarshal(line, out.Index(decoded).Addr().Interface())
+                  to: stdjson
+                when: uerr != nil
+            - op: ++
+              set: decoded
+      - return: out.Slice(0, decoded), nil
+        to: out.Slice
+  - of: countNDJSONRecords
+    participants:
+      - id: caller
+        kind: actor
+      - id: countNDJSONRecords
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(data) == 0
+      - bind: count
+        eval: bytes.Count(data, []byte{'\n'})
+        to: bytes
+      - opt:
+          do:
+            - op: ++
+              set: count
+          when: data[len(data)-1] != '\n'
+      - return: count
+  - of: (*ndjsonCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonCodec).Append
+        kind: self
+      - id: marshalRawSliceTo
+        kind: internal
+      - id: asSlice
+        kind: internal
+      - id: stdjson
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: out, nil
+          init:
+            bind: out, ok
+            eval: marshalRawSliceTo(dst, v)
+            to: marshalRawSliceTo
+          when: ok
+      - bind: slice, ok
+        eval: asSlice(v)
+        to: asSlice
+      - opt:
+          do:
+            - return: |-
+                dst, errs.Wrap(nil, errs.WrapParams{
+                			Code:    corendjson.CodeNDJSONValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "NDJSON codec requires a slice value",
+                			Private: "service/data/codec/ndjson.Append: argument is not a slice",
+                		})
+          when: "!ok"
+      - bind: origLen
+        eval: len(dst)
+      - loop:
+          do:
+            - bind: line, merr
+              eval: stdjson.Marshal(elemForMarshal(slice, i))
+              to: stdjson
+            - opt:
+                do:
+                  - return: |-
+                      dst[:origLen], errs.Wrap(merr, errs.WrapParams{
+                      				Code:    corendjson.CodeNDJSONMarshalFailed,
+                      				Reason:  "MARSHAL_FAILED",
+                      				Public:  "NDJSON encoding failed",
+                      				Private: "service/data/codec/ndjson.Append: encoding/json returned an error",
+                      			})
+                when: merr != nil
+            - set: dst
+              value: append(dst, line...)
+            - set: dst
+              value: append(dst, '\n')
+          key: i
+          range: slice.Len()
+      - return: dst, nil
+  - of: elemForMarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: elemForMarshal
+        kind: self
+      - id: slice.Index
+        kind: value
+      - id: elem.Interface
+        kind: value
+      - id: elem.Addr().Interface
+        kind: value
+    steps:
+      - bind: elem
+        eval: slice.Index(i)
+        to: slice.Index
+      - opt:
+          do:
+            - return: elem.Interface()
+              to: elem.Interface
+          when: elem.Kind() == reflect.Interface || !elem.CanAddr()
+      - return: elem.Addr().Interface()
+        to: elem.Addr().Interface
+  - of: asSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: asSlice
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: rv.Elem
+        kind: value
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: reflect.Value{}, false
+                when: rv.IsNil()
+            - set: rv
+              to: rv.Elem
+              value: rv.Elem()
+          when: rv.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: rv, true
+          when: rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array
+      - return: reflect.Value{}, false
+  - of: asSlicePointer
+    participants:
+      - id: caller
+        kind: actor
+      - id: asSlicePointer
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: reflect.Value{}, false
+          when: rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Slice
+      - return: rv, true

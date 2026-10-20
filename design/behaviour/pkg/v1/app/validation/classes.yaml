@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/validation
+  name: validation
+  purpose: "Package validation is the public facade for the SDK's value-checking domain: a small set of constraints, the combinators that compose them, and a struct-tag front end — all producing one [Report] that says WHERE each failure is and WHY."
+types: []

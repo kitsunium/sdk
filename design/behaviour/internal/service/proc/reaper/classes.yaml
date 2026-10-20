@@ -1,0 +1,272 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      exitOSErr is sysexits.h EX_OSERR (71): the exit status the proc domain assigns
+      to OS-level operation failures, restated here so a wrapped errno carries the
+      same exit semantics as the central ReapFailed/SubreaperFailed sentinels.
+    items:
+      - name: exitOSErr
+        type: int
+        value: "71"
+    name: exitOSErr
+  - doc: |-
+      prSetChildSubreaper is the prctl(2) operation that marks the calling process
+      as a "child subreaper": orphaned descendants reparent to the nearest living
+      ancestor subreaper instead of PID1, so a non-init supervisor still receives
+      their SIGCHLD and can wait(2) them. The value is 36 on Linux and is not
+      exported by the standard syscall package, so it is named here. It is typed
+      uintptr to feed syscall.Syscall6 directly.
+    items:
+      - name: prSetChildSubreaper
+        type: uintptr
+        value: "36"
+    name: prSetChildSubreaper
+  - doc: |-
+      timerSweepEvery is zero: on Linux, darwin and the BSDs every exiting child
+      posts SIGCHLD, so the loop sweeps on the signal alone. illumos and Solaris
+      are the exception (timersweep_solaris.go).
+    items:
+      - name: timerSweepEvery
+        type: time.Duration
+        value: "0"
+    name: timerSweepEvery
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Option
+      - config
+      - WithOnReap
+      - resolve
+    name: reaper.go
+  - decls:
+      - exitOSErr
+      - unixReaper
+      - New
+      - (*unixReaper).Start
+      - (*unixReaper).loop
+      - (*unixReaper).Stop
+      - (*unixReaper).markStopped
+      - (*unixReaper).ReapOnce
+      - (*unixReaper).drain
+      - (*unixReaper).LastError
+      - (*unixReaper).drainResult
+      - (*unixReaper).classifyWaitErr
+      - (*unixReaper).fireOnReap
+      - IsPID1
+    name: reaper_unix.go
+  - decls:
+      - prSetChildSubreaper
+      - SetChildSubreaper
+    name: subreaper_linux.go
+  - decls:
+      - timerSweepEvery
+    name: timersweep_unix.go
+functions:
+  - name: WithOnReap
+    params: fn func(int)
+    results: Option
+  - doc: resolve folds opts onto a zero config, returning the accumulated settings.
+    name: resolve
+    params: opts []Option
+    results: config
+  - name: New
+    params: opts ...Option
+    results: coreproc.Reaper
+  - name: IsPID1
+    results: bool
+  - doc: |-
+      SetChildSubreaper marks the calling process as a child subreaper via
+      prctl(PR_SET_CHILD_SUBREAPER, 1) so orphaned descendants reparent here rather
+      than to PID1. It returns SubreaperFailed (wrapping the errno) on failure. It
+      is Linux-only; other Unix platforms have no equivalent and report
+      UnsupportedPlatform.
+    name: SetChildSubreaper
+    results: error
+imports:
+  childwait: github.com/kitsunium/sdk/internal/service/proc/childwait
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  os: os
+  signal: os/signal
+  sync: sync
+  syscall: syscall
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/reaper
+  name: reaper
+  purpose: Package reaper — the PID1 / subreaper zombie collector backing pkg/v1/proc/reaper.
+types:
+  - kind: named
+    name: Option
+    underlying: func(*config)
+  - doc: |-
+      config is the internal, mutable accumulator an Option mutates. It never
+      escapes the package: New copies the resolved values into the concrete reaper.
+    fields:
+      - doc: |-
+          onReap, when non-nil, is invoked after every drain sweep with the number
+          of children reaped in that sweep (including zero). It must not block; it
+          runs on the reaper's own goroutine or the ReapOnce caller's goroutine. On
+          illumos and Solaris the loop also sweeps once a second, so an idle reaper
+          there reports zero once a second.
+        name: onReap
+        type: func(int)
+    kind: struct
+    name: config
+  - doc: |-
+      unixReaper is the Unix coreproc.Reaper: a SIGCHLD-driven waitpid loop that
+      drains every terminated child to ECHILD on each signal, with a final drain on
+      Stop so shutdown leaves no zombies. One concrete reaper type per file.
+    fields:
+      - doc: "onReap mirrors config.onReap: an optional post-sweep observer."
+        name: onReap
+        type: func(int)
+      - doc: |-
+          clk is what the timer sweep ticks on: clock.System from New, a
+          ManualClock in a white-box test. Set before Start and never after.
+        name: clk
+        type: clock.Waiter
+      - doc: |-
+          sweepEvery is the timer sweep's period: timerSweepEvery from New, so
+          zero — no ticker at all — wherever every child's exit posts SIGCHLD. A
+          white-box test sets it to drive the illumos/Solaris path on any Unix.
+        name: sweepEvery
+        type: time.Duration
+      - doc: |-
+          notify subscribes the loop's channel to SIGCHLD: signal.Notify from New.
+          A white-box test of the timer sweep sets a
+          subscription that delivers nothing, as on illumos and Solaris, where a
+          child's exit posts no SIGCHLD: a signal is process-wide, and one from
+          any child's exit, even one reaped by an earlier test, would otherwise
+          pass for a tick. Set before Start and never after.
+        name: notify
+        type: func(c chan<- os.Signal, sig ...os.Signal)
+      - doc: |-
+          mu guards running/sigCh/done/closeDone/lastErr across Start/Stop and the
+          concurrent LastError read so repeated Start/Stop cycles neither
+          double-install a handler nor leak a goroutine. The collection itself is
+          serialised by childwait's own sweep lock and needs nothing from mu.
+        name: mu
+        type: sync.RWMutex
+      - doc: |-
+          running reports whether the background loop goroutine is live; it makes
+          Start idempotent and Stop safe without a prior Start. It stays true until
+          the goroutine has fully exited so a concurrent Stop cannot observe a torn
+          state and return before the loop is gone.
+        name: running
+        type: bool
+      - doc: |-
+          stopping reports that a Stop for the current cycle is already in flight; a
+          second concurrent Stop joins the same stopped channel instead of issuing a
+          duplicate close, and Start refuses to launch a new loop until shutdown
+          completes so a fresh cycle can never overlap a draining one.
+        name: stopping
+        type: bool
+      - doc: |-
+          sigCh receives SIGCHLD notifications from os/signal while running; the loop
+          owns its lifecycle and detaches it via defer signal.Stop on exit.
+        name: sigCh
+        type: chan os.Signal
+      - doc: |-
+          done requests the loop's final drain and exit; closeDone guards the close
+          so even a mis-sequenced concurrent Stop never double-closes the channel.
+        name: done
+        type: chan struct{}
+      - doc: |-
+          closeDone closes done exactly once per Start/Stop cycle; it is reset to a
+          fresh Once on every Start so a later cycle can close again.
+        name: closeDone
+        type: "*sync.Once"
+      - doc: |-
+          stopped is closed by the loop just before it returns, letting Stop block
+          until the goroutine has fully exited (no goroutine leak across cycles).
+        name: stopped
+        type: chan struct{}
+      - doc: |-
+          lastErr records the most recent error a background sweep hit (nil on a
+          clean sweep). It is guarded by mu and surfaced via LastError so a
+          background reap failure is observable without blocking the loop.
+        name: lastErr
+        type: error
+    kind: struct
+    methods:
+      - doc: |-
+          Start begins the background SIGCHLD loop. It is idempotent: a second Start
+          while already running is a no-op.
+        name: Start
+        recv: r *unixReaper
+      - doc: |-
+          loop drains children on each SIGCHLD — and, on illumos and Solaris, on a
+          timer as well (timersweep_solaris.go) — until done is closed, then performs
+          one final drain so no zombie outlives Stop, detaches the signal handler, and
+          closes stopped to acknowledge.
+        name: loop
+        params: sigCh chan os.Signal, done, stopped chan struct{}
+        recv: r *unixReaper
+      - doc: |-
+          Stop ends the background loop after a final draining sweep and blocks until
+          the goroutine has exited. It is safe to call without a prior Start and is
+          idempotent across repeated calls.
+        name: Stop
+        recv: r *unixReaper
+      - doc: |-
+          markStopped clears the per-cycle running/stopping flags under the lock. The
+          loop runs it via defer just before it closes stopped, so every Stop caller
+          that wakes on <-stopped observes a fully idle reaper rather than a torn,
+          mid-teardown state.
+        name: markStopped
+        recv: r *unixReaper
+      - doc: |-
+          ReapOnce performs a single non-blocking drain sweep and reports how many
+          children were collected. It is safe to call concurrently with the background
+          loop: each collection is serialised by the child ledger, so the count is
+          simply split across whoever observes each exit — and a child a Process handle
+          spawned has its status handed to that handle whichever sweep takes it.
+        name: ReapOnce
+        recv: r *unixReaper
+        results: reaped int, err error
+      - doc: |-
+          drain runs a sweep on the loop's own path, recording any error into lastErr
+          so a background failure stays observable via LastError while the loop keeps
+          running (the next SIGCHLD retries). The count surfaces through onReap.
+        name: drain
+        recv: r *unixReaper
+      - doc: |-
+          LastError reports the error from the most recent background drain sweep, or
+          nil if the last sweep was clean. It is safe to call concurrently with the
+          loop. ReapOnce returns its own error directly; this is only for the loop path.
+        name: LastError
+        recv: r *unixReaper
+        results: error
+      - doc: |-
+          drainResult repeatedly collects any exited child until none is left,
+          returning the count and (on a non-ECHILD failure) a ReapFailed error.
+          ECHILD ("no children") and 0 ("children exist, none exited") both end the
+          sweep without error.
+
+          Each collection is childwait.ReapAny, never a bare wait4(-1): the sweep
+          takes ANY child, including one a Process handle spawned and is waiting for,
+          and ReapAny hands such a child's status to the handle before it returns. A
+          bare wait4 here discarded it, and the handle then reported a clean exit as
+          WAIT_FAILED (ADR 0093).
+        name: drainResult
+        recv: r *unixReaper
+        results: reaped int, err error
+      - doc: |-
+          classifyWaitErr maps a non-nil Wait4 errno to (done, fatal): done=false means
+          retry (EINTR); done=true with fatal=nil means a benign ECHILD end; done=true
+          with a non-nil fatal means a wrapped ReapFailed. It fires the onReap observer
+          on every terminal outcome so the sweep count is always reported once.
+        name: classifyWaitErr
+        params: waitErr error, reaped int
+        recv: r *unixReaper
+        results: done bool, fatal error
+      - doc: fireOnReap invokes the optional post-sweep observer with n, if one is set.
+        name: fireOnReap
+        params: n int
+        recv: r *unixReaper
+    name: unixReaper

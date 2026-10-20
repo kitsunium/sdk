@@ -1,0 +1,122 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: EntryKind.Known
+    steps:
+      - return: k >= EntryCommand && k <= EntryTransfer
+  - of: NodeID.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: NodeID.String
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - return: strconv.FormatUint(uint64(id), 10)
+        to: strconv
+  - of: Incarnation.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: Incarnation.String
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - return: hex.EncodeToString(i[:])
+        to: hex
+  - of: Incarnation.IsZero
+    steps:
+      - return: i == Incarnation{}
+  - of: ClusterID.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClusterID.String
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - return: hex.EncodeToString(c[:])
+        to: hex
+  - of: ClusterID.IsZero
+    steps:
+      - return: c == ClusterID{}
+  - of: LogIdentityValue.Same
+    steps:
+      - return: l.Cluster == o.Cluster && l.Epoch == o.Epoch
+  - of: TokenValue.Position
+    steps:
+      - return: "PositionValue{Term: t.Term, Index: t.Index}"
+  - of: MembershipValue.IsRetired
+    participants:
+      - id: caller
+        kind: actor
+      - id: MembershipValue.IsRetired
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(m.Retired, id)
+        to: slices
+  - of: MembershipValue.Clone
+    steps:
+      - return: |-
+          MembershipValue{
+          		Index: m.Index,
+          		// append(s[:0:0], s...) is the copy slices.Clone makes, nil kept nil,
+          		// written out because slices.Clone's own body would push the engine's
+          		// ConfAt, which inlines this method, past the inliner's budget.
+          		Members: append(m.Members[:0:0], m.Members...),
+          		Retired: append(m.Retired[:0:0], m.Retired...),
+          	}
+  - of: MessageKind.Lane
+    steps:
+      - return: FrameLane(k >> 6)
+  - of: MessageKind.Known
+    steps:
+      - return: (k >= MsgPreVote && k <= MsgForwardAdminResp) || (k >= MsgApp && k <= MsgForwardResp)
+  - of: Role.String
+    steps:
+      - switch:
+          cases:
+            - case: RoleFollower
+              do:
+                - return: "\"follower\""
+            - case: RolePreCandidate
+              do:
+                - return: "\"pre-candidate\""
+            - case: RoleCandidate
+              do:
+                - return: "\"candidate\""
+            - case: RoleLeader
+              do:
+                - return: "\"leader\""
+            - case: RoleLearner
+              do:
+                - return: "\"learner\""
+          "on": r
+      - return: "\"unknown\""
+  - of: (*StatusValue).Precondition
+    steps:
+      - return: "PreconditionSpec{Log: s.Log, Alarm: s.NoSpace, Generation: s.Timing.Generation}"
+  - of: StopReasonValue.ExitCode
+    participants:
+      - id: caller
+        kind: actor
+      - id: StopReasonValue.ExitCode
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: exitCantCreate
+          when: s.Unmarked
+      - opt:
+          do:
+            - return: "0"
+          when: s.Err == nil
+      - return: errs.ExitCodeOf(s.Err)
+        to: errs

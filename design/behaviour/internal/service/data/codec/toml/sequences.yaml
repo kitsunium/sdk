@@ -1,0 +1,6065 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*tomlCodec).Name
+    steps:
+      - return: "\"toml\""
+  - of: (*tomlCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*tomlCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*tomlCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlCodec).Marshal
+        kind: self
+      - id: scratch
+        kind: package
+      - id: encodeDocument
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: buf.Write
+        kind: value
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: out, err
+        eval: encodeDocument(buf.AvailableBuffer(), v)
+        to: encodeDocument
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: nil, err
+          when: err != nil
+      - set: encoded
+        to: slices
+        value: slices.Clone(out)
+      - opt:
+          do:
+            - eval: buf.Write(out)
+              to: buf.Write
+          when: cap(out) > buf.Cap()
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: encoded, nil
+  - of: (*tomlCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlCodec).Unmarshal
+        kind: self
+      - id: unmarshal
+        kind: internal
+    steps:
+      - return: unmarshal(data, v)
+        to: unmarshal
+  - of: (*tomlCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlCodec).Append
+        kind: self
+      - id: encodeDocument
+        kind: internal
+    steps:
+      - return: encodeDocument(dst, v)
+        to: encodeDocument
+  - of: (*tomlCodec).NewEncoder
+    steps:
+      - return: "&tomlEncoder{w: w}"
+  - of: (*tomlCodec).NewDecoder
+    steps:
+      - return: "&tomlDecoder{r: r}"
+  - of: unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: reflect
+        kind: stdlib
+      - id: parserPool.Get
+        kind: value
+      - id: parserPool.Put
+        kind: value
+      - id: p.parse
+        kind: internal
+      - id: d.root
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
+                			errs.String(fieldProblem, problemTooLarge), errs.Int(fieldLimit, maxDocumentBytes))
+              to: errs
+          when: len(data) > maxDocumentBytes
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
+                			errs.String(fieldProblem, problemTarget), errs.String(fieldType, typeName(rv)))
+              to: errs
+          when: rv.Kind() != reflect.Pointer || rv.IsNil()
+      - bind: p
+        eval: parserPool.Get()
+        to: parserPool.Get
+      - defer: parserPool.Put(p)
+        to: parserPool.Put
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: p.parse(data)
+            to: p.parse
+          when: err != nil
+      - bind: d
+        eval: "decoder{p: p}"
+      - return: d.root(v, rv.Elem())
+        to: d.root
+  - of: typeName
+    participants:
+      - id: caller
+        kind: actor
+      - id: typeName
+        kind: self
+      - id: v.Type().String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"nil\""
+          when: "!v.IsValid()"
+      - return: v.Type().String()
+        to: v.Type().String
+  - of: (*decoder).root
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).root
+        kind: self
+      - id: d.anyTable
+        kind: internal
+      - id: d.mergeTable
+        kind: internal
+      - id: d.anyInto
+        kind: internal
+      - id: d.value
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: m
+          cases:
+            - do:
+                - alt:
+                    - do:
+                        - set: "*m"
+                          to: d.anyTable
+                          value: d.anyTable(rootNode)
+                      when: "*m == nil"
+                    - do:
+                        - eval: d.mergeTable(rootNode, *m)
+                          to: d.mergeTable
+                      else: true
+                - return: nil
+              types: "*map[string]any"
+            - do:
+                - set: "*m"
+                  to: d.anyInto
+                  value: d.anyInto(rootNode, *m)
+                - return: nil
+              types: "*any"
+            - default: true
+              do:
+                - return: d.value(rootNode, target)
+                  to: d.value
+          "on": v
+  - of: (*decoder).anyInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).anyInto
+        kind: self
+      - id: d.mergeTable
+        kind: internal
+      - id: d.anyTable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.mergeTable(n, m)
+              to: d.mergeTable
+            - return: m
+          init:
+            bind: m, ok
+            eval: existing.(map[string]any)
+          when: ok && m != nil
+      - return: d.anyTable(n)
+        to: d.anyTable
+  - of: (*decoder).mergeTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).mergeTable
+        kind: self
+      - id: d.keyString
+        kind: internal
+      - id: d.anyInto
+        kind: internal
+      - id: d.anyValue
+        kind: internal
+    steps:
+      - bind: nodes
+        eval: d.p.nodes
+      - loop:
+          cond: c != noNode
+          do:
+            - bind: key
+              eval: d.keyString(c)
+              to: d.keyString
+            - opt:
+                do:
+                  - set: m[key]
+                    to: d.anyInto
+                    value: d.anyInto(c, m[key])
+                  - continue: true
+                when: d.merges(c)
+            - set: m[key]
+              to: d.anyValue
+              value: d.anyValue(c)
+          init: c := nodes[t].first
+          post: c = nodes[c].next
+  - of: (*decoder).merges
+    steps:
+      - bind: node
+        eval: "&d.p.nodes[c]"
+      - return: node.kind == kindTable && node.origin != originInline
+  - of: (*decoder).keyString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).keyString
+        kind: self
+      - id: d.p.internKey
+        kind: internal
+    steps:
+      - return: d.p.internKey(d.p.keyBytes(&d.p.nodes[c]))
+        to: d.p.internKey
+  - of: (*decoder).anyTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).anyTable
+        kind: self
+      - id: d.anyValue
+        kind: internal
+    steps:
+      - bind: nodes
+        eval: d.p.nodes
+      - bind: m
+        eval: make(map[string]any, nodes[t].count)
+      - loop:
+          cond: c != noNode
+          do:
+            - set: m[d.keyString(c)]
+              to: d.anyValue
+              value: d.anyValue(c)
+          init: c := nodes[t].first
+          post: c = nodes[c].next
+      - return: m
+  - of: (*decoder).anyArray
+    steps:
+      - bind: nodes
+        eval: d.p.nodes
+      - bind: out
+        eval: make([]any, 0, nodes[n].count)
+      - loop:
+          cond: c != noNode
+          do:
+            - set: out
+              value: append(out, d.anyValue(c))
+          init: c := nodes[n].first
+          post: c = nodes[c].next
+      - return: out
+  - of: (*decoder).anyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).anyValue
+        kind: self
+      - id: d.anyTable
+        kind: internal
+      - id: d.anyArray
+        kind: internal
+      - id: d.scalarAny
+        kind: internal
+    steps:
+      - bind: node
+        eval: "&d.p.nodes[n]"
+      - switch:
+          cases:
+            - case: kindTable
+              do:
+                - return: d.anyTable(n)
+                  to: d.anyTable
+            - case: kindArray, kindArrayOfTables
+              do:
+                - return: d.anyArray(n)
+                  to: d.anyArray
+            - case: kindString
+              do:
+                - return: string(d.p.textBytes(node))
+            - default: true
+              do:
+                - return: d.scalarAny(node)
+                  to: d.scalarAny
+          "on": node.kind
+  - of: (*decoder).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).fail
+        kind: self
+      - id: position
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: line, _
+        eval: position(d.p.data, int(d.p.nodes[n].at))
+        to: position
+      - bind: fields
+        eval: |-
+          []errs.FieldValue{
+          		errs.String(fieldProblem, problem),
+          		errs.String(fieldKey, d.keyPath(n)),
+          		errs.Int(fieldLine, line),
+          		errs.String(fieldTOML, kindNames[d.p.nodes[n].kind]),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.String(fieldType, target.String()))
+          when: target != nil
+      - return: errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{}, fields...)
+        to: errs
+  - of: (*decoder).keyPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).keyPath
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: parts
+          type: "[]string"
+      - loop:
+          cond: c != noNode && c != rootNode
+          do:
+            - bind: node
+              eval: "&d.p.nodes[c]"
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: parentKind
+                  eval: d.p.nodes[node.parent].kind
+                when: parentKind == kindArray || parentKind == kindArrayOfTables
+            - set: parts
+              value: append(parts, d.quotedKey(c))
+          init: c := n
+          post: c = d.p.nodes[c].parent
+      - loop:
+          cond: i < j
+          do:
+            - set: parts[i], parts[j]
+              value: parts[j], parts[i]
+          init: i, j := 0, len(parts)-1
+          post: i, j = i+1, j-1
+      - return: strings.Join(parts, ".")
+        to: strings
+  - of: (*decoder).quotedKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).quotedKey
+        kind: self
+      - id: quoteKey
+        kind: internal
+    steps:
+      - return: quoteKey(d.keyString(c))
+        to: quoteKey
+  - of: quoteKey
+    steps:
+      - opt:
+          do:
+            - return: key
+          when: isBareKey(key)
+      - return: string(appendBasicString(nil, key))
+  - of: (*decoder).scalarAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).scalarAny
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: instantOf
+        kind: internal
+      - id: d.localAny
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: kindInteger
+              do:
+                - return: int64(node.num)
+            - case: kindFloat
+              do:
+                - return: math.Float64frombits(node.num)
+                  to: math
+            - case: kindBool
+              do:
+                - return: node.num == 1
+            - case: kindDateTime
+              do:
+                - return: instantOf(&d.p.times[node.num])
+                  to: instantOf
+            - default: true
+              do:
+                - return: d.localAny(node)
+                  to: d.localAny
+          "on": node.kind
+  - of: (*decoder).localAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).localAny
+        kind: self
+      - id: localDateOf
+        kind: internal
+      - id: localTimeOf
+        kind: internal
+    steps:
+      - bind: dt
+        eval: "&d.p.times[node.num]"
+      - switch:
+          cases:
+            - case: kindLocalDate
+              do:
+                - return: localDateOf(dt)
+                  to: localDateOf
+            - case: kindLocalTime
+              do:
+                - return: localTimeOf(dt)
+                  to: localTimeOf
+            - default: true
+              do:
+                - return: "LocalDateTime{LocalDate: localDateOf(dt), LocalTime: localTimeOf(dt)}"
+          "on": node.kind
+  - of: instantOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: instantOf
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: zone
+        eval: time.UTC
+      - opt:
+          do:
+            - set: zone
+              to: time
+              value: time.FixedZone("", dt.offset)
+          when: dt.offset != 0
+      - return: time.Date(dt.year, time.Month(dt.month), dt.day, dt.hour, dt.minute, dt.second, dt.nanosecond, zone)
+        to: time
+  - of: (*decoder).scalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).scalar
+        kind: self
+      - id: infoOf
+        kind: internal
+      - id: d.temporal
+        kind: internal
+      - id: d.native
+        kind: internal
+      - id: d.unmarshalText
+        kind: internal
+      - id: d.fail
+        kind: internal
+    steps:
+      - bind: node
+        eval: "&d.p.nodes[n]"
+      - bind: info
+        eval: infoOf(v.Type())
+        to: infoOf
+      - opt:
+          do:
+            - return: d.temporal(n, v)
+              to: d.temporal
+          when: node.kind >= kindDateTime
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: held, err
+            eval: d.native(n, v)
+            to: d.native
+          when: held
+      - opt:
+          do:
+            - return: d.unmarshalText(n, v, d.p.textBytes(node))
+              to: d.unmarshalText
+          when: info.is(typeTextUnmarshaler)
+      - return: d.fail(n, problemMismatch, v.Type())
+        to: d.fail
+  - of: (*decoder).native
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).native
+        kind: self
+      - id: d.setString
+        kind: internal
+      - id: d.setInteger
+        kind: internal
+      - id: d.setFloat
+        kind: internal
+      - id: d.setBool
+        kind: internal
+    steps:
+      - bind: node
+        eval: "&d.p.nodes[n]"
+      - switch:
+          cases:
+            - case: kindString
+              do:
+                - return: d.setString(n, v), nil
+                  to: d.setString
+            - case: kindInteger
+              do:
+                - return: d.setInteger(n, v)
+                  to: d.setInteger
+            - case: kindFloat
+              do:
+                - return: d.setFloat(n, v, math.Float64frombits(node.num))
+                  to: d.setFloat
+            - case: kindBool
+              do:
+                - return: d.setBool(n, v), nil
+                  to: d.setBool
+            - default: true
+              do:
+                - return: false, nil
+          "on": node.kind
+  - of: (*decoder).setString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).setString
+        kind: self
+      - id: v.SetString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: v.Kind() != reflect.String
+      - eval: v.SetString(string(d.p.textBytes(&d.p.nodes[n])))
+        to: v.SetString
+      - return: "true"
+  - of: (*decoder).setInteger
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).setInteger
+        kind: self
+      - id: v.SetInt
+        kind: value
+      - id: v.SetUint
+        kind: value
+      - id: d.setFloat
+        kind: internal
+    steps:
+      - bind: i
+        eval: int64(d.p.nodes[n].num)
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - opt:
+                    do:
+                      - return: true, d.fail(n, problemOverflow, v.Type())
+                    when: v.OverflowInt(i)
+                - eval: v.SetInt(i)
+                  to: v.SetInt
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - opt:
+                    do:
+                      - return: true, d.fail(n, problemOverflow, v.Type())
+                    when: i < 0 || v.OverflowUint(uint64(i))
+                - eval: v.SetUint(uint64(i))
+                  to: v.SetUint
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: d.setFloat(n, v, float64(i))
+                  to: d.setFloat
+            - default: true
+              do:
+                - return: false, nil
+          "on": v.Kind()
+      - return: true, nil
+  - of: (*decoder).setFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).setFloat
+        kind: self
+      - id: v.SetFloat
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: v.Kind() != reflect.Float32 && v.Kind() != reflect.Float64
+      - opt:
+          do:
+            - return: true, d.fail(n, problemOverflow, v.Type())
+          when: v.Kind() == reflect.Float32 && !math.IsInf(f, 0) && math.Abs(f) > math.MaxFloat32
+      - eval: v.SetFloat(f)
+        to: v.SetFloat
+      - return: true, nil
+  - of: (*decoder).setBool
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).setBool
+        kind: self
+      - id: v.SetBool
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: v.Kind() != reflect.Bool
+      - eval: v.SetBool(d.p.nodes[n].num == 1)
+        to: v.SetBool
+      - return: "true"
+  - of: (*decoder).temporal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).temporal
+        kind: self
+      - id: v.Type
+        kind: value
+      - id: d.asTime
+        kind: internal
+      - id: d.localAny
+        kind: internal
+      - id: d.fail
+        kind: internal
+      - id: v.Set
+        kind: value
+    steps:
+      - bind: node
+        eval: "&d.p.nodes[n]"
+      - bind: dt
+        eval: "&d.p.times[node.num]"
+      - var:
+          name: out
+          type: any
+      - switch:
+          cases:
+            - case: t == timeType
+              do:
+                - set: out
+                  to: d.asTime
+                  value: d.asTime(node.kind, dt)
+            - case: node.kind != kindDateTime && t == localTypeOf(node.kind)
+              do:
+                - set: out
+                  to: d.localAny
+                  value: d.localAny(node)
+            - default: true
+              do:
+                - return: d.fail(n, problemMismatch, t)
+                  to: d.fail
+          init:
+            bind: t
+            eval: v.Type()
+            to: v.Type
+      - eval: v.Set(reflect.ValueOf(out))
+        to: v.Set
+      - return: nil
+  - of: (*decoder).asTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).asTime
+        kind: self
+      - id: instantOf
+        kind: internal
+      - id: time
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: kindDateTime
+              do:
+                - return: instantOf(dt)
+                  to: instantOf
+            - case: kindLocalTime
+              do:
+                - return: time.Date(0, time.January, 1, dt.hour, dt.minute, dt.second, dt.nanosecond, localZone)
+                  to: time
+            - default: true
+              do:
+                - return: time.Date(dt.year, time.Month(dt.month), dt.day, dt.hour, dt.minute, dt.second, dt.nanosecond, localZone)
+                  to: time
+          "on": k
+  - of: localTypeOf
+    steps:
+      - switch:
+          cases:
+            - case: kindLocalDate
+              do:
+                - return: localDateType
+            - case: kindLocalTime
+              do:
+                - return: localTimeType
+            - default: true
+              do:
+                - return: localDateTimeType
+          "on": k
+  - of: (*decoder).wrapFail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).wrapFail
+        kind: self
+      - id: position
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: line, _
+        eval: position(d.p.data, int(d.p.nodes[n].at))
+        to: position
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coretoml.CodeTOMLUnmarshalFailed,
+          		Reason:  coretoml.UnmarshalFailed.Reason(),
+          		Public:  coretoml.UnmarshalFailed.Public(),
+          		Private: privateTextRefused,
+          	}, errs.String(fieldProblem, problemText), errs.String(fieldKey, d.keyPath(n)),
+          		errs.Int(fieldLine, line), errs.String(fieldType, target.String()))
+        to: errs
+  - of: (*decoder).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).value
+        kind: self
+      - id: allocPointers
+        kind: internal
+      - id: d.fail
+        kind: internal
+      - id: d.intoInterface
+        kind: internal
+      - id: d.table
+        kind: internal
+      - id: d.array
+        kind: internal
+      - id: d.scalar
+        kind: internal
+    steps:
+      - bind: v, ok
+        eval: allocPointers(v)
+        to: allocPointers
+      - opt:
+          do:
+            - return: d.fail(n, problemPointerLoop, v.Type())
+              to: d.fail
+          when: "!ok"
+      - opt:
+          do:
+            - return: d.intoInterface(n, v)
+              to: d.intoInterface
+          when: v.Kind() == reflect.Interface
+      - switch:
+          cases:
+            - case: kindTable
+              do:
+                - return: d.table(n, v)
+                  to: d.table
+            - case: kindArray, kindArrayOfTables
+              do:
+                - return: d.array(n, v)
+                  to: d.array
+            - default: true
+              do:
+                - return: d.scalar(n, v)
+                  to: d.scalar
+          "on": d.p.nodes[n].kind
+  - of: allocPointers
+    participants:
+      - id: caller
+        kind: actor
+      - id: allocPointers
+        kind: self
+      - id: v.Set
+        kind: value
+      - id: v.Elem
+        kind: value
+    steps:
+      - loop:
+          cond: v.Kind() == reflect.Pointer
+          do:
+            - opt:
+                do:
+                  - return: v, false
+                when: hops == maxDepth
+            - opt:
+                do:
+                  - eval: v.Set(reflect.New(v.Type().Elem()))
+                    to: v.Set
+                when: v.IsNil()
+            - set: v
+              to: v.Elem
+              value: v.Elem()
+          init: hops := int32(0)
+          post: hops++
+      - return: v, true
+  - of: (*decoder).intoInterface
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).intoInterface
+        kind: self
+      - id: v.Elem().Interface
+        kind: value
+      - id: d.anyInto
+        kind: internal
+      - id: d.anyValue
+        kind: internal
+      - id: reflect
+        kind: stdlib
+      - id: d.fail
+        kind: internal
+      - id: v.Set
+        kind: value
+    steps:
+      - var:
+          name: current
+          type: any
+      - opt:
+          do:
+            - set: current
+              to: v.Elem().Interface
+              value: v.Elem().Interface()
+          when: "!v.IsNil()"
+      - var:
+          name: decoded
+          type: any
+      - alt:
+          - do:
+              - set: decoded
+                to: d.anyInto
+                value: d.anyInto(n, current)
+            when: d.merges(n)
+          - do:
+              - set: decoded
+                to: d.anyValue
+                value: d.anyValue(n)
+            else: true
+      - bind: dv
+        eval: reflect.ValueOf(decoded)
+        to: reflect
+      - opt:
+          do:
+            - return: d.fail(n, problemMismatch, v.Type())
+              to: d.fail
+          when: "!dv.Type().AssignableTo(v.Type())"
+      - eval: v.Set(dv)
+        to: v.Set
+      - return: nil
+  - of: (*decoder).table
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).table
+        kind: self
+      - id: d.structFields
+        kind: internal
+      - id: d.mapEntries
+        kind: internal
+      - id: d.tableIntoSlice
+        kind: internal
+      - id: d.tableIntoArray
+        kind: internal
+      - id: d.fail
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - return: d.structFields(n, v)
+                  to: d.structFields
+            - case: reflect.Map
+              do:
+                - return: d.mapEntries(n, v)
+                  to: d.mapEntries
+            - case: reflect.Slice
+              do:
+                - return: d.tableIntoSlice(n, v)
+                  to: d.tableIntoSlice
+            - case: reflect.Array
+              do:
+                - return: d.tableIntoArray(n, v)
+                  to: d.tableIntoArray
+            - default: true
+              do:
+                - return: d.fail(n, problemMismatch, v.Type())
+                  to: d.fail
+          "on": v.Kind()
+  - of: (*decoder).tableIntoSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).tableIntoSlice
+        kind: self
+      - id: d.fail
+        kind: internal
+      - id: v.Set
+        kind: value
+      - id: d.value
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.fail(n, problemMismatch, v.Type())
+              to: d.fail
+          when: d.p.nodes[n].origin == originInline
+      - opt:
+          do:
+            - eval: v.Set(reflect.Append(v, reflect.New(v.Type().Elem()).Elem()))
+              to: v.Set
+          when: v.Len() == 0
+      - return: d.value(n, v.Index(v.Len()-1))
+        to: d.value
+  - of: (*decoder).tableIntoArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).tableIntoArray
+        kind: self
+      - id: d.fail
+        kind: internal
+      - id: d.value
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.fail(n, problemMismatch, v.Type())
+              to: d.fail
+          init:
+            bind: from
+            eval: d.p.nodes[n].origin
+          when: from != originImplicit && from != originDotted
+      - opt:
+          do:
+            - return: d.fail(n, problemArrayTooShort, v.Type())
+              to: d.fail
+          when: v.Len() == 0
+      - return: d.value(n, v.Index(0))
+        to: d.value
+  - of: (*decoder).structFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).structFields
+        kind: self
+      - id: infoOf
+        kind: internal
+      - id: info.lookup
+        kind: internal
+      - id: d.field
+        kind: internal
+      - id: d.value
+        kind: internal
+    steps:
+      - bind: info
+        eval: infoOf(v.Type())
+        to: infoOf
+      - bind: nodes
+        eval: d.p.nodes
+      - loop:
+          cond: c != noNode
+          do:
+            - bind: f, ok
+              eval: info.lookup(d.p.keyBytes(&nodes[c]))
+              to: info.lookup
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - bind: fv, err
+              eval: d.field(c, v, f.index)
+              to: d.field
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.value(c, fv)
+                  to: d.value
+                when: err != nil
+          init: c := nodes[n].first
+          post: c = nodes[c].next
+      - return: nil
+  - of: (*decoder).field
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).field
+        kind: self
+      - id: v.Set
+        kind: value
+      - id: v.Elem
+        kind: value
+      - id: v.Field
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - opt:
+                            do:
+                              - return: reflect.Value{}, d.fail(c, problemEmbedded, v.Type())
+                            when: "!v.CanSet()"
+                        - eval: v.Set(reflect.New(v.Type().Elem()))
+                          to: v.Set
+                      when: v.IsNil()
+                  - set: v
+                    to: v.Elem
+                    value: v.Elem()
+                when: i > 0 && v.Kind() == reflect.Pointer
+            - set: v
+              to: v.Field
+              value: v.Field(step)
+          key: i
+          range: index
+          value: step
+      - return: v, nil
+  - of: (*decoder).mapEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).mapEntries
+        kind: self
+      - id: v.Type
+        kind: value
+      - id: v.Set
+        kind: value
+      - id: reflect.New(t.Key()).Elem
+        kind: value
+      - id: reflect.New(t.Elem()).Elem
+        kind: value
+      - id: d.mapKey
+        kind: internal
+      - id: elem.SetZero
+        kind: value
+      - id: v.MapIndex
+        kind: value
+      - id: elem.Set
+        kind: value
+      - id: d.value
+        kind: internal
+      - id: v.SetMapIndex
+        kind: value
+    steps:
+      - bind: t
+        eval: v.Type()
+        to: v.Type
+      - opt:
+          do:
+            - eval: v.Set(reflect.MakeMapWithSize(t, int(d.p.nodes[n].count)))
+              to: v.Set
+          when: v.IsNil() || !d.merges(n)
+      - bind: key
+        eval: reflect.New(t.Key()).Elem()
+        to: reflect.New(t.Key()).Elem
+      - bind: elem
+        eval: reflect.New(t.Elem()).Elem()
+        to: reflect.New(t.Elem()).Elem
+      - bind: nodes
+        eval: d.p.nodes
+      - loop:
+          cond: c != noNode
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.mapKey(c, key)
+                  to: d.mapKey
+                when: err != nil
+            - eval: elem.SetZero()
+              to: elem.SetZero
+            - opt:
+                do:
+                  - eval: elem.Set(existing)
+                    to: elem.Set
+                init:
+                  bind: existing
+                  eval: v.MapIndex(key)
+                  to: v.MapIndex
+                when: existing.IsValid()
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.value(c, elem)
+                  to: d.value
+                when: err != nil
+            - eval: v.SetMapIndex(key, elem)
+              to: v.SetMapIndex
+          init: c := nodes[n].first
+          post: c = nodes[c].next
+      - return: nil
+  - of: (*decoder).mapKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).mapKey
+        kind: self
+      - id: d.p.keyBytes
+        kind: internal
+      - id: key.SetString
+        kind: value
+      - id: setIntKey
+        kind: internal
+      - id: setUintKey
+        kind: internal
+      - id: setFloatKey
+        kind: internal
+      - id: d.textKey
+        kind: internal
+      - id: d.fail
+        kind: internal
+    steps:
+      - bind: raw
+        eval: d.p.keyBytes(&d.p.nodes[c])
+        to: d.p.keyBytes
+      - var:
+          name: ok
+          type: bool
+      - switch:
+          cases:
+            - case: reflect.String
+              do:
+                - eval: key.SetString(d.p.internKey(raw))
+                  to: key.SetString
+                - set: ok
+                  value: "true"
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - set: ok
+                  to: setIntKey
+                  value: setIntKey(key, raw)
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - set: ok
+                  to: setUintKey
+                  value: setUintKey(key, raw)
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - set: ok
+                  to: setFloatKey
+                  value: setFloatKey(key, raw)
+            - default: true
+              do:
+                - return: d.textKey(c, key, raw)
+                  to: d.textKey
+          "on": key.Kind()
+      - opt:
+          do:
+            - return: d.fail(c, problemMapKey, key.Type())
+              to: d.fail
+          when: "!ok"
+      - return: nil
+  - of: (*decoder).textKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).textKey
+        kind: self
+      - id: d.unmarshalText
+        kind: internal
+      - id: d.fail
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.unmarshalText(c, key, raw)
+              to: d.unmarshalText
+          when: infoOf(key.Type()).is(typeTextUnmarshaler)
+      - return: d.fail(c, problemMapKey, key.Type())
+        to: d.fail
+  - of: setIntKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: setIntKey
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: key.SetInt
+        kind: value
+    steps:
+      - bind: i, err
+        eval: strconv.ParseInt(string(raw), int(decimalBase), 64)
+        to: strconv
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil || key.OverflowInt(i)
+      - eval: key.SetInt(i)
+        to: key.SetInt
+      - return: "true"
+  - of: setUintKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: setUintKey
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: key.SetUint
+        kind: value
+    steps:
+      - bind: u, err
+        eval: strconv.ParseUint(string(raw), int(decimalBase), 64)
+        to: strconv
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil || key.OverflowUint(u)
+      - eval: key.SetUint(u)
+        to: key.SetUint
+      - return: "true"
+  - of: setFloatKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: setFloatKey
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: key.SetFloat
+        kind: value
+    steps:
+      - bind: f, err
+        eval: strconv.ParseFloat(string(raw), key.Type().Bits())
+        to: strconv
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - eval: key.SetFloat(f)
+        to: key.SetFloat
+      - return: "true"
+  - of: (*decoder).unmarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).unmarshalText
+        kind: self
+      - id: d.fail
+        kind: internal
+      - id: u.UnmarshalText
+        kind: value
+      - id: d.wrapFail
+        kind: internal
+    steps:
+      - bind: u, ok
+        eval: reflect.TypeAssert[encoding.TextUnmarshaler](v.Addr())
+      - opt:
+          do:
+            - return: d.fail(c, problemMismatch, v.Type())
+              to: d.fail
+          when: "!ok"
+      - opt:
+          do:
+            - return: d.wrapFail(c, err, v.Type())
+              to: d.wrapFail
+          init:
+            bind: err
+            eval: u.UnmarshalText(raw)
+            to: u.UnmarshalText
+          when: err != nil
+      - return: nil
+  - of: (*decoder).array
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).array
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: d.elements
+        kind: internal
+      - id: v.Set
+        kind: value
+      - id: d.fail
+        kind: internal
+    steps:
+      - bind: count
+        eval: int(d.p.nodes[n].count)
+      - switch:
+          cases:
+            - case: reflect.Slice
+              do:
+                - bind: slice
+                  eval: reflect.MakeSlice(v.Type(), count, count)
+                  to: reflect
+                - opt:
+                    do:
+                      - return: err
+                    init:
+                      bind: err
+                      eval: d.elements(n, slice)
+                      to: d.elements
+                    when: err != nil
+                - eval: v.Set(slice)
+                  to: v.Set
+                - return: nil
+            - case: reflect.Array
+              do:
+                - opt:
+                    do:
+                      - return: d.fail(n, problemArrayTooShort, v.Type())
+                        to: d.fail
+                    when: d.p.nodes[n].kind == kindArrayOfTables && count > v.Len()
+                - return: d.elements(n, v)
+                  to: d.elements
+            - default: true
+              do:
+                - return: d.fail(n, problemMismatch, v.Type())
+                  to: d.fail
+          "on": v.Kind()
+  - of: (*decoder).elements
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).elements
+        kind: self
+      - id: v.Len
+        kind: value
+      - id: d.value
+        kind: internal
+    steps:
+      - bind: limit
+        eval: v.Len()
+        to: v.Len
+      - bind: i
+        eval: "0"
+      - bind: nodes
+        eval: d.p.nodes
+      - loop:
+          cond: c != noNode && i < limit
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.value(c, v.Index(i))
+                  to: d.value
+                when: err != nil
+            - op: ++
+              set: i
+          init: c := nodes[n].first
+          post: c = nodes[c].next
+      - return: nil
+  - of: (*tomlDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlDecoder).Decode
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: unmarshal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: io.EOF
+          when: d.done
+      - set: d.done
+        value: "true"
+      - bind: data, err
+        eval: io.ReadAll(io.LimitReader(d.r, int64(maxDocumentBytes)+1))
+        to: io
+      - opt:
+          do:
+            - return: io.EOF
+          when: errors.Is(err, io.EOF)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(err, errs.WrapParams{
+                			Code:    coretoml.CodeTOMLUnmarshalFailed,
+                			Reason:  coretoml.UnmarshalFailed.Reason(),
+                			Public:  coretoml.UnmarshalFailed.Public(),
+                			Private: privateReadFailed,
+                		})
+              to: errs
+          when: err != nil
+      - return: unmarshal(data, v)
+        to: unmarshal
+  - of: (*tomlDecoder).More
+    steps:
+      - return: "!d.done"
+  - of: (*encoder).reset
+    steps:
+      - set: e.buf
+        value: nil
+      - set: e.keys
+        value: e.keys[:0]
+      - set: e.depth
+        value: "0"
+      - set: e.hops
+        value: "0"
+      - set: e.lastWasHeader
+        value: "false"
+      - loop:
+          do:
+            - eval: clear(e.free[i][:cap(e.free[i])])
+          key: i
+          range: e.free
+  - of: (*encoder).retained
+    steps:
+      - bind: total
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: total
+              value: cap(s)
+          key: _
+          range: e.free
+          value: s
+      - return: total
+  - of: encodeDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeDocument
+        kind: self
+      - id: encoderPool.Get
+        kind: value
+      - id: encoderPool.Put
+        kind: value
+      - id: resolve
+        kind: internal
+      - id: e.table
+        kind: internal
+    steps:
+      - bind: e
+        eval: encoderPool.Get()
+        to: encoderPool.Get
+      - defer: encoderPool.Put(e)
+        to: encoderPool.Put
+      - set: e.buf
+        value: dst
+      - bind: root, ok
+        eval: resolve(reflect.ValueOf(v))
+        to: resolve
+      - opt:
+          do:
+            - return: dst, encodeFail(nilOrLoop(root), reflect.TypeOf(v))
+          when: "!ok"
+      - opt:
+          do:
+            - return: dst, encodeFail(problemRoot, root.Type())
+          when: infoOf(root.Type()).is(typeValue)
+      - opt:
+          do:
+            - return: dst, err
+          init:
+            bind: err
+            eval: e.table(root, false)
+            to: e.table
+          when: err != nil
+      - return: e.buf, nil
+  - of: resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolve
+        kind: self
+      - id: v.Elem
+        kind: value
+    steps:
+      - loop:
+          cond: v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface)
+          do:
+            - opt:
+                do:
+                  - return: v, false
+                when: v.IsNil() || hops == maxDepth
+            - set: v
+              to: v.Elem
+              value: v.Elem()
+          init: hops := int32(0)
+          post: hops++
+      - return: v, v.IsValid()
+  - of: nilOrLoop
+    steps:
+      - opt:
+          do:
+            - return: problemPointerLoop
+          when: v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) && !v.IsNil()
+      - return: problemNil
+  - of: encodeFail
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeFail
+        kind: self
+      - id: t.String
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: name
+        eval: "\"nil\""
+      - opt:
+          do:
+            - set: name
+              to: t.String
+              value: t.String()
+          when: t != nil
+      - return: errs.Wrap(coretoml.MarshalFailed, errs.WrapParams{}, errs.String(fieldProblem, problem), errs.String(fieldType, name))
+        to: errs
+  - of: (*encoder).table
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).table
+        kind: self
+      - id: encodeFail
+        kind: internal
+      - id: e.collect
+        kind: internal
+      - id: e.release
+        kind: internal
+      - id: e.keyValues
+        kind: internal
+      - id: e.subTables
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: encodeFail(problemTooDeepEncode, v.Type())
+              to: encodeFail
+          when: e.depth >= maxDepth
+      - op: ++
+        set: e.depth
+      - defer: func() { e.depth-- }()
+      - bind: entries, err
+        eval: e.collect(v)
+        to: e.collect
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: e.release(entries)
+        to: e.release
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: e.keyValues(entries, commented)
+            to: e.keyValues
+          when: err != nil
+      - return: e.subTables(entries, commented)
+        to: e.subTables
+  - of: (*encoder).keyValues
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).keyValues
+        kind: self
+      - id: e.keyValue
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: e.isTable(&entries[i])
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: e.keyValue(&entries[i], commented)
+                  to: e.keyValue
+                when: err != nil
+          key: i
+          range: entries
+      - return: nil
+  - of: (*encoder).subTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).subTables
+        kind: self
+      - id: e.subTable
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: ent
+              eval: "&entries[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: "!e.isTable(ent)"
+            - set: e.keys
+              value: append(e.keys, ent.key)
+            - bind: err
+              eval: e.subTable(ent, commented || ent.opts.commented)
+              to: e.subTable
+            - set: e.keys
+              value: e.keys[:len(e.keys)-1]
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          key: i
+          range: entries
+      - return: nil
+  - of: (*encoder).subTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).subTable
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: e.arrayOfTables
+        kind: internal
+      - id: e.header
+        kind: internal
+      - id: e.table
+        kind: internal
+    steps:
+      - bind: v, _
+        eval: resolve(ent.value)
+        to: resolve
+      - opt:
+          do:
+            - return: e.arrayOfTables(v, ent.opts.comment, commented)
+              to: e.arrayOfTables
+          when: v.Kind() == reflect.Slice || v.Kind() == reflect.Array
+      - eval: e.header(ent.opts.comment, commented, false)
+        to: e.header
+      - return: e.table(v, commented)
+        to: e.table
+  - of: (*encoder).arrayOfTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).arrayOfTables
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: e.header
+        kind: internal
+      - id: e.table
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: element, _
+              eval: resolve(v.Index(i))
+              to: resolve
+            - eval: e.header(comment, commented, true)
+              to: e.header
+            - set: comment
+              value: "\"\""
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: e.table(element, commented)
+                  to: e.table
+                when: err != nil
+          key: i
+          range: v.Len()
+      - return: nil
+  - of: (*encoder).header
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).header
+        kind: self
+      - id: appendComment
+        kind: internal
+      - id: appendKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: e.buf
+              value: append(e.buf, charNewline)
+          when: len(e.buf) > 0 && !e.lastWasHeader
+      - set: e.buf
+        to: appendComment
+        value: appendComment(e.buf, comment)
+      - opt:
+          do:
+            - set: e.buf
+              value: append(e.buf, commentPrefix...)
+          when: commented
+      - set: e.buf
+        value: append(e.buf, charOpenBracket)
+      - opt:
+          do:
+            - set: e.buf
+              value: append(e.buf, charOpenBracket)
+          when: array
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: e.buf
+                    value: append(e.buf, charDot)
+                when: i > 0
+            - set: e.buf
+              to: appendKey
+              value: appendKey(e.buf, part)
+          key: i
+          range: e.keys
+          value: part
+      - set: e.buf
+        value: append(e.buf, charCloseBracket)
+      - opt:
+          do:
+            - set: e.buf
+              value: append(e.buf, charCloseBracket)
+          when: array
+      - set: e.buf
+        value: append(e.buf, charNewline)
+      - set: e.lastWasHeader
+        value: "true"
+  - of: appendComment
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendComment
+        kind: self
+      - id: cutLine
+        kind: internal
+    steps:
+      - loop:
+          cond: comment != ""
+          do:
+            - bind: line, rest, _
+              eval: cutLine(comment)
+              to: cutLine
+            - set: b
+              value: append(b, commentPrefix...)
+            - set: b
+              value: append(b, line...)
+            - set: b
+              value: append(b, charNewline)
+            - set: comment
+              value: rest
+      - return: b
+  - of: (*encoder).keyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).keyValue
+        kind: self
+      - id: appendComment
+        kind: internal
+      - id: appendKey
+        kind: internal
+      - id: e.appendValue
+        kind: internal
+      - id: commentLines
+        kind: internal
+    steps:
+      - set: commented
+        value: commented || ent.opts.commented
+      - set: e.buf
+        to: appendComment
+        value: appendComment(e.buf, ent.opts.comment)
+      - bind: start
+        eval: len(e.buf)
+      - opt:
+          do:
+            - set: e.buf
+              value: append(e.buf, commentPrefix...)
+          when: commented
+      - set: e.buf
+        to: appendKey
+        value: appendKey(e.buf, ent.key)
+      - set: e.buf
+        value: append(e.buf, " = "...)
+      - var:
+          name: err
+          type: error
+      - set: e.buf, err
+        to: e.appendValue
+        value: e.appendValue(e.buf, ent.value, ent.opts)
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - set: e.buf
+              to: commentLines
+              value: commentLines(e.buf, start)
+          when: commented
+      - set: e.buf
+        value: append(e.buf, charNewline)
+      - set: e.lastWasHeader
+        value: "false"
+      - return: nil
+  - of: commentLines
+    participants:
+      - id: caller
+        kind: actor
+      - id: commentLines
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: region
+        eval: slices.Clone(b[start:])
+        to: slices
+      - set: b
+        value: b[:start]
+      - loop:
+          do:
+            - set: b
+              value: append(b, c)
+            - opt:
+                do:
+                  - set: b
+                    value: append(b, commentPrefix...)
+                when: c == charNewline
+          key: _
+          range: region
+          value: c
+      - return: b
+  - of: (*encoder).isTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).isTable
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: isArrayOfTables
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: ent.opts.inline
+      - bind: v, ok
+        eval: resolve(ent.value)
+        to: resolve
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - opt:
+          do:
+            - return: "true"
+          when: "!infoOf(v.Type()).is(typeValue)"
+      - return: isArrayOfTables(v)
+        to: isArrayOfTables
+  - of: isArrayOfTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: isArrayOfTables
+        kind: self
+      - id: resolve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: (v.Kind() != reflect.Slice && v.Kind() != reflect.Array) || v.Len() == 0
+      - loop:
+          do:
+            - bind: element, ok
+              eval: resolve(v.Index(i))
+              to: resolve
+            - opt:
+                do:
+                  - return: "false"
+                when: "!ok || infoOf(element.Type()).is(typeValue)"
+          key: i
+          range: v.Len()
+      - return: "true"
+  - of: (*encoder).collect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).collect
+        kind: self
+      - id: e.acquire
+        kind: internal
+      - id: e.mapEntries
+        kind: internal
+      - id: infoOf
+        kind: internal
+      - id: structEntries
+        kind: internal
+    steps:
+      - bind: entries
+        eval: e.acquire()
+        to: e.acquire
+      - opt:
+          do:
+            - return: e.mapEntries(entries, v)
+              to: e.mapEntries
+          when: v.Kind() == reflect.Map
+      - bind: info
+        eval: infoOf(v.Type())
+        to: infoOf
+      - opt:
+          do:
+            - return: entries, encodeFail(problemNotUTF8, v.Type())
+          when: info.is(typeBadNames)
+      - return: structEntries(entries, v, info), nil
+        to: structEntries
+  - of: (*encoder).acquire
+    steps:
+      - opt:
+          do:
+            - bind: s
+              eval: e.free[n-1]
+            - set: e.free
+              value: e.free[:n-1]
+            - return: s[:0]
+          init:
+            bind: "n"
+            eval: len(e.free)
+          when: n > 0
+      - return: nil
+  - of: (*encoder).release
+    steps:
+      - opt:
+          do:
+            - set: e.free
+              value: append(e.free, s)
+          when: cap(s) > 0
+  - of: structEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: structEntries
+        kind: self
+      - id: fieldOf
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: f
+              eval: "&info.fields[i]"
+            - bind: fv, ok
+              eval: fieldOf(v, f.index)
+              to: fieldOf
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok || omitted(fv, f.opts)"
+            - set: entries
+              value: "append(entries, entry{key: f.name, value: fv, opts: f.opts})"
+          key: i
+          range: info.fields
+      - return: entries
+  - of: fieldOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldOf
+        kind: self
+      - id: v.Elem
+        kind: value
+      - id: v.Field
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: v, false
+                      when: v.IsNil()
+                  - set: v
+                    to: v.Elem
+                    value: v.Elem()
+                when: i > 0 && v.Kind() == reflect.Pointer
+            - set: v
+              to: v.Field
+              value: v.Field(step)
+          key: i
+          range: index
+          value: step
+      - return: v, true
+  - of: omitted
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Pointer, reflect.Map, reflect.Interface
+              do:
+                - opt:
+                    do:
+                      - return: "true"
+                    when: v.IsNil()
+            - default: true
+          "on": v.Kind()
+      - return: (opts.omitEmpty && isEmpty(v)) || (opts.omitZero && isZero(v))
+  - of: (*encoder).mapEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).mapEntries
+        kind: self
+      - id: v.Type
+        kind: value
+      - id: reflect.New(t.Key()).Elem
+        kind: value
+      - id: reflect
+        kind: stdlib
+      - id: iter.Reset
+        kind: value
+      - id: key.SetIterKey
+        kind: value
+      - id: values.Index
+        kind: value
+      - id: value.SetIterValue
+        kind: value
+      - id: mapKeyString
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: t
+        eval: v.Type()
+        to: v.Type
+      - bind: key
+        eval: reflect.New(t.Key()).Elem()
+        to: reflect.New(t.Key()).Elem
+      - bind: values
+        eval: reflect.MakeSlice(reflect.SliceOf(t.Elem()), v.Len(), v.Len())
+        to: reflect
+      - var:
+          name: iter
+          type: reflect.MapIter
+      - eval: iter.Reset(v)
+        to: iter.Reset
+      - loop:
+          cond: iter.Next()
+          do:
+            - eval: key.SetIterKey(&iter)
+              to: key.SetIterKey
+            - bind: value
+              eval: values.Index(i)
+              to: values.Index
+            - eval: value.SetIterValue(&iter)
+              to: value.SetIterValue
+            - opt:
+                do:
+                  - continue: true
+                when: value.Kind() == reflect.Interface && value.IsNil()
+            - bind: name, err
+              eval: mapKeyString(key)
+              to: mapKeyString
+            - opt:
+                do:
+                  - return: entries, err
+                when: err != nil
+            - opt:
+                do:
+                  - return: entries, encodeFail(problemNotUTF8, t)
+                when: "!utf8.ValidString(name)"
+            - set: entries
+              value: "append(entries, entry{key: name, value: nilToZero(value)})"
+          init: i := 0
+          post: i++
+      - eval: slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.key, b.key) })
+        to: slices
+      - return: entries, keyClash(entries, t)
+  - of: nilToZero
+    participants:
+      - id: caller
+        kind: actor
+      - id: nilToZero
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: reflect.Zero(v.Type().Elem())
+              to: reflect
+          when: v.Kind() == reflect.Pointer && v.IsNil()
+      - return: v
+  - of: keyClash
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyClash
+        kind: self
+      - id: encodeFail
+        kind: internal
+    steps:
+      - loop:
+          cond: i < len(entries)
+          do:
+            - opt:
+                do:
+                  - return: encodeFail(problemKeyClash, t)
+                    to: encodeFail
+                when: entries[i].key == entries[i-1].key
+          init: i := 1
+          post: i++
+      - return: nil
+  - of: mapKeyString
+    participants:
+      - id: caller
+        kind: actor
+      - id: mapKeyString
+        kind: self
+      - id: infoOf
+        kind: internal
+      - id: marshalText
+        kind: internal
+      - id: k.String
+        kind: value
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: info
+        eval: infoOf(k.Type())
+        to: infoOf
+      - opt:
+          do:
+            - bind: text, err
+              eval: marshalText(k, info)
+              to: marshalText
+            - return: string(text), err
+          when: info.is(typeTextMarshaler) || info.is(typeTextMarshalerPtr)
+      - switch:
+          cases:
+            - case: reflect.String
+              do:
+                - return: k.String(), nil
+                  to: k.String
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: strconv.FormatInt(k.Int(), int(decimalBase)), nil
+                  to: strconv
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: strconv.FormatUint(k.Uint(), int(decimalBase)), nil
+                  to: strconv
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: strconv.FormatFloat(k.Float(), 'f', -1, k.Type().Bits()), nil
+                  to: strconv
+            - default: true
+              do:
+                - return: "\"\", encodeFail(problemKeyType, k.Type())"
+          "on": k.Kind()
+  - of: isEmpty
+    participants:
+      - id: caller
+        kind: actor
+      - id: isEmpty
+        kind: self
+      - id: v.IsZero
+        kind: value
+      - id: isEmptyStruct
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64, reflect.String, reflect.Pointer, reflect.Interface
+              do:
+                - return: v.IsZero()
+                  to: v.IsZero
+            - case: reflect.Array, reflect.Slice, reflect.Map
+              do:
+                - return: v.Len() == 0
+            - case: reflect.Struct
+              do:
+                - return: isEmptyStruct(v)
+                  to: isEmptyStruct
+            - default: true
+              do:
+                - return: "false"
+          "on": v.Kind()
+  - of: isEmptyStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: isEmptyStruct
+        kind: self
+      - id: infoOf
+        kind: internal
+      - id: v.IsZero
+        kind: value
+      - id: fieldOf
+        kind: internal
+    steps:
+      - bind: info
+        eval: infoOf(v.Type())
+        to: infoOf
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: info.is(typeValue)
+      - loop:
+          do:
+            - bind: fv, ok
+              eval: fieldOf(v, info.fields[i].index)
+              to: fieldOf
+            - opt:
+                do:
+                  - return: "false"
+                when: ok && !isEmpty(fv)
+          key: i
+          range: info.fields
+      - return: "true"
+  - of: isZero
+    participants:
+      - id: caller
+        kind: actor
+      - id: isZero
+        kind: self
+      - id: v.IsZero
+        kind: value
+      - id: z.IsZero
+        kind: internal
+      - id: reflect
+        kind: stdlib
+      - id: ptr.Elem().Set
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!infoOf(v.Type()).is(typeZeroer)"
+      - opt:
+          do:
+            - return: z.IsZero()
+              to: z.IsZero
+          init:
+            bind: z, ok
+            eval: reflect.TypeAssert[interface{ IsZero() bool }](v)
+          when: ok
+      - bind: ptr
+        eval: reflect.New(v.Type())
+        to: reflect
+      - eval: ptr.Elem().Set(v)
+        to: ptr.Elem().Set
+      - bind: z, ok
+        eval: reflect.TypeAssert[interface{ IsZero() bool }](ptr)
+      - return: ok && z.IsZero()
+  - of: appendFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFloat
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: math.IsNaN(f)
+              do:
+                - return: append(b, wordNaN...)
+            - case: math.IsInf(f, 1)
+              do:
+                - return: append(b, wordInf...)
+            - case: math.IsInf(f, -1)
+              do:
+                - return: append(b, '-', 'i', 'n', 'f')
+            - default: true
+              do:
+                - bind: start
+                  eval: len(b)
+                - set: b
+                  to: strconv
+                  value: strconv.AppendFloat(b, f, 'f', -1, bits)
+                - opt:
+                    do:
+                      - set: b
+                        value: append(b, '.', '0')
+                    when: "!slices.Contains(b[start:], charDot)"
+                - return: b
+  - of: (*encoder).appendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).appendValue
+        kind: self
+      - id: infoOf
+        kind: internal
+      - id: appendSpecial
+        kind: internal
+      - id: appendMarshaledText
+        kind: internal
+      - id: e.appendIndirect
+        kind: internal
+      - id: appendStringValue
+        kind: internal
+      - id: e.appendArray
+        kind: internal
+      - id: e.appendInlineTable
+        kind: internal
+      - id: appendScalar
+        kind: internal
+    steps:
+      - bind: info
+        eval: infoOf(v.Type())
+        to: infoOf
+      - opt:
+          do:
+            - return: appendSpecial(b, v), nil
+              to: appendSpecial
+          when: info.is(typeSpecial)
+      - opt:
+          do:
+            - return: appendMarshaledText(b, v, info)
+              to: appendMarshaledText
+          when: info.is(typeTextMarshalerPtr) || (info.is(typeTextMarshaler) && v.Kind() != reflect.String)
+      - switch:
+          cases:
+            - case: reflect.Pointer, reflect.Interface
+              do:
+                - return: e.appendIndirect(b, v, opts)
+                  to: e.appendIndirect
+            - case: reflect.String
+              do:
+                - return: appendStringValue(b, v.String(), opts.multiline)
+                  to: appendStringValue
+            - case: reflect.Slice, reflect.Array
+              do:
+                - return: e.appendArray(b, v, opts.multiline)
+                  to: e.appendArray
+            - case: reflect.Map, reflect.Struct
+              do:
+                - return: e.appendInlineTable(b, v)
+                  to: e.appendInlineTable
+            - default: true
+              do:
+                - return: appendScalar(b, v)
+                  to: appendScalar
+          "on": v.Kind()
+  - of: (*encoder).appendIndirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).appendIndirect
+        kind: self
+      - id: e.appendValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, encodeFail(problemPointerLoop, v.Type())
+          when: e.hops >= maxDepth
+      - op: ++
+        set: e.hops
+      - defer: func() { e.hops-- }()
+      - opt:
+          do:
+            - return: e.appendValue(b, v.Elem(), opts)
+              to: e.appendValue
+          when: "!v.IsNil()"
+      - opt:
+          do:
+            - return: b, encodeFail(problemNil, v.Type())
+          when: v.Kind() == reflect.Interface
+      - return: e.appendValue(b, reflect.Zero(v.Type().Elem()), opts)
+        to: e.appendValue
+  - of: appendScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendScalar
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: appendUint
+        kind: internal
+      - id: appendFloat
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - return: strconv.AppendBool(b, v.Bool()), nil
+                  to: strconv
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: strconv.AppendInt(b, v.Int(), int(decimalBase)), nil
+                  to: strconv
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: appendUint(b, v)
+                  to: appendUint
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: appendFloat(b, v.Float(), v.Type().Bits()), nil
+                  to: appendFloat
+            - default: true
+              do:
+                - return: b, encodeFail(problemUnsupported, v.Type())
+          "on": v.Kind()
+  - of: appendUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendUint
+        kind: self
+      - id: v.Uint
+        kind: value
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: u
+        eval: v.Uint()
+        to: v.Uint
+      - opt:
+          do:
+            - return: b, encodeFail(problemUintRange, v.Type())
+          when: u > math.MaxInt64
+      - return: strconv.AppendUint(b, u, int(decimalBase)), nil
+        to: strconv
+  - of: appendSpecial
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendSpecial
+        kind: self
+      - id: valueOf[time.Time](v).AppendFormat
+        kind: value
+      - id: valueOf[LocalDate](v).appendText
+        kind: internal
+      - id: valueOf[LocalTime](v).appendText
+        kind: internal
+      - id: valueOf[LocalDateTime](v).appendText
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: timeType
+              do:
+                - return: valueOf[time.Time](v).AppendFormat(b, rfc3339Nano)
+                  to: valueOf[time.Time](v).AppendFormat
+            - case: localDateType
+              do:
+                - return: valueOf[LocalDate](v).appendText(b)
+                  to: valueOf[LocalDate](v).appendText
+            - case: localTimeType
+              do:
+                - return: valueOf[LocalTime](v).appendText(b)
+                  to: valueOf[LocalTime](v).appendText
+            - default: true
+              do:
+                - return: valueOf[LocalDateTime](v).appendText(b)
+                  to: valueOf[LocalDateTime](v).appendText
+          "on": v.Type()
+  - of: valueOf
+    steps:
+      - bind: value, _
+        eval: reflect.TypeAssert[T](v)
+      - return: value
+  - of: appendMarshaledText
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMarshaledText
+        kind: self
+      - id: marshalText
+        kind: internal
+      - id: appendStringValue
+        kind: internal
+    steps:
+      - bind: text, err
+        eval: marshalText(v, info)
+        to: marshalText
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - return: appendStringValue(b, string(text), false)
+        to: appendStringValue
+  - of: marshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalText
+        kind: self
+      - id: reflect.New(v.Type()).Elem
+        kind: value
+      - id: target.Set
+        kind: value
+      - id: target.Addr
+        kind: value
+      - id: m.MarshalText
+        kind: value
+    steps:
+      - bind: target
+        eval: v
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: target
+                    to: reflect.New(v.Type()).Elem
+                    value: reflect.New(v.Type()).Elem()
+                  - eval: target.Set(v)
+                    to: target.Set
+                when: "!v.CanAddr()"
+            - set: target
+              to: target.Addr
+              value: target.Addr()
+          when: info.is(typeTextMarshalerPtr)
+      - bind: m, _
+        eval: reflect.TypeAssert[encoding.TextMarshaler](target)
+      - bind: text, err
+        eval: m.MarshalText()
+        to: m.MarshalText
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(err, errs.WrapParams{
+                			Code:    coretoml.CodeTOMLMarshalFailed,
+                			Reason:  coretoml.MarshalFailed.Reason(),
+                			Public:  coretoml.MarshalFailed.Public(),
+                			Private: privateTextMarshalFailed,
+                		}, errs.String(fieldProblem, problemMarshalText), errs.String(fieldType, v.Type().String()))
+          when: err != nil
+      - return: text, nil
+  - of: appendStringValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendStringValue
+        kind: self
+      - id: appendMultilineString
+        kind: internal
+      - id: appendString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, encodeFail(problemNotUTF8, reflect.TypeFor[string]())
+          when: "!utf8.ValidString(s)"
+      - opt:
+          do:
+            - return: appendMultilineString(b, s), nil
+              to: appendMultilineString
+          when: multiline && containsByte(s, charNewline)
+      - return: appendString(b, s), nil
+        to: appendString
+  - of: appendKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendKey
+        kind: self
+      - id: appendString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: append(b, key...)
+          when: isBareKey(key)
+      - return: appendString(b, key)
+        to: appendString
+  - of: appendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendString
+        kind: self
+      - id: appendBasicString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: b
+              value: append(b, charApostrophe)
+            - set: b
+              value: append(b, s...)
+            - return: append(b, charApostrophe)
+          when: canBeLiteral(s)
+      - return: appendBasicString(b, s)
+        to: appendBasicString
+  - of: appendBasicString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBasicString
+        kind: self
+      - id: appendEscapedByte
+        kind: internal
+    steps:
+      - set: b
+        value: append(b, charQuote)
+      - loop:
+          do:
+            - set: b
+              to: appendEscapedByte
+              value: appendEscapedByte(b, s[i])
+          key: i
+          range: len(s)
+      - return: append(b, charQuote)
+  - of: appendEscapedByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEscapedByte
+        kind: self
+      - id: appendUnicodeEscape
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: append(b, charBackslash, esc)
+          init:
+            bind: esc
+            eval: basicEscapes[c]
+          when: esc != 0
+      - opt:
+          do:
+            - return: appendUnicodeEscape(b, c)
+              to: appendUnicodeEscape
+          when: c < charFirstPrintable || c == charDelete
+      - return: append(b, c)
+  - of: appendUnicodeEscape
+    steps:
+      - return: append(b, charBackslash, 'u', '0', '0', hexDigits[c>>highNibbleShift], hexDigits[c&lowNibbleMask])
+  - of: appendMultilineString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMultilineString
+        kind: self
+      - id: quoteRunLength
+        kind: internal
+      - id: appendQuoteRun
+        kind: internal
+      - id: appendMultilineByte
+        kind: internal
+    steps:
+      - set: b
+        value: append(b, tripleQuote...)
+      - set: b
+        value: append(b, charNewline)
+      - loop:
+          cond: i < len(s)
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - bind: run
+                    eval: quoteRunLength(s, i)
+                    to: quoteRunLength
+                  - set: b
+                    to: appendQuoteRun
+                    value: appendQuoteRun(b, run)
+                  - op: +=
+                    set: i
+                    value: run
+                  - continue: true
+                when: c == charQuote
+            - set: b
+              to: appendMultilineByte
+              value: appendMultilineByte(b, c)
+            - op: ++
+              set: i
+          init: i := 0
+      - return: append(b, tripleQuote...)
+  - of: quoteRunLength
+    steps:
+      - bind: j
+        eval: i
+      - loop:
+          cond: j < len(s) && s[j] == charQuote
+          do:
+            - op: ++
+              set: j
+      - return: j - i
+  - of: appendQuoteRun
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - set: b
+                    value: append(b, charQuote)
+                range: run
+            - return: b
+          when: run < delimiterLength
+      - loop:
+          do:
+            - set: b
+              value: append(b, charBackslash, charQuote)
+          range: run
+      - return: b
+  - of: appendMultilineByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMultilineByte
+        kind: self
+      - id: appendEscapedByte
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: append(b, c)
+          when: c == charNewline || c == charTab
+      - return: appendEscapedByte(b, c)
+        to: appendEscapedByte
+  - of: (*encoder).appendArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).appendArray
+        kind: self
+      - id: appendSeparator
+        kind: internal
+      - id: e.appendValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, encodeFail(problemTooDeepEncode, v.Type())
+          when: e.depth >= maxDepth
+      - op: ++
+        set: e.depth
+      - defer: func() { e.depth-- }()
+      - set: b
+        value: append(b, charOpenBracket)
+      - var:
+          name: err
+          type: error
+      - loop:
+          do:
+            - set: b
+              to: appendSeparator
+              value: appendSeparator(b, i, multiline)
+            - set: b, err
+              to: e.appendValue
+              value: e.appendValue(b, v.Index(i), fieldOptions{})
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: i
+          range: v.Len()
+      - opt:
+          do:
+            - set: b
+              value: append(b, charNewline)
+          when: multiline && v.Len() > 0
+      - return: append(b, charCloseBracket), nil
+  - of: appendSeparator
+    steps:
+      - opt:
+          do:
+            - set: b
+              value: append(b, charComma)
+          when: i > 0
+      - opt:
+          do:
+            - set: b
+              value: append(b, charNewline)
+            - return: append(b, indentSymbol...)
+          when: multiline
+      - opt:
+          do:
+            - set: b
+              value: append(b, charSpace)
+          when: i > 0
+      - return: b
+  - of: (*encoder).appendInlineTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).appendInlineTable
+        kind: self
+      - id: e.collect
+        kind: internal
+      - id: e.release
+        kind: internal
+      - id: appendKey
+        kind: internal
+      - id: e.appendValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, encodeFail(problemTooDeepEncode, v.Type())
+          when: e.depth >= maxDepth
+      - op: ++
+        set: e.depth
+      - defer: func() { e.depth-- }()
+      - bind: entries, err
+        eval: e.collect(v)
+        to: e.collect
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - defer: e.release(entries)
+        to: e.release
+      - set: b
+        value: append(b, charOpenBrace)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: b
+                    value: append(b, charComma, charSpace)
+                when: i > 0
+            - set: b
+              to: appendKey
+              value: appendKey(b, entries[i].key)
+            - set: b
+              value: append(b, " = "...)
+            - bind: opts
+              eval: entries[i].opts
+            - set: opts.multiline
+              value: "false"
+            - set: b, err
+              to: e.appendValue
+              value: e.appendValue(b, entries[i].value, opts)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: i
+          range: entries
+      - return: append(b, charCloseBrace), nil
+  - of: (*tomlEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tomlEncoder).Encode
+        kind: self
+      - id: scratch
+        kind: package
+      - id: encodeDocument
+        kind: internal
+      - id: e.w.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - defer: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - bind: out, err
+        eval: encodeDocument(buf.AvailableBuffer(), v)
+        to: encodeDocument
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(werr, errs.WrapParams{
+                			Code:    coretoml.CodeTOMLMarshalFailed,
+                			Reason:  coretoml.MarshalFailed.Reason(),
+                			Public:  coretoml.MarshalFailed.Public(),
+                			Private: privateWriteFailed,
+                		})
+              to: errs
+          init:
+            bind: _, werr
+            eval: e.w.Write(out)
+            to: e.w.Write
+          when: werr != nil
+      - return: nil
+  - of: (*tomlEncoder).Close
+    steps:
+      - return: nil
+  - of: LocalDate.AsTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalDate.AsTime
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Date(d.Year, time.Month(d.Month), d.Day, 0, 0, 0, 0, zone)
+        to: time
+  - of: LocalDate.String
+    steps:
+      - return: string(d.appendText(make([]byte, 0, localDateWidth)))
+  - of: LocalDate.MarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalDate.MarshalText
+        kind: self
+      - id: d.appendText
+        kind: internal
+    steps:
+      - return: d.appendText(make([]byte, 0, localDateWidth)), nil
+        to: d.appendText
+  - of: (*LocalDate).UnmarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LocalDate).UnmarshalText
+        kind: self
+      - id: parseExactly
+        kind: internal
+      - id: localDateOf
+        kind: internal
+    steps:
+      - var:
+          name: dt
+          type: datetime
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: parseExactly(text, &dt, kindLocalDate)
+            to: parseExactly
+          when: err != nil
+      - set: "*d"
+        to: localDateOf
+        value: localDateOf(&dt)
+      - return: nil
+  - of: LocalDate.appendText
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalDate.appendText
+        kind: self
+      - id: appendPadded
+        kind: internal
+    steps:
+      - set: b
+        to: appendPadded
+        value: appendPadded(b, d.Year, yearDigits)
+      - set: b
+        value: append(b, '-')
+      - set: b
+        to: appendPadded
+        value: appendPadded(b, d.Month, zeroPadWidth)
+      - set: b
+        value: append(b, '-')
+      - return: appendPadded(b, d.Day, zeroPadWidth)
+        to: appendPadded
+  - of: LocalTime.String
+    steps:
+      - return: string(t.appendText(make([]byte, 0, localTimeWidth+1+nanoDigits)))
+  - of: LocalTime.MarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalTime.MarshalText
+        kind: self
+      - id: t.appendText
+        kind: internal
+    steps:
+      - return: t.appendText(make([]byte, 0, localTimeWidth+1+nanoDigits)), nil
+        to: t.appendText
+  - of: (*LocalTime).UnmarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LocalTime).UnmarshalText
+        kind: self
+      - id: parseExactly
+        kind: internal
+      - id: localTimeOf
+        kind: internal
+    steps:
+      - var:
+          name: dt
+          type: datetime
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: parseExactly(text, &dt, kindLocalTime)
+            to: parseExactly
+          when: err != nil
+      - set: "*t"
+        to: localTimeOf
+        value: localTimeOf(&dt)
+      - return: nil
+  - of: LocalTime.appendText
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalTime.appendText
+        kind: self
+      - id: appendPadded
+        kind: internal
+      - id: appendFraction
+        kind: internal
+    steps:
+      - set: b
+        to: appendPadded
+        value: appendPadded(b, t.Hour, zeroPadWidth)
+      - set: b
+        value: append(b, ':')
+      - set: b
+        to: appendPadded
+        value: appendPadded(b, t.Minute, zeroPadWidth)
+      - set: b
+        value: append(b, ':')
+      - set: b
+        to: appendPadded
+        value: appendPadded(b, t.Second, zeroPadWidth)
+      - return: appendFraction(b, t.Nanosecond, t.Precision)
+        to: appendFraction
+  - of: LocalDateTime.AsTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalDateTime.AsTime
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - return: time.Date(dt.Year, time.Month(dt.Month), dt.Day, dt.Hour, dt.Minute, dt.Second, dt.Nanosecond, zone)
+        to: time
+  - of: LocalDateTime.String
+    steps:
+      - return: string(dt.appendText(make([]byte, 0, localDateWidth+1+localTimeWidth+1+nanoDigits)))
+  - of: LocalDateTime.MarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalDateTime.MarshalText
+        kind: self
+      - id: dt.appendText
+        kind: internal
+    steps:
+      - return: dt.appendText(make([]byte, 0, localDateWidth+1+localTimeWidth+1+nanoDigits)), nil
+        to: dt.appendText
+  - of: (*LocalDateTime).UnmarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LocalDateTime).UnmarshalText
+        kind: self
+      - id: parseExactly
+        kind: internal
+    steps:
+      - var:
+          name: parsed
+          type: datetime
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: parseExactly(text, &parsed, kindLocalDateTime)
+            to: parseExactly
+          when: err != nil
+      - set: "*dt"
+        value: "LocalDateTime{LocalDate: localDateOf(&parsed), LocalTime: localTimeOf(&parsed)}"
+      - return: nil
+  - of: LocalDateTime.appendText
+    participants:
+      - id: caller
+        kind: actor
+      - id: LocalDateTime.appendText
+        kind: self
+      - id: dt.LocalDate.appendText
+        kind: internal
+      - id: dt.LocalTime.appendText
+        kind: internal
+    steps:
+      - set: b
+        to: dt.LocalDate.appendText
+        value: dt.LocalDate.appendText(b)
+      - set: b
+        value: append(b, 'T')
+      - return: dt.LocalTime.appendText(b)
+        to: dt.LocalTime.appendText
+  - of: appendPadded
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendPadded
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: strconv.AppendInt(b, int64(v), int(decimalBase))
+              to: strconv
+          when: v < 0
+      - bind: digits
+        eval: len(strconv.AppendInt(make([]byte, 0, width), int64(v), int(decimalBase)))
+      - loop:
+          do:
+            - set: b
+              value: append(b, '0')
+          range: width - digits
+      - return: strconv.AppendInt(b, int64(v), int(decimalBase))
+        to: strconv
+  - of: appendFraction
+    steps:
+      - opt:
+          do:
+            - return: b
+          when: precision <= 0 && nanosecond <= 0
+      - var:
+          name: digits
+          type: "[nanoDigits]byte"
+      - bind: "n"
+        eval: max(nanosecond, 0)
+      - loop:
+          cond: i >= 0
+          do:
+            - set: digits[i]
+              value: "'0' + byte(n%int(decimalBase))"
+            - op: /=
+              set: "n"
+              value: int(decimalBase)
+          init: i := nanoDigits - 1
+          post: i--
+      - bind: width
+        eval: min(precision, nanoDigits)
+      - opt:
+          do:
+            - set: width
+              value: nanoDigits
+            - loop:
+                cond: width > 1 && digits[width-1] == '0'
+                do:
+                  - op: "--"
+                    set: width
+          when: width <= 0
+      - set: b
+        value: append(b, '.')
+      - return: append(b, digits[:width]...)
+  - of: parseExactly
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseExactly
+        kind: self
+      - id: p.dateTime
+        kind: internal
+      - id: p.fail
+        kind: internal
+    steps:
+      - bind: p
+        eval: "parser{data: text}"
+      - bind: got, err
+        eval: p.dateTime(dt)
+        to: p.dateTime
+      - opt:
+          do:
+            - set: err
+              to: p.fail
+              value: p.fail(p.pos, problemNotThisKind)
+          when: err == nil && (got != want || p.pos != len(text))
+      - return: err
+  - of: localDateOf
+    steps:
+      - return: "LocalDate{Year: dt.year, Month: dt.month, Day: dt.day}"
+  - of: localTimeOf
+    steps:
+      - return: "LocalTime{Hour: dt.hour, Minute: dt.minute, Second: dt.second, Nanosecond: dt.nanosecond, Precision: dt.precision}"
+  - of: (*parser).numberOrDate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).numberOrDate
+        kind: self
+      - id: p.dateTimeValue
+        kind: internal
+      - id: p.numberValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.dateTimeValue(parent, part)
+              to: p.dateTimeValue
+          when: p.digitsThen(yearDigits, '-') || p.digitsThen(pairDigits, ':')
+      - return: p.numberValue(parent, part)
+        to: p.numberValue
+  - of: (*parser).dateTimeValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).dateTimeValue
+        kind: self
+      - id: p.dateTime
+        kind: internal
+      - id: leaf
+        kind: internal
+      - id: p.add
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - var:
+          name: dt
+          type: datetime
+      - bind: k, err
+        eval: p.dateTime(&dt)
+        to: p.dateTime
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: "n"
+        eval: leaf(k, part, at)
+        to: leaf
+      - set: n.num
+        value: uint64(len(p.times))
+      - set: n.text
+        value: "span{start: int32(at), end: int32(p.pos)}"
+      - set: p.times
+        value: append(p.times, dt)
+      - eval: p.add(parent, n)
+        to: p.add
+      - return: nil
+  - of: (*parser).dateTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).dateTime
+        kind: self
+      - id: p.date
+        kind: internal
+      - id: p.timeOfDay
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: kindLocalTime, p.timeOfDay(dt)
+          when: p.digitsThen(pairDigits, ':')
+      - opt:
+          do:
+            - return: 0, err
+          init:
+            bind: err
+            eval: p.date(dt)
+            to: p.date
+          when: err != nil
+      - opt:
+          do:
+            - return: kindLocalDate, nil
+          when: "!p.timeDelimiter()"
+      - opt:
+          do:
+            - return: 0, err
+          init:
+            bind: err
+            eval: p.timeOfDay(dt)
+            to: p.timeOfDay
+          when: err != nil
+      - opt:
+          do:
+            - return: kindDateTime, p.offsetError(dt)
+          when: p.offset(dt)
+      - return: kindLocalDateTime, nil
+  - of: (*parser).date
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).date
+        kind: self
+      - id: p.fixed
+        kind: internal
+      - id: p.fail
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - var:
+          name: ok
+          type: bool
+      - set: dt.year, ok
+        to: p.fixed
+        value: p.fixed(yearDigits, '-')
+      - opt:
+          do:
+            - set: dt.month, ok
+              to: p.fixed
+              value: p.fixed(pairDigits, '-')
+          when: ok
+      - opt:
+          do:
+            - set: dt.day, ok
+              to: p.fixed
+              value: p.fixed(pairDigits, 0)
+          when: ok
+      - opt:
+          do:
+            - return: p.fail(at, problemBadDate)
+              to: p.fail
+          when: "!ok || dt.month < 1 || dt.month > monthsPerYear || dt.day < 1 || dt.day > daysIn(dt.month, dt.year)"
+      - return: nil
+  - of: (*parser).timeDelimiter
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: p.pos >= len(p.data)
+      - bind: c
+        eval: p.data[p.pos]
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+            - return: "true"
+          when: c == 'T' || c == 't'
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+            - return: "true"
+          when: c == charSpace && p.pos+1 < len(p.data) && byteClass[p.data[p.pos+1]]&classDigit != 0
+      - return: "false"
+  - of: (*parser).timeOfDay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).timeOfDay
+        kind: self
+      - id: p.fixed
+        kind: internal
+      - id: p.fail
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - var:
+          name: ok
+          type: bool
+      - set: dt.hour, ok
+        to: p.fixed
+        value: p.fixed(pairDigits, ':')
+      - opt:
+          do:
+            - set: dt.minute, ok
+              to: p.fixed
+              value: p.fixed(pairDigits, 0)
+          when: ok
+      - opt:
+          do:
+            - set: dt.second, ok
+              to: p.fixed
+              value: p.fixed(pairDigits, 0)
+            - set: ok
+              value: ok && p.secondFraction(dt)
+          when: ok && p.consume(':')
+      - opt:
+          do:
+            - return: p.fail(at, problemBadTime)
+              to: p.fail
+          when: "!ok || dt.hour > maxHour || dt.minute > maxMinute || dt.second > maxSecond"
+      - return: nil
+  - of: (*parser).offset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).offset
+        kind: self
+      - id: p.fixed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: p.pos >= len(p.data)
+      - bind: c
+        eval: p.data[p.pos]
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+            - return: "true"
+          when: c == 'Z' || c == 'z'
+      - opt:
+          do:
+            - return: "false"
+          when: c != '+' && c != '-'
+      - op: ++
+        set: p.pos
+      - bind: hours, okH
+        eval: p.fixed(pairDigits, ':')
+        to: p.fixed
+      - bind: minutes, okM
+        eval: p.fixed(pairDigits, 0)
+        to: p.fixed
+      - opt:
+          do:
+            - set: dt.offset
+              value: offsetInvalid
+            - return: "true"
+          when: "!okH || !okM || hours > maxHour || minutes > maxMinute"
+      - set: dt.offset
+        value: hours*secondsPerHour + minutes*secondsPerMinute
+      - opt:
+          do:
+            - set: dt.offset
+              value: "-dt.offset"
+          when: c == '-'
+      - return: "true"
+  - of: (*parser).offsetError
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).offsetError
+        kind: self
+      - id: p.fail
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: dt.offset != offsetInvalid
+      - return: p.fail(p.pos, problemBadOffset)
+        to: p.fail
+  - of: daysIn
+    steps:
+      - switch:
+          cases:
+            - case: february
+              do:
+                - opt:
+                    do:
+                      - return: leapFebruaryDays
+                    when: isLeap(year)
+                - return: februaryDays
+            - case: april, june, september, november
+              do:
+                - return: shortMonth
+            - default: true
+              do:
+                - return: longMonth
+          "on": month
+  - of: isLeap
+    steps:
+      - return: year%leapCycle == 0 && (year%centuryCycle != 0 || year%quadCenturyCycle == 0)
+  - of: (*parser).numberValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).numberValue
+        kind: self
+      - id: p.number
+        kind: internal
+      - id: leaf
+        kind: internal
+      - id: p.add
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - bind: k, bits, err
+        eval: p.number()
+        to: p.number
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: "n"
+        eval: leaf(k, part, at)
+        to: leaf
+      - set: n.num
+        value: bits
+      - set: n.text
+        value: "span{start: int32(at), end: int32(p.pos)}"
+      - eval: p.add(parent, n)
+        to: p.add
+      - return: nil
+  - of: (*parser).number
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).number
+        kind: self
+      - id: p.specialFloat
+        kind: internal
+      - id: p.radixInteger
+        kind: internal
+      - id: p.decimal
+        kind: internal
+    steps:
+      - bind: start
+        eval: p.pos
+      - bind: signed
+        eval: p.data[p.pos] == '+' || p.data[p.pos] == '-'
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+          when: signed
+      - opt:
+          do:
+            - return: 0, 0, p.fail(start, problemBadNumber)
+          when: p.pos >= len(p.data)
+      - bind: c
+        eval: p.data[p.pos]
+      - switch:
+          cases:
+            - case: c == 'i' || c == 'n'
+              do:
+                - return: p.specialFloat(start)
+                  to: p.specialFloat
+            - case: "!signed && p.hasRadixPrefix()"
+              do:
+                - return: p.radixInteger()
+                  to: p.radixInteger
+            - default: true
+              do:
+                - return: p.decimal(start)
+                  to: p.decimal
+  - of: (*parser).hasRadixPrefix
+    steps:
+      - return: p.data[p.pos] == '0' && p.pos+1 < len(p.data) && radixBits(p.data[p.pos+1]) != 0
+  - of: (*parser).specialFloat
+    steps:
+      - bind: negative
+        eval: p.data[start] == '-'
+      - switch:
+          cases:
+            - case: p.literal(wordInf)
+              do:
+                - return: kindFloat, math.Float64bits(math.Inf(signOf(negative))), nil
+            - case: p.literal(wordNaN)
+              do:
+                - return: kindFloat, math.Float64bits(math.NaN()), nil
+            - default: true
+              do:
+                - return: 0, 0, p.fail(start, problemBadNumber)
+  - of: signOf
+    steps:
+      - opt:
+          do:
+            - return: "-1"
+          when: negative
+      - return: "1"
+  - of: radixBits
+    steps:
+      - switch:
+          cases:
+            - case: "'x'"
+              do:
+                - return: hexBits
+            - case: "'o'"
+              do:
+                - return: octalBits
+            - case: "'b'"
+              do:
+                - return: binaryBits
+            - default: true
+              do:
+                - return: "0"
+          "on": c
+  - of: radixClass
+    steps:
+      - switch:
+          cases:
+            - case: hexBits
+              do:
+                - return: classHex
+            - case: octalBits
+              do:
+                - return: classOctal
+            - default: true
+              do:
+                - return: classBinary
+          "on": bits
+  - of: (*parser).radixInteger
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).radixInteger
+        kind: self
+      - id: radixBits
+        kind: internal
+      - id: p.digits
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - bind: bits
+        eval: radixBits(p.data[p.pos+1])
+        to: radixBits
+      - op: +=
+        set: p.pos
+        value: "2"
+      - bind: digitsStart
+        eval: p.pos
+      - opt:
+          do:
+            - return: 0, 0, err
+          init:
+            bind: err
+            eval: p.digits(radixClass(bits))
+            to: p.digits
+          when: err != nil
+      - var:
+          name: value
+          type: uint64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: c == '_'
+            - opt:
+                do:
+                  - return: 0, 0, p.fail(at, problemIntegerRange)
+                when: value > math.MaxInt64>>bits
+            - set: value
+              value: value<<bits | uint64(hexValue(c))
+          key: _
+          range: p.data[digitsStart:p.pos]
+          value: c
+      - return: kindInteger, value, nil
+  - of: (*parser).digits
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).digits
+        kind: self
+      - id: p.fail
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.fail(p.pos, problemBadNumber)
+              to: p.fail
+          when: p.pos >= len(p.data) || byteClass[p.data[p.pos]]&cls == 0
+      - op: ++
+        set: p.pos
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - bind: c
+              eval: p.data[p.pos]
+            - opt:
+                do:
+                  - op: ++
+                    set: p.pos
+                  - continue: true
+                when: byteClass[c]&cls != 0
+            - opt:
+                do:
+                  - return: nil
+                when: c != '_'
+            - opt:
+                do:
+                  - return: p.fail(p.pos, problemBadUnderscore)
+                    to: p.fail
+                when: p.pos+1 >= len(p.data) || byteClass[p.data[p.pos+1]]&cls == 0
+            - op: +=
+              set: p.pos
+              value: "2"
+      - return: nil
+  - of: (*parser).decimal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).decimal
+        kind: self
+      - id: p.digits
+        kind: internal
+      - id: p.fraction
+        kind: internal
+      - id: p.floatOf
+        kind: internal
+      - id: p.integerOf
+        kind: internal
+    steps:
+      - bind: intStart
+        eval: p.pos
+      - opt:
+          do:
+            - return: 0, 0, err
+          init:
+            bind: err
+            eval: p.digits(classDigit)
+            to: p.digits
+          when: err != nil
+      - opt:
+          do:
+            - return: 0, 0, p.fail(intStart, problemLeadingZero)
+          when: p.data[intStart] == '0' && p.pos-intStart > 1
+      - bind: isFloat, err
+        eval: p.fraction()
+        to: p.fraction
+      - opt:
+          do:
+            - return: 0, 0, err
+          when: err != nil
+      - bind: token
+        eval: p.data[start:p.pos]
+      - opt:
+          do:
+            - return: p.floatOf(start, token)
+              to: p.floatOf
+          when: isFloat
+      - return: p.integerOf(start, token)
+        to: p.integerOf
+  - of: (*parser).fraction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).fraction
+        kind: self
+      - id: p.digits
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: false, err
+                init:
+                  bind: err
+                  eval: p.digits(classDigit)
+                  to: p.digits
+                when: err != nil
+            - set: isFloat
+              value: "true"
+          when: p.consume(charDot)
+      - opt:
+          do:
+            - return: isFloat, nil
+          when: p.pos >= len(p.data) || (p.data[p.pos] != 'e' && p.data[p.pos] != 'E')
+      - op: ++
+        set: p.pos
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+          when: p.pos < len(p.data) && (p.data[p.pos] == '+' || p.data[p.pos] == '-')
+      - return: true, p.digits(classDigit)
+  - of: (*parser).floatOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).floatOf
+        kind: self
+      - id: fastFloat
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[floatBufferBytes]byte"
+      - bind: clean
+        eval: buf[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: clean
+                    value: append(clean, c)
+                when: c != '_'
+          key: _
+          range: token
+          value: c
+      - opt:
+          do:
+            - return: kindFloat, math.Float64bits(f), nil
+          init:
+            bind: f, ok
+            eval: fastFloat(clean)
+            to: fastFloat
+          when: ok
+      - bind: f, err
+        eval: strconv.ParseFloat(string(clean), 64)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, 0, p.fail(at, problemFloatRange)
+          when: err != nil
+      - return: kindFloat, math.Float64bits(f), nil
+  - of: fastFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: fastFloat
+        kind: self
+      - id: significandOf
+        kind: internal
+      - id: exponentOf
+        kind: internal
+    steps:
+      - bind: negative
+        eval: b[0] == '-'
+      - opt:
+          do:
+            - set: b
+              value: b[1:]
+          when: b[0] == '-' || b[0] == '+'
+      - bind: significand, exponent, rest, ok
+        eval: significandOf(b)
+        to: significandOf
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok"
+      - bind: exp, ok
+        eval: exponentOf(rest)
+        to: exponentOf
+      - op: +=
+        set: exponent
+        value: exp
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok || significand > maxExactSignificand || exponent < -maxExactPow10 || exponent > maxExactPow10"
+      - bind: f
+        eval: float64(significand)
+      - alt:
+          - do:
+              - op: /=
+                set: f
+                value: exactPow10[-exponent]
+            when: exponent < 0
+          - do:
+              - op: "*="
+                set: f
+                value: exactPow10[exponent]
+            else: true
+      - opt:
+          do:
+            - set: f
+              value: "-f"
+          when: negative
+      - return: f, true
+  - of: exponentOf
+    steps:
+      - opt:
+          do:
+            - return: 0, true
+          when: len(b) == 0
+      - set: b
+        value: b[1:]
+      - bind: sign
+        eval: "1"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: sign
+                    value: "-1"
+                when: b[0] == '-'
+            - set: b
+              value: b[1:]
+          when: b[0] == '+' || b[0] == '-'
+      - opt:
+          do:
+            - return: 0, false
+          when: len(b) > maxExponentDigits
+      - bind: value
+        eval: "0"
+      - loop:
+          do:
+            - set: value
+              value: value*int(decimalBase) + int(c-'0')
+          key: _
+          range: b
+          value: c
+      - return: sign * value, true
+  - of: (*parser).stringValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).stringValue
+        kind: self
+      - id: leaf
+        kind: internal
+      - id: p.multilineString
+        kind: internal
+      - id: p.singleLineString
+        kind: internal
+      - id: p.add
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - bind: "n"
+        eval: leaf(kindString, part, at)
+        to: leaf
+      - bind: quote
+        eval: p.data[p.pos]
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: n.text, err
+                to: p.multilineString
+                value: p.multilineString(quote)
+              - op: "|="
+                set: n.flags
+                value: flagTextEscaped
+            when: p.hasTriple(quote)
+          - do:
+              - var:
+                  name: escaped
+                  type: bool
+              - set: n.text, escaped, err
+                to: p.singleLineString
+                value: p.singleLineString()
+              - opt:
+                  do:
+                    - op: "|="
+                      set: n.flags
+                      value: flagTextEscaped
+                  when: escaped
+            else: true
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - eval: p.add(parent, n)
+        to: p.add
+      - return: nil
+  - of: (*parser).hasTriple
+    steps:
+      - return: p.pos+2 < len(p.data) && p.data[p.pos+1] == quote && p.data[p.pos+2] == quote
+  - of: (*parser).singleLineString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).singleLineString
+        kind: self
+      - id: p.literalString
+        kind: internal
+      - id: p.basicString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: value, err
+              to: p.literalString
+              value: p.literalString()
+            - return: value, false, err
+          when: p.data[p.pos] == charApostrophe
+      - return: p.basicString()
+        to: p.basicString
+  - of: (*parser).literalString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).literalString
+        kind: self
+      - id: p.skipRune
+        kind: internal
+    steps:
+      - op: ++
+        set: p.pos
+      - bind: start
+        eval: p.pos
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - bind: c
+              eval: p.data[p.pos]
+            - opt:
+                do:
+                  - bind: value
+                    eval: "span{start: int32(start), end: int32(p.pos)}"
+                  - op: ++
+                    set: p.pos
+                  - return: value, nil
+                when: c == charApostrophe
+            - opt:
+                do:
+                  - op: ++
+                    set: p.pos
+                  - continue: true
+                when: byteClass[c]&classPrintable != 0
+            - opt:
+                do:
+                  - return: span{}, err
+                init:
+                  bind: err
+                  eval: p.skipRune(problemControlInString)
+                  to: p.skipRune
+                when: err != nil
+      - return: span{}, p.fail(p.pos, problemUnterminatedString)
+  - of: (*parser).basicString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).basicString
+        kind: self
+      - id: p.basicEscaped
+        kind: internal
+      - id: p.skipRune
+        kind: internal
+    steps:
+      - op: ++
+        set: p.pos
+      - bind: start
+        eval: p.pos
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - bind: c
+              eval: p.data[p.pos]
+            - opt:
+                do:
+                  - set: value
+                    value: "span{start: int32(start), end: int32(p.pos)}"
+                  - op: ++
+                    set: p.pos
+                  - return: value, false, nil
+                when: c == charQuote
+            - opt:
+                do:
+                  - set: value, err
+                    to: p.basicEscaped
+                    value: p.basicEscaped(start)
+                  - return: value, true, err
+                when: c == charBackslash
+            - opt:
+                do:
+                  - op: ++
+                    set: p.pos
+                  - continue: true
+                when: byteClass[c]&classPrintable != 0
+            - opt:
+                do:
+                  - return: span{}, false, err
+                init:
+                  bind: err
+                  eval: p.skipRune(problemControlInString)
+                  to: p.skipRune
+                when: err != nil
+      - return: span{}, false, p.fail(p.pos, problemUnterminatedString)
+  - of: (*parser).basicEscaped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).basicEscaped
+        kind: self
+      - id: p.basicStep
+        kind: internal
+    steps:
+      - bind: out
+        eval: int32(len(p.unescaped))
+      - set: p.unescaped
+        value: append(p.unescaped, p.data[start:p.pos]...)
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - bind: c
+              eval: p.data[p.pos]
+            - opt:
+                do:
+                  - op: ++
+                    set: p.pos
+                  - return: "span{start: out, end: int32(len(p.unescaped))}, nil"
+                when: c == charQuote
+            - opt:
+                do:
+                  - return: span{}, err
+                init:
+                  bind: err
+                  eval: p.basicStep(c)
+                  to: p.basicStep
+                when: err != nil
+      - return: span{}, p.fail(p.pos, problemUnterminatedString)
+  - of: (*parser).basicStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).basicStep
+        kind: self
+      - id: p.escape
+        kind: internal
+      - id: p.skipRune
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.escape()
+              to: p.escape
+          when: c == charBackslash
+      - opt:
+          do:
+            - set: p.unescaped
+              value: append(p.unescaped, c)
+            - op: ++
+              set: p.pos
+            - return: nil
+          when: byteClass[c]&classPrintable != 0
+      - bind: start
+        eval: p.pos
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: p.skipRune(problemControlInString)
+            to: p.skipRune
+          when: err != nil
+      - set: p.unescaped
+        value: append(p.unescaped, p.data[start:p.pos]...)
+      - return: nil
+  - of: (*parser).escape
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).escape
+        kind: self
+      - id: p.fail
+        kind: internal
+      - id: p.hexEscape
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - op: ++
+        set: p.pos
+      - opt:
+          do:
+            - return: p.fail(at, problemBadEscape)
+              to: p.fail
+          when: p.pos >= len(p.data)
+      - bind: c
+        eval: p.data[p.pos]
+      - opt:
+          do:
+            - set: p.unescaped
+              value: append(p.unescaped, b)
+            - op: ++
+              set: p.pos
+            - return: nil
+          init:
+            bind: b
+            eval: simpleEscapes[c]
+          when: b != 0
+      - op: ++
+        set: p.pos
+      - switch:
+          cases:
+            - case: "'u'"
+              do:
+                - return: p.hexEscape(at, unicodeEscapeDigits)
+                  to: p.hexEscape
+            - case: "'U'"
+              do:
+                - return: p.hexEscape(at, longEscapeDigits)
+                  to: p.hexEscape
+            - case: "'x'"
+              do:
+                - return: p.hexEscape(at, shortEscapeDigits)
+                  to: p.hexEscape
+            - default: true
+              do:
+                - return: p.fail(at, problemBadEscape)
+                  to: p.fail
+          "on": c
+  - of: (*parser).hexEscape
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).hexEscape
+        kind: self
+      - id: p.fail
+        kind: internal
+      - id: utf8
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: p.fail(at, problemBadEscape)
+              to: p.fail
+          when: len(p.data)-p.pos < digits
+      - var:
+          name: code
+          type: uint32
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: p.fail(at, problemBadEscape)
+                    to: p.fail
+                when: byteClass[c]&classHex == 0
+            - set: code
+              value: code<<hexDigitBits | uint32(hexValue(c))
+          key: _
+          range: "p.data[p.pos : p.pos+digits]"
+          value: c
+      - opt:
+          do:
+            - return: p.fail(at, problemBadEscape)
+              to: p.fail
+          when: code > utf8.MaxRune || (code >= surrogateFirst && code <= surrogateLast)
+      - op: +=
+        set: p.pos
+        value: digits
+      - set: p.unescaped
+        to: utf8
+        value: utf8.AppendRune(p.unescaped, rune(code))
+      - return: nil
+  - of: (*parser).multilineString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).multilineString
+        kind: self
+      - id: p.newline
+        kind: internal
+      - id: p.multilineStep
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - op: +=
+        set: p.pos
+        value: delimiterLength
+      - eval: p.newline()
+        to: p.newline
+      - bind: out
+        eval: int32(len(p.unescaped))
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - bind: closed, err
+              eval: p.multilineStep(quote)
+              to: p.multilineStep
+            - opt:
+                do:
+                  - return: span{}, err
+                when: err != nil
+            - opt:
+                do:
+                  - return: "span{start: out, end: int32(len(p.unescaped))}, nil"
+                when: closed
+      - return: span{}, p.fail(at, problemUnterminatedString)
+  - of: (*parser).multilineStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).multilineStep
+        kind: self
+      - id: p.quoteRun
+        kind: internal
+    steps:
+      - bind: c
+        eval: p.data[p.pos]
+      - opt:
+          do:
+            - return: p.quoteRun(quote)
+              to: p.quoteRun
+          when: c == quote
+      - opt:
+          do:
+            - return: false, p.multilineEscape()
+          when: c == charBackslash && quote == charQuote
+      - opt:
+          do:
+            - set: p.unescaped
+              value: append(p.unescaped, c)
+            - op: ++
+              set: p.pos
+            - return: false, nil
+          when: byteClass[c]&classPrintable != 0
+      - return: false, p.multilineOther()
+  - of: (*parser).multilineOther
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).multilineOther
+        kind: self
+      - id: p.skipRune
+        kind: internal
+    steps:
+      - bind: start
+        eval: p.pos
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.skipRune(problemControlInString)
+                  to: p.skipRune
+                when: err != nil
+          when: "!p.newline()"
+      - set: p.unescaped
+        value: append(p.unescaped, p.data[start:p.pos]...)
+      - return: nil
+  - of: (*parser).quoteRun
+    steps:
+      - bind: start
+        eval: p.pos
+      - loop:
+          cond: p.pos < len(p.data) && p.data[p.pos] == quote
+          do:
+            - op: ++
+              set: p.pos
+      - bind: run
+        eval: p.pos - start
+      - opt:
+          do:
+            - return: false, p.fail(start, problemTooManyQuotes)
+          when: run > maxClosingQuotes
+      - opt:
+          do:
+            - set: p.unescaped
+              value: append(p.unescaped, p.data[start:p.pos]...)
+            - return: false, nil
+          when: run < delimiterLength
+      - set: p.unescaped
+        value: append(p.unescaped, p.data[start:p.pos-delimiterLength]...)
+      - return: true, nil
+  - of: (*parser).multilineEscape
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).multilineEscape
+        kind: self
+      - id: p.escape
+        kind: internal
+      - id: p.skipSpace
+        kind: internal
+    steps:
+      - bind: ahead
+        eval: p.pos + 1
+      - loop:
+          cond: ahead < len(p.data) && (p.data[ahead] == charSpace || p.data[ahead] == charTab)
+          do:
+            - op: ++
+              set: ahead
+      - bind: saved
+        eval: p.pos
+      - set: p.pos
+        value: ahead
+      - opt:
+          do:
+            - set: p.pos
+              value: saved
+            - return: p.escape()
+              to: p.escape
+          when: "!p.newline()"
+      - loop:
+          do:
+            - eval: p.skipSpace()
+              to: p.skipSpace
+            - opt:
+                do:
+                  - return: nil
+                when: "!p.newline()"
+          forever: true
+  - of: hexValue
+    steps:
+      - switch:
+          cases:
+            - case: c <= '9'
+              do:
+                - return: c - '0'
+            - case: c >= 'a'
+              do:
+                - return: c - 'a' + hexLetterValue
+            - default: true
+              do:
+                - return: c - 'A' + hexLetterValue
+  - of: (*parser).header
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).header
+        kind: self
+      - id: p.skipSpace
+        kind: internal
+      - id: p.key
+        kind: internal
+      - id: p.fail
+        kind: internal
+      - id: p.walkHeader
+        kind: internal
+      - id: p.openArrayTable
+        kind: internal
+      - id: p.openTable
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - bind: array
+        eval: p.pos+1 < len(p.data) && p.data[p.pos+1] == charOpenBracket
+      - op: ++
+        set: p.pos
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+          when: array
+      - eval: p.skipSpace()
+        to: p.skipSpace
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: p.key()
+            to: p.key
+          when: err != nil
+      - opt:
+          do:
+            - return: p.fail(p.pos, problemUnclosedHeader)
+              to: p.fail
+          when: "!p.consume(charCloseBracket) || (array && !p.consume(charCloseBracket))"
+      - bind: parent, err
+        eval: p.walkHeader(p.parts[:len(p.parts)-1])
+        to: p.walkHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: last
+        eval: p.parts[len(p.parts)-1]
+      - opt:
+          do:
+            - return: p.openArrayTable(parent, last, at)
+              to: p.openArrayTable
+          when: array
+      - return: p.openTable(parent, last, at)
+        to: p.openTable
+  - of: (*parser).walkHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).walkHeader
+        kind: self
+      - id: p.headerStep
+        kind: internal
+    steps:
+      - bind: t
+        eval: rootNode
+      - loop:
+          do:
+            - bind: next, err
+              eval: p.headerStep(t, part)
+              to: p.headerStep
+            - opt:
+                do:
+                  - return: noNode, err
+                when: err != nil
+            - set: t
+              value: next
+          key: _
+          range: parts
+          value: part
+      - return: t, nil
+  - of: (*parser).headerStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).headerStep
+        kind: self
+      - id: p.child
+        kind: internal
+      - id: p.newTable
+        kind: internal
+    steps:
+      - bind: c
+        eval: p.child(t, p.partBytes(part))
+        to: p.child
+      - opt:
+          do:
+            - return: p.newTable(t, part, originImplicit)
+              to: p.newTable
+          when: c == noNode
+      - bind: "n"
+        eval: "&p.nodes[c]"
+      - opt:
+          do:
+            - return: c, nil
+          when: n.kind == kindTable && n.origin != originInline
+      - opt:
+          do:
+            - return: n.last, nil
+          when: n.kind == kindArrayOfTables
+      - return: noNode, p.fail(int(part.at), problemExtendValue)
+  - of: (*parser).openTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).openTable
+        kind: self
+      - id: p.child
+        kind: internal
+      - id: p.newTable
+        kind: internal
+      - id: p.fail
+        kind: internal
+    steps:
+      - bind: c
+        eval: p.child(parent, p.partBytes(part))
+        to: p.child
+      - opt:
+          do:
+            - bind: t, err
+              eval: p.newTable(parent, part, originHeader)
+              to: p.newTable
+            - set: p.current
+              value: t
+            - return: err
+          when: c == noNode
+      - bind: "n"
+        eval: "&p.nodes[c]"
+      - opt:
+          do:
+            - set: n.origin
+              value: originHeader
+            - set: p.current
+              value: c
+            - return: nil
+          when: n.kind == kindTable && n.origin == originImplicit
+      - return: p.fail(at, redefinitionProblem(n))
+        to: p.fail
+  - of: (*parser).openArrayTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).openArrayTable
+        kind: self
+      - id: p.child
+        kind: internal
+      - id: p.fail
+        kind: internal
+      - id: p.add
+        kind: internal
+      - id: p.newTable
+        kind: internal
+    steps:
+      - bind: c
+        eval: p.child(parent, p.partBytes(part))
+        to: p.child
+      - alt:
+          - do:
+              - opt:
+                  do:
+                    - return: p.fail(at, problemTooDeep)
+                      to: p.fail
+                  when: p.nodes[parent].depth >= maxDepth
+              - bind: "n"
+                eval: "node{kind: kindArrayOfTables, key: part.name, at: int32(at)}"
+              - opt:
+                  do:
+                    - op: "|="
+                      set: n.flags
+                      value: flagKeyEscaped
+                  when: part.escaped
+              - set: c
+                to: p.add
+                value: p.add(parent, n)
+            when: c == noNode
+          - do:
+              - return: p.fail(at, problemNotArrayOfTables)
+                to: p.fail
+            when: p.nodes[c].kind != kindArrayOfTables
+      - bind: element, err
+        eval: "p.newTable(c, keyPart{at: int32(at)}, originElement)"
+        to: p.newTable
+      - set: p.current
+        value: element
+      - return: err
+  - of: redefinitionProblem
+    steps:
+      - switch:
+          cases:
+            - case: n.kind == kindTable && n.origin == originHeader
+              do:
+                - return: problemTableTwice
+            - case: n.kind == kindTable && n.origin == originDotted
+              do:
+                - return: problemTableDotted
+            - case: n.kind == kindArrayOfTables
+              do:
+                - return: problemTableIsArray
+            - default: true
+              do:
+                - return: problemExtendValue
+  - of: (*parser).keyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).keyValue
+        kind: self
+      - id: p.key
+        kind: internal
+      - id: p.fail
+        kind: internal
+      - id: p.skipSpace
+        kind: internal
+      - id: p.walkDotted
+        kind: internal
+      - id: p.value
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: p.key()
+            to: p.key
+          when: err != nil
+      - opt:
+          do:
+            - return: p.fail(p.pos, problemExpectedEquals)
+              to: p.fail
+          when: "!p.consume(charEquals)"
+      - eval: p.skipSpace()
+        to: p.skipSpace
+      - bind: parent, err
+        eval: p.walkDotted(t, p.parts[:len(p.parts)-1])
+        to: p.walkDotted
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: last
+        eval: p.parts[len(p.parts)-1]
+      - opt:
+          do:
+            - return: p.fail(at, problemKeyTwice)
+              to: p.fail
+          when: p.child(parent, p.partBytes(last)) != noNode
+      - return: p.value(parent, last)
+        to: p.value
+  - of: (*parser).walkDotted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).walkDotted
+        kind: self
+      - id: p.child
+        kind: internal
+      - id: p.newTable
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: p.child(t, p.partBytes(part))
+              to: p.child
+            - opt:
+                do:
+                  - bind: next, err
+                    eval: p.newTable(t, part, originDotted)
+                    to: p.newTable
+                  - opt:
+                      do:
+                        - return: noNode, err
+                      when: err != nil
+                  - set: t
+                    value: next
+                  - continue: true
+                when: c == noNode
+            - opt:
+                do:
+                  - return: noNode, p.fail(int(part.at), problemDottedExtends)
+                when: p.nodes[c].kind != kindTable || p.nodes[c].origin != originDotted
+            - set: t
+              value: c
+          key: _
+          range: parts
+          value: part
+      - return: t, nil
+  - of: (*parser).consume
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+            - return: "true"
+          when: p.pos < len(p.data) && p.data[p.pos] == c
+      - return: "false"
+  - of: (*parser).key
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).key
+        kind: self
+      - id: p.simpleKey
+        kind: internal
+      - id: p.skipSpace
+        kind: internal
+    steps:
+      - set: p.parts
+        value: p.parts[:0]
+      - loop:
+          do:
+            - bind: part, err
+              eval: p.simpleKey()
+              to: p.simpleKey
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: p.parts
+              value: append(p.parts, part)
+            - eval: p.skipSpace()
+              to: p.skipSpace
+            - opt:
+                do:
+                  - return: nil
+                when: "!p.consume(charDot)"
+            - eval: p.skipSpace()
+              to: p.skipSpace
+          forever: true
+  - of: (*parser).simpleKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).simpleKey
+        kind: self
+      - id: p.singleLineString
+        kind: internal
+    steps:
+      - bind: at
+        eval: int32(p.pos)
+      - opt:
+          do:
+            - return: keyPart{}, p.fail(p.pos, problemExpectedKey)
+          when: p.pos >= len(p.data)
+      - opt:
+          do:
+            - bind: name, escaped, err
+              eval: p.singleLineString()
+              to: p.singleLineString
+            - return: "keyPart{name: name, at: at, escaped: escaped}, err"
+          init:
+            bind: c
+            eval: p.data[p.pos]
+          when: c == charQuote || c == charApostrophe
+      - bind: start
+        eval: p.pos
+      - loop:
+          cond: p.pos < len(p.data) && isBareKeyByte(p.data[p.pos])
+          do:
+            - op: ++
+              set: p.pos
+      - opt:
+          do:
+            - return: keyPart{}, p.fail(p.pos, problemExpectedKey)
+          when: p.pos == start
+      - return: "keyPart{name: span{start: int32(start), end: int32(p.pos)}, at: at}, nil"
+  - of: isBareKeyByte
+    steps:
+      - return: byteClass[c]&classBareKey != 0
+  - of: (*parser).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).value
+        kind: self
+      - id: p.fail
+        kind: internal
+      - id: p.stringValue
+        kind: internal
+      - id: p.array
+        kind: internal
+      - id: p.inlineTable
+        kind: internal
+      - id: p.boolValue
+        kind: internal
+      - id: p.numberOrDate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.fail(p.pos, problemExpectedValue)
+              to: p.fail
+          when: p.pos >= len(p.data)
+      - opt:
+          do:
+            - return: p.fail(p.pos, problemTooDeep)
+              to: p.fail
+          when: p.nodes[parent].depth >= maxDepth
+      - bind: c
+        eval: p.data[p.pos]
+      - switch:
+          cases:
+            - case: c == charQuote || c == charApostrophe
+              do:
+                - return: p.stringValue(parent, part)
+                  to: p.stringValue
+            - case: c == charOpenBracket
+              do:
+                - return: p.array(parent, part)
+                  to: p.array
+            - case: c == charOpenBrace
+              do:
+                - return: p.inlineTable(parent, part)
+                  to: p.inlineTable
+            - case: c == 't' || c == 'f'
+              do:
+                - return: p.boolValue(parent, part)
+                  to: p.boolValue
+            - case: byteClass[c]&classNumberStart != 0
+              do:
+                - return: p.numberOrDate(parent, part)
+                  to: p.numberOrDate
+            - default: true
+              do:
+                - return: p.fail(p.pos, problemExpectedValue)
+                  to: p.fail
+  - of: leaf
+    steps:
+      - bind: "n"
+        eval: "node{kind: k, key: part.name, at: int32(at)}"
+      - opt:
+          do:
+            - op: "|="
+              set: n.flags
+              value: flagKeyEscaped
+          when: part.escaped
+      - return: "n"
+  - of: (*parser).boolValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).boolValue
+        kind: self
+      - id: leaf
+        kind: internal
+      - id: p.fail
+        kind: internal
+      - id: p.add
+        kind: internal
+    steps:
+      - bind: at
+        eval: p.pos
+      - bind: "n"
+        eval: leaf(kindBool, part, at)
+        to: leaf
+      - switch:
+          cases:
+            - case: p.literal(wordTrue)
+              do:
+                - set: n.num
+                  value: "1"
+            - case: p.literal(wordFalse)
+            - default: true
+              do:
+                - return: p.fail(at, problemExpectedValue)
+                  to: p.fail
+      - set: n.text
+        value: "span{start: int32(at), end: int32(p.pos)}"
+      - eval: p.add(parent, n)
+        to: p.add
+      - return: nil
+  - of: (*parser).literal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!bytes.HasPrefix(p.data[p.pos:], []byte(word))"
+      - op: +=
+        set: p.pos
+        value: len(word)
+      - return: "true"
+  - of: (*parser).array
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).array
+        kind: self
+      - id: p.add
+        kind: internal
+      - id: p.skipBlank
+        kind: internal
+      - id: p.value
+        kind: internal
+      - id: p.afterElement
+        kind: internal
+    steps:
+      - bind: arr
+        eval: p.add(parent, leaf(kindArray, part, p.pos))
+        to: p.add
+      - op: ++
+        set: p.pos
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.skipBlank()
+                  to: p.skipBlank
+                when: err != nil
+            - opt:
+                do:
+                  - return: nil
+                when: p.consume(charCloseBracket)
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.value(arr, noPart)
+                  to: p.value
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: done, err
+                  eval: p.afterElement()
+                  to: p.afterElement
+                when: done || err != nil
+          forever: true
+  - of: (*parser).afterElement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).afterElement
+        kind: self
+      - id: p.skipBlank
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: p.skipBlank()
+            to: p.skipBlank
+          when: err != nil
+      - opt:
+          do:
+            - return: true, nil
+          when: p.consume(charCloseBracket)
+      - opt:
+          do:
+            - return: false, nil
+          when: p.consume(charComma)
+      - return: false, p.fail(p.pos, problemExpectedComma)
+  - of: (*parser).skipBlank
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).skipBlank
+        kind: self
+      - id: p.skipSpace
+        kind: internal
+      - id: p.comment
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: p.skipSpace()
+              to: p.skipSpace
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: err
+                        eval: p.comment()
+                        to: p.comment
+                      when: err != nil
+                when: p.pos < len(p.data) && p.data[p.pos] == charHash
+            - opt:
+                do:
+                  - return: nil
+                when: "!p.newline()"
+          forever: true
+  - of: (*parser).inlineTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).inlineTable
+        kind: self
+      - id: leaf
+        kind: internal
+      - id: p.add
+        kind: internal
+      - id: p.inlineClose
+        kind: internal
+      - id: p.keyValue
+        kind: internal
+      - id: p.afterPair
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: leaf(kindTable, part, p.pos)
+        to: leaf
+      - set: n.origin
+        value: originInline
+      - bind: t
+        eval: p.add(parent, n)
+        to: p.add
+      - op: ++
+        set: p.pos
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: done, err
+            eval: p.inlineClose()
+            to: p.inlineClose
+          when: done || err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.keyValue(t)
+                  to: p.keyValue
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: done, err
+                  eval: p.afterPair()
+                  to: p.afterPair
+                when: done || err != nil
+          forever: true
+  - of: (*parser).afterPair
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).afterPair
+        kind: self
+      - id: p.inlineClose
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: done, err
+          init:
+            bind: done, err
+            eval: p.inlineClose()
+            to: p.inlineClose
+          when: done || err != nil
+      - opt:
+          do:
+            - return: false, p.fail(p.pos, problemExpectedPairComma)
+          when: "!p.consume(charComma)"
+      - return: p.inlineClose()
+        to: p.inlineClose
+  - of: (*parser).inlineClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).inlineClose
+        kind: self
+      - id: p.skipBlank
+        kind: internal
+      - id: p.consume
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: p.skipBlank()
+            to: p.skipBlank
+          when: err != nil
+      - return: p.consume(charCloseBrace), nil
+        to: p.consume
+  - of: (*parser).reset
+    steps:
+      - set: p.data
+        value: nil
+      - set: p.nodes
+        value: p.nodes[:0]
+      - set: p.unescaped
+        value: p.unescaped[:0]
+      - set: p.times
+        value: p.times[:0]
+      - set: p.parts
+        value: p.parts[:0]
+      - eval: clear(p.index)
+      - set: p.pos
+        value: "0"
+      - set: p.current
+        value: rootNode
+      - opt:
+          do:
+            - eval: clear(p.keys)
+            - set: p.internedBytes
+              value: "0"
+          when: len(p.keys) >= maxInternedKeys
+  - of: (*parser).internKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).internKey
+        kind: self
+      - id: p.newKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s
+          init:
+            bind: s, ok
+            eval: p.keys[string(key)]
+          when: ok
+      - return: p.newKey(key)
+        to: p.newKey
+  - of: (*parser).newKey
+    steps:
+      - bind: s
+        eval: string(key)
+      - opt:
+          do:
+            - return: s
+          when: len(key) > maxInternedKeyBytes || len(p.keys) >= maxInternedKeys
+      - opt:
+          do:
+            - set: p.keys
+              value: make(map[string]string)
+          when: p.keys == nil
+      - set: p.keys[s]
+        value: s
+      - op: +=
+        set: p.internedBytes
+        value: len(s) + internEntryBytes
+      - return: s
+  - of: (*parser).retainedBytes
+    steps:
+      - return: cap(p.nodes)*nodeBytes + cap(p.unescaped) + cap(p.times)*datetimeBytes + len(p.index)*nodeBytes + p.internedBytes
+  - of: (*parser).parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).parse
+        kind: self
+      - id: p.expression
+        kind: internal
+    steps:
+      - set: p.data
+        value: data
+      - set: p.pos
+        value: "0"
+      - opt:
+          do:
+            - set: p.nodes
+              value: make([]node, 0, min(estimateNodes(data), maxPresizedNodes))
+          when: len(data)/bytesPerNodeGuess > cap(p.nodes)
+      - set: p.nodes
+        value: "append(p.nodes[:0], node{kind: kindTable, origin: originHeader, parent: noNode, first: noNode, last: noNode, next: noNode, hnext: noNode})"
+      - set: p.current
+        value: rootNode
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.expression()
+                  to: p.expression
+                when: err != nil
+      - return: nil
+  - of: estimateNodes
+    steps:
+      - return: 1 + bytes.Count(data, []byte{charEquals}) + bytes.Count(data, []byte{charComma}) + bytes.Count(data, []byte{charOpenBracket})
+  - of: (*parser).expression
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).expression
+        kind: self
+      - id: p.skipSpace
+        kind: internal
+      - id: p.header
+        kind: internal
+      - id: p.keyValue
+        kind: internal
+      - id: p.endOfLine
+        kind: internal
+    steps:
+      - eval: p.skipSpace()
+        to: p.skipSpace
+      - opt:
+          do:
+            - return: nil
+          when: p.pos >= len(p.data)
+      - var:
+          name: err
+          type: error
+      - switch:
+          cases:
+            - case: charNewline, charReturn, charHash
+            - case: charOpenBracket
+              do:
+                - set: err
+                  to: p.header
+                  value: p.header()
+            - default: true
+              do:
+                - set: err
+                  to: p.keyValue
+                  value: p.keyValue(p.current)
+          "on": p.data[p.pos]
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: p.endOfLine()
+        to: p.endOfLine
+  - of: (*parser).endOfLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).endOfLine
+        kind: self
+      - id: p.skipSpace
+        kind: internal
+      - id: p.comment
+        kind: internal
+      - id: p.fail
+        kind: internal
+    steps:
+      - eval: p.skipSpace()
+        to: p.skipSpace
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.comment()
+                  to: p.comment
+                when: err != nil
+          when: p.pos < len(p.data) && p.data[p.pos] == charHash
+      - opt:
+          do:
+            - return: nil
+          when: p.pos >= len(p.data) || p.newline()
+      - return: p.fail(p.pos, problemExpectedNewline)
+        to: p.fail
+  - of: (*parser).skipSpace
+    steps:
+      - loop:
+          cond: p.pos < len(p.data) && (p.data[p.pos] == charSpace || p.data[p.pos] == charTab)
+          do:
+            - op: ++
+              set: p.pos
+  - of: (*parser).newline
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: p.pos
+            - return: "true"
+          when: p.pos < len(p.data) && p.data[p.pos] == charNewline
+      - opt:
+          do:
+            - op: +=
+              set: p.pos
+              value: "2"
+            - return: "true"
+          when: p.pos+1 < len(p.data) && p.data[p.pos] == charReturn && p.data[p.pos+1] == charNewline
+      - return: "false"
+  - of: (*parser).comment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).comment
+        kind: self
+      - id: p.skipRune
+        kind: internal
+    steps:
+      - op: ++
+        set: p.pos
+      - loop:
+          cond: p.pos < len(p.data)
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: p.pos
+                  - continue: true
+                when: byteClass[p.data[p.pos]]&classPrintable != 0
+            - opt:
+                do:
+                  - return: nil
+                when: p.atNewline()
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: p.skipRune(problemControlInComment)
+                  to: p.skipRune
+                when: err != nil
+      - return: nil
+  - of: (*parser).atNewline
+    steps:
+      - return: |-
+          p.data[p.pos] == charNewline ||
+          		(p.data[p.pos] == charReturn && p.pos+1 < len(p.data) && p.data[p.pos+1] == charNewline)
+  - of: (*parser).skipRune
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).skipRune
+        kind: self
+      - id: p.fail
+        kind: internal
+      - id: utf8
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: p.fail(p.pos, problem)
+              to: p.fail
+          when: p.data[p.pos] < charFirstNonASCII
+      - bind: r, size
+        eval: utf8.DecodeRune(p.data[p.pos:])
+        to: utf8
+      - opt:
+          do:
+            - return: p.fail(p.pos, problemInvalidUTF8)
+              to: p.fail
+          when: r == utf8.RuneError && size <= 1
+      - op: +=
+        set: p.pos
+        value: size
+      - return: nil
+  - of: (*parser).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).fail
+        kind: self
+      - id: position
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: line, column
+        eval: position(p.data, at)
+        to: position
+      - return: |-
+          errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
+          		errs.String(fieldProblem, problem), errs.Int(fieldLine, line), errs.Int(fieldColumn, column))
+        to: errs
+  - of: (*parser).newTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).newTable
+        kind: self
+      - id: p.add
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: noNode, p.fail(int(part.at), problemTooDeep)
+          when: p.nodes[parent].depth >= maxDepth
+      - bind: "n"
+        eval: "node{kind: kindTable, origin: from, key: part.name, at: part.at}"
+      - opt:
+          do:
+            - op: "|="
+              set: n.flags
+              value: flagKeyEscaped
+          when: part.escaped
+      - return: p.add(parent, n), nil
+        to: p.add
+  - of: (*parser).keyBytes
+    steps:
+      - opt:
+          do:
+            - return: p.unescaped[n.key.start:n.key.end]
+          when: n.flags&flagKeyEscaped != 0
+      - return: p.data[n.key.start:n.key.end]
+  - of: (*parser).textBytes
+    steps:
+      - opt:
+          do:
+            - return: p.unescaped[n.text.start:n.text.end]
+          when: n.flags&flagTextEscaped != 0
+      - return: p.data[n.text.start:n.text.end]
+  - of: (*parser).partBytes
+    steps:
+      - opt:
+          do:
+            - return: p.unescaped[part.name.start:part.name.end]
+          when: part.escaped
+      - return: p.data[part.name.start:part.name.end]
+  - of: (*parser).child
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).child
+        kind: self
+      - id: p.indexLookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.indexLookup(t, key)
+              to: p.indexLookup
+          when: p.nodes[t].flags&flagIndexed != 0
+      - loop:
+          cond: c != noNode
+          do:
+            - opt:
+                do:
+                  - return: c
+                when: bytes.Equal(p.keyBytes(&p.nodes[c]), key)
+          init: c := p.nodes[t].first
+          post: c = p.nodes[c].next
+      - return: noNode
+  - of: (*parser).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).add
+        kind: self
+      - id: p.indexInsert
+        kind: internal
+      - id: p.indexTable
+        kind: internal
+    steps:
+      - bind: idx
+        eval: int32(len(p.nodes))
+      - set: n.parent, n.first, n.last, n.next, n.hnext
+        value: parent, noNode, noNode, noNode, noNode
+      - set: n.depth
+        value: p.nodes[parent].depth + 1
+      - set: p.nodes
+        value: append(p.nodes, n)
+      - bind: holder
+        eval: "&p.nodes[parent]"
+      - alt:
+          - do:
+              - set: holder.first
+                value: idx
+            when: holder.last == noNode
+          - do:
+              - set: p.nodes[holder.last].next
+                value: idx
+            else: true
+      - set: holder.last
+        value: idx
+      - op: ++
+        set: holder.count
+      - alt:
+          - do:
+              - eval: p.indexInsert(idx)
+                to: p.indexInsert
+            when: holder.flags&flagIndexed != 0
+          - do:
+              - eval: p.indexTable(parent)
+                to: p.indexTable
+            when: holder.kind == kindTable && holder.count > linearLimit
+      - return: idx
+  - of: keyHash
+    steps:
+      - return: maphash.Bytes(hashSeed, key) ^ (uint64(t) * hashMixer)
+  - of: (*parser).indexTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).indexTable
+        kind: self
+      - id: p.indexInsert
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: p.index
+              value: make(map[uint64]int32)
+          when: p.index == nil
+      - op: "|="
+        set: p.nodes[t].flags
+        value: flagIndexed
+      - loop:
+          cond: c != noNode
+          do:
+            - eval: p.indexInsert(c)
+              to: p.indexInsert
+          init: c := p.nodes[t].first
+          post: c = p.nodes[c].next
+  - of: (*parser).indexInsert
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).indexInsert
+        kind: self
+      - id: keyHash
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: "&p.nodes[c]"
+      - bind: h
+        eval: keyHash(n.parent, p.keyBytes(n))
+        to: keyHash
+      - bind: head, ok
+        eval: p.index[h]
+      - opt:
+          do:
+            - set: head
+              value: noNode
+          when: "!ok"
+      - set: n.hnext
+        value: head
+      - set: p.index[h]
+        value: c
+  - of: infoOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: infoOf
+        kind: self
+      - id: typeInfos.Load
+        kind: value
+      - id: describe
+        kind: internal
+      - id: typeInfos.LoadOrStore
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: predeclaredInfo
+          when: t.PkgPath() == "" && t.Kind() >= reflect.Bool && t.Kind() <= reflect.Float64 || t.PkgPath() == "" && t.Kind() == reflect.String
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: info
+                init:
+                  bind: info, isInfo
+                  eval: cached.(*typeInfo)
+                when: isInfo
+          init:
+            bind: cached, ok
+            eval: typeInfos.Load(t)
+            to: typeInfos.Load
+          when: ok
+      - bind: info
+        eval: describe(t)
+        to: describe
+      - bind: actual, _
+        eval: typeInfos.LoadOrStore(t, info)
+        to: typeInfos.LoadOrStore
+      - opt:
+          do:
+            - return: stored
+          init:
+            bind: stored, isInfo
+            eval: actual.(*typeInfo)
+          when: isInfo
+      - return: info
+  - of: describe
+    participants:
+      - id: caller
+        kind: actor
+      - id: describe
+        kind: self
+      - id: t.Kind
+        kind: value
+      - id: structFields
+        kind: internal
+      - id: fieldIndexes
+        kind: internal
+    steps:
+      - bind: info
+        eval: "&typeInfo{flags: methodFlags(t)}"
+      - bind: kindOfT
+        eval: t.Kind()
+        to: t.Kind
+      - opt:
+          do:
+            - op: "|="
+              set: info.flags
+              value: typeValue
+          when: info.flags&(typeSpecial|typeTextMarshaler|typeTextMarshalerPtr) != 0 || (kindOfT != reflect.Map && kindOfT != reflect.Struct)
+      - opt:
+          do:
+            - set: info.fields
+              to: structFields
+              value: structFields(t)
+            - set: info.exact, info.folded
+              to: fieldIndexes
+              value: fieldIndexes(info.fields)
+            - opt:
+                do:
+                  - op: "|="
+                    set: info.flags
+                    value: typeBadNames
+                when: slices.ContainsFunc(info.fields, func(f fieldPlan) bool { return !utf8.ValidString(f.name) })
+          when: kindOfT == reflect.Struct
+      - return: info
+  - of: methodFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: methodFlags
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: t.Implements
+        kind: value
+    steps:
+      - bind: ptr
+        eval: reflect.PointerTo(t)
+        to: reflect
+      - bind: textMarshaler
+        eval: t.Implements(textMarshalerType)
+        to: t.Implements
+      - bind: flags
+        eval: |-
+          flagIf(textMarshaler, typeTextMarshaler) |
+          		flagIf(!textMarshaler && ptr.Implements(textMarshalerType), typeTextMarshalerPtr) |
+          		flagIf(ptr.Implements(textUnmarshalerType), typeTextUnmarshaler) |
+          		flagIf(ptr.Implements(isZeroerType), typeZeroer)
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: typeSpecial
+          when: t == timeType || t == localDateType || t == localTimeType || t == localDateTimeType
+      - return: flags
+  - of: flagIf
+    steps:
+      - opt:
+          do:
+            - return: flag
+          when: cond
+      - return: "0"
+  - of: (*typeInfo).is
+    steps:
+      - return: ti.flags&flags == flags
+  - of: structFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: structFields
+        kind: self
+      - id: collectFields
+        kind: internal
+    steps:
+      - var:
+          name: fields
+          type: "[]fieldPlan"
+      - eval: collectFields(&fields, t, nil, 0, map[reflect.Type]bool{})
+        to: collectFields
+      - bind: byName
+        eval: make(map[string]int, len(fields))
+      - bind: kept
+        eval: fields[:0]
+      - loop:
+          do:
+            - bind: at, seen
+              eval: byName[f.name]
+            - opt:
+                do:
+                  - set: byName[f.name]
+                    value: len(kept)
+                  - set: kept
+                    value: append(kept, f)
+                  - continue: true
+                when: "!seen"
+            - opt:
+                do:
+                  - set: kept[at]
+                    value: f
+                when: f.depth < kept[at].depth
+          key: _
+          range: fields
+          value: f
+      - return: kept
+  - of: collectFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectFields
+        kind: self
+      - id: t.Field
+        kind: value
+      - id: f.Tag.Lookup
+        kind: value
+      - id: parseTag
+        kind: internal
+      - id: embeddedStruct
+        kind: internal
+      - id: standaloneTags
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: visited[t]
+      - set: visited[t]
+        value: "true"
+      - defer: delete(visited, t)
+      - loop:
+          do:
+            - bind: f
+              eval: t.Field(i)
+              to: t.Field
+            - bind: tag, tagged
+              eval: f.Tag.Lookup(tagName)
+              to: f.Tag.Lookup
+            - opt:
+                do:
+                  - continue: true
+                when: tag == tagSkip
+            - bind: path
+              eval: append(append(make([]int, 0, len(index)+1), index...), i)
+            - bind: name, opts
+              eval: parseTag(tag)
+              to: parseTag
+            - opt:
+                do:
+                  - eval: collectFields(fields, embedded, path, depth+1, visited)
+                    to: collectFields
+                  - continue: true
+                init:
+                  bind: embedded
+                  eval: embeddedStruct(f)
+                  to: embeddedStruct
+                when: embedded != nil && name == ""
+            - opt:
+                do:
+                  - continue: true
+                when: "!f.IsExported()"
+            - opt:
+                do:
+                  - set: name
+                    value: f.Name
+                when: "!tagged || name == \"\""
+            - set: opts
+              to: standaloneTags
+              value: standaloneTags(f.Tag, opts)
+            - set: "*fields"
+              value: "append(*fields, fieldPlan{name: name, index: path, opts: opts, depth: depth})"
+          key: i
+          range: t.NumField()
+  - of: embeddedStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: embeddedStruct
+        kind: self
+      - id: t.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!f.Anonymous"
+      - bind: t
+        eval: f.Type
+      - opt:
+          do:
+            - set: t
+              to: t.Elem
+              value: t.Elem()
+          when: t.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: nil
+          when: t.Kind() != reflect.Struct
+      - return: t
+  - of: parseTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTag
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: applyOption
+        kind: internal
+    steps:
+      - bind: name, rest, _
+        eval: strings.Cut(tag, ",")
+        to: strings
+      - loop:
+          cond: rest != ""
+          do:
+            - var:
+                name: opt
+                type: string
+            - set: opt, rest, _
+              to: strings
+              value: strings.Cut(rest, ",")
+            - eval: applyOption(&opts, opt)
+              to: applyOption
+      - return: name, opts
+  - of: applyOption
+    steps:
+      - switch:
+          cases:
+            - case: optOmitEmpty
+              do:
+                - set: opts.omitEmpty
+                  value: "true"
+            - case: optOmitZero
+              do:
+                - set: opts.omitZero
+                  value: "true"
+            - case: optInline
+              do:
+                - set: opts.inline
+                  value: "true"
+            - case: optMultiline
+              do:
+                - set: opts.multiline
+                  value: "true"
+            - case: optCommented
+              do:
+                - set: opts.commented
+                  value: "true"
+            - default: true
+          "on": opt
+  - of: standaloneTags
+    participants:
+      - id: caller
+        kind: actor
+      - id: standaloneTags
+        kind: self
+      - id: tag.Get
+        kind: value
+    steps:
+      - set: opts.multiline
+        value: opts.multiline || tag.Get(optMultiline) == tagTrue
+      - set: opts.inline
+        value: opts.inline || tag.Get(optInline) == tagTrue
+      - set: opts.commented
+        value: opts.commented || tag.Get(optCommented) == tagTrue
+      - set: opts.comment
+        to: tag.Get
+        value: tag.Get(tagComment)
+      - return: opts
+  - of: fieldIndexes
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldIndexes
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - set: exact
+        value: make(map[string]int, len(fields))
+      - set: folded
+        value: make(map[string]int, len(fields))
+      - loop:
+          do:
+            - set: exact[f.name]
+              value: i
+            - bind: lower
+              eval: strings.ToLower(f.name)
+              to: strings
+            - opt:
+                do:
+                  - set: folded[lower]
+                    value: i
+                init:
+                  bind: _, taken
+                  eval: folded[lower]
+                when: "!taken"
+          key: i
+          range: fields
+          value: f
+      - return: exact, folded
+  - of: (*typeInfo).lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*typeInfo).lookup
+        kind: self
+      - id: ti.lookupFolded
+        kind: internal
+    steps:
+      - bind: i, ok
+        eval: ti.exact[string(key)]
+      - opt:
+          do:
+            - set: i, ok
+              to: ti.lookupFolded
+              value: ti.lookupFolded(key)
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil, false
+          when: "!ok"
+      - return: "&ti.fields[i], true"
+  - of: buildByteClass
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildByteClass
+        kind: self
+      - id: markRange
+        kind: internal
+    steps:
+      - var:
+          name: table
+          type: "[byteValues]uint16"
+      - op: "|="
+        set: table[charTab]
+        value: classPrintable
+      - loop:
+          cond: c < charDelete
+          do:
+            - op: "|="
+              set: table[c]
+              value: classPrintable
+          init: c := charFirstPrintable
+          post: c++
+      - eval: markRange(&table, '0', '9', classBareKey|classDigit|classHex|classNumberStart)
+        to: markRange
+      - eval: markRange(&table, 'a', 'z', classBareKey)
+        to: markRange
+      - eval: markRange(&table, 'A', 'Z', classBareKey)
+        to: markRange
+      - eval: markRange(&table, 'a', 'f', classHex)
+        to: markRange
+      - eval: markRange(&table, 'A', 'F', classHex)
+        to: markRange
+      - eval: markRange(&table, '0', '7', classOctal)
+        to: markRange
+      - eval: markRange(&table, '0', '1', classBinary)
+        to: markRange
+      - op: "|="
+        set: table['-']
+        value: classBareKey | classNumberStart
+      - op: "|="
+        set: table['_']
+        value: classBareKey
+      - op: "|="
+        set: table['+']
+        value: classNumberStart
+      - op: "|="
+        set: table['i']
+        value: classNumberStart
+      - op: "|="
+        set: table['n']
+        value: classNumberStart
+      - return: table
+  - of: markRange
+    steps:
+      - loop:
+          cond: c <= last
+          do:
+            - op: "|="
+              set: table[c]
+              value: cls
+          init: c := first
+          post: c++

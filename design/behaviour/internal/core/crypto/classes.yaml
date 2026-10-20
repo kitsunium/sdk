@@ -1,0 +1,479 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      KeyLen is the required symmetric key length in bytes (256-bit). Both shipped
+      AEADs — AES-256-GCM and XChaCha20-Poly1305 — take a 32-byte key, so a single
+      fixed length keeps the surface tiny and the validation total.
+    items:
+      - name: KeyLen
+        type: int
+        value: "32"
+    name: KeyLen
+  - doc: |-
+      phcMinSegments is the minimum field count of a `$id$…` PHC string once split
+      on `$`: the empty prefix, the id, and at least one more field.
+    items:
+      - name: phcMinSegments
+        type: int
+        value: "3"
+    name: phcMinSegments
+  - doc: |-
+      Version is the box wire-format version, the first byte of every sealed box
+      ([Version][id][nonce][ciphertext||tag]). It is frozen post-v1.0.0; a future
+      framing change bumps it and Open rejects an unknown version as
+      DecryptionFailed. Concrete AEADs embed it via this constant.
+    items:
+      - name: Version
+        type: byte
+        value: "0x01"
+    name: Version
+  - doc: |-
+      headerLen is the fixed prefix every box carries before its scheme-specific
+      nonce: one Version byte + one algorithm-id byte.
+    items:
+      - name: headerLen
+        type: int
+        value: "2"
+    name: headerLen
+files:
+  - decls:
+      - agreements
+      - RegisterAgreement
+      - LookupAgreement
+      - AvailableAgreements
+      - GenerateAgreementKey
+      - AgreementShared
+      - neutralizeAgreementCause
+      - agreementSchemeFault
+      - agreementSchemeFault.Error
+    name: agreement_registry.go
+  - decls:
+      - Algorithm
+      - Algorithm.String
+      - Algorithm.Known
+    name: algorithm.go
+  - decls:
+      - derivers
+      - RegisterDeriver
+      - LookupDeriver
+      - AvailableDerivers
+      - Subkey
+    name: deriver_registry.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - conflictText
+    name: errors.go
+  - decls:
+      - hashers
+      - RegisterHasher
+      - LookupHasher
+      - AvailableHashers
+      - Sum
+      - NewHash
+      - SumHex
+    name: hash_registry.go
+  - decls:
+      - KeyLen
+      - Key
+      - NewKey
+      - Key.Bytes
+      - Key.Zeroize
+      - Key.String
+      - Key.GoString
+    name: key.go
+  - decls:
+      - macs
+      - RegisterMAC
+      - LookupMAC
+      - AvailableMACs
+      - MACTag
+      - MACVerify
+    name: mac_registry.go
+  - decls:
+      - phcMinSegments
+      - passwordHashers
+      - RegisterPasswordHasher
+      - LookupPasswordHasher
+      - AvailablePasswordHashers
+      - HashPassword
+      - VerifyPassword
+      - NeedsRehash
+      - phcID
+    name: password_registry.go
+  - decls:
+      - aeads
+      - Register
+      - indexID
+      - Lookup
+      - lookupByID
+      - Available
+    name: registry.go
+  - decls:
+      - schemeRegistry
+      - (*schemeRegistry).register
+      - (*schemeRegistry).publish
+    name: registry_generic.go
+  - decls:
+      - Version
+      - headerLen
+      - Seal
+      - Open
+    name: seal.go
+  - decls:
+      - signers
+      - RegisterSigner
+      - LookupSigner
+      - AvailableSigners
+      - GenerateKey
+      - Sign
+      - Verify
+    name: signer_registry.go
+  - decls:
+      - streamSealers
+      - RegisterStreamSealer
+      - LookupStreamSealer
+      - AvailableStreamSealers
+      - SealStream
+      - OpenStream
+    name: stream_registry.go
+functions:
+  - name: RegisterAgreement
+    params: a Agreement
+    results: Agreement
+  - name: LookupAgreement
+    params: name Algorithm
+    results: a Agreement, ok bool
+  - name: AvailableAgreements
+    results: "[]Algorithm"
+  - name: GenerateAgreementKey
+    params: name Algorithm
+    results: pub, priv []byte, err error
+  - name: AgreementShared
+    params: name Algorithm, priv, peerPub []byte
+    results: secret []byte, err error
+  - doc: |-
+      neutralizeAgreementCause returns a cause safe to hand to errs.Wrap at the
+      AgreementShared boundary. When the scheme returns a stdlib error it passes
+      through unchanged (errs.Wrap takes the stdlib path, so AgreementFailed wins
+      origin). When the scheme returns its own *errs.Error, origin-wins would
+      otherwise inherit that error's Code/Public/Private — possibly leaking a
+      diagnostic message or key bytes — so it is collapsed to an opaque
+      agreementSchemeFault carrying no scheme Public/Private/Fields, forcing the
+      facade's CodeAgreementFailed to stay the origin (finding V21).
+    name: neutralizeAgreementCause
+    params: cause error
+    results: error
+  - name: RegisterDeriver
+    params: d Deriver
+    results: Deriver
+  - name: LookupDeriver
+    params: name Algorithm
+    results: d Deriver, ok bool
+  - name: AvailableDerivers
+    results: "[]Algorithm"
+  - name: Subkey
+    params: name Algorithm, secret, salt []byte, info string, length int
+    results: subkey []byte, err error
+  - doc: |-
+      conflictText renders a registry conflict for the boot panic that reports it:
+      the typed error's header and Public, then each field it carries, quoted.
+      Error() never renders a field (rule 4), and the panic is the only place an
+      operator learns WHICH registrar refused WHICH key.
+    name: conflictText
+    params: err error
+    results: string
+  - name: RegisterHasher
+    params: h Hasher
+    results: Hasher
+  - name: LookupHasher
+    params: name Algorithm
+    results: h Hasher, ok bool
+  - name: AvailableHashers
+    results: "[]Algorithm"
+  - name: Sum
+    params: name Algorithm, data []byte
+    results: digest []byte, err error
+  - name: NewHash
+    params: name Algorithm
+    results: h hash.Hash, err error
+  - name: SumHex
+    params: name Algorithm, data []byte
+    results: digest string, err error
+  - name: NewKey
+    params: raw []byte
+    results: key Key, err error
+  - name: RegisterMAC
+    params: m MAC
+    results: MAC
+  - name: LookupMAC
+    params: name Algorithm
+    results: m MAC, ok bool
+  - name: AvailableMACs
+    results: "[]Algorithm"
+  - name: MACTag
+    params: name Algorithm, key Key, message []byte
+    results: tag []byte, err error
+  - name: MACVerify
+    params: name Algorithm, key Key, message, tag []byte
+    results: ok bool, err error
+  - name: RegisterPasswordHasher
+    params: p PasswordHasher
+    results: PasswordHasher
+  - name: LookupPasswordHasher
+    params: name Algorithm
+    results: p PasswordHasher, ok bool
+  - name: AvailablePasswordHashers
+    results: "[]Algorithm"
+  - name: HashPassword
+    params: name Algorithm, password []byte
+    results: phc string, err error
+  - name: VerifyPassword
+    params: password []byte, phc string
+    results: ok bool, err error
+  - name: NeedsRehash
+    params: phc string
+    results: bool
+  - doc: |-
+      phcID extracts the scheme id from a PHC string of the form `$id$...`. It
+      returns ok=false for any string not starting with `$id$`.
+    name: phcID
+    params: phc string
+    results: id string, ok bool
+  - name: Register
+    params: a AEAD
+    results: AEAD
+  - doc: |-
+      indexID inserts (id -> a) into the wire-id index. Same idempotent-vs-conflict
+      semantics as the scheme registry: the SAME scheme under its own id is a
+      no-op, a DISTINCT one under a taken id is the conflict. The check and the
+      insert are one atomic step of the kernel table.
+    name: indexID
+    params: id byte, a AEAD
+    results: error
+  - name: Lookup
+    params: name Algorithm
+    results: a AEAD, ok bool
+  - doc: |-
+      lookupByID resolves the 1-byte wire id to its AEAD; used by Open to dispatch
+      from the box header alone.
+
+      IFACE-PLUGIN: returns the AEAD interface so the box id resolves to whichever
+      scheme registered it; concrete scheme types stay unexported per package.
+    name: lookupByID
+    params: id byte
+    results: a AEAD, ok bool
+  - name: Available
+    results: "[]Algorithm"
+  - name: Seal
+    params: name Algorithm, key Key, plaintext, aad []byte
+    results: box []byte, err error
+  - name: Open
+    params: key Key, box, aad []byte
+    results: plaintext []byte, err error
+  - name: RegisterSigner
+    params: s Signer
+    results: Signer
+  - name: LookupSigner
+    params: name Algorithm
+    results: s Signer, ok bool
+  - name: AvailableSigners
+    results: "[]Algorithm"
+  - name: GenerateKey
+    params: name Algorithm
+    results: pub, priv []byte, err error
+  - name: Sign
+    params: name Algorithm, priv, message []byte
+    results: sig []byte, err error
+  - name: Verify
+    params: name Algorithm, pub, message, sig []byte
+    results: ok bool, err error
+  - name: RegisterStreamSealer
+    params: s StreamSealer
+    results: StreamSealer
+  - name: LookupStreamSealer
+    params: name Algorithm
+    results: s StreamSealer, ok bool
+  - name: AvailableStreamSealers
+    results: "[]Algorithm"
+  - name: SealStream
+    params: name Algorithm, key Key, dst io.Writer, aad []byte
+    results: sealed io.WriteCloser, err error
+  - name: OpenStream
+    params: name Algorithm, key Key, src io.Reader, aad []byte
+    results: opened io.Reader, err error
+imports:
+  bytes: bytes
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  hash: hash
+  hex: encoding/hex
+  io: io
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/crypto
+  name: crypto
+  purpose: Package crypto — the AEAD port implemented by each concrete algorithm.
+types:
+  - doc: |-
+      agreementSchemeFault is the opaque, non-*errs.Error stand-in attached as the
+      cause when an Agreement scheme returns its own typed error. It carries a
+      fixed redacted message so no scheme diagnostic — and no key material — can
+      ride out through the wrap chain, while still keeping a cause for chain walks.
+    kind: struct
+    methods:
+      - doc: Error reports a fixed redacted marker so the scheme's diagnostic never leaks.
+        name: Error
+        recv: agreementSchemeFault
+        results: string
+    name: agreementSchemeFault
+  - kind: named
+    methods:
+      - name: String
+        recv: a Algorithm
+        results: string
+      - name: Known
+        recv: a Algorithm
+        results: bool
+    name: Algorithm
+    underlying: string
+  - fields:
+      - doc: |-
+          raw holds the symmetric key bytes behind a slice so a value-receiver
+          Zeroize can clear the shared backing array; NewKey is the only producer.
+        name: raw
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: Bytes
+        recv: k Key
+        results: "[]byte"
+      - name: Zeroize
+        recv: k Key
+      - name: String
+        recv: k Key
+        results: string
+      - name: GoString
+        recv: k Key
+        results: string
+    name: Key
+  - doc: |-
+      schemeRegistry is one capability's registry: the kernel's read-mostly,
+      copy-on-write table, and the public registrar's name, which is what its
+      refusals carry. Re-registering the SAME value is an idempotent no-op; a
+      DISTINCT value under a taken Algorithm is the hard conflict. The zero table
+      is ready to use; a registry is declared with its verb.
+
+      V is what the registry stores: a comparable port that names its own
+      Algorithm, the key it registers under — every capability port is one.
+    fields:
+      - doc: |-
+          table maps each Algorithm to its scheme; Lookup and Names read it
+          directly, lock-free.
+        name: table
+        type: plugin.Registry[Algorithm, V]
+      - doc: verb names the public registrar in panic/error text, e.g. "RegisterHasher".
+        name: verb
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          register is the body of every public registrar: it refuses an unusable value,
+          publishes v under v.Algorithm(), and returns v so a scheme package can bind
+          its singleton to a typed package-level variable. Both refusals are boot-time
+          panics carrying the duplicate-registration code.
+
+          "Unusable" means a nil, a typed nil pointer or a value whose type is not
+          comparable: each satisfies the port and none can serve one call (see
+          internal/kernel/plugin). It is refused BEFORE v.Algorithm() is called, which
+          is what lets a typed nil be refused at all.
+        name: register
+        params: v V
+        recv: r *schemeRegistry[V]
+        results: V
+      - doc: |-
+          publish inserts (name -> v). Returns a non-nil error when name is already
+          held by a DISTINCT value; re-publishing the SAME value is an idempotent
+          no-op. The duplicate check and the publish are one atomic step of the kernel
+          table.
+        name: publish
+        params: name Algorithm, v V
+        recv: r *schemeRegistry[V]
+        results: error
+    name: schemeRegistry
+    typeParams: |-
+      V interface {
+      	comparable
+      	Algorithm() Algorithm
+      }
+vars:
+  - doc: |-
+      agreements maps each Algorithm to its Agreement scheme. Backed by the shared
+      read-mostly schemeRegistry — register once at import, dispatch is lock-free.
+    items:
+      - name: agreements
+        value: "schemeRegistry[Agreement]{verb: \"RegisterAgreement\"}"
+    name: agreements
+  - doc: |-
+      derivers maps each Algorithm to its Deriver. A distinct capability beside
+      AEAD/Hasher/Signer; backed by the shared read-mostly schemeRegistry — register
+      once at import, dispatch is lock-free.
+    items:
+      - name: derivers
+        value: "schemeRegistry[Deriver]{verb: \"RegisterDeriver\"}"
+    name: derivers
+  - doc: |-
+      hashers maps each Algorithm to its Hasher. Separate from the AEAD registry:
+      fingerprint hashing is a distinct, non-authenticated capability. Backed by the
+      shared read-mostly schemeRegistry — register once at import, Sum is lock-free.
+    items:
+      - name: hashers
+        value: "schemeRegistry[Hasher]{verb: \"RegisterHasher\"}"
+    name: hashers
+  - doc: |-
+      macs maps each Algorithm to its MAC. Backed by the shared read-mostly
+      schemeRegistry — register once at import, dispatch is lock-free.
+    items:
+      - name: macs
+        value: "schemeRegistry[MAC]{verb: \"RegisterMAC\"}"
+    name: macs
+  - doc: |-
+      passwordHashers maps each Algorithm to its PasswordHasher. Backed by the
+      shared read-mostly schemeRegistry — register once at import, dispatch is
+      lock-free.
+    items:
+      - name: passwordHashers
+        value: "schemeRegistry[PasswordHasher]{verb: \"RegisterPasswordHasher\"}"
+    name: passwordHashers
+  - doc: |-
+      aeads maps each Algorithm to its AEAD (the shared schemeRegistry); idIndex
+      maps the 1-byte wire id to the same AEAD so Open can dispatch from the box
+      header alone. Both are the kernel's read-mostly, copy-on-write table
+      (kernel/plugin.Registry, ADR 0159). The id index is the AEAD's own, kept
+      BESIDE the Algorithm table: the scheme registry is keyed by Algorithm,
+      whereas Open resolves by the byte id in the frame.
+    grouped: true
+    items:
+      - name: aeads
+        value: "schemeRegistry[AEAD]{verb: \"Register\"}"
+      - name: idIndex
+        type: plugin.Registry[byte, AEAD]
+    name: aeads
+  - doc: |-
+      signers maps each Algorithm to its Signer. Backed by the shared read-mostly
+      schemeRegistry — register once at import, dispatch is lock-free.
+    items:
+      - name: signers
+        value: "schemeRegistry[Signer]{verb: \"RegisterSigner\"}"
+    name: signers
+  - doc: |-
+      streamSealers maps each Algorithm to its StreamSealer. Backed by the shared
+      read-mostly schemeRegistry — register once at import, dispatch is lock-free.
+    items:
+      - name: streamSealers
+        value: "schemeRegistry[StreamSealer]{verb: \"RegisterStreamSealer\"}"
+    name: streamSealers

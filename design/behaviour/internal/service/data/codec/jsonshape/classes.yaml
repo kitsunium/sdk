@@ -1,0 +1,675 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      jsontextPackage is the import path of the package json/v2's streaming
+      methods take their encoder and decoder from.
+    items:
+      - name: jsontextPackage
+        type: string
+        value: "\"encoding/json/jsontext\""
+    name: jsontextPackage
+  - doc: The two streaming methods.
+    grouped: true
+    items:
+      - doc: marshalJSONTo is func(*jsontext.Encoder) error.
+        name: marshalJSONTo
+        type: streamMethod
+        value: iota
+      - doc: unmarshalJSONFrom is func(*jsontext.Decoder) error.
+        name: unmarshalJSONFrom
+    name: marshalJSONTo
+  - grouped: true
+    items:
+      - doc: |-
+          Any is a value whose kind the type does not decide: an interface, a
+          json.RawMessage, a type that writes its own JSON.
+        name: Any
+        type: Kind
+        value: iota
+      - doc: "Object is a JSON object whose members are Fields: a struct."
+        name: Object
+      - doc: "Array is a JSON array whose elements are Items: a slice or an array."
+        name: Array
+      - doc: |-
+          Map is a JSON object whose member names are keys and whose values are
+          Values: a Go map.
+        name: Map
+      - doc: |-
+          String is a JSON string: a string, a []byte in base64, a text
+          marshaler, a time.Time.
+        name: String
+      - doc: Integer is a JSON number the type holds as an integer.
+        name: Integer
+      - doc: Number is a JSON number the type holds as a float, or json.Number.
+        name: Number
+      - doc: Boolean is true or false.
+        name: Boolean
+      - doc: |-
+          Unsupported is a type encoding/json refuses to encode: a channel, a
+          function, a complex number, an unsafe pointer, a map whose key it
+          cannot write as a member name. A value holding one is refused whole.
+        name: Unsupported
+    name: Any
+  - doc: |-
+      reservedInName are the characters a tag name stops at: the option
+      separator, the backslash, and the three quotes.
+    items:
+      - name: reservedInName
+        type: string
+        value: "\",\\\\'\\\"`\""
+    name: reservedInName
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - member
+      - level
+      - fieldWalk
+      - members
+      - (*fieldWalk).scan
+      - (*fieldWalk).add
+      - (*fieldWalk).embedded
+      - embed
+      - writable
+      - dominantMembers
+      - compareTagged
+      - dominantFallback
+      - (*member).optional
+      - (*member).quoted
+      - emptiable
+      - throughPointer
+      - indirect
+    name: fields.go
+  - decls:
+      - jsontextPackage
+      - marshalJSONTo
+      - jsonMarshalerType
+      - streamMethod
+      - receives
+      - hasStreamMethod
+      - streamMethodOn
+      - writesJSON
+      - writesText
+      - hasAnyMethod
+      - isJSONTextValue
+    name: methods.go
+  - decls:
+      - Kind
+      - Any
+      - kindNames
+      - Kind.String
+      - Kind.MarshalText
+      - ShapeValue
+      - FieldValue
+      - Of
+      - For
+    name: shape.go
+  - decls:
+      - reservedInName
+      - tagOptions
+      - tagOptions.hasOthers
+      - parseTag
+      - readName
+      - readOption
+      - setFlag
+      - readValue
+      - consumeOption
+      - consumeQuoted
+      - isLetterOrDigit
+    name: tag.go
+  - decls:
+      - timeType
+      - walker
+      - newWalker
+      - (*walker).shape
+      - (*walker).byKind
+      - scalar
+      - (*walker).slice
+      - (*walker).mapOf
+      - (*walker).object
+      - (*walker).extraValues
+      - knownShape
+      - keyWritable
+      - refKind
+      - named
+    name: walk.go
+functions:
+  - doc: |-
+      members returns the members encoding/json writes for struct t, in the order
+      it writes them, and the type of the embedded map or jsontext.Value that
+      collects any other member, or nil.
+
+      Embedded structs are explored breadth first, so a field's depth is its
+      index length. For one name, only the shallowest fields compete: one wins
+      alone, or a single tagged one among several; otherwise none is written —
+      and no deeper field of that name either.
+    name: members
+    params: t reflect.Type
+    results: written []*member, extra reflect.Type
+  - doc: |-
+      embed decides what an embedded field — anonymous, or named with the embed
+      option — becomes: promoted, when it is a struct; the collector of unknown
+      members, when it is an exported map with string keys or a jsontext.Value;
+      otherwise an ordinary member (standsAsMember) or nothing at all.
+
+      A field carrying options other than embed is embedded all the same, with
+      those options dropped — unless it names itself, which makes it an ordinary
+      member under that name.
+    name: embed
+    params: field reflect.StructField, candidate *member
+    results: promoted, collects, standsAsMember bool
+  - doc: |-
+      writable reports whether an ordinary member is written: every exported
+      field is, and so is an unexported embedded struct given a name — unless it
+      has methods encoding/json could not call on an unexported field.
+    name: writable
+    params: field reflect.StructField, opts tagOptions
+    results: bool
+  - doc: |-
+      dominantMembers keeps, for each name, the member encoding/json writes, and
+      returns them in the order it writes them: depth first, by index path.
+    name: dominantMembers
+    params: found []*member
+    results: "[]*member"
+  - doc: |-
+      compareTagged orders a member named by its tag before one named by its Go
+      name.
+    name: compareTagged
+    params: a, b *member
+    results: int
+  - doc: |-
+      dominantFallback returns the collector of unknown members json/v2 uses: the
+      only one, or the one shallower than every other — nil when none is, or two
+      tie at one depth.
+    name: dominantFallback
+    params: fallbacks []*member
+    results: "*member"
+  - doc: |-
+      emptiable reports whether a value of t can be empty under the v1 definition
+      omitempty keeps: false, zero, an empty string, collection or zero-length
+      array, a nil pointer or interface. A struct is never empty.
+    name: emptiable
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      throughPointer reports whether the path to a promoted field passes through
+      an embedded pointer — a nil one drops every field below it.
+    name: throughPointer
+    params: root reflect.Type, index []int
+    results: bool
+  - doc: indirect follows one unnamed pointer, as Go allows embedding *T but not **T.
+    name: indirect
+    params: t reflect.Type
+    results: reflect.Type
+  - doc: |-
+      receives reports whether encoding/json calls iface's method on a value of t:
+      a value receiver's always, a pointer receiver's only when the value is
+      addressable — the v1 semantics Go 1.27's encoding/json keeps, under which a
+      value copied to be encoded (a root passed by value, a map's key or value)
+      does not have its pointer methods called.
+    name: receives
+    params: t, iface reflect.Type, addressable bool
+    results: bool
+  - doc: |-
+      hasStreamMethod reports whether encoding/json calls json/v2's streaming
+      method m on a value of t: by value always, by pointer only on an
+      addressable value. It is matched by signature so this package does not
+      import json/v2 to recognise it.
+    name: hasStreamMethod
+    params: t reflect.Type, m streamMethod, addressable bool
+    results: bool
+  - doc: |-
+      streamMethodOn reports whether the method set of receiver holds the
+      streaming method m, with its signature. Each name is looked up as a
+      constant: a MethodByName whose argument the compiler cannot see makes the
+      linker keep every exported method of every type a program uses, which is
+      how a product that imported this package linked all of the framework.
+    name: streamMethodOn
+    params: receiver reflect.Type, m streamMethod
+    results: bool
+  - doc: |-
+      writesJSON reports whether a value of t writes its own JSON —
+      json.Marshaler, or json/v2's MarshalerTo — where it is encoded, addressable
+      or not.
+    name: writesJSON
+    params: t reflect.Type, addressable bool
+    results: bool
+  - doc: |-
+      writesText reports whether a value of t writes itself as text, which
+      encoding/json puts in a JSON string — encoding.TextMarshaler or
+      TextAppender — where it is encoded, addressable or not.
+    name: writesText
+    params: t reflect.Type, addressable bool
+    results: bool
+  - doc: |-
+      hasAnyMethod reports whether t has, on either receiver, any method
+      encoding/json would call to encode or decode it — the TYPE-level test
+      json/v2 applies to a byte slice's element and to an unexported embedded
+      struct, whatever the value's addressability.
+    name: hasAnyMethod
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      isJSONTextValue reports whether t is jsontext.Value, the other type json/v2
+      lets an embedded field collect unknown members into.
+    name: isJSONTextValue
+    params: t reflect.Type
+    results: bool
+  - name: Of
+    params: t reflect.Type
+    results: "*ShapeValue"
+  - name: For
+    results: "*ShapeValue"
+    typeParams: T any
+  - doc: |-
+      parseTag reads field's json tag. ignored reports a field encoding/json never
+      writes: `json:"-"` exactly, or an unexported field that is not embedded.
+
+      A name runs to the first reserved character; a name followed by something
+      other than a comma keeps only its leading identifier, and one that does not
+      start with a letter or an underscore is no name at all. An option is an
+      identifier; case: and format: take a value; anything malformed is skipped
+      to the next comma, as the engine skips it after recording its error.
+    name: parseTag
+    params: field reflect.StructField
+    results: opts tagOptions, ignored bool
+  - doc: readName reads the name at the start of tag into opts and returns the rest.
+    name: readName
+    params: tag string, opts *tagOptions
+    results: string
+  - doc: |-
+      readOption reads one option from tag — its comma first — into opts and
+      returns the rest. Every call but one reading a second comma in a row
+      consumes something, and that one leaves the comma for the next call.
+    name: readOption
+    params: tag string, opts *tagOptions
+    results: string
+  - doc: |-
+      setFlag records one of the four options that take no value; any other
+      option is one the engine ignores.
+    name: setFlag
+    params: option string, opts *tagOptions
+  - doc: |-
+      readValue reads the ":value" after case or format. The value is kept — the
+      tag advanced past it — only when it parses; otherwise the tag is left where
+      the value starts, and the next option read skips it.
+    name: readValue
+    params: tag string, allowQuoted bool, keep func(string)
+    results: string
+  - doc: |-
+      consumeOption reads the option at the start of in: an identifier, or — when
+      allowQuoted — a single-quoted string. Anything else is invalid, and
+      consumed up to the next comma.
+    name: consumeOption
+    params: in string, allowQuoted bool
+    results: option string, length int, valid bool
+  - doc: |-
+      consumeQuoted reads a single-quoted string: a double-quoted Go string with
+      single quotes as terminators, where \' is a quote and " is literal. An
+      unterminated or unparsable one is consumed up to the next comma, invalid.
+    name: consumeQuoted
+    params: in string, comma int
+    results: option string, length int, valid bool
+  - doc: isLetterOrDigit is the rune class of an identifier's tail.
+    name: isLetterOrDigit
+    params: r rune
+    results: bool
+  - doc: newWalker returns a walker with nothing on its path.
+    name: newWalker
+    results: "*walker"
+  - doc: scalar fills shape for a kind that holds no other value.
+    name: scalar
+    params: shape *ShapeValue, t reflect.Type
+  - doc: |-
+      knownShape describes the types whose kind would mislead: time.Time writes a
+      date-time string through its own method, time.Duration an integer count of
+      nanoseconds, json.Number a number from a string.
+    name: knownShape
+    params: t reflect.Type
+    results: "*ShapeValue, bool"
+  - doc: |-
+      keyWritable reports whether encoding/json writes t as an object member name:
+      a string, an integer or a float — written as text — a type that writes
+      itself as text by value, an interface holding one, or a pointer to any of
+      these. A json.Marshaler key is not called for a name, and a bool or a struct
+      is refused.
+    name: keyWritable
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      refKind is the kind of a type referenced rather than described again,
+      computed without walking it.
+    name: refKind
+    params: t reflect.Type
+    results: Kind
+  - doc: |-
+      named returns a shape of kind that carries t's qualified name —
+      "path/to/pkg.Name" — when t is a named type from a package; an unnamed or
+      predeclared type has no Name.
+    name: named
+    params: t reflect.Type, kind Kind
+    results: "*ShapeValue"
+imports:
+  cmp: cmp
+  encoding: encoding
+  json: encoding/json
+  reflect: reflect
+  slices: slices
+  strconv: strconv
+  strings: strings
+  time: time
+  unicode: unicode
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/jsonshape
+  name: jsonshape
+  purpose: "Package jsonshape — the members encoding/json writes for a struct, resolved by its own rules: json/v2's field walk under the v1 options Go 1.27's encoding/json runs with."
+types:
+  - doc: |-
+      member is one field encoding/json writes as an object member. It is
+      handled by pointer: it is too large to copy through every sort comparison.
+    fields:
+      - name: name
+        type: string
+      - name: goName
+        type: string
+      - name: typ
+        type: reflect.Type
+      - name: tag
+        type: reflect.StructTag
+      - name: index
+        type: "[]int"
+      - name: opts
+        type: tagOptions
+    kind: struct
+    methods:
+      - doc: |-
+          optional reports whether an encoded object can lack the member: omitzero;
+          omitempty on a kind the v1 definition of empty covers; or a path to the
+          field through an embedded pointer, which nil drops the member with.
+        name: optional
+        params: root reflect.Type
+        recv: m *member
+        results: bool
+      - doc: |-
+          quoted reports whether the ",string" option takes effect: on a bool, a
+          number or a string — through one unnamed pointer — that writes nothing of
+          its own where it is encoded, and on json.Number, whose own method honours
+          the option. addressable is the field's, and a pointer followed makes what it
+          points at addressable.
+        name: quoted
+        params: addressable bool
+        recv: m *member
+        results: bool
+    name: member
+  - doc: |-
+      level is a struct whose fields join the object being resolved: the struct
+      itself, or one it embeds, with the index path that reaches it. children
+      says whether the structs it embeds are explored in turn — a struct type met
+      a second time lends its own fields again, so a repeat can tie and cancel
+      out, but not its embeddings, so a cycle ends.
+    fields:
+      - name: typ
+        type: reflect.Type
+      - name: index
+        type: "[]int"
+      - name: children
+        type: bool
+    kind: struct
+    name: level
+  - doc: |-
+      fieldWalk is the breadth-first walk over one struct and the structs it
+      embeds: the levels still to scan, the struct types met so far, and what the
+      scanned fields became.
+    fields:
+      - name: queue
+        type: "[]level"
+      - name: seen
+        type: map[reflect.Type]bool
+      - name: found
+        type: "[]*member"
+      - name: fallbacks
+        type: "[]*member"
+    kind: struct
+    methods:
+      - doc: scan adds the fields of one struct, in declaration order.
+        name: scan
+        params: current level
+        recv: w *fieldWalk
+      - doc: |-
+          add decides what one field becomes: nothing, a promoted struct, a collector
+          of unknown members, or a member.
+        name: add
+        params: current level, field reflect.StructField, fieldIndex int
+        recv: w *fieldWalk
+      - doc: |-
+          embedded handles an embedded field — anonymous, or named with the embed
+          option — and reports whether it was consumed: promoted into the next level,
+          kept as the collector of unknown members, or dropped. A field it does not
+          consume stands as an ordinary member.
+        name: embedded
+        params: current level, field reflect.StructField, candidate *member
+        recv: w *fieldWalk
+        results: bool
+    name: fieldWalk
+  - doc: streamMethod names one of json/v2's two streaming methods.
+    kind: named
+    name: streamMethod
+    underlying: int
+  - kind: named
+    methods:
+      - name: String
+        recv: k Kind
+        results: string
+      - name: MarshalText
+        recv: k Kind
+        results: "[]byte, error"
+    name: Kind
+    underlying: uint8
+  - fields:
+      - doc: Kind is the JSON kind the values take.
+        name: Kind
+        type: Kind
+      - doc: |-
+          Name is the qualified Go type name — "time.Time",
+          "example.com/shop.Order" — for a named type from a package, and empty
+          otherwise.
+        name: Name
+        type: string
+      - doc: |-
+          Format refines a kind: the Go kind of a number ("int64", "uint8",
+          "float32"), "base64" for bytes written as a string, "date-time" for a
+          time.Time, "duration-ns" for a time.Duration's integer nanoseconds.
+        name: Format
+        type: string
+      - doc: |-
+          Nullable reports that a value of the type can be written as null: a
+          nil pointer, slice, map or interface.
+        name: Nullable
+        type: bool
+      - doc: Fields are an Object's members, in the order encoding/json writes them.
+        name: Fields
+        type: "[]FieldValue"
+      - doc: Items is an Array's element shape.
+        name: Items
+        type: "*ShapeValue"
+      - doc: |-
+          Values is a Map's value shape — and, on an Object, the shape of the
+          members an embedded map adds beyond Fields (json/v2's embed option).
+        name: Values
+        type: "*ShapeValue"
+      - doc: |-
+          Ref is set, to Name, on the shape of a type already being described
+          further up: the description stops there instead of recursing. A
+          recursive type is always a named one, so Ref names an ancestor.
+        name: Ref
+        type: string
+    kind: struct
+    name: ShapeValue
+  - fields:
+      - doc: Name is the member name on the wire.
+        name: Name
+        type: string
+      - doc: |-
+          Shape describes the member's value. When Quoted, the value travels
+          inside a JSON string.
+        name: Shape
+        type: "*ShapeValue"
+      - doc: |-
+          Optional reports that an encoded object may lack the member: its tag
+          says omitempty on a kind that can be empty, or omitzero, or the field
+          is promoted through an embedded pointer that may be nil.
+        name: Optional
+        type: bool
+      - doc: |-
+          Quoted reports the ",string" option taking effect: the value is written
+          as a JSON string holding its own encoding — "42" for 42.
+        name: Quoted
+        type: bool
+      - doc: Rules is the field's validate tag as written, for a reader to show.
+        name: Rules
+        type: string
+      - doc: GoName is the Go field's name.
+        name: GoName
+        type: string
+      - doc: |-
+          Tag is the Go field's whole struct tag, so a framework can read tags of
+          its own — where a request field is read from — beside encoding/json's.
+        name: Tag
+        type: reflect.StructTag
+      - doc: |-
+          Index is the path to the Go field from the described struct, through
+          every embedding, for reflect.Type.FieldByIndex and
+          reflect.Value.FieldByIndex.
+        name: Index
+        type: "[]int"
+    kind: struct
+    name: FieldValue
+  - doc: tagOptions is what a json tag says about a field.
+    fields:
+      - doc: "name is the member name: the tag's, else the Go field's."
+        name: name
+        type: string
+      - doc: hasName reports that the name came from the tag.
+        name: hasName
+        type: bool
+      - doc: embed, omitEmpty, omitZero and quoted are the options of those names.
+        name: embed
+        type: bool
+      - doc: embed, omitEmpty, omitZero and quoted are the options of those names.
+        name: omitEmpty
+        type: bool
+      - doc: embed, omitEmpty, omitZero and quoted are the options of those names.
+        name: omitZero
+        type: bool
+      - doc: embed, omitEmpty, omitZero and quoted are the options of those names.
+        name: quoted
+        type: bool
+      - doc: |-
+          cased and formatted record a valid case: or format: option, which only
+          matter as options other than embed.
+        name: cased
+        type: bool
+      - doc: |-
+          cased and formatted record a valid case: or format: option, which only
+          matter as options other than embed.
+        name: formatted
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          hasOthers reports options besides embed, which make json/v2 treat an
+          embedded field as a member when it is named and drop them when it is not.
+        name: hasOthers
+        recv: o tagOptions
+        results: bool
+    name: tagOptions
+  - doc: |-
+      walker describes one type. path holds the named types being described on
+      the way down, so a type that reaches itself is described once and then
+      referenced.
+    fields:
+      - name: path
+        type: map[reflect.Type]bool
+    kind: struct
+    methods:
+      - doc: |-
+          shape describes t, for a value that is addressable where encoding/json
+          meets it or not: only an addressable value has its pointer methods called.
+        name: shape
+        params: t reflect.Type, addressable bool
+        recv: w *walker
+        results: "*ShapeValue"
+      - doc: |-
+          byKind describes a type encoding/json lays out from its kind: the
+          composite kinds here, the scalars in scalar.
+
+          Where a container puts its elements decides their addressability, as in
+          json/v2: a slice's and a pointer's elements are addressable, an array's and
+          a struct's inherit it, a map's values never are.
+        name: byKind
+        params: t reflect.Type, addressable bool
+        recv: w *walker
+        results: "*ShapeValue"
+      - doc: |-
+          slice fills shape for a slice: a base64 string for bytes that write nothing
+          of their own, an array otherwise; either may be null.
+        name: slice
+        params: shape *ShapeValue, t reflect.Type
+        recv: w *walker
+      - doc: |-
+          mapOf fills shape for a map: an object whose values are the map's, or
+          Unsupported when encoding/json cannot write the key as a member name.
+        name: mapOf
+        params: shape *ShapeValue, t reflect.Type
+        recv: w *walker
+      - doc: |-
+          object fills shape for a struct with its members and, when an embedded map
+          collects extra members, their value shape.
+        name: object
+        params: shape *ShapeValue, t reflect.Type, addressable bool
+        recv: w *walker
+      - doc: |-
+          extraValues describes the members an embedded fallback collects: a map's
+          values, or anything for a jsontext.Value.
+        name: extraValues
+        params: extra reflect.Type
+        recv: w *walker
+        results: "*ShapeValue"
+    name: walker
+vars:
+  - doc: The interfaces encoding/json consults, by their reflect.Type.
+    grouped: true
+    items:
+      - name: jsonMarshalerType
+        value: reflect.TypeFor[json.Marshaler]()
+      - name: jsonUnmarshalerType
+        value: reflect.TypeFor[json.Unmarshaler]()
+      - name: textMarshalerType
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+      - name: textAppenderType
+        value: reflect.TypeFor[encoding.TextAppender]()
+      - name: textUnmarshalerType
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - name: isZeroerType
+        value: reflect.TypeFor[interface{ IsZero() bool }]()
+      - name: errorType
+        value: reflect.TypeFor[error]()
+    name: jsonMarshalerType
+  - doc: kindNames are the Kind spellings, indexed by Kind.
+    items:
+      - name: kindNames
+        value: "[...]string{\"any\", \"object\", \"array\", \"map\", \"string\", \"integer\", \"number\", \"boolean\", \"unsupported\"}"
+    name: kindNames
+  - doc: The types described by what they write rather than by their kind.
+    grouped: true
+    items:
+      - name: timeType
+        value: reflect.TypeFor[time.Time]()
+      - name: durationType
+        value: reflect.TypeFor[time.Duration]()
+      - name: numberType
+        value: reflect.TypeFor[json.Number]()
+    name: timeType

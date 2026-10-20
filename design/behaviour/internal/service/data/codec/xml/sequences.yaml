@@ -1,0 +1,273 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*xmlCodec).Name
+    steps:
+      - return: "\"xml\""
+  - of: (*xmlCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*xmlCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*xmlCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlCodec).Marshal
+        kind: self
+      - id: scratch
+        kind: package
+      - id: stdxml
+        kind: stdlib
+      - id: enc.Encode
+        kind: value
+      - id: enc.Close
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: enc
+        eval: stdxml.NewEncoder(buf)
+        to: stdxml
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                nil, errs.Wrap(xerr, errs.WrapParams{
+                			Code:    corexml.CodeXMLMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "XML encoding failed",
+                			Private: "service/data/codec/xml.Marshal: encoding/xml returned an error",
+                		})
+          init:
+            bind: xerr
+            eval: enc.Encode(v)
+            to: enc.Encode
+          when: xerr != nil
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                nil, errs.Wrap(cerr, errs.WrapParams{
+                			Code:    corexml.CodeXMLMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "XML encoding failed",
+                			Private: "service/data/codec/xml.Marshal: encoder.Close returned an error",
+                		})
+          init:
+            bind: cerr
+            eval: enc.Close()
+            to: enc.Close
+          when: cerr != nil
+      - bind: out
+        eval: slices.Clone(buf.Bytes())
+        to: slices
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: out, nil
+  - of: (*xmlCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlCodec).Unmarshal
+        kind: self
+      - id: stdxml
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: xerr
+        eval: stdxml.Unmarshal(data, v)
+        to: stdxml
+      - opt:
+          do:
+            - return: nil
+          when: xerr == nil
+      - return: |-
+          errs.Wrap(xerr, errs.WrapParams{
+          		Code:    corexml.CodeXMLUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "XML decoding failed",
+          		Private: "service/data/codec/xml.Unmarshal: encoding/xml returned an error",
+          	})
+        to: errs
+  - of: (*xmlCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlCodec).Append
+        kind: self
+      - id: scratch
+        kind: package
+      - id: stdxml
+        kind: stdlib
+      - id: enc.Encode
+        kind: value
+      - id: enc.Close
+        kind: value
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: enc
+        eval: stdxml.NewEncoder(buf)
+        to: stdxml
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                dst, errs.Wrap(xerr, errs.WrapParams{
+                			Code:    corexml.CodeXMLMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "XML encoding failed",
+                			Private: "service/data/codec/xml.Append: encoding/xml returned an error",
+                		})
+          init:
+            bind: xerr
+            eval: enc.Encode(v)
+            to: enc.Encode
+          when: xerr != nil
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                dst, errs.Wrap(cerr, errs.WrapParams{
+                			Code:    corexml.CodeXMLMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "XML encoding failed",
+                			Private: "service/data/codec/xml.Append: encoder.Close returned an error",
+                		})
+          init:
+            bind: cerr
+            eval: enc.Close()
+            to: enc.Close
+          when: cerr != nil
+      - set: dst
+        value: append(dst, buf.Bytes()...)
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: dst, nil
+  - of: (*xmlCodec).NewEncoder
+    steps:
+      - return: "&xmlEncoder{inner: stdxml.NewEncoder(w)}"
+  - of: (*xmlCodec).NewDecoder
+    steps:
+      - return: "&xmlDecoder{inner: stdxml.NewDecoder(r)}"
+  - of: (*xmlDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlDecoder).Decode
+        kind: self
+      - id: d.inner.Decode
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: io.EOF
+          when: d.done
+      - bind: xerr
+        eval: d.inner.Decode(v)
+        to: d.inner.Decode
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: io.EOF
+          when: errors.Is(xerr, io.EOF)
+      - opt:
+          do:
+            - return: nil
+          when: xerr == nil
+      - return: |-
+          errs.Wrap(xerr, errs.WrapParams{
+          		Code:    corexml.CodeXMLUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "XML decoding failed",
+          		Private: "service/data/codec/xml.Decoder.Decode: encoding/xml returned an error",
+          	})
+        to: errs
+  - of: (*xmlDecoder).More
+    steps:
+      - return: "!d.done"
+  - of: (*xmlEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlEncoder).Encode
+        kind: self
+      - id: e.inner.Encode
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: xerr
+        eval: e.inner.Encode(v)
+        to: e.inner.Encode
+      - opt:
+          do:
+            - return: nil
+          when: xerr == nil
+      - return: |-
+          errs.Wrap(xerr, errs.WrapParams{
+          		Code:    corexml.CodeXMLMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "XML encoding failed",
+          		Private: "service/data/codec/xml.Encoder.Encode: encoding/xml returned an error",
+          	})
+        to: errs
+  - of: (*xmlEncoder).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlEncoder).Close
+        kind: self
+      - id: e.inner.Flush
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: xerr
+        eval: e.inner.Flush()
+        to: e.inner.Flush
+      - opt:
+          do:
+            - return: nil
+          when: xerr == nil
+      - return: |-
+          errs.Wrap(xerr, errs.WrapParams{
+          		Code:    corexml.CodeXMLMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "XML encoding failed",
+          		Private: "service/data/codec/xml.Encoder.Close: Flush returned an error",
+          	})
+        to: errs

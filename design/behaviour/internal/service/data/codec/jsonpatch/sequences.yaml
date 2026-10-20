@@ -1,0 +1,846 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Diff
+    participants:
+      - id: caller
+        kind: actor
+      - id: Diff
+        kind: self
+      - id: parse
+        kind: internal
+      - id: d.diff
+        kind: internal
+    steps:
+      - bind: a, err
+        eval: parse("from", from)
+        to: parse
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: b, err
+        eval: parse("to", to)
+        to: parse
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - var:
+          name: d
+          type: differ
+      - eval: d.diff("", a, b)
+        to: d.diff
+      - return: append([]EditValue{}, d.edits...), nil
+  - of: (*differ).diff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*differ).diff
+        kind: self
+      - id: d.diffObjects
+        kind: internal
+      - id: d.diffArrays
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: equal(a, b)
+              do:
+                - return: ""
+            - case: a.kind == '{' && b.kind == '{'
+              do:
+                - eval: d.diffObjects(path, a, b)
+                  to: d.diffObjects
+            - case: a.kind == '[' && b.kind == '['
+              do:
+                - eval: d.diffArrays(path, a.items, b.items)
+                  to: d.diffArrays
+            - default: true
+              do:
+                - set: d.edits
+                  value: "append(d.edits, EditValue{Op: Replace, Path: path, Value: encode(b), Old: encode(a)})"
+  - of: (*differ).diffObjects
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*differ).diffObjects
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: d.diff
+        kind: internal
+    steps:
+      - bind: names
+        eval: append(slices.Clone(a.names), b.names...)
+      - eval: slices.Sort(names)
+        to: slices
+      - loop:
+          do:
+            - bind: before, inA
+              eval: a.fields[name]
+            - bind: after, inB
+              eval: b.fields[name]
+            - bind: at
+              eval: path + "/" + escapeToken(name)
+            - switch:
+                cases:
+                  - case: inA && inB
+                    do:
+                      - eval: d.diff(at, before, after)
+                        to: d.diff
+                  - case: inA
+                    do:
+                      - set: d.edits
+                        value: "append(d.edits, EditValue{Op: Remove, Path: at, Old: encode(before)})"
+                  - default: true
+                    do:
+                      - set: d.edits
+                        value: "append(d.edits, EditValue{Op: Add, Path: at, Value: encode(after)})"
+          key: _
+          range: slices.Compact(names)
+          value: name
+  - of: (*differ).diffArrays
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*differ).diffArrays
+        kind: self
+      - id: commonPrefix
+        kind: internal
+      - id: d.changeRun
+        kind: internal
+    steps:
+      - bind: prefix
+        eval: commonPrefix(a, b)
+        to: commonPrefix
+      - bind: suffix
+        eval: commonPrefix(reversed(a[prefix:]), reversed(b[prefix:]))
+        to: commonPrefix
+      - bind: midA, midB
+        eval: a[prefix:len(a)-suffix], b[prefix:len(b)-suffix]
+      - bind: i, x, y
+        eval: prefix, 0, 0
+      - loop:
+          do:
+            - set: i
+              to: d.changeRun
+              value: d.changeRun(path, i, midA[x:kept[0]], midB[y:kept[1]])
+            - set: x, y
+              value: kept[0]+1, kept[1]+1
+            - op: ++
+              set: i
+          key: _
+          range: append(align(midA, midB), [2]int{len(midA), len(midB)})
+          value: kept
+  - of: (*differ).changeRun
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*differ).changeRun
+        kind: self
+      - id: d.diff
+        kind: internal
+    steps:
+      - bind: paired
+        eval: min(len(removed), len(added))
+      - loop:
+          do:
+            - eval: d.diff(path+"/"+strconv.Itoa(i), removed[k], added[k])
+              to: d.diff
+            - op: ++
+              set: i
+          key: k
+          range: paired
+      - loop:
+          do:
+            - set: d.edits
+              value: "append(d.edits, EditValue{Op: Remove, Path: path + \"/\" + strconv.Itoa(i), Old: encode(gone)})"
+          key: _
+          range: removed[paired:]
+          value: gone
+      - loop:
+          do:
+            - set: d.edits
+              value: "append(d.edits, EditValue{Op: Add, Path: path + \"/\" + strconv.Itoa(i), Value: encode(came)})"
+            - op: ++
+              set: i
+          key: _
+          range: added[paired:]
+          value: came
+      - return: i
+  - of: lcsLengths
+    steps:
+      - bind: width
+        eval: len(b) + 1
+      - bind: lengths
+        eval: make([]uint32, (len(a)+1)*width)
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: lengths[i*width+j]
+                          value: lengths[(i+1)*width+j+1] + 1
+                        - continue: true
+                      when: equal(x, y)
+                  - set: lengths[i*width+j]
+                    value: max(lengths[(i+1)*width+j], lengths[i*width+j+1])
+                key: j
+                range: slices.Backward(b)
+                value: "y"
+          key: i
+          range: slices.Backward(a)
+          value: x
+      - return: lengths
+  - of: commonPrefix
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(a) && n < len(b) && equal(a[n], b[n])
+          do:
+            - op: ++
+              set: "n"
+      - return: "n"
+  - of: reversed
+    participants:
+      - id: caller
+        kind: actor
+      - id: reversed
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: slices.Clone(s)
+        to: slices
+      - eval: slices.Reverse(out)
+        to: slices
+      - return: out
+  - of: escapeToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: escapeToken
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1")
+        to: strings
+  - of: parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: parse
+        kind: self
+      - id: jsontext
+        kind: stdlib
+      - id: readValue
+        kind: internal
+      - id: dec.ReadToken
+        kind: value
+    steps:
+      - bind: dec
+        eval: jsontext.NewDecoder(bytes.NewReader(raw))
+        to: jsontext
+      - bind: root, err
+        eval: readValue(dec)
+        to: readValue
+      - opt:
+          do:
+            - return: nil, notJSON(which, dec.InputOffset(), err)
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, notJSON(which, dec.InputOffset(), trailing)
+          init:
+            bind: _, trailing
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: "!errors.Is(trailing, io.EOF)"
+      - return: root, nil
+  - of: readValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: readValue
+        kind: self
+      - id: dec.ReadToken
+        kind: value
+      - id: readObject
+        kind: internal
+      - id: readArray
+        kind: internal
+      - id: tok.String
+        kind: value
+      - id: digest
+        kind: internal
+    steps:
+      - bind: tok, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: value
+        eval: "&node{kind: tok.Kind()}"
+      - switch:
+          cases:
+            - case: "'{'"
+              do:
+                - set: err
+                  to: readObject
+                  value: readObject(dec, value)
+            - case: "'['"
+              do:
+                - set: err
+                  to: readArray
+                  value: readArray(dec, value)
+            - case: "'\"', '0'"
+              do:
+                - set: value.text
+                  to: tok.String
+                  value: tok.String()
+            - default: true
+          "on": value.kind
+      - opt:
+          do:
+            - set: value.sum
+              to: digest
+              value: digest(value)
+          when: err == nil
+      - return: value, err
+  - of: digest
+    participants:
+      - id: caller
+        kind: actor
+      - id: digest
+        kind: self
+      - id: fnvByte
+        kind: internal
+      - id: fnvString
+        kind: internal
+      - id: numberDigest
+        kind: internal
+      - id: fnvUint
+        kind: internal
+      - id: mix
+        kind: internal
+    steps:
+      - bind: h
+        eval: fnvByte(fnvOffset, byte(n.kind))
+        to: fnvByte
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: fnvString(h, n.text)
+                  to: fnvString
+            - case: "'0'"
+              do:
+                - return: numberDigest(h, n.text)
+                  to: numberDigest
+            - case: "'['"
+              do:
+                - loop:
+                    do:
+                      - set: h
+                        to: fnvUint
+                        value: fnvUint(h, item.sum)
+                    key: _
+                    range: n.items
+                    value: item
+                - return: h
+            - case: "'{'"
+              do:
+                - var:
+                    name: members
+                    type: uint64
+                - loop:
+                    do:
+                      - op: +=
+                        set: members
+                        to: mix
+                        value: mix(fnvString(fnvOffset, name) ^ mix(value.sum))
+                    key: name
+                    range: n.fields
+                    value: value
+                - return: fnvUint(fnvUint(h, uint64(len(n.fields))), members)
+                  to: fnvUint
+            - default: true
+              do:
+                - return: h
+          "on": n.kind
+  - of: numberDigest
+    participants:
+      - id: caller
+        kind: actor
+      - id: numberDigest
+        kind: self
+      - id: canonical
+        kind: internal
+      - id: fnvString
+        kind: internal
+      - id: fnvByte
+        kind: internal
+    steps:
+      - bind: negative, digits, exponent, ok
+        eval: canonical(text)
+        to: canonical
+      - switch:
+          cases:
+            - case: "!ok"
+              do:
+                - return: fnvString(h, text)
+                  to: fnvString
+            - case: digits == ""
+              do:
+                - return: fnvByte(h, '0')
+                  to: fnvByte
+            - case: negative
+              do:
+                - set: h
+                  to: fnvByte
+                  value: fnvByte(h, '-')
+            - default: true
+      - return: fnvString(fnvString(h, digits), "e"+exponent.String())
+        to: fnvString
+  - of: fnvByte
+    steps:
+      - return: (h ^ uint64(b)) * fnvPrime
+  - of: fnvString
+    participants:
+      - id: caller
+        kind: actor
+      - id: fnvString
+        kind: self
+      - id: fnvUint
+        kind: internal
+      - id: fnvByte
+        kind: internal
+    steps:
+      - set: h
+        to: fnvUint
+        value: fnvUint(h, uint64(len(s)))
+      - loop:
+          do:
+            - set: h
+              to: fnvByte
+              value: fnvByte(h, s[i])
+          key: i
+          range: len(s)
+      - return: h
+  - of: fnvUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: fnvUint
+        kind: self
+      - id: fnvByte
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: h
+              to: fnvByte
+              value: fnvByte(h, byte(v))
+            - op: ">>="
+              set: v
+              value: byteBits
+          range: uint64Bytes
+      - return: h
+  - of: mix
+    steps:
+      - op: ^=
+        set: v
+        value: v >> 30
+      - op: "*="
+        set: v
+        value: "0xbf58476d1ce4e5b9"
+      - op: ^=
+        set: v
+        value: v >> 27
+      - op: "*="
+        set: v
+        value: "0x94d049bb133111eb"
+      - return: v ^ (v >> 31)
+  - of: readObject
+    participants:
+      - id: caller
+        kind: actor
+      - id: readObject
+        kind: self
+      - id: readMember
+        kind: internal
+      - id: dec.ReadToken
+        kind: value
+    steps:
+      - set: obj.fields
+        value: map[string]*node{}
+      - loop:
+          cond: dec.PeekKind() != '}'
+          do:
+            - bind: name, member, err
+              eval: readMember(dec)
+              to: readMember
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: obj.names
+              value: append(obj.names, name)
+            - set: obj.fields[name]
+              value: member
+      - bind: _, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - return: err
+  - of: readArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: readArray
+        kind: self
+      - id: readValue
+        kind: internal
+      - id: dec.ReadToken
+        kind: value
+    steps:
+      - loop:
+          cond: dec.PeekKind() != ']'
+          do:
+            - bind: item, err
+              eval: readValue(dec)
+              to: readValue
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: arr.items
+              value: append(arr.items, item)
+      - bind: _, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - return: err
+  - of: readMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: readMember
+        kind: self
+      - id: dec.ReadToken
+        kind: value
+      - id: tok.String
+        kind: value
+      - id: readValue
+        kind: internal
+    steps:
+      - bind: tok, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - opt:
+          do:
+            - return: "\"\", nil, err"
+          when: err != nil
+      - set: name
+        to: tok.String
+        value: tok.String()
+      - set: value, err
+        to: readValue
+        value: readValue(dec)
+      - return: name, value, err
+  - of: equal
+    participants:
+      - id: caller
+        kind: actor
+      - id: equal
+        kind: self
+      - id: sameNumber
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: a.sum != b.sum || a.kind != b.kind
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: a.text == b.text
+            - case: "'0'"
+              do:
+                - return: sameNumber(a.text, b.text)
+                  to: sameNumber
+            - case: "'['"
+              do:
+                - return: slices.EqualFunc(a.items, b.items, equal)
+                  to: slices
+            - case: "'{'"
+              do:
+                - return: len(a.fields) == len(b.fields) && everyMember(a, b)
+            - default: true
+              do:
+                - return: "true"
+          "on": a.kind
+  - of: sameNumber
+    participants:
+      - id: caller
+        kind: actor
+      - id: sameNumber
+        kind: self
+      - id: canonical
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: a == b
+      - bind: negA, digitsA, expA, okA
+        eval: canonical(a)
+        to: canonical
+      - bind: negB, digitsB, expB, okB
+        eval: canonical(b)
+        to: canonical
+      - opt:
+          do:
+            - return: "false"
+          when: "!okA || !okB"
+      - opt:
+          do:
+            - return: digitsA == digitsB
+          when: digitsA == "" || digitsB == ""
+      - return: negA == negB && digitsA == digitsB && expA.Cmp(expB) == 0
+  - of: canonical
+    participants:
+      - id: caller
+        kind: actor
+      - id: canonical
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: exponent.SetString
+        kind: value
+      - id: exponent.Sub
+        kind: value
+      - id: exponent.Add
+        kind: value
+    steps:
+      - set: negative
+        to: strings
+        value: strings.HasPrefix(number, "-")
+      - bind: mantissa, power, _
+        eval: strings.Cut(strings.TrimPrefix(number, "-"), "e")
+        to: strings
+      - opt:
+          do:
+            - set: mantissa, power, _
+              to: strings
+              value: strings.Cut(mantissa, "E")
+          when: power == "" && strings.Contains(mantissa, "E")
+      - bind: integer, fraction, _
+        eval: strings.Cut(mantissa, ".")
+        to: strings
+      - set: exponent
+        value: new(big.Int)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: false, "", nil, false
+                init:
+                  bind: _, parsed
+                  eval: exponent.SetString(strings.TrimPrefix(power, "+"), 10)
+                  to: exponent.SetString
+                when: "!parsed"
+          when: power != ""
+      - set: digits
+        to: strings
+        value: strings.TrimLeft(integer+fraction, "0")
+      - eval: exponent.Sub(exponent, big.NewInt(int64(len(fraction))))
+        to: exponent.Sub
+      - bind: trimmed
+        eval: strings.TrimRight(digits, "0")
+        to: strings
+      - eval: exponent.Add(exponent, big.NewInt(int64(len(digits)-len(trimmed))))
+        to: exponent.Add
+      - return: negative, trimmed, exponent, true
+  - of: encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: encode
+        kind: self
+      - id: jsontext
+        kind: stdlib
+      - id: write
+        kind: internal
+      - id: bytes
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - bind: enc
+        eval: jsontext.NewEncoder(&buf)
+        to: jsontext
+      - opt:
+          do:
+            - return: "[]byte(strconv.Quote(n.kind.String()))"
+          init:
+            bind: err
+            eval: write(enc, n)
+            to: write
+          when: err != nil
+      - return: bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+        to: bytes
+  - of: write
+    participants:
+      - id: caller
+        kind: actor
+      - id: write
+        kind: self
+      - id: writeObject
+        kind: internal
+      - id: writeContainer
+        kind: internal
+      - id: enc.WriteValue
+        kind: value
+      - id: enc.WriteToken
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: "'{'"
+              do:
+                - return: writeObject(enc, n)
+                  to: writeObject
+            - case: "'['"
+              do:
+                - return: |-
+                    writeContainer(enc, jsontext.BeginArray, jsontext.EndArray, func() error {
+                    			//: each element.
+                    			for _, item := range n.items {
+                    				//: the element.
+                    				if err := write(enc, item); err != nil {
+                    					//: the encoder's refusal.
+                    					return err
+                    				}
+                    			}
+                    			//: every element.
+                    			return nil
+                    		})
+                  to: writeContainer
+            - case: "'0'"
+              do:
+                - return: enc.WriteValue(jsontext.Value(n.text))
+                  to: enc.WriteValue
+            - default: true
+              do:
+                - return: enc.WriteToken(scalarToken(n))
+                  to: enc.WriteToken
+          "on": n.kind
+  - of: writeObject
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeObject
+        kind: self
+      - id: writeContainer
+        kind: internal
+    steps:
+      - return: |-
+          writeContainer(enc, jsontext.BeginObject, jsontext.EndObject, func() error {
+          		//: each member: its name, then its value.
+          		for _, name := range obj.names {
+          			//: the name.
+          			if err := enc.WriteToken(jsontext.String(name)); err != nil {
+          				//: the encoder's refusal.
+          				return err
+          			}
+          			//: the value.
+          			if err := write(enc, obj.fields[name]); err != nil {
+          				//: the encoder's refusal.
+          				return err
+          			}
+          		}
+          		//: every member.
+          		return nil
+          	})
+        to: writeContainer
+  - of: scalarToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: scalarToken
+        kind: self
+      - id: jsontext
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: jsontext.String(n.text)
+                  to: jsontext
+            - case: "'t'"
+              do:
+                - return: jsontext.True
+            - case: "'f'"
+              do:
+                - return: jsontext.False
+            - default: true
+              do:
+                - return: jsontext.Null
+          "on": n.kind
+  - of: writeContainer
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeContainer
+        kind: self
+      - id: enc.WriteToken
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: enc.WriteToken(begin)
+            to: enc.WriteToken
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: body()
+          when: err != nil
+      - return: enc.WriteToken(end)
+        to: enc.WriteToken
+  - of: notJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: notJSON
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: problem
+        eval: "\"not one well-formed JSON value\""
+      - opt:
+          do:
+            - set: problem
+              value: "\"the document ends before its value does\""
+          when: errors.Is(cause, io.ErrUnexpectedEOF) || errors.Is(cause, io.EOF)
+      - return: |-
+          kerrs.Wrap(corejsonpatch.NotJSON, kerrs.WrapParams{},
+          		kerrs.String("document", which), kerrs.Int64("offset", offset), kerrs.String("problem", problem))
+        to: kerrs

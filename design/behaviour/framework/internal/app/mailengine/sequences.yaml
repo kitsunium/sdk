@@ -1,0 +1,367 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c == nil
+      - return: "sdkClock{Clock: c}"
+  - of: sdkClock.NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTimer
+        kind: self
+      - id: c.Clock.NewTimer
+        kind: value
+    steps:
+      - return: c.Clock.NewTimer(d)
+        to: c.Clock.NewTimer
+  - of: sdkClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTicker
+        kind: self
+      - id: c.Clock.NewTicker
+        kind: value
+    steps:
+      - return: c.Clock.NewTicker(d)
+        to: c.Clock.NewTicker
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Mail.Store
+        kind: value
+    steps:
+      - eval: |-
+          plug.Mail.Store(&plug.MailDriverConfig{
+          		Open: open, Validate: validate, Capture: capture,
+          		ParseSMTP: parseSMTP, NewSMTP: newSMTP, Refused: refused,
+          	})
+        to: plug.Mail.Store
+  - of: validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: validate
+        kind: self
+      - id: mail
+        kind: package
+    steps:
+      - return: mail.Validate(messageOf(msg))
+        to: mail
+  - of: capture
+    steps:
+      - return: "&captured{t: mail.NewCapture(capturedMails)}"
+  - of: parseSMTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseSMTP
+        kind: self
+      - id: mail
+        kind: package
+    steps:
+      - bind: cfg, err
+        eval: mail.ParseURL(url)
+        to: mail
+      - opt:
+          do:
+            - return: plug.MailRelayValue{}, err
+          when: err != nil
+      - return: "plug.MailRelayValue{Config: cfg, Server: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), TLS: tlsName(cfg.TLS)}, nil"
+  - of: newSMTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: newSMTP
+        kind: self
+      - id: mail
+        kind: package
+    steps:
+      - bind: cfg, ok
+        eval: relay.Config.(mail.SMTPConfig)
+      - opt:
+          do:
+            - return: nil, errs.Wrap(mail.InvalidConfig, errs.WrapParams{}, errs.String("problem", "the relay was not read by the mail subsystem"))
+          when: "!ok"
+      - bind: t, err
+        eval: mail.NewSMTP(cfg)
+        to: mail
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "transport{t: t}, nil"
+  - of: tlsName
+    steps:
+      - switch:
+          cases:
+            - case: mail.TLSStartTLS
+              do:
+                - return: "\"starttls\""
+            - case: mail.TLSImplicit
+              do:
+                - return: "\"implicit\""
+            - case: mail.TLSDisabled
+              do:
+                - return: "\"none\""
+            - default: true
+              do:
+                - return: "\"unset\""
+          "on": mode
+  - of: refused
+    steps:
+      - bind: s, ok
+        eval: sentinels[kind]
+      - return: ok && errors.Is(err, s)
+  - of: messageOf
+    steps:
+      - bind: msg, _
+        eval: v.Value.(mail.Message)
+      - return: msg
+  - of: addressOf
+    steps:
+      - bind: from, _
+        eval: v.Value.(mail.Address)
+      - return: from
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: queueengine
+        kind: package
+      - id: deferrerOf
+        kind: internal
+      - id: mailspool
+        kind: package
+    steps:
+      - bind: sc
+        eval: |-
+          mailspool.Config{
+          		Transport:       attempts{run: cfg.Transport},
+          		Clock:           clockOf(cfg.Clock),
+          		Observe:         observeOf(cfg.Observe),
+          		Annotate:        cfg.Annotate,
+          		NewID:           cfg.NewID,
+          		From:            addressOf(cfg.From),
+          		Backoff:         backoffOf(cfg),
+          		MaxAttempts:     cfg.MaxAttempts,
+          		SendTimeout:     cfg.SendTimeout,
+          		PollInterval:    cfg.PollInterval,
+          		Dir:             cfg.Dir,
+          		MaxMessageBytes: cfg.MaxMessageBytes,
+          	}
+      - opt:
+          do:
+            - bind: b, ok
+              eval: queueengine.BrokerOf(cfg.Outbox)
+              to: queueengine
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(mailspool.Misconfigured, errs.WrapParams{},
+                      				errs.String("problem", "the outbox's queue was not opened by the queue subsystem"))
+                when: "!ok"
+            - set: sc.Broker
+              value: b
+            - set: sc.Deferrer
+              to: deferrerOf
+              value: deferrerOf(cfg.Database)
+          when: cfg.Outbox != nil
+      - bind: s, err
+        eval: mailspool.New(sc)
+        to: mailspool
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "spool{s: s}, nil"
+  - of: backoffOf
+    steps:
+      - return: "resilience.Backoff{BaseDelay: cfg.BackoffBase, MaxDelay: cfg.BackoffMax}"
+  - of: deferrerOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: deferrerOf
+        kind: self
+      - id: storeengine
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: db == nil
+      - bind: tm, _, ok
+        eval: storeengine.SQLOf(db)
+        to: storeengine
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - bind: df, defers
+        eval: tm.(sql.Deferrer)
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: _, aborts
+            eval: tm.(sql.Aborter)
+          when: "!defers || !aborts"
+      - return: df
+  - of: observeOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: fn == nil
+      - return:
+          closure:
+            params: e mailspool.Event
+            steps:
+              - eval: |-
+                  fn(&plug.MailEventValue{
+                  			Err: e.Err, Meta: e.Meta, At: e.At, QueuedAt: e.QueuedAt, Message: plug.MailValue{Value: e.Message},
+                  			ID: e.ID, Attempt: e.Attempt, Kind: eventOf(e.Kind),
+                  		})
+  - of: eventOf
+    steps:
+      - opt:
+          do:
+            - return: e
+          init:
+            bind: e, ok
+            eval: events[k]
+          when: ok
+      - return: plug.MailEventOther
+  - of: attemptFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: attemptFrom
+        kind: self
+      - id: mailspool
+        kind: package
+    steps:
+      - bind: a, ok
+        eval: mailspool.AttemptFrom(ctx)
+        to: mailspool
+      - return: "plug.MailAttemptValue{QueuedAt: a.QueuedAt, Meta: a.Meta, ID: a.ID, Attempt: a.Attempt}, ok"
+  - of: spool.Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: spool.Send
+        kind: self
+      - id: s.s.Send
+        kind: value
+    steps:
+      - return: s.s.Send(ctx, messageOf(msg))
+        to: s.s.Send
+  - of: spool.SendWithID
+    participants:
+      - id: caller
+        kind: actor
+      - id: spool.SendWithID
+        kind: self
+      - id: s.s.SendWithID
+        kind: value
+    steps:
+      - return: s.s.SendWithID(ctx, id, messageOf(msg))
+        to: s.s.SendWithID
+  - of: spool.DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: spool.DeadLetters
+        kind: self
+      - id: s.s.DeadLetters
+        kind: value
+    steps:
+      - bind: dead, err
+        eval: s.s.DeadLetters(ctx, maxLetters)
+        to: s.s.DeadLetters
+      - return: len(dead), err
+  - of: spool.Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: spool.Run
+        kind: self
+      - id: s.s.Run
+        kind: value
+    steps:
+      - return: s.s.Run(ctx)
+        to: s.s.Run
+  - of: spool.Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: spool.Close
+        kind: self
+      - id: s.s.Close
+        kind: value
+    steps:
+      - return: s.s.Close()
+        to: s.s.Close
+  - of: transport.Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: transport.Send
+        kind: self
+      - id: t.t.Send
+        kind: value
+    steps:
+      - return: t.t.Send(ctx, messageOf(msg))
+        to: t.t.Send
+  - of: (*captured).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*captured).Send
+        kind: self
+      - id: c.t.Send
+        kind: value
+    steps:
+      - return: c.t.Send(ctx, messageOf(msg))
+        to: c.t.Send
+  - of: (*captured).Composed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*captured).Composed
+        kind: self
+      - id: c.t.Sent
+        kind: value
+    steps:
+      - bind: sent
+        eval: c.t.Sent()
+        to: c.t.Sent
+      - opt:
+          do:
+            - return: nil
+          when: len(sent) == 0
+      - return: sent[len(sent)-1].Raw
+  - of: attempts.Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: attempts.Send
+        kind: self
+      - id: attemptFrom
+        kind: internal
+    steps:
+      - bind: attempt, _
+        eval: attemptFrom(ctx)
+        to: attemptFrom
+      - return: "a.run(ctx, plug.MailValue{Value: msg}, attempt)"

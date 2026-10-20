@@ -1,0 +1,385 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: buildPow10
+    steps:
+      - var:
+          name: table
+          type: "[maxFractionDigits + 1]uint64"
+      - bind: value
+        eval: uint64(1)
+      - loop:
+          do:
+            - set: table[i]
+              value: value
+            - op: "*="
+              set: value
+              value: decimalBase
+          key: i
+          range: table
+      - return: table
+  - of: Int
+    steps:
+      - opt:
+          do:
+            - return: "CountValue{integerPart: uint64(-(n + 1)) + 1}"
+          when: n < 0
+      - return: "CountValue{integerPart: uint64(n)}"
+  - of: Decimal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Decimal
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: splitDecimal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: CountValue{}, errs.Wrap(InvalidCount, errs.WrapParams{}, errs.String("detail", "value is NaN or infinite"))
+          when: math.IsNaN(value) || math.IsInf(value, 0)
+      - opt:
+          do:
+            - return: |-
+                CountValue{}, errs.Wrap(InvalidCount, errs.WrapParams{},
+                			errs.Int("fraction_digits", fractionDigits), errs.Int("max_fraction_digits", maxFractionDigits))
+          when: fractionDigits < 0 || fractionDigits > maxFractionDigits
+      - bind: abs
+        eval: math.Abs(value)
+        to: math
+      - opt:
+          do:
+            - return: CountValue{}, errs.Wrap(InvalidCount, errs.WrapParams{}, errs.String("detail", "integer part exceeds int64"))
+          when: abs >= math.MaxInt64
+      - return: splitDecimal(abs, fractionDigits), nil
+        to: splitDecimal
+  - of: splitDecimal
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitDecimal
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - bind: whole
+        eval: math.Trunc(abs)
+        to: math
+      - bind: scale
+        eval: pow10[fractionDigits]
+      - bind: fraction
+        eval: uint64(math.Round((abs - whole) * float64(scale)))
+      - bind: integer
+        eval: uint64(whole)
+      - opt:
+          do:
+            - op: ++
+              set: integer
+            - op: "-="
+              set: fraction
+              value: scale
+          when: fraction >= scale
+      - return: |-
+          CountValue{
+          		integerPart:           integer,
+          		fractionValue:         fraction,
+          		visibleFractionDigits: uint8(fractionDigits), //nolint:gosec // bounded by maxFractionDigits above.
+          	}
+  - of: CountValue.IntegerPart
+    steps:
+      - return: c.integerPart
+  - of: CountValue.FractionValue
+    steps:
+      - return: c.fractionValue
+  - of: CountValue.VisibleFractionDigits
+    steps:
+      - return: int(c.visibleFractionDigits)
+  - of: CountValue.IsIntegerValued
+    steps:
+      - return: c.fractionValue == 0
+  - of: Form.String
+    steps:
+      - opt:
+          do:
+            - return: "\"invalid\""
+          when: "!f.Valid()"
+      - return: formNames[f]
+  - of: Form.Valid
+    steps:
+      - return: f < formCount
+  - of: ValidateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateKey
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(InvalidKey, errs.WrapParams{}, errs.String("detail", "empty"))
+              to: errs
+          when: key == ""
+      - bind: text
+        eval: string(key)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: errs.Wrap(InvalidKey, errs.WrapParams{}, errs.String("key", text), errs.String("detail", "control character"))
+                    to: errs
+                when: text[i] < asciiSpace || text[i] == asciiDelete
+          key: i
+          range: len(text)
+      - return: nil
+  - of: MessageValue.Format
+    participants:
+      - id: caller
+        kind: actor
+      - id: MessageValue.Format
+        kind: self
+      - id: m.patternFor
+        kind: internal
+      - id: body.literal
+        kind: internal
+      - id: body.expand
+        kind: internal
+    steps:
+      - bind: body, ok
+        eval: m.patternFor(form)
+        to: m.patternFor
+      - opt:
+          do:
+            - return: "\"\", errs.Wrap(PluralFormMissing, errs.WrapParams{}, errs.String(\"form\", form.String()))"
+          when: "!ok"
+      - opt:
+          do:
+            - return: literal, nil
+          init:
+            bind: literal, direct
+            eval: body.literal()
+            to: body.literal
+          when: direct
+      - return: body.expand(args)
+        to: body.expand
+  - of: MessageValue.HasForm
+    participants:
+      - id: caller
+        kind: actor
+      - id: MessageValue.HasForm
+        kind: self
+      - id: m.patternFor
+        kind: internal
+    steps:
+      - bind: _, ok
+        eval: m.patternFor(form)
+        to: m.patternFor
+      - return: ok
+  - of: MessageValue.IsPlural
+    steps:
+      - return: len(m.plural) > 0
+  - of: PatternValue.literal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", true"
+          when: len(p.parts) == 0
+      - opt:
+          do:
+            - return: p.parts[0].Text, true
+          when: len(p.parts) == 1 && p.parts[0].Name == ""
+      - return: "\"\", false"
+  - of: PatternValue.expand
+    participants:
+      - id: caller
+        kind: actor
+      - id: PatternValue.expand
+        kind: self
+      - id: out.Grow
+        kind: value
+      - id: out.WriteString
+        kind: value
+      - id: out.String
+        kind: value
+    steps:
+      - var:
+          name: out
+          type: strings.Builder
+      - eval: out.Grow(p.size + argSizeGuess*(len(p.parts)-1))
+        to: out.Grow
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: out.WriteString(span.Text)
+                    to: out.WriteString
+                  - continue: true
+                when: span.Name == ""
+            - bind: value, ok
+              eval: args[span.Name]
+            - opt:
+                do:
+                  - return: "\"\", errs.Wrap(ArgumentMissing, errs.WrapParams{}, errs.String(\"placeholder\", span.Name))"
+                when: "!ok"
+            - eval: out.WriteString(value)
+              to: out.WriteString
+          key: _
+          range: p.parts
+          value: span
+      - return: out.String(), nil
+        to: out.String
+  - of: isNameStart
+    steps:
+      - return: b == '_' || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+  - of: NewTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTag
+        kind: self
+      - id: appendLower
+        kind: internal
+      - id: appendTitle
+        kind: internal
+      - id: appendUpper
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: TagValue{}, errs.Wrap(InvalidTag, errs.WrapParams{}, errs.String("detail", "language subtag is not 2 or 3 letters"))
+          when: "!isAlpha(language) || len(language) < minLanguageLen || len(language) > maxLanguageLen"
+      - opt:
+          do:
+            - return: TagValue{}, errs.Wrap(InvalidTag, errs.WrapParams{}, errs.String("detail", "script subtag is not 4 letters"))
+          when: script != "" && (len(script) != scriptLen || !isAlpha(script))
+      - opt:
+          do:
+            - return: TagValue{}, errs.Wrap(InvalidTag, errs.WrapParams{}, errs.String("detail", "region subtag is not 2 letters or 3 digits"))
+          when: region != "" && !isRegion(region)
+      - var:
+          name: buf
+          type: "[maxTagLen]byte"
+      - bind: written
+        eval: appendLower(buf[:0], language)
+        to: appendLower
+      - bind: built
+        eval: "TagValue{langN: uint8(len(language))}"
+      - opt:
+          do:
+            - set: written
+              to: appendTitle
+              value: appendTitle(append(written, '-'), script)
+            - set: built.scriptN
+              value: uint8(scriptLen)
+          when: script != ""
+      - opt:
+          do:
+            - set: written
+              to: appendUpper
+              value: appendUpper(append(written, '-'), region)
+            - set: built.regionN
+              value: uint8(len(region))
+          when: region != ""
+      - set: built.canonical
+        value: string(written)
+      - return: built, nil
+  - of: isRegion
+    steps:
+      - return: (len(sub) == regionAlphaLen && isAlpha(sub)) || (len(sub) == regionDigitLen && isDigit(sub))
+  - of: appendLower
+    steps:
+      - loop:
+          do:
+            - set: dst
+              value: append(dst, lowerByte(sub[i]))
+          key: i
+          range: len(sub)
+      - return: dst
+  - of: appendUpper
+    steps:
+      - loop:
+          do:
+            - set: dst
+              value: append(dst, upperByte(sub[i]))
+          key: i
+          range: len(sub)
+      - return: dst
+  - of: appendTitle
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTitle
+        kind: self
+      - id: appendLower
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, upperByte(sub[0]))
+      - return: appendLower(dst, sub[1:])
+        to: appendLower
+  - of: lowerByte
+    steps:
+      - opt:
+          do:
+            - return: b + asciiCaseBit
+          when: b >= 'A' && b <= 'Z'
+      - return: b
+  - of: upperByte
+    steps:
+      - opt:
+          do:
+            - return: b - asciiCaseBit
+          when: b >= 'a' && b <= 'z'
+      - return: b
+  - of: TagValue.String
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: t.IsZero()
+      - return: t.canonical
+  - of: TagValue.IsZero
+    steps:
+      - return: t.canonical == ""
+  - of: TagValue.Language
+    steps:
+      - return: t.canonical[:t.langN]
+  - of: TagValue.Script
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: t.scriptN == 0
+      - bind: start
+        eval: int(t.langN) + separatorLen
+      - return: "t.canonical[start : start+int(t.scriptN)]"
+  - of: TagValue.Region
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: t.regionN == 0
+      - return: t.canonical[len(t.canonical)-int(t.regionN):]
+  - of: TagValue.Parent
+    steps:
+      - opt:
+          do:
+            - return: |-
+                TagValue{
+                			canonical: t.canonical[:len(t.canonical)-int(t.regionN)-separatorLen],
+                			langN:     t.langN,
+                			scriptN:   t.scriptN,
+                		}, true
+          when: t.regionN != 0
+      - opt:
+          do:
+            - return: |-
+                TagValue{
+                			canonical: t.canonical[:len(t.canonical)-int(t.scriptN)-separatorLen],
+                			langN:     t.langN,
+                		}, true
+          when: t.scriptN != 0
+      - return: TagValue{}, false

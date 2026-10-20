@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: resolve
+    steps:
+      - var:
+          name: c
+          type: config
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: opt == nil
+            - eval: opt(&c)
+          key: _
+          range: opts
+          value: opt
+      - return: c

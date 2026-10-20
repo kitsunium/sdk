@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: holds
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: current == nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: existing.Name == name
+          key: _
+          range: current.byType[eventType]
+          value: existing
+      - return: "false"

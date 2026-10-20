@@ -1,0 +1,253 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Decode bounds and the escaping digit table. Both bounds are compile-time
+      constants rather than constructor options ON PURPOSE: ADR 0031 forbids a
+      policy whose zero value silently means "inert". A NewWithLimit(0) would be
+      exactly that — a caller passing the zero value would disable the guard
+      while believing they configured it. With constants there is no zero value
+      to misread, and raising a bound is a reviewed source change.
+    grouped: true
+    items:
+      - doc: |-
+          maxFormBytes caps a single Unmarshal payload at 8 MiB. Real form
+          bodies are kilobytes; anything past this is either a consumer bug or
+          an attempt to make the decoder allocate on the attacker's behalf.
+        name: maxFormBytes
+        type: int
+        value: 8 * 1024 * 1024
+      - doc: |-
+          maxFormPairs caps the number of key=value pairs a single payload may
+          declare: "a=1&a=1&…" repeated far enough is a memory-amplification
+          lever, since every pair appends to the same slice. The ceiling is
+          checked from the '&' count BEFORE parsing, so an over-long body is
+          refused without allocating a map. Count and value are net/url's own:
+          since Go 1.24 ParseQuery applies the same '&' count + 1 against the
+          same 10 000 (GODEBUG urlmaxqueryparams), so this codec and
+          r.ParseForm() in the same process refuse the same bodies — an empty
+          segment counted as a pair by both. The check is kept because the
+          stdlib's can be lifted at run time and a const cannot.
+        name: maxFormPairs
+        type: int
+        value: "10_000"
+      - doc: |-
+          upperhex is the digit table for percent-escapes. Uppercase matches
+          net/url.QueryEscape byte-for-byte — TestAppendQueryEscapeMatchesStdlib
+          pins the equivalence over the full byte range.
+        name: upperhex
+        type: string
+        value: "\"0123456789ABCDEF\""
+      - doc: |-
+          escapedByteWidth is the width of one "%XX" percent-escape, used when
+          pre-sizing the output buffer.
+        name: escapedByteWidth
+        type: int
+        value: "3"
+      - doc: |-
+          nibbleShift moves a byte's high nibble into the low position so it
+          can index upperhex.
+        name: nibbleShift
+        type: byte
+        value: "4"
+      - doc: nibbleMask isolates a byte's low nibble for the same purpose.
+        name: nibbleMask
+        type: byte
+        value: "0x0F"
+    name: maxFormBytes
+files:
+  - decls:
+      - maxFormBytes
+      - Codec
+      - formCodec
+      - New
+      - (*formCodec).Name
+      - (*formCodec).MIMETypes
+      - (*formCodec).Extensions
+      - (*formCodec).Marshal
+      - (*formCodec).Append
+      - (*formCodec).Unmarshal
+      - publish
+      - collapseSingle
+      - asValues
+      - asPointedValues
+      - widenSingle
+      - encodeInto
+      - encodedLen
+      - escapedLen
+      - appendQueryEscape
+      - isUnreservedQueryByte
+      - isASCIIAlphanumeric
+      - isUnreservedMark
+      - valueInvalid
+    name: codec.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: |-
+      publish writes values through the caller's pointer. The three accepted
+      targets differ in fidelity, and the difference is enforced rather than
+      smoothed over: url.Values / map[string][]string take the decode verbatim,
+      while map[string]string refuses a body that repeats a key.
+    name: publish
+    params: values url.Values, v any
+    results: error
+  - doc: |-
+      collapseSingle projects values onto a one-value-per-key map, refusing any
+      body that repeats a key. The refusal is the point: last-wins and first-wins
+      both discard data the wire actually carried, and this codec does not
+      pretend a lossy projection succeeded.
+    name: collapseSingle
+    params: values url.Values
+    results: single map[string]string, err error
+  - doc: |-
+      asValues coerces v into a url.Values, accepting the three modelled shapes
+      plus a non-nil pointer to any of them. map[string]string is widened to one
+      value per key, which is lossless in this direction. The pointer forms live
+      in asPointedValues so neither half exceeds the branch budget.
+    name: asValues
+    params: v any
+    results: values url.Values, ok bool
+  - doc: |-
+      asPointedValues is asValues' pointer half: it dereferences a non-nil
+      pointer to any modelled shape. A nil pointer is rejected rather than
+      dereferenced, so a caller's zero-valued variable cannot panic the encoder.
+    name: asPointedValues
+    params: v any
+    results: values url.Values, ok bool
+  - doc: |-
+      widenSingle turns a one-value-per-key map into the codec's native
+      url.Values shape. The one-element slices share a single backing array, so
+      widening costs two allocations in total rather than one per key.
+    name: widenSingle
+    params: src map[string]string
+    results: url.Values
+  - doc: |-
+      encodeInto appends the canonical urlencoded rendering of values onto dst
+      and returns the grown buffer. Byte-for-byte identical to
+      url.Values.Encode() — pinned by TestEncodeIntoMatchesStdlibEncode — but
+      writes into a caller-owned []byte instead of minting a string, which is
+      what makes Append worth having.
+    name: encodeInto
+    params: dst []byte, values url.Values
+    results: "[]byte"
+  - doc: |-
+      encodedLen computes the exact byte length encodeInto will append, so the
+      buffer is grown once instead of doubling its way there.
+    name: encodedLen
+    params: values url.Values, keys []string
+    results: int
+  - doc: escapedLen reports how many bytes appendQueryEscape will write for s.
+    name: escapedLen
+    params: s string
+    results: int
+  - doc: |-
+      appendQueryEscape appends s to dst using the query-component escaping rules
+      of net/url.QueryEscape: RFC 3986 §2.3 unreserved bytes travel verbatim,
+      space becomes '+', and every other byte becomes an uppercase "%XX" triple.
+      Hand-rolled because QueryEscape returns a string, which would put one
+      allocation per key and per value on the encode path.
+    name: appendQueryEscape
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      isUnreservedQueryByte reports whether c is an RFC 3986 §2.3 unreserved
+      byte, i.e. one net/url.QueryEscape leaves untouched.
+    name: isUnreservedQueryByte
+    params: c byte
+    results: bool
+  - doc: isASCIIAlphanumeric reports whether c is an ASCII letter or digit.
+    name: isASCIIAlphanumeric
+    params: c byte
+    results: bool
+  - doc: |-
+      isUnreservedMark reports whether c is one of the four RFC 3986 §2.3
+      unreserved punctuation marks.
+    name: isUnreservedMark
+    params: c byte
+    results: bool
+  - doc: |-
+      valueInvalid builds the shape-rejection error with a call-site-specific
+      Private detail. Centralised so every entry point emits the same Code /
+      Reason / Public triple.
+    name: valueInvalid
+    params: detail string
+    results: error
+imports:
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coreform: github.com/kitsunium/sdk/internal/core/data/codec/form
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  slices: slices
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/form
+  name: form
+  purpose: Package form implements application/x-www-form-urlencoded as a codec.Codec — the encoding every HTML form POSTs and every query string carries.
+types:
+  - doc: formCodec is the concrete Codec implementation for urlencoded forms.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*formCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*formCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*formCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal encodes v as an application/x-www-form-urlencoded body. Keys are
+          emitted in ascending lexicographic order — Go map iteration is randomised,
+          so sorting is the only way the same value yields the same bytes twice.
+          Values under one key keep their slice order, which is the wire order.
+        name: Marshal
+        params: v any
+        recv: "*formCodec"
+        results: encoded []byte, err error
+      - doc: |-
+          Append encodes v and appends the bytes onto dst. Implements the optional
+          codec.Appender interface so hot-path callers (request builders, replay
+          harnesses) can reuse one buffer across bodies. On failure dst is returned
+          untouched, per the Appender contract.
+        name: Append
+        params: dst []byte, v any
+        recv: "*formCodec"
+        results: appended []byte, err error
+      - doc: |-
+          Unmarshal parses an urlencoded body into v, which must be a non-nil pointer
+          to url.Values, map[string][]string, or map[string]string.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*formCodec"
+        results: error
+    name: formCodec
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME /
+      extension tables.
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&formCodec{})
+      - doc: ": the one IANA-registered media type for this encoding."
+        name: mimeTypes
+        value: "[]string{\"application/x-www-form-urlencoded\"}"
+      - doc: |-
+          : NEITHER extension is standardised — urlencoded is a wire encoding
+          : for HTTP bodies and query strings, not a file format. They are
+          : registered only so codec.LookupExt has a deterministic answer for
+          : callers who persist a captured body to disk.
+        name: extensions
+        value: "[]string{\".form\", \".urlencoded\"}"
+    name: Codec
