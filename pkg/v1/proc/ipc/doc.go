@@ -52,7 +52,7 @@
 // [RuntimeDir] names an application's directory: $RUNTIME_DIRECTORY (systemd),
 // $XDG_RUNTIME_DIR/<app>, %LOCALAPPDATA%\<app> on Windows, else
 // <tmp>/<app>-<uid>. [RuntimeDirOr] ends the same chain on a directory the
-// caller names instead of <tmp> (ADR 0181). A path is at most the shortest
+// caller names instead of <tmp> (ADR 0182). A path is at most the shortest
 // sun_path any supported kernel has, less its NUL.
 //
 // # Ports, and the doubles they admit
