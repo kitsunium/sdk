@@ -440,15 +440,16 @@ drop_line() {
 # GitHub counts as passing. Each test removes one of the three pieces.
 @test "gates: the gates of shell-gates block through the required bazel job" {
   body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
-  [[ "$body" == *"    needs: [shell-gates, lint-ktn]"* ]]
+  [[ "$body" == *"    needs: [shell-gates, lint-ktn, models]"* ]]
   [[ "$body" == *'    if: ${{ !cancelled() }}'* ]]
   [[ "$body" == *'needs.shell-gates.result'* ]]
   [[ "$body" == *'needs.lint-ktn.result'* ]]
+  [[ "$body" == *'needs.models.result'* ]]
 }
 
 @test "gates: a gate in a job the required job does not need is NOT BLOCKING" {
   gates_fixture
-  sed -e 's/^    needs: \[shell-gates, lint-ktn\]$/    needs: [lint-ktn]/' .github/workflows/bazel-ci.yml >wf.tmp
+  sed -e 's/^    needs: \[shell-gates, lint-ktn, models\]$/    needs: [lint-ktn, models]/' .github/workflows/bazel-ci.yml >wf.tmp
   mv wf.tmp .github/workflows/bazel-ci.yml
 
   run bash scripts/ci-gates-check.sh
@@ -549,6 +550,38 @@ drop_line() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"NOT BLOCKING: 'lint-ktn-check' runs only in job 'lint-ktn'"* ]]
   [[ "$output" == *"never checks needs.lint-ktn.result"* ]]
+}
+
+# ── models: a gate that blocks, and fails without its secret ────────────────
+
+# models-check was advisory while the secret KIT_READ_TOKEN was not set. It is
+# a gate now: the required bazel job needs the job and checks its result, and
+# the job fails on an empty secret unless the run is a fork's or Dependabot's
+# pull request, which GitHub gives no secret.
+@test "models: models-check is a gate blocking through bazel, not advisory" {
+  run grep -qxE '  models-check' "$REPO_ROOT/scripts/ci-gates-check.sh"
+  [ "$status" -eq 0 ]
+  run awk '/^ADVISORY=\(/{f=1;next} f&&/^\)/{f=0} f&&/models-check/{found=1} END{exit !found}' "$REPO_ROOT/scripts/ci-gates-check.sh"
+  [ "$status" -eq 1 ]
+}
+
+@test "models: a models result bazel ignores is NOT BLOCKING" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml 'needs.models.result'
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT BLOCKING: 'models-check' runs only in job 'models'"* ]]
+  [[ "$output" == *"never checks needs.models.result"* ]]
+}
+
+@test "models: only a fork or Dependabot pull request skips the check, with a warning" {
+  body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" models)"
+  [[ "$body" == *'github.event.pull_request.head.repo.full_name'* ]]
+  [[ "$body" == *'dependabot[bot]'* ]]
+  [[ "$body" == *'::warning title=models gate did not run::'* ]]
+  [[ "$body" == *'::error title=models has no KIT_READ_TOKEN::'* ]]
 }
 
 # A tag or a branch of a third-party action can be moved under this lane; a
