@@ -25,6 +25,14 @@ func tlsPair(t *testing.T) (server *tls.Conn, peer stdnet.Conn) {
 	return tls.Server(serverSide, testIdentity(t).ServerConfig()), clientSide
 }
 
+// negotiatingBudget bounds a negotiation a test expects to COMPLETE.
+//
+// It is a ceiling, not a wait: the handshake returns as soon as both halves
+// have spoken. On a loaded NetBSD runner a real TLS negotiation over a pipe took
+// over 150ms, the bound the stalled case uses, and a completed negotiation was
+// reported as cut off; the bound under test is the stalled case's, never this.
+const negotiatingBudget time.Duration = time.Minute
+
 // negotiate drives the client half of a TLS handshake.
 //
 // Goroutine lifecycle: one per case that wants a peer, started by the case and
@@ -114,7 +122,9 @@ func Test_boundHandshake(t *testing.T) {
 		{name: "a plaintext connection", plaintext: true},
 		{name: "a plaintext connection under a budget", plaintext: true, budget: time.Millisecond},
 		{name: "a peer that never sends a ClientHello", budget: 150 * time.Millisecond, stalled: true},
-		{name: "a peer that negotiates", budget: 5 * time.Second},
+		//: a ceiling, never a wait: the negotiation ends as soon as both halves
+		//: have spoken, so the budget only has to outlast the slowest runner.
+		{name: "a peer that negotiates", budget: negotiatingBudget},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -199,17 +209,24 @@ func Test_handshakeHandler_ServeConn(t *testing.T) {
 		name string
 		// stalled leaves the peer silent, so the negotiation never completes.
 		stalled bool
+		// budget is the group's handshake bound.
+		budget time.Duration
 		// handlerErr is what the group's handler reports once reached.
 		handlerErr error
 		// wantReached is whether the handler must run at all.
 		wantReached bool
 	}
 	tests := []tc{
-		{name: "a peer that negotiates", wantReached: true},
-		{name: "a handler that fails after a good negotiation", handlerErr: failure, wantReached: true},
+		//: a negotiating peer gets a ceiling it can never reach, so a slow
+		//: runner cannot turn a completed negotiation into a timed-out one.
+		{name: "a peer that negotiates", budget: negotiatingBudget, wantReached: true},
+		{
+			name: "a handler that fails after a good negotiation", budget: negotiatingBudget,
+			handlerErr: failure, wantReached: true,
+		},
 		//: a connection that never negotiated is not a connection the handler
 		//: should ever see; the engine closes it on the way out.
-		{name: "a peer that never sends a ClientHello", stalled: true},
+		{name: "a peer that never sends a ClientHello", budget: 150 * time.Millisecond, stalled: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -224,7 +241,7 @@ func Test_handshakeHandler_ServeConn(t *testing.T) {
 				return c.handlerErr
 			}),
 			timeouts: corenet.TimeoutsValue{
-				Handshake: corenet.DurationValue(150 * time.Millisecond),
+				Handshake: corenet.DurationValue(c.budget),
 			},
 		}
 
