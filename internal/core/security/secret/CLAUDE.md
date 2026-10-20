@@ -21,9 +21,9 @@ engines declare none.
 
 **The ports are generated from the design** (ADR 0163): `Store` and
 `SubjectKeyStore` are declared, with their doc comments, under `ports:` in
-`design/security/secret.yaml`, and `kit gen` writes them into `design_gen.go`.
+`design/security/secret.yaml`, and `kit gen` writes them into `gen_ports.go`.
 A port or its doc comment changes in the design, then `kit gen`, then `make
-api` — never in `design_gen.go`, whose header digests `make api-check`
+api` — never in `gen_ports.go`, whose header digests `make api-check`
 verifies. They moved there from `secret.go` and `subject.go`, content moved and
 never deleted.
 

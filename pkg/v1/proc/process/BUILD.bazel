@@ -6,7 +6,7 @@ go_library(
     name = "process",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "process.go",
         "signals.go",
     ],
@@ -29,7 +29,7 @@ alias(
 go_test(
     name = "process_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "process_external_test.go",
         "process_other_test.go",
         "process_unix_external_test.go",

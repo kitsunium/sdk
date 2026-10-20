@@ -47,7 +47,6 @@ go_test(
     name = "yaml_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "codec_bench_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",
@@ -55,6 +54,7 @@ go_test(
         "decoder_internal_test.go",
         "encoder_internal_test.go",
         "fuzz_external_test.go",
+        "gen_api_test.go",
         "limits_external_test.go",
         "marshal_external_test.go",
         "parse_internal_test.go",

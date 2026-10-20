@@ -48,7 +48,7 @@ go_test(
     name = "i18n_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "i18n_bench_test.go",
         "load_external_test.go",
         "message_external_test.go",

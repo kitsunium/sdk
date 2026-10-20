@@ -92,7 +92,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.TLSMaterialInvalid`
 Code `0.2.11.15` · reason `TLS_MATERIAL_INVALID` · public "The TLS material is missing or invalid"
 
 <a name="Load"></a>
-## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go>)
+## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/gen_facade.go>)
 
 ```go
 func Load(p FileParams) (id Identity, err error)
@@ -101,7 +101,7 @@ func Load(p FileParams) (id Identity, err error)
 Load reads the named TLS material from disk and returns the opaque identity. A configured-but-unreadable file is an error, never a silently skipped one.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/gen_facade.go>)
 
 ```go
 func New(p Params) (id Identity, err error)
@@ -110,7 +110,7 @@ func New(p Params) (id Identity, err error)
 New validates TLS material held in memory and returns the opaque identity. It applies exactly the same rules as Load; only the source of the bytes differs.
 
 <a name="FileParams"></a>
-## type [FileParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go>)
+## type [FileParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/gen_facade.go>)
 
 FileParams names TLS material to read from the filesystem.
 
@@ -155,7 +155,7 @@ type FileParams struct {
 ```
 
 <a name="Identity"></a>
-## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go>)
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/gen_facade.go>)
 
 Identity is an opaque TLS identity. Its String and GoString output is always "\<redacted>"; ClientConfig and ServerConfig are the only ways to reach the material, and each returns a fresh \*tls.Config.
 
@@ -217,7 +217,7 @@ func (Identity) String() string
 String implements fmt.Stringer and always redacts so key material never reaches a log line through %v or %s.
 
 <a name="Params"></a>
-## type [Params](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/facade_gen.go>)
+## type [Params](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/tlsid/gen_facade.go>)
 
 Params carries TLS material already held in memory.
 

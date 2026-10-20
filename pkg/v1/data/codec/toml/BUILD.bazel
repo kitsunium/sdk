@@ -6,7 +6,7 @@ go_library(
     name = "toml",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "toml.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/toml",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "toml_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "toml_external_test.go",
     ],
     deps = [

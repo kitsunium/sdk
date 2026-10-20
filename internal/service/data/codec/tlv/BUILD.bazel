@@ -40,7 +40,6 @@ alias(
 go_test(
     name = "tlv_test",
     srcs = [
-        "api_gen_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",
         "codec_internal_test.go",
@@ -48,6 +47,7 @@ go_test(
         "decoder_typed_internal_test.go",
         "encoder_internal_test.go",
         "fuzz_external_test.go",
+        "gen_api_test.go",
         "helpers_internal_test.go",
         "tlv_bench_test.go",
         "typeinfo_internal_test.go",

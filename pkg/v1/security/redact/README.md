@@ -135,7 +135,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/security/redact.ValueUn
 Code `0.3.73.2` · reason `VALUE_UNENCODABLE` · public "The value cannot be encoded as JSON and was not redacted"
 
 <a name="DefaultWords"></a>
-## func [DefaultWords](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go>)
+## func [DefaultWords](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/gen_facade.go>)
 
 ```go
 func DefaultWords() []string
@@ -153,7 +153,7 @@ func New(cfg Config) Redactor
 New returns a Redactor applying cfg.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/gen_facade.go>)
 
 Config says what a Redactor treats as secret: the name Words, the struct Tag, an extra Field rule, and how an Error in a log attribute is shown. Its zero value is usable.
 
@@ -187,7 +187,7 @@ type Config struct {
 ```
 
 <a name="Document"></a>
-## type [Document](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go>)
+## type [Document](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/gen_facade.go>)
 
 Document is a JSON document with its secrets replaced — never longer than its bound, always well-formed — and whether it had to be cut.
 
@@ -209,7 +209,7 @@ type Document struct {
 ```
 
 <a name="Redactor"></a>
-## type [Redactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/facade_gen.go>)
+## type [Redactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/gen_facade.go>)
 
 Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New](#New) returns the SDK's implementation, which caches what it learns about each Go type, so build one per configuration and keep it; it is safe for concurrent use. The port is frozen at those five methods (ADR 0039), so a consumer can accept a Redactor and hand a test double in its place.
 
@@ -245,7 +245,7 @@ type Redactor interface {
 ```
 
 <a name="Redactor.Attrs"></a>
-### func \(Redactor\) [Attrs](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/design_gen.go>)
+### func \(Redactor\) [Attrs](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/gen_ports.go>)
 
 ```go
 func (Redactor) Attrs(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string]
@@ -254,7 +254,7 @@ func (Redactor) Attrs(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[stri
 Attrs renders log attributes as display text, one (key, text) pair at a time, in order, a group flattened into dotted keys; each text is cut to the bound. It is an iterator so the caller bounds the COUNT by breaking.
 
 <a name="Redactor.JSON"></a>
-### func \(Redactor\) [JSON](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/design_gen.go>)
+### func \(Redactor\) [JSON](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/gen_ports.go>)
 
 ```go
 func (Redactor) JSON(document []byte, maxBytes int) (redacted DocumentValue, err error)
@@ -263,7 +263,7 @@ func (Redactor) JSON(document []byte, maxBytes int) (redacted DocumentValue, err
 JSON returns document with its secrets replaced, within the bound. A document that is not exactly one JSON value is refused with [DocumentInvalid](#DocumentInvalid), and nothing is returned for it.
 
 <a name="Redactor.Name"></a>
-### func \(Redactor\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/design_gen.go>)
+### func \(Redactor\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/gen_ports.go>)
 
 ```go
 func (Redactor) Name(name string) bool
@@ -272,7 +272,7 @@ func (Redactor) Name(name string) bool
 Name reports whether a member, header or attribute name names a secret.
 
 <a name="Redactor.Text"></a>
-### func \(Redactor\) [Text](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/design_gen.go>)
+### func \(Redactor\) [Text](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/gen_ports.go>)
 
 ```go
 func (Redactor) Text(s string, maxBytes int) string
@@ -281,7 +281,7 @@ func (Redactor) Text(s string, maxBytes int) string
 Text returns s with the credentials of every URL in it replaced by [Placeholder](#Placeholder), then cut to the bound at a rune boundary, ending in [Ellipsis](#Ellipsis) when cut. The credentials are replaced BEFORE the cut, so a cut never lands between a password and the "@" that marks it as one.
 
 <a name="Redactor.Value"></a>
-### func \(Redactor\) [Value](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/design_gen.go>)
+### func \(Redactor\) [Value](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/redact/gen_ports.go>)
 
 ```go
 func (Redactor) Value(v any, maxBytes int) (redacted DocumentValue, err error)

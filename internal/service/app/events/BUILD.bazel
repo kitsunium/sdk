@@ -36,9 +36,9 @@ go_test(
     name = "events_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "dispatch_external_test.go",
         "events_bench_test.go",
+        "gen_api_test.go",
         "halt_external_test.go",
         "harness_external_test.go",
         "registration_external_test.go",

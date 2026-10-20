@@ -43,7 +43,7 @@ A Heap is NOT safe for concurrent use. That is deliberate: a lock inside would b
   - [func \(\*Heap\) Push\(v T\)](<#Heap.Push>)
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/gen_facade.go>)
 
 ```go
 func New[T any](cmp func(a T, b T) int) *Heap[T]
@@ -85,7 +85,7 @@ write report
 </details>
 
 <a name="Heap"></a>
-## type [Heap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/facade_gen.go>)
+## type [Heap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/heap/gen_facade.go>)
 
 Heap is a binary heap ordered by the comparison given to [New](#New).
 

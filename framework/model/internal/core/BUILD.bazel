@@ -7,12 +7,12 @@ go_library(
     srcs = [
         "architecture.go",
         "code.go",
-        "codes_gen.go",
         "connector.go",
         "devtools.go",
         "doc.go",
         "edge_kind.go",
         "event_type.go",
+        "gen_codes.go",
         "graph.go",
         "history.go",
         "id.go",
@@ -43,8 +43,8 @@ alias(
 go_test(
     name = "core_test",
     srcs = [
-        "api_gen_test.go",
         "connector_test.go",
+        "gen_api_test.go",
         "id_external_test.go",
         "id_grammar_external_test.go",
         "model_test.go",

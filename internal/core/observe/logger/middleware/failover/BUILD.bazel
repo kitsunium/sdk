@@ -5,8 +5,8 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "failover",
     srcs = [
-        "codes_gen.go",
         "doc.go",
+        "gen_codes.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover",
     visibility = [
@@ -34,7 +34,7 @@ filegroup(
 
 go_test(
     name = "failover_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [
         ":failover",
         "//internal/kernel/errs",

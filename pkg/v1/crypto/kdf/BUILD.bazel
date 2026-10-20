@@ -6,7 +6,7 @@ go_library(
     name = "kdf",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "kdf.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/kdf",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "kdf_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "kdf_bench_test.go",
         "kdf_external_test.go",
     ],

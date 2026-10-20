@@ -40,11 +40,11 @@ alias(
 go_test(
     name = "async_test",
     srcs = [
-        "api_gen_test.go",
         "async_sink_external_test.go",
         "async_sink_internal_test.go",
         "drainer_internal_test.go",
         "entry_internal_test.go",
+        "gen_api_test.go",
         "runtime_internal_test.go",
     ],
     embed = [":async"],

@@ -7,9 +7,9 @@ go_library(
     srcs = [
         "claims.go",
         "claims_with.go",
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "token.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/security/token",
@@ -32,7 +32,7 @@ alias(
 go_test(
     name = "token_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "token_external_test.go",
     ],
     deps = [

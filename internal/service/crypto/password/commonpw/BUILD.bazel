@@ -28,9 +28,9 @@ alias(
 go_test(
     name = "commonpw_test",
     srcs = [
-        "api_gen_test.go",
         "commonpw_external_test.go",
         "export_test.go",
+        "gen_api_test.go",
     ],
     embed = [":commonpw"],
 )

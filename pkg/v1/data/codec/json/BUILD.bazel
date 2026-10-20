@@ -6,7 +6,7 @@ go_library(
     name = "json",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "json.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "json_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "json_external_test.go",
     ],
     deps = [

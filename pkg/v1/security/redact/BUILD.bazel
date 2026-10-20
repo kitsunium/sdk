@@ -6,7 +6,7 @@ go_library(
     name = "redact",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "redact.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/security/redact",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "redact_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "redact_external_test.go",
     ],
     deps = [

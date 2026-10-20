@@ -62,7 +62,7 @@
 #       engine, observe/otel, declares no code (it takes the caller's sentinel)
 #       and is not judged.
 #
-# codeRangeOwners is read from internal/kernel/errs/codes_gen_test.go, the
+# codeRangeOwners is read from internal/kernel/errs/gen_ranges_test.go, the
 # table the ownership audit holds every declaration to (ADR 0035) — kit writes
 # it from design/sdk.yaml's codes.ranges, a block authored apart from the codes
 # (ADR 0164) —, so "the ranges this package owns" is the audit's own answer,
@@ -79,7 +79,7 @@ cd "$root"
 
 service="internal/service"
 core="internal/core"
-owners_file="internal/kernel/errs/codes_gen_test.go"
+owners_file="internal/kernel/errs/gen_ranges_test.go"
 errs_import="github.com/kitsunium/sdk/internal/kernel/errs"
 
 # The families of ADR 0155, as the layers group them.

@@ -1,7 +1,7 @@
 //go:build !race
 
 // The fixtures of the logger's performance contracts (design/sdk.yaml,
-// budgets): each sets one call up and returns it, and the perf_gen_test.go
+// budgets): each sets one call up and returns it, and the gen_perf_test.go
 // kit gen writes beside this file counts its allocations against its
 // budget — the total over 30 000 calls after as many warm-up calls.
 //

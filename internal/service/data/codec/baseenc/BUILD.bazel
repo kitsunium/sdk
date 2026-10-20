@@ -38,7 +38,6 @@ go_test(
     name = "baseenc_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "base45_internal_test.go",
         "base_convert_internal_test.go",
         "baseenc_bench_test.go",
@@ -50,6 +49,7 @@ go_test(
         "decoder_internal_test.go",
         "encoder_internal_test.go",
         "fuzz_internal_test.go",
+        "gen_api_test.go",
         "helpers_internal_test.go",
         "spec_internal_test.go",
     ],

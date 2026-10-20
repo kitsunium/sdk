@@ -19,7 +19,7 @@ project:
   # refuses the project under any other kit, by name, and `make regen`
   # (scripts/regen.sh) refuses to run one. No part of the design's digest.
   kit:
-    version: v0.1.0-rc.9
+    version: v0.1.0-rc.14
   surface: closed
   # Every doc comment is the design's (ADR 0167): kit gen writes each doc
   # slot of a designed declaration and each package's doc.go.
@@ -151,7 +151,7 @@ families:
       - security
 # A code is errs.Code's dotted quad (ADR 0005), declared by the core at the
 # engine's path (ADR 0160): its package's codes: and sentinels: in the
-# domain's design file, which kit gen writes into codes_gen.go (ADR 0164).
+# domain's design file, which kit gen writes into gen_codes.go (ADR 0164).
 # The ranges below own the ranges (ADR 0035): kit writes them into
 # codeRangeOwners, and they are authored apart from the codes they audit.
 # //:audit_sources is what the errs audits read (check-audit-coverage.sh).
@@ -163,11 +163,11 @@ codes:
   type: go:github.com/kitsunium/sdk/internal/kernel/errs.Code
   define: go:github.com/kitsunium/sdk/internal/kernel/errs.Define
   static: go:github.com/kitsunium/sdk/internal/kernel/errs.Static
-  owners: internal/kernel/errs/codes_gen_test.go#codeRangeOwners
+  owners: internal/kernel/errs/gen_ranges_test.go#codeRangeOwners
   audit: BUILD.bazel#audit_sources
   # The ranges' table (ADR 0035, ADR 0164): each range MM.LL.PP and the
   # directory of the package that owns it. kit writes it into
-  # internal/kernel/errs/codes_gen_test.go (codeRangeOwners), which the
+  # internal/kernel/errs/gen_ranges_test.go (codeRangeOwners), which the
   # registry audits compare the codes with; it is authored here, apart from
   # the codes, and never derived from them.
   ranges:
@@ -430,13 +430,13 @@ stdlib:
   vendors: [third-party, framework/connectors]
 # The race-off allocation lane (CLAUDE.md rule 12): the hand-written
 # targets, and the section kit gen keeps of it — every package whose budgets
-# name a fixture, so that its perf_gen_test.go runs (ADR 0165).
+# name a fixture, so that its gen_perf_test.go runs (ADR 0165).
 allocLane: tools/alloc-lane-targets.txt
 # Each designed function's performance contract (ADR 0165). What the
 # compiler decides — inline, inlineCost, escapes — kit check measures from
 # go build -gcflags=<package>=-m=2 on the host cell, and prints for every
 # budget's function whether it holds or not. What a call costs — allocs (at
-# most), allocsMin (at least) — the perf_gen_test.go kit gen writes counts,
+# most), allocsMin (at least) — the gen_perf_test.go kit gen writes counts,
 # race off, over the hand-written fixture the budget names (func
 # perf<Fixture>(tb testing.TB) func(), in the package's
 # perf_fixtures_test.go), as a total over 30 000 calls after as many
@@ -464,7 +464,7 @@ budgets:
   # A pkg/v1 forwarder with an inline budget forwards only while the compiler
   # inlines it, and is otherwise a variable bound to its callee: kit measures
   # it (go build -gcflags=<package>=-m=2, on the platforms' first cell) and
-  # records the verdict in facade_gen.go (ADR 0166). errs.ReasonOf's forwarder
+  # records the verdict in gen_facade.go (ADR 0166). errs.ReasonOf's forwarder
   # costs 88 against the inliner's 80 — the kernel accessor alone costs 75 —
   # and measured slower than the variable by more than the 3 % a forwarder may
   # cost (ADR 0163 §10): CPU time per call +1.88 %, +1.07 %, +3.88 % (p =

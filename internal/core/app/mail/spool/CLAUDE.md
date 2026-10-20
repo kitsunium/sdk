@@ -16,7 +16,7 @@ service's, and `pkg/v1/app/mail/spool` aliases them there (ADR 0074).
 
 | File | Surface |
 |---|---|
-| `codes_gen.go` | `CodeSpoolMisconfigured` … `CodeInvalidMailID` — range `0.3.81.*`; `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID` (`errs.Define`) — written by kit gen from `design/app/mail/spool.yaml` (ADR 0164) |
+| `gen_codes.go` | `CodeSpoolMisconfigured` … `CodeInvalidMailID` — range `0.3.81.*`; `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID` (`errs.Define`) — written by kit gen from `design/app/mail/spool.yaml` (ADR 0164) |
 
 ## Error codes
 

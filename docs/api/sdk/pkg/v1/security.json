@@ -55,7 +55,7 @@
       "dir": "token",
       "layer": "public",
       "family": "security",
-      "doc": "Package token — the dotted-quad codes a consumer routes on.\n\nThese are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are\nowned by internal/core/security/token, where every code of the token domain\nis declared (ADR 0160), and 0.3.42.* by internal/core/crypto/key/jwk; the\nerrs ownership audit skips a cross-package selector for exactly this reason\n(ADR 0035). Matching on a code\nrather than on a reason string is the stronger contract — a code is a number\nin docs/error-codes.yaml, a reason is a spelling.\n\n\tswitch {\n\tcase errs.HasCode(err, token.CodeExpired):          // 401, refresh\n\tcase errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service\n\tcase errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert\n\t}\n\nAll three answer 401, and a token addressed to another service is no\nexception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is\n\"invalid for other reasons\", while 403 (insufficient_scope) says the token\nis valid HERE and merely too weak, which an audience mismatch is not. What\ndiffers between the rows is what the caller does next, not the status.\n\nPackage token — the algorithm, registered-claim and JWK key vocabulary.\n\nPackage token — the constructor set, one per algorithm, plus the JWK\nloaders and bridges. Each constructor accepts only the Go key type its\nalgorithm can use, which is what makes algorithm confusion a call that does\nnot compile.\n\nPackage token — the typed verdicts an issuer, a verifier or a key loader\nreturns.\n\nMatch them with errs.HasCode (the codes are re-exported in facade_gen.go) or\nerrs.HasReason. Their Public halves name WHICH check refused a token and\nnever echo a value out of it — not an audience, not an issuer, not a key id,\nnot a claim. The JWK* verdicts are the key loaders' — ParseJWK and\nParseJWKSet — and hold a key document to the same rule: they name the rule a\nmember broke, never the member's value.\n\nPackage token is the public facade for the SDK's security-token domain:\nJSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO\nv4.public. It is stdlib-only and composes the SDK's own crypto schemes, so\nit adds no dependency to a consumer's build.\n\n\tiss, err := token.NewES256Issuer(privateKey, token.IssuerConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Lifetime: 15 * time.Minute,\n\t})\n\tjwt, err := iss.Issue(token.NewClaims().WithSubject(\"user-42\").WithAudience(\"api\"))\n\n\tver, err := token.NewES256Verifier(&privateKey.PublicKey, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t    Leeway:   30 * time.Second,\n\t})\n\tclaims, err := ver.Verify(jwt)\n\n# Algorithm confusion is a call you cannot write\n\nThere is no NewVerifier(algorithm, key), and no verifier reads the token's\n\"alg\" header to decide what to do with it. There is one constructor per\nalgorithm, and each accepts only the Go type that algorithm can use:\n\n\tNewHS256Verifier(secret crypto.Key,      cfg VerifierConfig)\n\tNewES256Verifier(pub *ecdsa.PublicKey,   cfg VerifierConfig)\n\tNewEdDSAVerifier(pub ed25519.PublicKey,  cfg VerifierConfig)\n\nThe textbook attack — take the RSA or EC public key the server publishes,\nuse it as an HMAC shared secret, mint tokens with it, and let a verifier\nthat trusts the header do the rest — needs a call that hands a public key to\nthe HMAC path. Here that call does not compile: crypto.Key is a struct with\nan unexported field, and no *ecdsa.PublicKey converts to it. Verification\nthen COMPARES the header against the binding and refuses a mismatch with\nAlgorithmMismatch, before any key reaches any primitive.\n\n[NewVerifierFromJWK] and [NewSetVerifier] are the only places an algorithm\nis selected at run time, and they select it from the KEY's kty/crv — the\nmaterial a relying party fetched from a publisher it trusts — never from the\ntoken.\n\n# Loading a published key\n\nA relying party that verifies against an issuer's published keys fetches the\nkey document itself — this package performs no I/O, follows no jwks_uri and\ncaches nothing (ADR 0042) — and hands the bytes to [ParseJWKSet], or to\n[ParseJWK] for a single key:\n\n\tset, err := token.ParseJWKSet(body) // the issuer's JWK Set, as fetched\n\tver, err := token.NewSetVerifier(set, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t})\n\nParsing is the only way to obtain a [JWK]: the type has no exported field\nand no UnmarshalJSON, so its validation — strict base64url, coordinates at\nthe curve's fixed length, the point on its curve, a private \"d\" deriving\nexactly the declared public key — is not a step a caller can skip by\ndecoding some other way. [NewJWKSet] assembles a set from keys already\nparsed. A refusal carries one of the CodeJWK* codes, matchable with\nerrs.HasCode; a set is accepted whole or not at all, so one RSA member —\nthe SDK verifies nothing with RSA — refuses the document.\n\n# What is always refused\n\n  - \"alg\":\"none\" in any capitalisation (RFC 7519 §6). [Algorithm] is an enum\n    with no value that spells it, so no configuration can enable it.\n  - a non-empty \"crit\" header (RFC 7515 §4.1.11).\n  - a token with no \"exp\", unless VerifierConfig.AllowMissingExpiry says\n    otherwise. RFC 7519 §4.1.4 makes exp OPTIONAL; a bearer token that never\n    expires is a password with a worse rotation story, so the default here\n    inverts that and the opt-out has a name.\n  - a token past MaxTokenLen, or claims past MaxClaimDepth — both checked\n    before any decode allocates.\n  - a repeated JSON member in the header or the claims (RFC 8725 §2.6).\n\n# Testing time without sleeping\n\nEvery config has a Clock field, and it takes any value with the two methods\nNow and Since — so the fake is one a test writes itself, and an expiry test\nmoves time by assignment instead of by sleeping:\n\n\ttype fakeClock struct{ now time.Time }\n\n\tfunc (c *fakeClock) Now() time.Time                  { return c.now }\n\tfunc (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }\n\n\tfake := &fakeClock{now: time.Unix(1000, 0)}\n\tver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})\n\tfake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically\n\nMove it between calls, or guard it with a mutex if a verifier reads it from\nanother goroutine at the same time.\n\n# Claims are not printable\n\n[Claims] renders its SHAPE under %v / %s / %#v — \"token.Claims{registered:3\naud:1 private:2}\" — and never a value. A claim set is the output of an\nauthentication decision and routinely holds a subject id, an email or a\ntenant; the counts are enough to tell \"no audience was sent\" from \"the\naudience did not match\", which is what a %v is usually reaching for.\n"
+      "doc": "Package token — the dotted-quad codes a consumer routes on.\n\nThese are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are\nowned by internal/core/security/token, where every code of the token domain\nis declared (ADR 0160), and 0.3.42.* by internal/core/crypto/key/jwk; the\nerrs ownership audit skips a cross-package selector for exactly this reason\n(ADR 0035). Matching on a code\nrather than on a reason string is the stronger contract — a code is a number\nin docs/error-codes.yaml, a reason is a spelling.\n\n\tswitch {\n\tcase errs.HasCode(err, token.CodeExpired):          // 401, refresh\n\tcase errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service\n\tcase errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert\n\t}\n\nAll three answer 401, and a token addressed to another service is no\nexception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is\n\"invalid for other reasons\", while 403 (insufficient_scope) says the token\nis valid HERE and merely too weak, which an audience mismatch is not. What\ndiffers between the rows is what the caller does next, not the status.\n\nPackage token — the algorithm, registered-claim and JWK key vocabulary.\n\nPackage token — the constructor set, one per algorithm, plus the JWK\nloaders and bridges. Each constructor accepts only the Go key type its\nalgorithm can use, which is what makes algorithm confusion a call that does\nnot compile.\n\nPackage token — the typed verdicts an issuer, a verifier or a key loader\nreturns.\n\nMatch them with errs.HasCode (the codes are re-exported in gen_facade.go) or\nerrs.HasReason. Their Public halves name WHICH check refused a token and\nnever echo a value out of it — not an audience, not an issuer, not a key id,\nnot a claim. The JWK* verdicts are the key loaders' — ParseJWK and\nParseJWKSet — and hold a key document to the same rule: they name the rule a\nmember broke, never the member's value.\n\nPackage token is the public facade for the SDK's security-token domain:\nJSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO\nv4.public. It is stdlib-only and composes the SDK's own crypto schemes, so\nit adds no dependency to a consumer's build.\n\n\tiss, err := token.NewES256Issuer(privateKey, token.IssuerConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Lifetime: 15 * time.Minute,\n\t})\n\tjwt, err := iss.Issue(token.NewClaims().WithSubject(\"user-42\").WithAudience(\"api\"))\n\n\tver, err := token.NewES256Verifier(&privateKey.PublicKey, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t    Leeway:   30 * time.Second,\n\t})\n\tclaims, err := ver.Verify(jwt)\n\n# Algorithm confusion is a call you cannot write\n\nThere is no NewVerifier(algorithm, key), and no verifier reads the token's\n\"alg\" header to decide what to do with it. There is one constructor per\nalgorithm, and each accepts only the Go type that algorithm can use:\n\n\tNewHS256Verifier(secret crypto.Key,      cfg VerifierConfig)\n\tNewES256Verifier(pub *ecdsa.PublicKey,   cfg VerifierConfig)\n\tNewEdDSAVerifier(pub ed25519.PublicKey,  cfg VerifierConfig)\n\nThe textbook attack — take the RSA or EC public key the server publishes,\nuse it as an HMAC shared secret, mint tokens with it, and let a verifier\nthat trusts the header do the rest — needs a call that hands a public key to\nthe HMAC path. Here that call does not compile: crypto.Key is a struct with\nan unexported field, and no *ecdsa.PublicKey converts to it. Verification\nthen COMPARES the header against the binding and refuses a mismatch with\nAlgorithmMismatch, before any key reaches any primitive.\n\n[NewVerifierFromJWK] and [NewSetVerifier] are the only places an algorithm\nis selected at run time, and they select it from the KEY's kty/crv — the\nmaterial a relying party fetched from a publisher it trusts — never from the\ntoken.\n\n# Loading a published key\n\nA relying party that verifies against an issuer's published keys fetches the\nkey document itself — this package performs no I/O, follows no jwks_uri and\ncaches nothing (ADR 0042) — and hands the bytes to [ParseJWKSet], or to\n[ParseJWK] for a single key:\n\n\tset, err := token.ParseJWKSet(body) // the issuer's JWK Set, as fetched\n\tver, err := token.NewSetVerifier(set, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t})\n\nParsing is the only way to obtain a [JWK]: the type has no exported field\nand no UnmarshalJSON, so its validation — strict base64url, coordinates at\nthe curve's fixed length, the point on its curve, a private \"d\" deriving\nexactly the declared public key — is not a step a caller can skip by\ndecoding some other way. [NewJWKSet] assembles a set from keys already\nparsed. A refusal carries one of the CodeJWK* codes, matchable with\nerrs.HasCode; a set is accepted whole or not at all, so one RSA member —\nthe SDK verifies nothing with RSA — refuses the document.\n\n# What is always refused\n\n  - \"alg\":\"none\" in any capitalisation (RFC 7519 §6). [Algorithm] is an enum\n    with no value that spells it, so no configuration can enable it.\n  - a non-empty \"crit\" header (RFC 7515 §4.1.11).\n  - a token with no \"exp\", unless VerifierConfig.AllowMissingExpiry says\n    otherwise. RFC 7519 §4.1.4 makes exp OPTIONAL; a bearer token that never\n    expires is a password with a worse rotation story, so the default here\n    inverts that and the opt-out has a name.\n  - a token past MaxTokenLen, or claims past MaxClaimDepth — both checked\n    before any decode allocates.\n  - a repeated JSON member in the header or the claims (RFC 8725 §2.6).\n\n# Testing time without sleeping\n\nEvery config has a Clock field, and it takes any value with the two methods\nNow and Since — so the fake is one a test writes itself, and an expiry test\nmoves time by assignment instead of by sleeping:\n\n\ttype fakeClock struct{ now time.Time }\n\n\tfunc (c *fakeClock) Now() time.Time                  { return c.now }\n\tfunc (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }\n\n\tfake := &fakeClock{now: time.Unix(1000, 0)}\n\tver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})\n\tfake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically\n\nMove it between calls, or guard it with a mutex if a verifier reads it from\nanother goroutine at the same time.\n\n# Claims are not printable\n\n[Claims] renders its SHAPE under %v / %s / %#v — \"token.Claims{registered:3\naud:1 private:2}\" — and never a value. A claim set is the output of an\nauthentication decision and routinely holds a subject id, an email or a\ntenant; the counts are enough to tell \"no audience was sent\" from \"the\naudience did not match\", which is what a %v is usually reaching for.\n"
     }
   ],
   "symbols": [
@@ -69,7 +69,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.Abstain",
       "doc": "Abstain means a policy has no opinion about this request. It is the\nZERO Decision, it grants nothing, and [Check] refuses it.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -81,7 +81,7 @@
       "spelled": "func(conditions ...Condition) (condition Condition, err error)",
       "canonical": "func(conditions ...github.com/kitsunium/sdk/pkg/v1/security/authz.Condition) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AllOf holds when every condition holds. Every branch is evaluated, so the\nanswer is order-independent and a failure anywhere is reported.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -95,7 +95,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.Allow",
       "doc": "Allow means a policy permits the request. It is the only granting state,\nand any [Deny] in the composition still outranks it.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -107,7 +107,7 @@
       "spelled": "func(conditions ...Condition) (condition Condition, err error)",
       "canonical": "func(conditions ...github.com/kitsunium/sdk/pkg/v1/security/authz.Condition) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AnyOf holds when at least one condition holds — but an unevaluable branch is\nstill absorbing, so a request cannot satisfy the rule by omitting the\nattribute one of its branches names.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -120,7 +120,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/authz.AttrValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/authz.AttrValue",
       "doc": "Attr is the public alias for one typed, named fact attached to a [Request].\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -132,7 +132,7 @@
       "spelled": "func(key string, lo int64) (condition Condition, err error)",
       "canonical": "func(key string, lo int64) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AttrAtLeast holds when the request carries key as a number at least lo.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -144,7 +144,7 @@
       "spelled": "func(key string, value bool) Attr",
       "canonical": "func(key string, value bool) github.com/kitsunium/sdk/pkg/v1/security/authz.Attr",
       "doc": "AttrBool builds a flag attribute. Present-and-false is a different fact from\nabsent, and this is how the first one is stated.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -156,7 +156,7 @@
       "spelled": "func(key string, want string) (condition Condition, err error)",
       "canonical": "func(key string, want string) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AttrContains holds when the request carries key as a set containing want.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -168,7 +168,7 @@
       "spelled": "func(key string, want string) (condition Condition, err error)",
       "canonical": "func(key string, want string) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AttrEquals holds when the request carries key as text equal to want, and\nFAILS when the attribute is absent or is not text.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -180,7 +180,7 @@
       "spelled": "func(key string, value int64) Attr",
       "canonical": "func(key string, value int64) github.com/kitsunium/sdk/pkg/v1/security/authz.Attr",
       "doc": "AttrInt64 builds a whole-number attribute. Times travel as Unix seconds.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -192,7 +192,7 @@
       "spelled": "func(key string) (condition Condition, err error)",
       "canonical": "func(key string) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AttrIsTrue holds when the request carries key as a flag that is set. Present\nand false does not hold; absent fails.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -205,7 +205,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/authz.AttrKind",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/authz.AttrKind",
       "doc": "AttrKind is the public alias for the type an [Attr] carries. The kind is\npart of the attribute's identity: a text rule against a number MISMATCHES,\nit does not compare false.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -217,7 +217,7 @@
       "spelled": "func(key string) (condition Condition, err error)",
       "canonical": "func(key string) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "AttrMatchesSubject holds when the request carries key as text equal to the\nsubject — the ownership rule. An anonymous request owns nothing, so an empty\nsubject never matches, not even an empty owner.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -229,7 +229,7 @@
       "spelled": "func(key string, value string) Attr",
       "canonical": "func(key string, value string) github.com/kitsunium/sdk/pkg/v1/security/authz.Attr",
       "doc": "AttrString builds a text attribute.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -241,7 +241,7 @@
       "spelled": "func(key string, values ...string) Attr",
       "canonical": "func(key string, values ...string) github.com/kitsunium/sdk/pkg/v1/security/authz.Attr",
       "doc": "AttrStrings builds a set attribute — roles, groups, scopes. Passing no\nvalues states that the subject holds none, which is NOT the same as omitting\nthe attribute: the first abstains, the second refuses.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -259,7 +259,7 @@
         "public": "Access to the requested resource is denied"
       },
       "doc": "AttributeKindMismatch is reported by a condition whose attribute is\npresent under another kind.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -277,7 +277,7 @@
         "public": "Access to the requested resource is denied"
       },
       "doc": "AttributeMissing is reported by a condition whose rule named an\nattribute the request does not carry.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -289,7 +289,7 @@
       "spelled": "func(ctx context.Context, policy Policy, request Request) error",
       "canonical": "func(ctx context.Context, policy github.com/kitsunium/sdk/pkg/v1/security/authz.Policy, request github.com/kitsunium/sdk/pkg/v1/security/authz.Request) error",
       "doc": "Check evaluates policy and reports the verdict as an error: nil when\npermitted, [PermissionDenied] otherwise. It is the closure — the one place\nwhere \"nobody said Allow\" becomes a refusal — and a nil policy refuses.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -306,7 +306,7 @@
         "value": "0.2.26.3"
       },
       "doc": "CodeAttributeKindMismatch identifies an attribute present under another\nkind than the rule compares.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -323,7 +323,7 @@
         "value": "0.2.26.2"
       },
       "doc": "CodeAttributeMissing identifies a rule that named an attribute the\nrequest does not carry. It is a failure, never a false comparison.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -340,7 +340,7 @@
         "value": "0.3.56.3"
       },
       "doc": "CodeConditionInvalid identifies a condition constructor refused at\nconstruction.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -357,7 +357,7 @@
         "value": "0.3.56.1"
       },
       "doc": "CodeGrantInvalid identifies an RBAC grant table refused at construction.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -374,7 +374,7 @@
         "value": "0.2.26.1"
       },
       "doc": "CodePermissionDenied identifies every refusal this domain produces —\nexplicit, by abstention, or by an evaluation that could not complete.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -391,7 +391,7 @@
         "value": "0.2.26.4"
       },
       "doc": "CodePolicyMisconfigured identifies a nil policy in a composition, or one\nthat returned a decision outside allow/deny/abstain.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -408,7 +408,7 @@
         "value": "0.3.56.2"
       },
       "doc": "CodeRuleInvalid identifies an ABAC rule set refused at construction.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -421,7 +421,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/authz.Condition",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/authz.Condition",
       "doc": "Condition is the public alias for an attribute predicate. Returning an error\nmeans \"could not be evaluated\", which is absorbing everywhere.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -439,7 +439,7 @@
         "public": "The condition cannot be built from the given arguments"
       },
       "doc": "ConditionInvalid is returned by a condition constructor for arguments it\ncannot honour.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -452,7 +452,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/authz.Decision",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/authz.Decision",
       "doc": "Decision is the public alias for the three-valued verdict: [Allow], [Deny]\nor [Abstain]. Its zero value is [Abstain].\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -466,7 +466,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.Deny",
       "doc": "Deny means a policy refuses the request. It is absorbing.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -478,7 +478,7 @@
       "spelled": "func(policies ...Policy) Policy",
       "canonical": "func(policies ...github.com/kitsunium/sdk/pkg/v1/security/authz.Policy) github.com/kitsunium/sdk/pkg/v1/security/authz.Policy",
       "doc": "DenyOverrides composes policies: a [Deny] from any member wins, an [Allow]\nrequires at least one grant and no refusal, and everything else abstains.\nEvery member is evaluated — only a refusal short-circuits — so the result\ndoes not depend on the order the policies were listed in.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -491,7 +491,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/authz.GrantValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/authz.GrantValue",
       "doc": "Grant is the public alias for one role and the permissions it confers.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -509,7 +509,7 @@
         "public": "The role grant table is not usable and was refused"
       },
       "doc": "GrantInvalid is returned by [NewRBAC] for a grant table it cannot honour.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -523,7 +523,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.KindBool",
       "doc": "KindBool is a flag, which can be present and false.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -537,7 +537,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.KindInt64",
       "doc": "KindInt64 is a whole number — including a Unix timestamp.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -551,7 +551,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.KindInvalid",
       "doc": "KindInvalid is the zero AttrKind. [NewRequest] drops an attribute\ncarrying it, so such an attribute is absent rather than unusable.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -565,7 +565,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.KindString",
       "doc": "KindString is a single text value.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -579,7 +579,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/authz.KindStrings",
       "doc": "KindStrings is an unordered set of text values — roles, groups, scopes.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -591,7 +591,7 @@
       "spelled": "func(policy Policy, err error) Policy",
       "canonical": "func(policy github.com/kitsunium/sdk/pkg/v1/security/authz.Policy, err error) github.com/kitsunium/sdk/pkg/v1/security/authz.Policy",
       "doc": "Must unwraps a policy constructor for a package-level var, panicking on\nerror. Use it on wiring written in code, never on data read at run time.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -603,7 +603,7 @@
       "spelled": "func(condition Condition, err error) Condition",
       "canonical": "func(condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error) github.com/kitsunium/sdk/pkg/v1/security/authz.Condition",
       "doc": "MustCondition unwraps a condition constructor for a package-level var,\npanicking on error. Same contract as [Must].\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -615,7 +615,7 @@
       "spelled": "func(rules ...Rule) (policy Policy, err error)",
       "canonical": "func(rules ...github.com/kitsunium/sdk/pkg/v1/security/authz.Rule) (policy github.com/kitsunium/sdk/pkg/v1/security/authz.Policy, err error)",
       "doc": "NewABAC builds an attribute-based policy over a fixed rule set, folded by\nthe same deny-overrides algorithm the policy set is.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -627,7 +627,7 @@
       "spelled": "func(cfg RBACConfig) (policy Policy, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/authz.RBACConfig) (policy github.com/kitsunium/sdk/pkg/v1/security/authz.Policy, err error)",
       "doc": "NewRBAC builds a role-based policy over a fixed grant table. It answers\n[Allow] or [Abstain] and never [Deny] for an ungranted request — see the\npackage docs for why that is what makes it composable.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -639,7 +639,7 @@
       "spelled": "func(subject string, action string, resource string, attrs ...Attr) Request",
       "canonical": "func(subject string, action string, resource string, attrs ...github.com/kitsunium/sdk/pkg/v1/security/authz.Attr) github.com/kitsunium/sdk/pkg/v1/security/authz.Request",
       "doc": "NewRequest builds the immutable question. Attributes are indexed by key,\nlast one wins, and one with an empty key or the zero kind is dropped — so\nevery attribute a rule can find is one it can use.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -651,7 +651,7 @@
       "spelled": "func(inner Condition) (condition Condition, err error)",
       "canonical": "func(inner github.com/kitsunium/sdk/pkg/v1/security/authz.Condition) (condition github.com/kitsunium/sdk/pkg/v1/security/authz.Condition, err error)",
       "doc": "Not inverts a condition's answer and PROPAGATES its failure unchanged. An\nattribute the request does not carry therefore stays unevaluable instead of\nbecoming \"true\", which is the single sharpest form of the absent-attribute\ntrap.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -664,7 +664,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/authz.PermissionValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/authz.PermissionValue",
       "doc": "Permission is the public alias for one (action, resource) pair a role\nconfers. Resource is the KIND of thing; instance facts belong in attributes.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -682,7 +682,7 @@
         "public": "Access to the requested resource is denied"
       },
       "doc": "PermissionDenied is the one refusal. Every non-granting outcome converts\nto it, with the same code, status and sentence.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -695,7 +695,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/authz.Policy",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/authz.Policy",
       "doc": "Policy is the public alias for the authorization port. It is a func type, so\nit can never grow a method and break a downstream implementer (ADR 0039).\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -713,7 +713,7 @@
         "public": "Access to the requested resource is denied"
       },
       "doc": "PolicyMisconfigured is reported for a nil policy in a composition, or a\ndecision outside allow/deny/abstain.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -726,7 +726,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/authz.RBACConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/authz.RBACConfig",
       "doc": "RBACConfig is the public alias for [NewRBAC]'s parameters.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -739,7 +739,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/authz.RequestValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/authz.RequestValue",
       "doc": "Request is the public alias for the immutable question a policy answers.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -752,7 +752,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/authz.RuleValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/authz.RuleValue",
       "doc": "Rule is the public alias for one attribute rule: what it is about, what it\ndecides, and when it fires.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -770,7 +770,7 @@
         "public": "The attribute rule set is not usable and was refused"
       },
       "doc": "RuleInvalid is returned by [NewABAC] for a rule set it cannot honour.\n",
-      "file": "authz/facade_gen.go",
+      "file": "authz/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -787,7 +787,7 @@
         "value": "0.3.73.1"
       },
       "doc": "CodeDocumentInvalid identifies a document that is not one JSON value.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -804,7 +804,7 @@
         "value": "0.3.73.2"
       },
       "doc": "CodeValueUnencodable identifies a value encoding/json refuses to encode.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -817,7 +817,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/redact.Config",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/redact.Config",
       "doc": "Config says what a Redactor treats as secret: the name Words, the struct\nTag, an extra Field rule, and how an Error in a log attribute is shown. Its\nzero value is usable.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -829,7 +829,7 @@
       "spelled": "func() []string",
       "canonical": "func() []string",
       "doc": "DefaultWords returns the name fragments a Redactor treats as secret when its\nConfig gives none, as a fresh slice a caller may extend.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -842,7 +842,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/redact.DocumentValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/redact.DocumentValue",
       "doc": "Document is a JSON document with its secrets replaced — never longer than\nits bound, always well-formed — and whether it had to be cut.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -860,7 +860,7 @@
         "public": "The document is not valid JSON and was not redacted"
       },
       "doc": "DocumentInvalid refuses a document that is not one JSON value.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -874,7 +874,7 @@
       "value": "\"…\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/redact.Ellipsis",
       "doc": "Ellipsis ends whatever was cut to fit a bound, and is counted in it.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -888,7 +888,7 @@
       "value": "16",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/redact.MinBytes",
       "doc": "MinBytes is the smallest bound honoured; a smaller one is raised to it.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -914,7 +914,7 @@
       "value": "\"[redacted]\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/redact.Placeholder",
       "doc": "Placeholder replaces every secret.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -927,7 +927,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/redact.Redactor",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/redact.Redactor",
       "doc": "Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New]\nreturns the SDK's implementation, which caches what it learns about each Go\ntype, so build one per configuration and keep it; it is safe for concurrent\nuse. The port is frozen at those five methods (ADR 0039), so a consumer can\naccept a Redactor and hand a test double in its place.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -941,7 +941,7 @@
       "value": "\"[unencodable]\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/redact.Unencodable",
       "doc": "Unencodable is the text a log attribute encoding/json refuses is shown as.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -959,7 +959,7 @@
         "public": "The value cannot be encoded as JSON and was not redacted"
       },
       "doc": "ValueUnencodable refuses a value encoding/json will not encode.\n",
-      "file": "redact/facade_gen.go",
+      "file": "redact/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -977,7 +977,7 @@
         "public": "An empty secret cannot be stored"
       },
       "doc": "EmptyValue is returned by a Put of an empty secret.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -990,7 +990,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.EnvConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.EnvConfig",
       "doc": "EnvConfig parameterises [NewEnv].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1008,7 +1008,7 @@
         "public": "The environment does not supply a usable value for that secret"
       },
       "doc": "EnvRefused is returned when the environment names a secret without a\nusable value: both forms set, or an empty or oversized file.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1021,7 +1021,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.FileConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.FileConfig",
       "doc": "FileConfig parameterises [NewFile].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1033,7 +1033,7 @@
       "spelled": "func(text string) Value",
       "canonical": "func(text string) github.com/kitsunium/sdk/pkg/v1/security/secret.Value",
       "doc": "FromString returns a Value holding text.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1051,7 +1051,7 @@
         "public": "A new secret could not be generated"
       },
       "doc": "GenerateFailed is returned when a rotation's generator failed.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1069,7 +1069,7 @@
         "public": "The secret store configuration is not usable"
       },
       "doc": "InvalidConfig is returned by a constructor given a configuration it\ncannot honour.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1087,7 +1087,7 @@
         "public": "A prune must keep at least one version"
       },
       "doc": "InvalidKeep is returned by a Prune asked to keep fewer than one version.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1105,7 +1105,7 @@
         "public": "That is not a valid secret name"
       },
       "doc": "InvalidName is returned for a name outside the grammar.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1123,7 +1123,7 @@
         "public": "That is not a valid subject reference"
       },
       "doc": "InvalidSubject is returned for a subject outside the grammar; the\nrejected string is never repeated.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1141,7 +1141,7 @@
         "public": "That value was erased"
       },
       "doc": "KeyDestroyed is returned by SubjectKeys.Open for a box whose data key is\nnot held: the value was erased.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1153,7 +1153,7 @@
       "spelled": "func(path string) (key crypto.Key, err error)",
       "canonical": "func(path string) (key github.com/kitsunium/sdk/pkg/v1/crypto.Key, err error)",
       "doc": "KeyFile returns the crypto.Key held in the file at path — exactly\ncrypto.KeyLen raw bytes — creating the file with a fresh random key on first\nuse: 0600, its directory 0700 when it has to be made, published atomically so\nthat concurrent first uses all return the same key.\n\nIt refuses content that is not exactly one key with [KeyFileInvalid], an\nexisting file other accounts can read with [InvalidConfig], and — where the\nfile store refuses, every platform outside the Unix family, because a mode\nis not an access list there — proc.UnsupportedPlatform. No error carries the\nkey or a refused file's content.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1171,7 +1171,7 @@
         "public": "The key file does not hold a key"
       },
       "doc": "KeyFileInvalid is returned by KeyFile for a file that exists and does not\nhold exactly one key of raw bytes.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1189,7 +1189,7 @@
         "public": "That secret cannot be used as a key"
       },
       "doc": "KeyMaterialInvalid is returned when a keyring version is not exactly 32\nbytes.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1202,7 +1202,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.Keyring",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.Keyring",
       "doc": "Keyring sees the versions of one secret as keys: the newest seals and signs,\nevery kept version opens and verifies.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1216,7 +1216,7 @@
       "value": "63",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/secret.MaxNameLen",
       "doc": "MaxNameLen is the longest secret name, in bytes.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1230,7 +1230,7 @@
       "value": "128",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/secret.MaxSubjectLen",
       "doc": "MaxSubjectLen is the longest subject reference, in bytes.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1243,7 +1243,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.MemoryConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.MemoryConfig",
       "doc": "MemoryConfig parameterises [NewMemory].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1255,7 +1255,7 @@
       "spelled": "func(raw []byte) Value",
       "canonical": "func(raw []byte) github.com/kitsunium/sdk/pkg/v1/security/secret.Value",
       "doc": "New returns a Value holding a copy of raw.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1267,7 +1267,7 @@
       "spelled": "func(cfg EnvConfig) (store Store, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/secret.EnvConfig) (store github.com/kitsunium/sdk/pkg/v1/security/secret.Store, err error)",
       "doc": "NewEnv returns a read-only Store over the process environment, honouring the\nNAME_FILE convention. It refuses a prefix no shell could export.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1279,7 +1279,7 @@
       "spelled": "func(cfg FileConfig) (store Store, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/secret.FileConfig) (store github.com/kitsunium/sdk/pkg/v1/security/secret.Store, err error)",
       "doc": "NewFile returns a Store that keeps its versions in a directory it owns,\nsealed at rest when cfg.Key is set. It refuses a directory other accounts\ncan read, and returns proc.UnsupportedPlatform where atomic publication or\nthe file lock is unavailable. The store also implements io.Closer.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1291,7 +1291,7 @@
       "spelled": "func(store Store, name string) (keyring *Keyring, err error)",
       "canonical": "func(store github.com/kitsunium/sdk/pkg/v1/security/secret.Store, name string) (keyring *github.com/kitsunium/sdk/pkg/v1/security/secret.Keyring, err error)",
       "doc": "NewKeyring returns the keyring over the versions of name in store.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1303,7 +1303,7 @@
       "spelled": "func(cfg MemoryConfig) Store",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/secret.MemoryConfig) github.com/kitsunium/sdk/pkg/v1/security/secret.Store",
       "doc": "NewMemory returns a Store that keeps its versions in this process's memory.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1315,7 +1315,7 @@
       "spelled": "func() SubjectKeyStore",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/security/secret.SubjectKeyStore",
       "doc": "NewMemorySubjectKeyStore returns a [SubjectKeyStore] that keeps the wrapped\nkeys in this process's memory — for tests and development, where the data\nthey protect dies with the process too.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1327,7 +1327,7 @@
       "spelled": "func(cfg RotatorConfig) (rotator *Rotator, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/secret.RotatorConfig) (rotator *github.com/kitsunium/sdk/pkg/v1/security/secret.Rotator, err error)",
       "doc": "NewRotator returns a rotator for cfg.Name in cfg.Store. It starts nothing.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1339,7 +1339,7 @@
       "spelled": "func(cfg SubjectKeysConfig) (keys *SubjectKeys, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/secret.SubjectKeysConfig) (keys *github.com/kitsunium/sdk/pkg/v1/security/secret.SubjectKeys, err error)",
       "doc": "NewSubjectKeys returns the engine that keeps one data key per subject under\ncfg.Root, filed in cfg.Store. It refuses a nil root or store, a negative\ncache, and a cache without a TTL — the TTL bounds how long a key another\nprocess destroyed keeps opening here — with [InvalidConfig].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1357,7 +1357,7 @@
         "public": "No secret has that name"
       },
       "doc": "NotFound is returned for a name that holds no version.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1370,7 +1370,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.PolicySpec",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.PolicySpec",
       "doc": "Policy says how often a secret rotates, how many versions a rotation keeps,\nand how a new one is made.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1382,7 +1382,7 @@
       "spelled": "func(n int) func() (Value, error)",
       "canonical": "func(n int) func() (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error)",
       "doc": "Random returns a generator of n bytes from crypto/rand; a keyring's versions\nneed n = 32. Below 16 bytes the generator refuses every call.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1400,7 +1400,7 @@
         "public": "This secret store cannot be written"
       },
       "doc": "ReadOnly is returned by a write to a store that only reads.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1418,7 +1418,7 @@
         "public": "A stored secret could not be read back"
       },
       "doc": "RecordUnreadable is returned by the file store for a record it found\nand could not read back — most often, one written under another key.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1432,7 +1432,7 @@
       "value": "\"<redacted>\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/secret.Redacted",
       "doc": "Redacted is the placeholder every rendering of a [Value] writes.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1445,7 +1445,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.RewrapValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.RewrapValue",
       "doc": "RewrapReport says what one [SubjectKeys].Rewrap pass did, key by key.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1458,7 +1458,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.Rotator",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.Rotator",
       "doc": "Rotator mints new versions of one secret according to a [Policy].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1471,7 +1471,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.RotatorConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.RotatorConfig",
       "doc": "RotatorConfig parameterises [NewRotator].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1489,7 +1489,7 @@
         "public": "That sealed value could not be opened"
       },
       "doc": "SealInvalid is returned by Keyring.Open for every box it cannot open.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1507,7 +1507,7 @@
         "public": "That signature is not valid"
       },
       "doc": "SignatureInvalid is returned by Keyring.Verify for every signature it\ncannot verify.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1520,7 +1520,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/secret.Store",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/secret.Store",
       "doc": "Store keeps named secrets as numbered versions. It is frozen at five\nmethods; a new capability arrives as a sibling interface.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1538,7 +1538,7 @@
         "public": "The secret store is unavailable"
       },
       "doc": "StoreUnavailable is returned when the backend could not be read or\nwritten; a retry is meaningful.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1551,7 +1551,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyStore",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyStore",
       "doc": "SubjectKeyStore keeps one wrapped data key per subject. The caller\nimplements it over its own storage — Insert and Replace atomic across every\nprocess — or uses [NewMemorySubjectKeyStore]. It is frozen at five methods;\na new capability arrives as a sibling interface.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1569,7 +1569,7 @@
         "public": "A data key could not be unwrapped"
       },
       "doc": "SubjectKeyUnreadable is returned when a subject's data key is held and\ndoes not unwrap under the root: a fault, never an erasure.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1582,7 +1582,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.SubjectKeys",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.SubjectKeys",
       "doc": "SubjectKeys keeps one data key per subject, wrapped by a root [Keyring]:\nSeal and Open under a subject's key, Destroy to erase everything it sealed,\nRewrap after the root rotates.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1595,7 +1595,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.SubjectKeysConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.SubjectKeysConfig",
       "doc": "SubjectKeysConfig parameterises [NewSubjectKeys].\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1607,7 +1607,7 @@
       "spelled": "func(box []byte) (subject string, err error)",
       "canonical": "func(box []byte) (subject string, err error)",
       "doc": "SubjectOf returns the subject a box sealed by [SubjectKeys].Seal names,\nwithout opening it, or [SealInvalid] for anything that is not such a box.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1619,7 +1619,7 @@
       "spelled": "func(name string) error",
       "canonical": "func(name string) error",
       "doc": "ValidateName reports whether name is a secret name, returning [InvalidName]\nwhen it is not. Every store calls it; a caller may too, to refuse a name at\nthe edge of its own input.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1631,7 +1631,7 @@
       "spelled": "func(subject string) error",
       "canonical": "func(subject string) error",
       "doc": "ValidateSubject reports whether subject is a subject reference, returning\n[InvalidSubject] when it is not: 1 to [MaxSubjectLen] bytes of a-z, 0-9,\n'-', '_', '.' and ':', starting with a letter or a digit. A subject is kept\nin clear, so it is a reference derived from an identity, never the identity.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1644,7 +1644,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/secret.Value",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/secret.Value",
       "doc": "Value is an immutable secret that renders as [Redacted] in every rendering;\nonly Reveal and RevealString hand its bytes back.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1662,7 +1662,7 @@
         "public": "A secret can only be decoded from a string, and never from its own placeholder"
       },
       "doc": "ValueRefused is returned by a decode given anything but a string, or\nthe placeholder itself.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1675,7 +1675,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/secret.VersionValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/secret.VersionValue",
       "doc": "Versioned is one version of one secret: name, number, value, and when the\nstore recorded it.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1688,7 +1688,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyValue",
       "doc": "WrappedKey is one subject's wrapped data key, as a [SubjectKeyStore] keeps\nit.\n",
-      "file": "secret/facade_gen.go",
+      "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1701,7 +1701,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/session.Config",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/session.Config",
       "doc": "Config is the public alias for the memory store's construction parameters.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1719,7 +1719,7 @@
         "public": "The session store location is not private enough to use"
       },
       "doc": "DirectoryUnsafe is returned when the store location is readable beyond\nits owner, or when the filesystem accepted a 0600 request without\nenforcing it.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1737,7 +1737,7 @@
         "public": "The session store could not generate a secure identifier"
       },
       "doc": "EntropyFailed is returned when the random source could not be read.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1755,7 +1755,7 @@
         "public": "That session has expired"
       },
       "doc": "Expired is returned when the record existed and its deadline had passed.\nThe record is dropped as this is reported, so the next call says NotFound.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1768,7 +1768,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/session.FileConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/session.FileConfig",
       "doc": "FileConfig is the public alias for the file store's construction parameters.\nIts Key field takes a pkg/v1/crypto.Key, and its Clock is a clock.Timed\nbecause the store both stamps time and waits on it — the poll between lock\nattempts is armed on it, so a test drives contention without sleeping.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1786,7 +1786,7 @@
         "public": "A session's subject cannot be changed without a new identifier"
       },
       "doc": "FixationRefused is returned by Save when the value's subject differs from\nthe stored record's. Regenerate is the operation that was wanted.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1799,7 +1799,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/session.ID",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/session.ID",
       "doc": "ID is the public alias for the opaque, redacting session identifier.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1813,7 +1813,7 @@
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/session.IDLen",
       "doc": "IDLen is the identifier length in bytes — 256 bits from crypto/rand.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1831,7 +1831,7 @@
         "public": "The session store could not mint a unique identifier"
       },
       "doc": "IdentifierCollision is returned when a freshly minted identifier already\nnames a live session, which at 256 bits means the random source is broken.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1849,7 +1849,7 @@
         "public": "The session store configuration is not usable"
       },
       "doc": "InvalidConfig is returned by every constructor for a configuration it\ncannot honour — a non-positive timeout, an idle window the ceiling makes\nunreachable, a missing directory or key.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1867,7 +1867,7 @@
         "public": "That is not a valid session identifier"
       },
       "doc": "InvalidID is returned for a malformed or zero identifier.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1885,7 +1885,7 @@
         "public": "A sealer needs a non-empty purpose"
       },
       "doc": "InvalidPurpose is returned by NewSealer for an empty purpose.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1903,7 +1903,7 @@
         "public": "The session store is busy"
       },
       "doc": "LockFailed is returned when the store-wide exclusive lock could not be\ntaken; the operation is refused rather than run unserialised.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1915,7 +1915,7 @@
       "spelled": "func(cfg FileConfig) (store Store, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/session.FileConfig) (store github.com/kitsunium/sdk/pkg/v1/security/session.Store, err error)",
       "doc": "NewFileStore returns a Store keeping one sealed file per session in cfg.Dir.\nIt refuses — at construction — an unusable configuration, an unsafe\ndirectory, a location reached through a link anybody could have planted\n([PathRedirected]), and a platform without flock(2), enforced Unix\npermissions and a directory flush.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1927,7 +1927,7 @@
       "spelled": "func(raw []byte) (id ID, err error)",
       "canonical": "func(raw []byte) (id github.com/kitsunium/sdk/pkg/v1/security/session.ID, err error)",
       "doc": "NewID builds an ID from exactly [IDLen] raw bytes. Most callers want\n[ParseID]; this is for a Store implementation that holds raw identifier\nbytes.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1939,7 +1939,7 @@
       "spelled": "func(cfg Config) (store Store, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/security/session.Config) (store github.com/kitsunium/sdk/pkg/v1/security/session.Store, err error)",
       "doc": "NewMemoryStore returns a Store keeping every session in this process's\nmemory. It refuses a Config it cannot honour and never returns an inert\nstore.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1951,7 +1951,7 @@
       "spelled": "func(key corecrypto.Key, purpose string) (sealer Sealer, err error)",
       "canonical": "func(key github.com/kitsunium/sdk/internal/core/crypto.Key, purpose string) (sealer github.com/kitsunium/sdk/pkg/v1/security/session.Sealer, err error)",
       "doc": "NewSealer returns a Sealer binding key and purpose. purpose is required: it\nis the domain separator between two things sealed under one key, and an empty\none is refused rather than read as \"no separation needed\".\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1963,7 +1963,7 @@
       "spelled": "func(state State) (session Session, err error)",
       "canonical": "func(state github.com/kitsunium/sdk/pkg/v1/security/session.State) (session github.com/kitsunium/sdk/pkg/v1/security/session.Session, err error)",
       "doc": "NewSession builds an immutable [Session] from a [State]. It is what a\nframework implementing its own [Store] returns; ordinary callers get sessions\nfrom a store and never call this.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1981,7 +1981,7 @@
         "public": "No session matches that identifier"
       },
       "doc": "NotFound is returned for an identifier that names no live session.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -1993,7 +1993,7 @@
       "spelled": "func(encoded string) (id ID, err error)",
       "canonical": "func(encoded string) (id github.com/kitsunium/sdk/pkg/v1/security/session.ID, err error)",
       "doc": "ParseID decodes the canonical form produced by [ID].Reveal — unpadded\nbase64url over exactly [IDLen] bytes. It is the inbound path: whatever\narrives from a cookie reaches the domain through here, and anything that is\nnot exactly that shape is refused before it can be used as a lookup key.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2011,7 +2011,7 @@
         "public": "The session store location is reached through a link"
       },
       "doc": "PathRedirected is returned by NewFileStore when the store's location is\nreached through a link it refuses to follow: one at the lock file's\nname, one at a component of FileConfig.Dir planted in a directory any\naccount can write, or a Dir that stopped naming the directory the store\nhad just opened. No retry helps; a human looks at the path.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2029,7 +2029,7 @@
         "public": "That session holds more data than the store accepts"
       },
       "doc": "PayloadTooLarge is returned by Save for a payload above the store's caps,\nand by Regenerate for a subject longer than 4096 bytes — refused before\nanything is minted, so the old session is untouched.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2047,7 +2047,7 @@
         "public": "That session could not be read"
       },
       "doc": "RecordCorrupt is returned by the file store when a record could not be\nread back — tampered, truncated, wrong key, or filed under another digest.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2065,7 +2065,7 @@
         "public": "That session value could not be opened"
       },
       "doc": "SealInvalid is returned by Sealer.Open for every failure, without\ndistinguishing them.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2078,7 +2078,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/session.Sealer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/session.Sealer",
       "doc": "Sealer is the public alias for the port that renders an [ID] as an opaque,\ntamper-evident cookie VALUE. It does not write cookies.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2091,7 +2091,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/session.SessionValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/session.SessionValue",
       "doc": "Session is the public alias for the immutable session a Store hands back.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2104,7 +2104,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/session.StateValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/session.StateValue",
       "doc": "State is the public alias for the exported description [NewSession] builds a\n[Session] from. It exists so a framework can implement [Store] over its own\nbackend; it is not a way around the fixation rule, since [Store].Save refuses\na subject the stored record does not have.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2117,7 +2117,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/session.Store",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/session.Store",
       "doc": "Store is the public alias for the session-lifetime port. Its method set is\nfrozen: new capabilities arrive as sibling interfaces (ADR 0039).\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2135,7 +2135,7 @@
         "public": "The session store is unavailable"
       },
       "doc": "StoreUnavailable is returned when the backend itself failed. Retryable.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2148,7 +2148,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/session.Sweeper",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/session.Sweeper",
       "doc": "Sweeper is the public alias for the first such sibling — a store that can\ndrop its expired records on demand.\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2166,7 +2166,7 @@
         "public": "This operation is not supported on this platform"
       },
       "doc": "UnsupportedPlatform is returned by NewFileStore on a platform without the\nmechanics its guarantees rest on. It is the SDK-wide sentinel, shared\nwith pkg/v1/proc (ADR 0018).\n",
-      "file": "session/facade_gen.go",
+      "file": "session/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2179,7 +2179,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/token.Algorithm",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.Algorithm",
       "doc": "Algorithm is the public alias for the signature algorithm a token issuer or\nverifier is bound to.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2193,7 +2193,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.AlgorithmES256",
       "doc": "AlgorithmES256 is JOSE \"ES256\" — ECDSA on NIST P-256 with SHA-256 and the\nfixed-width R||S signature encoding of RFC 7518 §3.4.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2207,7 +2207,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.AlgorithmEdDSA",
       "doc": "AlgorithmEdDSA is JOSE \"EdDSA\" — Ed25519 over the JWS signing input\n(RFC 8037 §3.1).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2221,7 +2221,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.AlgorithmHS256",
       "doc": "AlgorithmHS256 is JOSE \"HS256\" — HMAC-SHA-256 over a 256-bit shared secret\n(RFC 7518 §3.2). Symmetric: a verifier can also mint.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2239,7 +2239,7 @@
         "public": "The token algorithm is not the one this verifier accepts"
       },
       "doc": "AlgorithmMismatch is returned when the token's algorithm header is not\nthe algorithm the verifier is bound to. It is the verdict an\nalgorithm-confusion attempt produces, reached before any key is used.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2257,7 +2257,7 @@
         "public": "The token declares the unsecured none algorithm"
       },
       "doc": "AlgorithmNone is returned for a token declaring the unsecured \"none\"\nalgorithm. It is unconditional — no configuration accepts one.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2271,7 +2271,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.AlgorithmPasetoV4Public",
       "doc": "AlgorithmPasetoV4Public is PASETO v4.public — Ed25519 over the\npre-authentication encoding of the header, payload and footer.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2289,7 +2289,7 @@
         "public": "The token is not addressed to this audience"
       },
       "doc": "AudienceMismatch is returned when the configured audience is absent from\nan authenticated token's aud (RFC 8725 §3.9).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2303,7 +2303,7 @@
       "value": "\"aud\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimAudience",
       "doc": "ClaimAudience is the registered claim \"aud\" (RFC 7519 §4.1.3).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2317,7 +2317,7 @@
       "value": "\"exp\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimExpiry",
       "doc": "ClaimExpiry is the registered claim \"exp\" (RFC 7519 §4.1.4).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2331,7 +2331,7 @@
       "value": "\"jti\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimID",
       "doc": "ClaimID is the registered claim \"jti\" (RFC 7519 §4.1.7).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2345,7 +2345,7 @@
       "value": "\"iat\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimIssuedAt",
       "doc": "ClaimIssuedAt is the registered claim \"iat\" (RFC 7519 §4.1.6).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2359,7 +2359,7 @@
       "value": "\"iss\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimIssuer",
       "doc": "ClaimIssuer is the registered claim \"iss\" (RFC 7519 §4.1.1).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2377,7 +2377,7 @@
         "public": "The claim name is empty or reserved"
       },
       "doc": "ClaimNameInvalid is returned for a private claim name that is empty or\nshadows a registered one.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2391,7 +2391,7 @@
       "value": "\"nbf\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimNotBefore",
       "doc": "ClaimNotBefore is the registered claim \"nbf\" (RFC 7519 §4.1.5).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2405,7 +2405,7 @@
       "value": "\"sub\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimSubject",
       "doc": "ClaimSubject is the registered claim \"sub\" (RFC 7519 §4.1.2).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2418,7 +2418,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "Claims is the public alias for a token's immutable claim set.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2435,7 +2435,7 @@
         "value": "0.2.13.3"
       },
       "doc": "CodeAlgorithmMismatch identifies a header naming an algorithm other than the\nbound one — what an algorithm-confusion attempt produces (0.2.13.3).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2452,7 +2452,7 @@
         "value": "0.2.13.2"
       },
       "doc": "CodeAlgorithmNone identifies a token declaring the unsecured \"none\"\nalgorithm (0.2.13.2).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2469,7 +2469,7 @@
         "value": "0.2.13.8"
       },
       "doc": "CodeAudienceMismatch identifies a configured audience absent from the token's\naud claim (0.2.13.8).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2486,7 +2486,7 @@
         "value": "0.2.13.15"
       },
       "doc": "CodeClaimNameInvalid identifies an empty or reserved private-claim name\n(0.2.13.15).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2503,7 +2503,7 @@
         "value": "0.3.44.7"
       },
       "doc": "CodeDuplicateMember identifies a header or claims object repeating a member\nname (0.3.44.7).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2520,7 +2520,7 @@
         "value": "0.2.13.5"
       },
       "doc": "CodeExpired identifies an authenticated token whose exp is past (0.2.13.5).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2537,7 +2537,7 @@
         "value": "0.2.13.7"
       },
       "doc": "CodeExpiryRequired identifies a token with no exp where the profile requires\none (0.2.13.7).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2554,7 +2554,7 @@
         "value": "0.3.44.5"
       },
       "doc": "CodeFooterMismatch identifies a PASETO footer that is not the expected one\n(0.3.44.5).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2571,7 +2571,7 @@
         "value": "0.3.44.1"
       },
       "doc": "CodeHeaderUnsupported identifies a non-empty \"crit\", or a \"typ\" mismatch\n(0.3.44.1).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2588,7 +2588,7 @@
         "value": "0.2.13.14"
       },
       "doc": "CodeIssueFailed identifies claims that could not be rendered or signed\n(0.2.13.14).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2605,7 +2605,7 @@
         "value": "0.2.13.9"
       },
       "doc": "CodeIssuerMismatch identifies an iss that is not the configured issuer\n(0.2.13.9).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2622,7 +2622,7 @@
         "value": "0.3.42.5"
       },
       "doc": "CodeJWKInvalidEncoding identifies a member that is not unpadded base64url, or\nnot the fixed length its curve mandates (0.3.42.5).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2639,7 +2639,7 @@
         "value": "0.3.42.6"
       },
       "doc": "CodeJWKKeyMismatch identifies material that is not a key on the declared\ncurve: an off-curve point, an out-of-range scalar, or a \"d\" that does not\nderive the declared public key (0.3.42.6).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2656,7 +2656,7 @@
         "value": "0.3.42.1"
       },
       "doc": "CodeJWKMalformed identifies a key document that is not the JSON shape\nRFC 7517 describes — invalid JSON, a key that is not an object, or a set\nwhose \"keys\" is not an array (0.3.42.1).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2673,7 +2673,7 @@
         "value": "0.3.42.2"
       },
       "doc": "CodeJWKMissingMember identifies a key missing a member its declared type\nrequires, or a set missing \"keys\" (0.3.42.2).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2690,7 +2690,7 @@
         "value": "0.3.42.4"
       },
       "doc": "CodeJWKUnsupportedCurve identifies an unknown \"crv\", or one paired with the\nwrong \"kty\" (0.3.42.4).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2707,7 +2707,7 @@
         "value": "0.3.42.3"
       },
       "doc": "CodeJWKUnsupportedKeyType identifies a \"kty\" other than EC, OKP or oct — RSA\nincluded, since the SDK verifies nothing with RSA (0.3.42.3).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2724,7 +2724,7 @@
         "value": "0.3.44.4"
       },
       "doc": "CodeKeyIDAmbiguous identifies more keys sharing a kid than the verifier will\ntry (0.3.44.4).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2741,7 +2741,7 @@
         "value": "0.3.44.3"
       },
       "doc": "CodeKeyIDMissing identifies a token presented to a set verifier with no kid\n(0.3.44.3).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2758,7 +2758,7 @@
         "value": "0.3.44.2"
       },
       "doc": "CodeKeyNotFound identifies a kid naming no key in the set (0.3.44.2).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2775,7 +2775,7 @@
         "value": "0.2.13.12"
       },
       "doc": "CodeKeyUnsuitable identifies a key that cannot serve the algorithm it was\nhanded to (0.2.13.12).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2792,7 +2792,7 @@
         "value": "0.2.13.16"
       },
       "doc": "CodeLifetimeTooLong identifies an exp-iat span past\nVerifierConfig.MaxLifetime (0.2.13.16).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2809,7 +2809,7 @@
         "value": "0.2.13.1"
       },
       "doc": "CodeMalformed identifies an input that could not be read as a token\n(0.2.13.1).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2826,7 +2826,7 @@
         "value": "0.2.13.6"
       },
       "doc": "CodeNotYetValid identifies an authenticated token whose nbf is in the future\n(0.2.13.6).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2843,7 +2843,7 @@
         "value": "0.2.13.13"
       },
       "doc": "CodePolicyMisconfigured identifies a constructor given a configuration it\ncannot honour; permanent, never a retry (0.2.13.13).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2860,7 +2860,7 @@
         "value": "0.3.44.6"
       },
       "doc": "CodeSchemeUnsupported identifies a PASETO version+purpose that is not\nv4.public (0.3.44.6).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2877,7 +2877,7 @@
         "value": "0.2.13.4"
       },
       "doc": "CodeSignatureInvalid identifies a signature or MAC tag that did not\nauthenticate (0.2.13.4).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2894,7 +2894,7 @@
         "value": "0.2.13.11"
       },
       "doc": "CodeTooDeep identifies claims nested past MaxClaimDepth (0.2.13.11).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2911,7 +2911,7 @@
         "value": "0.2.13.10"
       },
       "doc": "CodeTooLarge identifies an input past a declared size bound (0.2.13.10).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2924,7 +2924,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Curve",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Curve",
       "doc": "Curve is the public alias for a JWK's \"crv\" member, the curve [JWK].Crv\nreports: [CurveP256], [CurveP384], [CurveP521] or [CurveEd25519]. A symmetric\nkey has no curve and reports the empty Curve.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2938,7 +2938,7 @@
       "value": "\"Ed25519\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.CurveEd25519",
       "doc": "CurveEd25519 is the Edwards curve of an EdDSA key (RFC 8037 §2).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2952,7 +2952,7 @@
       "value": "\"P-256\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.CurveP256",
       "doc": "CurveP256 is NIST P-256 (RFC 7518 §6.2.1.1), the curve of an ES256 key.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2966,7 +2966,7 @@
       "value": "\"P-384\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.CurveP384",
       "doc": "CurveP384 is NIST P-384. [ParseJWK] accepts it, but nothing in this package\nsigns or verifies with it, so [NewVerifierFromJWK] refuses it with\n[KeyUnsuitable].\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2980,7 +2980,7 @@
       "value": "\"P-521\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.CurveP521",
       "doc": "CurveP521 is NIST P-521, accepted and refused exactly as P-384 is.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -2998,7 +2998,7 @@
         "public": "The token repeats a member name"
       },
       "doc": "DuplicateMember is returned when a header or claims object repeats a\nmember name (RFC 8725 §2.6).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3016,7 +3016,7 @@
         "public": "The token has expired"
       },
       "doc": "Expired is returned when an AUTHENTICATED token's exp is past.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3034,7 +3034,7 @@
         "public": "The token carries no expiry"
       },
       "doc": "ExpiryRequired is returned when a token carries no exp and the profile\nrequires one — the default on both the issuing and verifying side.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3052,7 +3052,7 @@
         "public": "The token footer is not the expected one"
       },
       "doc": "FooterMismatch is returned for a PASETO footer that is not the expected\none, including a footer present where none was configured.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3070,7 +3070,7 @@
         "public": "The token header carries parameters this verifier will not accept"
       },
       "doc": "HeaderUnsupported is returned for a header carrying a non-empty \"crit\",\nor a \"typ\" other than VerifierConfig.RequireType.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3088,7 +3088,7 @@
         "public": "The token could not be issued"
       },
       "doc": "IssueFailed is returned when an issuer cannot render the given claims —\na claim the target format cannot express, or a signing fault.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3101,7 +3101,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/token.Issuer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.Issuer",
       "doc": "Issuer is the public alias for the token-minting port.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3114,7 +3114,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/token.IssuerConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/token.IssuerConfig",
       "doc": "IssuerConfig is the public alias for the JWT issuing policy.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3132,7 +3132,7 @@
         "public": "The token issuer is not the expected one"
       },
       "doc": "IssuerMismatch is returned when an authenticated token's iss is not the\nconfigured issuer (RFC 8725 §3.8).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3145,7 +3145,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue",
       "doc": "JWK is the public alias for a parsed JSON Web Key (RFC 7517). Obtain one\nfrom [ParseJWK]: the type has no exported field and deliberately no\nUnmarshalJSON, so json.Unmarshal decodes nothing into a JWK — and reports no\nerror. A JWK field in a configuration struct therefore stays the zero JWK,\nwhich [NewVerifierFromJWK] refuses with [KeyUnsuitable]; decode that field\nas a json.RawMessage and hand it to ParseJWK instead.\n\njson.Marshal renders a JWK's public members only. A symmetric (\"oct\") key\nhas no public form — its \"k\" member is the secret itself — so json.Marshal\nrefuses it rather than publish it; private members leave only through the\nkey's MarshalPrivate method, which says so at the call site.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3163,7 +3163,7 @@
         "public": "JWK member is not valid unpadded base64url"
       },
       "doc": "JWKInvalidEncoding is returned for a member that is not unpadded\nbase64url, or not the fixed length its curve mandates.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3181,7 +3181,7 @@
         "public": "JWK material does not match the declared curve"
       },
       "doc": "JWKKeyMismatch is returned for well-encoded material that is not a key on\nthe declared curve: an off-curve point, an out-of-range scalar, or a \"d\"\nthat does not derive the declared public key.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3199,7 +3199,7 @@
         "public": "JWK document is malformed"
       },
       "doc": "JWKMalformed is returned by ParseJWK / ParseJWKSet for a document that is\nnot the JSON shape RFC 7517 describes — invalid JSON, a key that is not an\nobject, or a set whose \"keys\" is not an array.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3217,7 +3217,7 @@
         "public": "JWK is missing a required member"
       },
       "doc": "JWKMissingMember is returned for a key missing a member its declared type\nrequires (\"kty\", \"crv\", \"x\", \"y\" or \"k\"), or a set missing \"keys\".\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3230,7 +3230,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Set",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Set",
       "doc": "JWKSet is the public alias for a parsed JSON Web Key Set (RFC 7517 §5).\nObtain one from [ParseJWKSet], or assemble one from parsed keys with\n[NewJWKSet].\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3248,7 +3248,7 @@
         "public": "JWK curve is not supported"
       },
       "doc": "JWKUnsupportedCurve is returned for an unknown \"crv\", or a known one\npaired with the wrong \"kty\" (P-256 under OKP, Ed25519 under EC).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3266,7 +3266,7 @@
         "public": "JWK key type is not supported"
       },
       "doc": "JWKUnsupportedKeyType is returned for a \"kty\" other than EC, OKP or oct.\nRSA is refused here on purpose: the SDK verifies nothing with RSA.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3279,7 +3279,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/crypto.Key",
       "owner": "go:github.com/kitsunium/sdk/internal/core/crypto.Key",
       "doc": "Key is the public alias for the SDK's opaque, redacting 256-bit symmetric\nkey — the only type NewHS256Issuer / NewHS256Verifier accept. Build one with\npkg/v1/crypto.NewKey, or derive one with pkg/v1/crypto/kdf; never type one.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3297,7 +3297,7 @@
         "public": "Too many keys share this token key identifier"
       },
       "doc": "KeyIDAmbiguous is returned when more keys share a kid than\nVerifierConfig.MaxKeyCandidates allows the verifier to try.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3315,7 +3315,7 @@
         "public": "The token carries no key identifier"
       },
       "doc": "KeyIDMissing is returned when a set verifier is handed a token with no\nkid header.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3333,7 +3333,7 @@
         "public": "No key in the key set matches this token"
       },
       "doc": "KeyNotFound is returned when a token's kid names no key in the set.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3346,7 +3346,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Type",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Type",
       "doc": "KeyType is the public alias for a JWK's \"kty\" member, the key-type family\n[JWK].Kty reports: [KeyTypeEC], [KeyTypeOKP] or [KeyTypeOct]. The zero JWK\nreports the empty KeyType.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3360,7 +3360,7 @@
       "value": "\"EC\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.TypeEC",
       "doc": "KeyTypeEC is the JWK \"kty\" of an elliptic-curve key on a NIST prime curve\n(RFC 7518 §6.2): public members \"x\" and \"y\", private member \"d\".\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3374,7 +3374,7 @@
       "value": "\"OKP\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.TypeOKP",
       "doc": "KeyTypeOKP is the JWK \"kty\" of an octet key pair, an Edwards-curve key\n(RFC 8037 §2): public member \"x\", private member \"d\".\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3388,7 +3388,7 @@
       "value": "\"oct\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.TypeOct",
       "doc": "KeyTypeOct is the JWK \"kty\" of a symmetric key carried whole in \"k\"\n(RFC 7518 §6.4). It has no public half and no curve.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3406,7 +3406,7 @@
         "public": "The key cannot be used for this token algorithm"
       },
       "doc": "KeyUnsuitable is returned when a key cannot serve the algorithm it was\nhanded to — the wrong length, curve, or key type.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3424,7 +3424,7 @@
         "public": "The token lifetime exceeds what this recipient accepts"
       },
       "doc": "LifetimeTooLong is returned when an authenticated token's exp-iat span\nexceeds VerifierConfig.MaxLifetime.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3442,7 +3442,7 @@
         "public": "The token is malformed"
       },
       "doc": "Malformed is returned when the input cannot be read as a token.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3454,7 +3454,7 @@
       "spelled": "func() Claims",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/security/token.Claims",
       "doc": "NewClaims returns an empty claim set to build on with the With* methods.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3466,7 +3466,7 @@
       "spelled": "func(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer Issuer, err error)",
       "canonical": "func(priv *crypto/ecdsa.PrivateKey, cfg github.com/kitsunium/sdk/pkg/v1/security/token.IssuerConfig) (issuer github.com/kitsunium/sdk/pkg/v1/security/token.Issuer, err error)",
       "doc": "NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256,\nemitting the fixed-width R||S signature of RFC 7518 §3.4.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3478,7 +3478,7 @@
       "spelled": "func(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier Verifier, err error)",
       "canonical": "func(pub *crypto/ecdsa.PublicKey, cfg github.com/kitsunium/sdk/pkg/v1/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/pkg/v1/security/token.Verifier, err error)",
       "doc": "NewES256Verifier returns a JWT verifier bound to ECDSA P-256 under pub. The\npoint is validated on the curve, not merely measured (RFC 8725 §3.4).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3490,7 +3490,7 @@
       "spelled": "func(priv ed25519.PrivateKey, cfg IssuerConfig) (issuer Issuer, err error)",
       "canonical": "func(priv crypto/ed25519.PrivateKey, cfg github.com/kitsunium/sdk/pkg/v1/security/token.IssuerConfig) (issuer github.com/kitsunium/sdk/pkg/v1/security/token.Issuer, err error)",
       "doc": "NewEdDSAIssuer returns a JWT issuer signing with Ed25519 (JOSE \"EdDSA\").\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3502,7 +3502,7 @@
       "spelled": "func(pub ed25519.PublicKey, cfg VerifierConfig) (verifier Verifier, err error)",
       "canonical": "func(pub crypto/ed25519.PublicKey, cfg github.com/kitsunium/sdk/pkg/v1/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/pkg/v1/security/token.Verifier, err error)",
       "doc": "NewEdDSAVerifier returns a JWT verifier bound to Ed25519 under pub.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3514,7 +3514,7 @@
       "spelled": "func(secret Key, cfg IssuerConfig) (issuer Issuer, err error)",
       "canonical": "func(secret github.com/kitsunium/sdk/pkg/v1/security/token.Key, cfg github.com/kitsunium/sdk/pkg/v1/security/token.IssuerConfig) (issuer github.com/kitsunium/sdk/pkg/v1/security/token.Issuer, err error)",
       "doc": "NewHS256Issuer returns a JWT issuer signing with HMAC-SHA-256 under secret.\n\nHS256 is symmetric: everyone who can verify these tokens can also mint them.\nReach for [NewES256Issuer] or [NewEdDSAIssuer] the moment the verifier is not\nin the same trust domain as the issuer.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3526,7 +3526,7 @@
       "spelled": "func(secret Key, cfg VerifierConfig) (verifier Verifier, err error)",
       "canonical": "func(secret github.com/kitsunium/sdk/pkg/v1/security/token.Key, cfg github.com/kitsunium/sdk/pkg/v1/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/pkg/v1/security/token.Verifier, err error)",
       "doc": "NewHS256Verifier returns a JWT verifier bound to HMAC-SHA-256 under secret.\nIt accepts a [Key] and nothing else, which is what makes the HMAC half of\nalgorithm confusion unwritable rather than merely documented.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3538,7 +3538,7 @@
       "spelled": "func(keys ...JWK) JWKSet",
       "canonical": "func(keys ...github.com/kitsunium/sdk/pkg/v1/security/token.JWK) github.com/kitsunium/sdk/pkg/v1/security/token.JWKSet",
       "doc": "NewJWKSet assembles a [JWKSet] from keys already parsed, in the given order —\nthe order in which [NewSetVerifier] tries candidates sharing a \"kid\". It\nvalidates nothing further: the material of every non-zero JWK already passed\n[ParseJWK], and a zero JWK in a set can never verify a token.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3550,7 +3550,7 @@
       "spelled": "func(priv ed25519.PrivateKey, cfg PasetoIssuerConfig) (issuer Issuer, err error)",
       "canonical": "func(priv crypto/ed25519.PrivateKey, cfg github.com/kitsunium/sdk/pkg/v1/security/token.PasetoIssuerConfig) (issuer github.com/kitsunium/sdk/pkg/v1/security/token.Issuer, err error)",
       "doc": "NewPasetoV4Issuer returns a PASETO v4.public issuer signing with Ed25519.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3562,7 +3562,7 @@
       "spelled": "func(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verifier Verifier, err error)",
       "canonical": "func(pub crypto/ed25519.PublicKey, cfg github.com/kitsunium/sdk/pkg/v1/security/token.PasetoVerifierConfig) (verifier github.com/kitsunium/sdk/pkg/v1/security/token.Verifier, err error)",
       "doc": "NewPasetoV4Verifier returns a PASETO v4.public verifier bound to pub. A token\nof any other PASETO version or purpose — including v4.local — is refused with\n[SchemeUnsupported].\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3574,7 +3574,7 @@
       "spelled": "func(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error)",
       "canonical": "func(set github.com/kitsunium/sdk/pkg/v1/security/token.JWKSet, cfg github.com/kitsunium/sdk/pkg/v1/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/pkg/v1/security/token.Verifier, err error)",
       "doc": "NewSetVerifier returns a JWT verifier selecting a key from set by the token's\n\"kid\" header.\n\nThe kid chooses which key to TRY; the signature decides whether the token is\nvalid. A token with no kid is refused with [KeyIDMissing] rather than tried\nagainst every key in the set. When several keys share a kid — legal during a\nrotation, since RFC 7517 §4.5 only SHOULD-s uniqueness — the candidates are\ntried in document order up to VerifierConfig.MaxKeyCandidates, past which the\ntoken is refused with [KeyIDAmbiguous].\n\nA set no token could ever verify against is refused here, with\n[PolicyMisconfigured], rather than built into a verifier that refuses\neverything: an empty set, and one whose every member either carries no kid\nor is a key this package does not verify with (P-384, P-521). A single key\npublished without a kid belongs to [NewVerifierFromJWK].\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3586,7 +3586,7 @@
       "spelled": "func(key JWK, cfg VerifierConfig) (verifier Verifier, err error)",
       "canonical": "func(key github.com/kitsunium/sdk/pkg/v1/security/token.JWK, cfg github.com/kitsunium/sdk/pkg/v1/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/pkg/v1/security/token.Verifier, err error)",
       "doc": "NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own\nkty/crv imply: oct to HS256, EC P-256 to ES256, OKP Ed25519 to EdDSA. Every\nother key the SDK can represent — P-384, P-521 — is refused with\n[KeyUnsuitable]; an RSA key never gets this far, because [ParseJWK] refuses\nit with [CodeJWKUnsupportedKeyType].\n\nThe key's advisory members are enforced: a \"use\" other than \"sig\", a\n\"key_ops\" without \"verify\", or an \"alg\" contradicting the key type all refuse\nthe key.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3604,7 +3604,7 @@
         "public": "The token is not valid yet"
       },
       "doc": "NotYetValid is returned when an authenticated token's nbf is future.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3616,7 +3616,7 @@
       "spelled": "func(document []byte) (key JWK, err error)",
       "canonical": "func(document []byte) (key github.com/kitsunium/sdk/pkg/v1/security/token.JWK, err error)",
       "doc": "ParseJWK decodes one JSON Web Key document (RFC 7517 §4) into the [JWK] that\n[NewVerifierFromJWK] and [NewJWKSet] take. Fetching the document is the\napplication's job: this package performs no I/O, so the bytes come from\nwherever the application already trusts — a configuration file, or a key\nendpoint it queried itself.\n\nIt is the only way to turn bytes into a JWK, and it validates before it\nreturns one: every member the key type requires present, every member\nunpadded base64url (RFC 7515 §2), coordinates at the curve's fixed length,\nthe point on the declared curve, and — when a private \"d\" is present — the\nscalar deriving exactly the declared public key. Members it does not model\nare ignored (RFC 7517 §4).\n\nA refusal returns the zero JWK and an error carrying one of\n[CodeJWKMalformed], [CodeJWKMissingMember], [CodeJWKUnsupportedKeyType],\n[CodeJWKUnsupportedCurve], [CodeJWKInvalidEncoding] or [CodeJWKKeyMismatch];\nits message names the rule that failed and never a member's value. An RSA\nkey is refused here, with [CodeJWKUnsupportedKeyType], because the SDK\nverifies nothing with RSA.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3628,7 +3628,7 @@
       "spelled": "func(document []byte) (set JWKSet, err error)",
       "canonical": "func(document []byte) (set github.com/kitsunium/sdk/pkg/v1/security/token.JWKSet, err error)",
       "doc": "ParseJWKSet decodes a JSON Web Key Set document (RFC 7517 §5) — typically the\nbody an issuer serves at its jwks_uri, fetched by the application — into the\n[JWKSet] that [NewSetVerifier] takes.\n\nEvery member is validated exactly as [ParseJWK] validates one, and the set is\naccepted whole or not at all: one refused member refuses the document, with\nthat member's own CodeJWK* code and its index attached, rather than yielding\na set that silently holds fewer keys than were published. A set carrying an\nRSA member is therefore refused, with [CodeJWKUnsupportedKeyType].\n\nThe \"keys\" member is required — absent or null is refused with\n[CodeJWKMissingMember] — while an empty array is a valid empty set, which\n[NewSetVerifier] then refuses because it could never verify anything. A\ndocument, or a member, that is JSON null is not an object at all and is\nrefused with [CodeJWKMalformed].\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3641,7 +3641,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/token.PasetoIssuerConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/token.PasetoIssuerConfig",
       "doc": "PasetoIssuerConfig is the public alias for the PASETO v4.public issuing\npolicy. It is a separate type rather than [IssuerConfig] plus two extras\nbecause PASETO has no header parameters: there is nothing for a Type or a\nKeyID to set, and publishing knobs the format ignores is how a configuration\nfield ends up doing nothing. Its equivalent of a \"kid\" is the Footer, which\nthe signature covers.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3654,7 +3654,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/token.PasetoVerifierConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/token.PasetoVerifierConfig",
       "doc": "PasetoVerifierConfig is the public alias for the PASETO v4.public\nverification policy. Same shape decision as its issuing counterpart: no\nRequireType, no MaxKeyCandidates, because PASETO has neither a \"typ\" to\nrequire nor a \"kid\" to select on.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3672,7 +3672,7 @@
         "public": "The token policy is misconfigured"
       },
       "doc": "PolicyMisconfigured is returned by a constructor given a configuration\nit cannot honour. Permanent, not transient: the fix is at the\nconstruction site, never a retry (ADR 0031).\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3702,7 +3702,7 @@
         "public": "This token version and purpose are not supported"
       },
       "doc": "SchemeUnsupported is returned for a PASETO version+purpose this package\ndoes not implement — every local purpose, and every version but v4.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3732,7 +3732,7 @@
         "public": "The token signature is not valid"
       },
       "doc": "SignatureInvalid is returned when the signature or MAC tag did not\nauthenticate under the bound key — the same verdict for a wrong key and\nfor tampered bytes, because they are the same event.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3750,7 +3750,7 @@
         "public": "The token claims are nested too deeply"
       },
       "doc": "TooDeep is returned for claims nested past MaxClaimDepth.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3768,7 +3768,7 @@
         "public": "The token exceeds the accepted size"
       },
       "doc": "TooLarge is returned for an input past a declared size bound, checked\nbefore any parsing happens.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3781,7 +3781,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/token.Verifier",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.Verifier",
       "doc": "Verifier is the public alias for the token-authenticating port.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     },
@@ -3794,7 +3794,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/token.VerifierConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/token.VerifierConfig",
       "doc": "VerifierConfig is the public alias for the JWT verification policy.\n",
-      "file": "token/facade_gen.go",
+      "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
     }

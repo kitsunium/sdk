@@ -75,7 +75,7 @@ KeyLen is the required symmetric key length in bytes (256-bit) — the length [N
 Initialised with `github.com/kitsunium/sdk/internal/core/crypto.KeyLen`.
 
 <a name="NewKey"></a>
-## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/facade_gen.go>)
+## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/gen_facade.go>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)
@@ -111,7 +111,7 @@ type Algorithm string
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/facade_gen.go>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/gen_facade.go>)
 
 Key is an opaque, redacting 256-bit symmetric key — the master a KeyTree derives from and the type DeriveKey returns. Build one with [NewKey](#NewKey).
 
@@ -162,7 +162,7 @@ func (Key) Zeroize()
 Zeroize overwrites the key material with zeros. Because copies share one backing array, this clears the secret for every copy of the Key.
 
 <a name="KeyTree"></a>
-## type [KeyTree](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/facade_gen.go>)
+## type [KeyTree](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/kdf/gen_facade.go>)
 
 KeyTree is the path-addressed hierarchical key-derivation node, re-exported from the service layer. Build one with NewKeyTree; Child descends a path and DeriveKey yields a 32-byte key at the current node.
 

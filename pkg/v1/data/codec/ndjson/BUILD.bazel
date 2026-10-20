@@ -6,7 +6,7 @@ go_library(
     name = "ndjson",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "ndjson.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/ndjson",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "ndjson_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "ndjson_external_test.go",
     ],
     deps = [

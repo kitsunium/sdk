@@ -36,7 +36,7 @@ type apiOptions struct {
 	// cells are the platforms table's cells; the first is the reference.
 	cells []platform
 	// markers makes -check-api compare every cell's symbols with the pin
-	// markers of api_gen*_test.go files.
+	// markers of gen_api*_test.go files.
 	markers bool
 	// digests makes -check-api verify every generated file's header digests
 	// against the design files' bytes.

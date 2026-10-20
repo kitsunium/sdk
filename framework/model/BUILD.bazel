@@ -50,7 +50,7 @@ filegroup(
 
 go_test(
     name = "model_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [
         ":model",
         "//framework/model/internal/core",

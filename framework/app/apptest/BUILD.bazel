@@ -26,8 +26,8 @@ alias(
 go_test(
     name = "apptest_test",
     srcs = [
-        "api_gen_test.go",
         "apptest_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":apptest",

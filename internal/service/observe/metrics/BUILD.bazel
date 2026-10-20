@@ -54,7 +54,6 @@ go_test(
     name = "metrics_test",
     srcs = [
         "allocwindow_test.go",
-        "api_gen_test.go",
         "cardinality_external_test.go",
         "exporter_description_external_test.go",
         "exporter_otlphttp_external_test.go",
@@ -64,6 +63,7 @@ go_test(
         "exporter_text_external_test.go",
         "exporter_text_internal_test.go",
         "gauge_internal_test.go",
+        "gen_api_test.go",
         "histogram_internal_test.go",
         "meter_alloc_test.go",
         "meter_bench_test.go",

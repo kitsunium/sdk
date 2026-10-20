@@ -6,7 +6,7 @@ go_library(
     name = "docstore",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/docstore",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "docstore_test",
     srcs = [
-        "api_gen_test.go",
         "docstore_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":docstore",

@@ -31,7 +31,7 @@ alias(
 go_test(
     name = "sample_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "sample_sink_external_test.go",
         "sample_sink_internal_test.go",
     ],

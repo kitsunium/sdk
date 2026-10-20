@@ -28,7 +28,7 @@ The same values are re-exported by pkg/v1/proc/process, beside the spawning of c
 - [type Module](<#Module>)
 
 <a name="Build"></a>
-## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/facade_gen.go>)
+## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
 
 ```go
 func Build() (info BuildInfo, ok bool)
@@ -37,7 +37,7 @@ func Build() (info BuildInfo, ok bool)
 Build describes what the running binary was built from, and reports false when the binary carries no build information.
 
 <a name="ParseBuild"></a>
-## func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/facade_gen.go>)
+## func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
 
 ```go
 func ParseBuild(info *debug.BuildInfo) BuildInfo
@@ -46,7 +46,7 @@ func ParseBuild(info *debug.BuildInfo) BuildInfo
 ParseBuild describes a BuildInfo from elsewhere — one a test builds by hand, or debug.ParseBuildInfo's reading of another binary — exactly as Build describes the running one.
 
 <a name="BuildInfo"></a>
-## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/facade_gen.go>)
+## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
 
 BuildInfo is what the running binary was built from: the toolchain, the main package, the main module with its version-control stamp, and every dependency followed through its replacement. It is an alias of the service value, and the same type as pkg/v1/proc/process.BuildInfo.
 
@@ -81,7 +81,7 @@ func (*BuildInfo) Module(path string) (found ModuleValue, ok bool)
 Module returns the module whose path is path — the main module or one of the dependencies — and whether the build contains it.
 
 <a name="Module"></a>
-## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/facade_gen.go>)
+## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
 
 Module is one module of the running binary, with its release, its commit and its local directory told apart. It is an alias of the service value, and the same type as pkg/v1/proc/process.Module.
 

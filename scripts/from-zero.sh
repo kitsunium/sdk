@@ -10,7 +10,7 @@
 #      header and clear kit's section of tools/alloc-lane-targets.txt, exactly
 #      as scripts/regen.sh does;
 #   3. `kit gen -stubs`: the design writes every generated file back, and a
-#      body that panics (stubs_gen.go) for each impl the design names that no
+#      body that panics (gen_stubs.go) for each impl the design names that no
 #      hand-written file declares — then every module of the census must
 #      COMPILE (go build and go vet, tests type-checked too). The stubs are
 #      counted per package: where every body exists, there are none;
@@ -116,7 +116,7 @@ kit gen -stubs >"$lists/gen-stubs.log" || {
   cat "$lists/gen-stubs.log" >&2
   die "kit gen -stubs failed"
 }
-find . -name stubs_gen.go -type f | LC_ALL=C sort >"$lists/stubs"
+find . -name gen_stubs.go -type f | LC_ALL=C sort >"$lists/stubs"
 total=0
 if [ -s "$lists/stubs" ]; then
   printf 'from-zero: stubs, per package:\n'

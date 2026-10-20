@@ -6,8 +6,8 @@ go_library(
     name = "flatbuffers",
     srcs = [
         "doc.go",
-        "facade_gen.go",
         "flatbuffers.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/flatbuffers",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "flatbuffers_test",
     srcs = [
-        "api_gen_test.go",
         "flatbuffers_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":flatbuffers",

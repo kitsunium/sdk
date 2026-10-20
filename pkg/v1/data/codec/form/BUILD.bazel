@@ -6,8 +6,8 @@ go_library(
     name = "form",
     srcs = [
         "doc.go",
-        "facade_gen.go",
         "form.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/form",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "form_test",
     srcs = [
-        "api_gen_test.go",
         "form_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":form",

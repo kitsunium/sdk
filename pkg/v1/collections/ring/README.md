@@ -85,7 +85,7 @@ Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/ring.Full
 Code `0.1.3.1` · reason `RING_FULL` · public "Ring buffer is at capacity"
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)
 
 ```go
 func New[T any](capacity int) (Queue[T], error)
@@ -132,7 +132,7 @@ then empty: true
 </details>
 
 <a name="Queue"></a>
-## type [Queue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/facade_gen.go>)
+## type [Queue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)
 
 Queue is the single-producer, single-consumer ring.
 

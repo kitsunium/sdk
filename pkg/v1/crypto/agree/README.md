@@ -77,7 +77,7 @@ func GenerateKey(a Algorithm) (pub []byte, priv []byte, err error)
 GenerateKey draws a fresh keypair for the named scheme, returning the raw public and private key bytes. An unregistered algorithm returns UnknownAgreementAlgorithm; treat priv as a secret and zero it when done.
 
 <a name="NewKey"></a>
-## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/facade_gen.go>)
+## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/gen_facade.go>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)
@@ -104,7 +104,7 @@ type Algorithm string
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/facade_gen.go>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/agree/gen_facade.go>)
 
 Key is an opaque, redacting 256-bit symmetric key — the same key type the AEAD surface uses. SharedKey returns one; its String output is "\<redacted>".
 

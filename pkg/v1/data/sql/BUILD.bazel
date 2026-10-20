@@ -6,7 +6,7 @@ go_library(
     name = "sql",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "sql.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -27,7 +27,7 @@ go_test(
     name = "sql_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "sql_external_test.go",
     ],
     deps = [

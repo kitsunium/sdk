@@ -31,8 +31,8 @@ alias(
 go_test(
     name = "gate_test",
     srcs = [
-        "api_gen_test.go",
         "gate_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":gate"],
     deps = [

@@ -44,7 +44,7 @@ has recorded for this package since ADR 0078.
 | `discover.go` | which subject this machine is enrolled as, and the refusal to guess |
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
 | `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |
-| `codes_gen.go` | `CodeEnrolmentFailed` and its sentinel — written by kit gen from `design/framework/connectors/ssh.yaml` (ADR 0164) |
+| `gen_codes.go` | `CodeEnrolmentFailed` and its sentinel — written by kit gen from `design/framework/connectors/ssh.yaml` (ADR 0164) |
 | `go.mod` | the module: the root `github.com/kitsunium/sdk` (the framework), `internal` (`internal/kernel/errs`) and the `pkg/v1` families its build reaches (ADR 0171), and `golang.org/x/crypto` |
 | `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate` |
 

@@ -257,7 +257,7 @@
         "public": "The cache backend could not serve the operation"
       },
       "doc": "BackendFailed is returned when a store could not serve an operation. A\nMISS is not this: a miss is (zero, false, nil).\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -270,7 +270,7 @@
       "canonical": "[K comparable, V any] github.com/kitsunium/sdk/internal/kernel/collections/cache.Cache[K, V]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.Cache",
       "doc": "Cache is the public alias for the generic LRU+TTL primitive.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -283,7 +283,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/cache.ChainConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/cache.ChainConfig",
       "doc": "ChainConfig parameterises [NewChain].\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -301,7 +301,7 @@
         "public": "The cache chain cannot be built from the given tiers"
       },
       "doc": "ChainMisconfigured is returned by [NewChain] for a tier set it cannot\nhonour.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -314,7 +314,7 @@
       "canonical": "[K comparable, V any] github.com/kitsunium/sdk/internal/kernel/collections/cache.Config[K, V]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.Config",
       "doc": "Config is the public alias for the primitive's constructor configuration.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -327,7 +327,7 @@
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.EntryValue[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.EntryValue",
       "doc": "Entry is what a caller stores: the value, its lifetime, and the tags by\nwhich it can later be invalidated in bulk.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -340,7 +340,7 @@
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.EntryFetcher[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.EntryFetcher",
       "doc": "EntryFetcher is the sibling that returns the whole entry — value, REMAINING\nTTL, tags — rather than only the value. Both stores built here implement it.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -358,7 +358,7 @@
         "public": "The cache entry is not storable as given"
       },
       "doc": "EntryRejected is returned by Set for an entry no store can represent —\nan empty key, an empty tag, or a negative TTL other than [NoExpiry].\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -371,7 +371,7 @@
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.Fill[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Fill",
       "doc": "Fill computes the entry for a key the cache does not hold: a query, a\nrequest, a derivation. It is your code.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -389,7 +389,7 @@
         "public": "The cache fill function failed and nothing was stored"
       },
       "doc": "FillFailed is returned by Load when your fill fails and its error\ncarries no SDK code of its own. Nothing is stored: caching a failure\nturns one bad minute at the origin into a full TTL of confident wrong\nanswers.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -402,7 +402,7 @@
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.Loader[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Loader",
       "doc": "Loader is the sibling that fills a miss while collapsing concurrent misses\non one key into a single fill — within one process, and not across replicas.\nSee the package documentation before sizing an origin against it.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -415,7 +415,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/cache.MemoryConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/cache.MemoryConfig",
       "doc": "MemoryConfig parameterises [NewMemory]. Its zero value is NOT a working\ncache — MaxEntries must be stated, and is refused rather than defaulted.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -433,7 +433,7 @@
         "public": "The cache cannot be built from the given configuration"
       },
       "doc": "Misconfigured is returned by a store constructor whose configuration it\ncannot honour — a non-positive capacity, a negative default TTL.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -445,7 +445,7 @@
       "spelled": "func[K comparable, V any](cfg Config[K, V]) *Cache[K, V]",
       "canonical": "func[K comparable, V any](cfg github.com/kitsunium/sdk/pkg/v1/data/cache.Config[K, V]) *github.com/kitsunium/sdk/pkg/v1/data/cache.Cache[K, V]",
       "doc": "New builds a [Cache] from cfg. A nil cfg.Clock defaults to the system clock.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -457,7 +457,7 @@
       "spelled": "func[V any](cfg ChainConfig, tiers ...Store[V]) (store Store[V], err error)",
       "canonical": "func[V any](cfg github.com/kitsunium/sdk/pkg/v1/data/cache.ChainConfig, tiers ...github.com/kitsunium/sdk/pkg/v1/data/cache.Store[V]) (store github.com/kitsunium/sdk/pkg/v1/data/cache.Store[V], err error)",
       "doc": "NewChain puts each store in front of the next: tiers[0] is consulted first,\nthe last is the authority. A hit in a far tier is promoted into every nearer\none, carrying its REMAINING TTL and its tags.\n\nEvery tier must implement [EntryFetcher] and [Tagger], checked here and\nrefused rather than discovered per call: a value promoted without its tags\nis one [Tagger] can no longer reach, so an invalidation would report success\nwhile a nearer tier kept serving the entry.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -469,7 +469,7 @@
       "spelled": "func[V any](cfg MemoryConfig) (store Store[V], err error)",
       "canonical": "func[V any](cfg github.com/kitsunium/sdk/pkg/v1/data/cache.MemoryConfig) (store github.com/kitsunium/sdk/pkg/v1/data/cache.Store[V], err error)",
       "doc": "NewMemory builds an in-process store: an LRU with TTL, a tag index, and\nstampede protection on Load.\n\nThe returned [Store] also implements [EntryFetcher], [Tagger] and [Loader].\n\nA non-positive MaxEntries is REFUSED, not defaulted. A capacity is the whole\nstatement of how much memory you are willing to spend, so any number chosen\nfor you would be arbitrary — and the value a zero would naturally mean,\nunbounded, is the dangerous one.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -483,7 +483,7 @@
       "value": "-1",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/cache.NoExpiry",
       "doc": "NoExpiry is the [Entry].TTL that stores an entry with no deadline.\n\nIt is deliberately distinct from the zero TTL, which means \"use the store's\ndefault\". A store with a one-minute default holding one entry that must\nnever expire is a real combination, and reading both meanings out of 0 would\nmake the second one unsayable.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -496,7 +496,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/collections/cache.StatsValue",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.StatsValue",
       "doc": "Stats is the public alias for the primitive's counters snapshot.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -509,7 +509,7 @@
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.Store[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Store",
       "doc": "Store is the cache port: Fetch, Set, Delete.\n\nThe method set is FROZEN at three. New capabilities arrive as SIBLING\ninterfaces you reach by type assertion — [EntryFetcher], [Tagger] and\n[Loader] — because this alias publishes the interface, Go interfaces are\nstructural, and a fourth method would break every downstream implementer at\ncompile time with no deprecation window.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -522,7 +522,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/cache.Tagger",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Tagger",
       "doc": "Tagger is the sibling for invalidating every entry carrying a tag.\n\nThe cost is proportional to the entries carrying the tag, not to the size of\nthe store — measured in internal/service/data/cache/BENCH.md at two store sizes.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -540,7 +540,7 @@
         "public": "A tier of the cache chain could not serve the operation"
       },
       "doc": "TierFailed is returned when a chained operation failed inside one tier.\nIts fields name the position, because a chain's caller holds one Store\nand would otherwise have no way to tell which backend broke.\n",
-      "file": "cache/facade_gen.go",
+      "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -578,7 +578,7 @@
       "spelled": "func() []Format",
       "canonical": "func() []github.com/kitsunium/sdk/pkg/v1/data/codec.Format",
       "doc": "Available returns the sorted list of registered formats.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -724,7 +724,7 @@
         "value": "1.2.0.2"
       },
       "doc": "CodeCodecUnavailable fires when a codec entry exists but is unusable\n(e.g., blank import missing or build tag not active).\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -740,7 +740,7 @@
         "value": "1.2.0.4"
       },
       "doc": "CodePromoteFailed fires when the facade's JSON-bridge promotion path\ncannot serve the request (unknown Format with no promotion strategy,\nor a malformed container after the codec populated it).\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -756,7 +756,7 @@
         "value": "1.2.0.3"
       },
       "doc": "CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on\na codec that does not implement StreamingCodec.\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -772,7 +772,7 @@
         "value": "1.2.0.1"
       },
       "doc": "CodeUnknownFormat fires when a Format is not registered in the registry.\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -785,7 +785,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Codec",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/codec.Codec",
       "doc": "Codec re-exports core/data/codec.Codec for consumers who want direct access.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -802,7 +802,7 @@
         "public": "codec is registered but unavailable"
       },
       "doc": "CodecUnavailable is returned when the registry entry exists but the\ncodec itself cannot be used (reserved for future gating).\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -815,7 +815,7 @@
       "canonical": "github.com/kitsunium/sdk/pkg/v1/data/transform.Algorithm",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
       "doc": "CompressAlgorithm is the transform package's Algorithm, so consumers name a\ncompressor without importing internal/*. Use the Gzip / Flate constants.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -828,7 +828,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Decoder",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/codec.Decoder",
       "doc": "Decoder re-exports core/data/codec.Decoder for streaming callers.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -841,7 +841,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Encoder",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/codec.Encoder",
       "doc": "Encoder re-exports core/data/codec.Encoder for streaming callers.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -893,7 +893,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Format",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/codec.Format",
       "doc": "Format re-exports core/data/codec.Format so consumers only depend on pkg/v1.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1030,7 +1030,7 @@
       "spelled": "func(body []byte) (value string, err error)",
       "canonical": "func(body []byte) (value string, err error)",
       "doc": "MultipartContentType returns the Content-Type header value —\n\"multipart/form-data; boundary=…\", quoted when the boundary needs it — for a\nbody Marshal(Multipart, …) returned. Send it alongside the bytes: the\nboundary is announced in that header, and since the Codec contract has\nnowhere to hand one back, it is read off the body's first delimiter line. A\nbody with no recoverable delimiter is refused with the codec's\nBOUNDARY_INVALID.\n\nA caller streaming through NewEncoder(Multipart, w) must set the header\nbefore the first byte instead: the Encoder returned has a Boundary() string\nmethod, and mime.FormatMediaType builds the same value from it.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1043,7 +1043,7 @@
       "canonical": "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart.Form",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/multipart.FormValue",
       "doc": "MultipartForm is the native Go shape of the [Multipart] format: a whole\nmultipart/form-data body — its RFC 2046 boundary and its parts, in wire\norder. Marshal one to build an upload; Unmarshal into a *MultipartForm to\nread one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal\nalways fills it with the one it recovered, so a decode → encode round trip\nkeeps the original delimiter — and reproduces the whole body byte for byte\nonly for a body this codec encoded, since a part header other than the name,\nfilename and media type is not carried through, and a filename is decoded to\nits last path element.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1056,7 +1056,7 @@
       "canonical": "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart.Part",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/multipart.PartValue",
       "doc": "MultipartPart is one section of a [MultipartForm]: a named field, optionally\na filename and a media type, and the bytes themselves — a file upload is a\npart with FileName and ContentType set. Marshal also accepts a single\nMultipartPart or a []MultipartPart.\n\nName is required. Name, FileName and ContentType are written into the part's\nheader block, so a CR, an LF or a NUL in any of them is refused — never\nescaped — with the codec's VALUE_INVALID naming the field. A UTF-8 filename\nis written as-is (RFC 7578 §4.2).\n\nDecoding keeps only a filename's last path element, reading both '/' and '\\'\nas separators on every operating system — RFC 7578 §4.2 has the receiver\ndrop the directory information a sender may include, and the sender writes\nit with its own separator. `C:\\Users\\ada\\cv.pdf` decodes to `cv.pdf` on\nLinux exactly as on Windows. Nothing else is removed, so a caller turning\nFileName into a path still validates it first.\n",
-      "file": "codec/facade_gen.go",
+      "file": "codec/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1123,7 +1123,7 @@
         "public": "codec promotion failed"
       },
       "doc": "PromoteFailed is returned when the facade's JSON-bridge promotion\ncannot serve the request — either the Format has no promotion\nstrategy registered, or the codec populated a container whose\nshape no longer matches what the wrap stage produced.\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -1140,7 +1140,7 @@
         "public": "codec does not support streaming"
       },
       "doc": "StreamingUnsupported is returned when NewEncoder / NewDecoder is\ncalled on a codec that does not implement StreamingCodec.\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -1183,7 +1183,7 @@
         "public": "codec format is not registered"
       },
       "doc": "UnknownFormat is returned when Marshal / Unmarshal / NewEncoder /\nNewDecoder receives a Format that no codec has registered.\n",
-      "file": "codec/codes_gen.go",
+      "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
     },
@@ -1250,7 +1250,7 @@
         "value": "0.3.9.1"
       },
       "doc": "CodeMarshalFailed is 0.3.9.1: encoding/asn1 could not encode the value.\n",
-      "file": "codec/asn1/facade_gen.go",
+      "file": "codec/asn1/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1267,7 +1267,7 @@
         "value": "0.3.9.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.9.2: the input is not DER or BER the target\ncan hold.\n",
-      "file": "codec/asn1/facade_gen.go",
+      "file": "codec/asn1/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1298,7 +1298,7 @@
         "public": "ASN.1 DER encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/asn1/facade_gen.go",
+      "file": "codec/asn1/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1316,7 +1316,7 @@
         "public": "ASN.1 DER decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/asn1/facade_gen.go",
+      "file": "codec/asn1/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1437,7 +1437,7 @@
         "value": "0.3.24.3"
       },
       "doc": "CodeDecodeFailed is 0.3.24.3: the input is not text of the Format's\nalphabet.\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1454,7 +1454,7 @@
         "value": "0.3.24.1"
       },
       "doc": "CodeMarshalFailed is 0.3.24.1: the value has no JSON encoding.\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1471,7 +1471,7 @@
         "value": "0.3.24.4"
       },
       "doc": "CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 4 KiB\nfor base58 and base62.\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1488,7 +1488,7 @@
         "value": "0.3.24.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.24.2: the decoded text is not JSON the target\ncan hold.\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1506,7 +1506,7 @@
         "public": "base-N decoding failed"
       },
       "doc": "DecodeFailed is the sentinel of [CodeDecodeFailed].\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1537,7 +1537,7 @@
         "public": "base-N encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1555,7 +1555,7 @@
         "public": "base-N input exceeds size limit"
       },
       "doc": "SizeExceeded is the sentinel of [CodeSizeExceeded].\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1573,7 +1573,7 @@
         "public": "base-N decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/baseenc/facade_gen.go",
+      "file": "codec/baseenc/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1586,7 +1586,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.A",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.A",
       "doc": "A is an array.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1611,7 +1611,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Binary",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Binary",
       "doc": "Binary is bytes and the subtype naming what they are.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1625,7 +1625,7 @@
       "value": "7",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryColumn",
       "doc": "BinaryColumn is a compressed time-series column.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1639,7 +1639,7 @@
       "value": "6",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryEncrypted",
       "doc": "BinaryEncrypted is a client-side encrypted value.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1653,7 +1653,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryFunction",
       "doc": "BinaryFunction marks a function.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1667,7 +1667,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryGeneric",
       "doc": "BinaryGeneric is the default subtype, the one a []byte is written as.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1681,7 +1681,7 @@
       "value": "5",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryMD5",
       "doc": "BinaryMD5 is an MD5 digest.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1695,7 +1695,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryOld",
       "doc": "BinaryOld is the deprecated generic subtype, with an inner length.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1709,7 +1709,7 @@
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinarySensitive",
       "doc": "BinarySensitive marks data a server must not log.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1723,7 +1723,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryUUID",
       "doc": "BinaryUUID is an RFC 9562 UUID.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1737,7 +1737,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryUUIDOld",
       "doc": "BinaryUUIDOld is the deprecated, byte-order-ambiguous UUID subtype.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1751,7 +1751,7 @@
       "value": "128",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryUserDefined",
       "doc": "BinaryUserDefined is the first subtype reserved for applications.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1765,7 +1765,7 @@
       "value": "9",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.BinaryVector",
       "doc": "BinaryVector is a packed numeric vector.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1782,7 +1782,7 @@
         "value": "0.3.36.4"
       },
       "doc": "CodeDepthExceeded identifies nesting past 100 levels.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1799,7 +1799,7 @@
         "value": "0.3.36.1"
       },
       "doc": "CodeMarshalFailed identifies a value Marshal or Append cannot encode.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1816,7 +1816,7 @@
         "value": "0.3.36.3"
       },
       "doc": "CodeSizeExceeded identifies an Unmarshal input past 10 MiB.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1833,7 +1833,7 @@
         "value": "0.3.36.2"
       },
       "doc": "CodeUnmarshalFailed identifies input Unmarshal refuses.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1850,7 +1850,7 @@
         "value": "0.3.36.5"
       },
       "doc": "CodeValueInvalid identifies a value type's constructor or parser\nrefusing its input.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1863,7 +1863,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.CodeWithScope",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.CodeWithScope",
       "doc": "CodeWithScope is the deprecated JavaScript with its scope document.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1876,7 +1876,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.D",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.D",
       "doc": "D is a document whose element order matters.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1889,7 +1889,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.DBPointer",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.DBPointer",
       "doc": "DBPointer is the deprecated namespace-and-ObjectID pointer.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1902,7 +1902,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.DateTime",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.DateTime",
       "doc": "DateTime is milliseconds since the Unix epoch, UTC.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1915,7 +1915,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Decimal128",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Decimal128",
       "doc": "Decimal128 is an IEEE 754-2008 128-bit decimal, converted exactly or\nnot at all.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1946,7 +1946,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.E",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.E",
       "doc": "E is one element of a D.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1972,7 +1972,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.JavaScript",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.JavaScript",
       "doc": "JavaScript is JavaScript code.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -1985,7 +1985,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.M",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.M",
       "doc": "M is a document whose element order does not; its keys are written sorted.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2028,7 +2028,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.MaxKey",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.MaxKey",
       "doc": "MaxKey sorts higher than every other value.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2041,7 +2041,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.MinKey",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.MinKey",
       "doc": "MinKey sorts lower than every other value.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2053,7 +2053,7 @@
       "spelled": "func(t time.Time) DateTime",
       "canonical": "func(t time.Time) github.com/kitsunium/sdk/pkg/v1/data/codec/bson.DateTime",
       "doc": "NewDateTimeFromTime returns the DateTime t falls in, truncated to the\nmillisecond.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2065,7 +2065,7 @@
       "spelled": "func(high uint64, low uint64) Decimal128",
       "canonical": "func(high uint64, low uint64) github.com/kitsunium/sdk/pkg/v1/data/codec/bson.Decimal128",
       "doc": "NewDecimal128 returns the decimal whose BID encoding is high (the first\neight bytes) and low (the last eight).\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2090,7 +2090,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Null",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Null",
       "doc": "Null is an explicit null, for a D.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2103,7 +2103,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.ObjectID",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.ObjectID",
       "doc": "ObjectID is the twelve-byte identifier; its text and JSON forms are 24\nhexadecimal digits.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2115,7 +2115,7 @@
       "spelled": "func(s string) (ObjectID, error)",
       "canonical": "func(s string) (github.com/kitsunium/sdk/pkg/v1/data/codec/bson.ObjectID, error)",
       "doc": "ObjectIDFromHex parses the 24-digit hexadecimal form of an ObjectID, in\neither case.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2127,7 +2127,7 @@
       "spelled": "func(s string) (Decimal128, error)",
       "canonical": "func(s string) (github.com/kitsunium/sdk/pkg/v1/data/codec/bson.Decimal128, error)",
       "doc": "ParseDecimal128 parses a decimal's string form — \"1.23\", \"-4E+5\", \"NaN\",\n\"Infinity\" — refusing one a decimal128 cannot hold exactly.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2140,7 +2140,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Regex",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Regex",
       "doc": "Regex is a pattern and its options.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2171,7 +2171,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Symbol",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Symbol",
       "doc": "Symbol is the deprecated symbol.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2184,7 +2184,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Timestamp",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Timestamp",
       "doc": "Timestamp is the replication timestamp: seconds and an increment.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2197,7 +2197,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/bson.Undefined",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/bson.Undefined",
       "doc": "Undefined is the deprecated undefined value.\n",
-      "file": "codec/bson/facade_gen.go",
+      "file": "codec/bson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2262,7 +2262,7 @@
         "value": "0.3.6.1"
       },
       "doc": "CodeMarshalFailed is 0.3.6.1: a value CBOR cannot carry, invalid UTF-8,\nnesting past the bound.\n",
-      "file": "codec/cbor/facade_gen.go",
+      "file": "codec/cbor/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2279,7 +2279,7 @@
         "value": "0.3.6.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.6.2: input that is not one well-formed item,\nor an item the target cannot hold.\n",
-      "file": "codec/cbor/facade_gen.go",
+      "file": "codec/cbor/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2310,7 +2310,7 @@
         "public": "CBOR encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/cbor/facade_gen.go",
+      "file": "codec/cbor/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2328,7 +2328,7 @@
         "public": "CBOR decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/cbor/facade_gen.go",
+      "file": "codec/cbor/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2345,7 +2345,7 @@
         "value": "0.3.8.1"
       },
       "doc": "CodeMarshalFailed is 0.3.8.1: encoding/csv refused to write the records.\n",
-      "file": "codec/csv/facade_gen.go",
+      "file": "codec/csv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2362,7 +2362,7 @@
         "value": "0.3.8.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.8.2: the input is not CSV encoding/csv reads.\n",
-      "file": "codec/csv/facade_gen.go",
+      "file": "codec/csv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2379,7 +2379,7 @@
         "value": "0.3.8.3"
       },
       "doc": "CodeValueInvalid is 0.3.8.3: the value or the target is not a\n[][]string.\n",
-      "file": "codec/csv/facade_gen.go",
+      "file": "codec/csv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2410,7 +2410,7 @@
         "public": "CSV encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/csv/facade_gen.go",
+      "file": "codec/csv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2428,7 +2428,7 @@
         "public": "CSV decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/csv/facade_gen.go",
+      "file": "codec/csv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2446,7 +2446,7 @@
         "public": "CSV codec requires a [][]string value"
       },
       "doc": "ValueInvalid is the sentinel of [CodeValueInvalid].\n",
-      "file": "codec/csv/facade_gen.go",
+      "file": "codec/csv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2464,7 +2464,7 @@
         "public": "FlatBuffers codec requires a *[]byte or BytesAcceptor target"
       },
       "doc": "BadTarget is the sentinel of [CodeBadTarget].\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2482,7 +2482,7 @@
         "public": "FlatBuffers codec requires []byte or a BytesProvider value"
       },
       "doc": "BadType is the sentinel of [CodeBadType].\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2495,7 +2495,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers.BytesAcceptor",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers.BytesAcceptor",
       "doc": "BytesAcceptor is what an Unmarshal target may implement to receive the\nbuffer. The slice is the caller's input, passed by reference: an\nimplementation that keeps it copies it.\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2508,7 +2508,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers.BytesProvider",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers.BytesProvider",
       "doc": "BytesProvider is what a Marshal argument may implement to hand the codec\nits already-encoded FlatBuffer: the bytes are read, never copied, for the\nlength of the call.\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2525,7 +2525,7 @@
         "value": "0.3.23.2"
       },
       "doc": "CodeBadTarget is 0.3.23.2: Unmarshal was given neither a *[]byte nor a\nBytesAcceptor.\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2542,7 +2542,7 @@
         "value": "0.3.23.1"
       },
       "doc": "CodeBadType is 0.3.23.1: Marshal was given neither a []byte nor a\nBytesProvider.\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2559,7 +2559,7 @@
         "value": "0.3.23.3"
       },
       "doc": "CodeTruncated is 0.3.23.3: the buffer is shorter than its root offset,\nor past 64 MiB.\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2590,7 +2590,7 @@
         "public": "FlatBuffers buffer is truncated"
       },
       "doc": "Truncated is the sentinel of [CodeTruncated].\n",
-      "file": "codec/flatbuffers/facade_gen.go",
+      "file": "codec/flatbuffers/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2607,7 +2607,7 @@
         "value": "0.3.40.3"
       },
       "doc": "CodeMultiValue is 0.3.40.3: a repeated key decoded into a\nmap[string]string.\n",
-      "file": "codec/form/facade_gen.go",
+      "file": "codec/form/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2624,7 +2624,7 @@
         "value": "0.3.40.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.40.2: a malformed escape, a ';' separator, or\na decode bound exceeded.\n",
-      "file": "codec/form/facade_gen.go",
+      "file": "codec/form/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2641,7 +2641,7 @@
         "value": "0.3.40.1"
       },
       "doc": "CodeValueInvalid is 0.3.40.1: the value or the target is not\nurl.Values-shaped.\n",
-      "file": "codec/form/facade_gen.go",
+      "file": "codec/form/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2672,7 +2672,7 @@
         "public": "form key carries multiple values"
       },
       "doc": "MultiValue is the sentinel of [CodeMultiValue].\n",
-      "file": "codec/form/facade_gen.go",
+      "file": "codec/form/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2690,7 +2690,7 @@
         "public": "form decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/form/facade_gen.go",
+      "file": "codec/form/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2708,7 +2708,7 @@
         "public": "form codec requires a url.Values-shaped value"
       },
       "doc": "ValueInvalid is the sentinel of [CodeValueInvalid].\n",
-      "file": "codec/form/facade_gen.go",
+      "file": "codec/form/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2725,7 +2725,7 @@
         "value": "0.3.2.1"
       },
       "doc": "CodeMarshalFailed identifies a value encoding/json could not encode (0.3.2.1).\n",
-      "file": "codec/json/facade_gen.go",
+      "file": "codec/json/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2742,7 +2742,7 @@
         "value": "0.3.2.2"
       },
       "doc": "CodeUnmarshalFailed identifies input that is not JSON the target can hold (0.3.2.2).\n",
-      "file": "codec/json/facade_gen.go",
+      "file": "codec/json/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2773,7 +2773,7 @@
         "public": "JSON encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/json/facade_gen.go",
+      "file": "codec/json/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2791,7 +2791,7 @@
         "public": "JSON decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/json/facade_gen.go",
+      "file": "codec/json/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2805,7 +2805,7 @@
       "value": "\"add\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.Add",
       "doc": "Add adds a member, or inserts an element before the one at the index.\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2822,7 +2822,7 @@
         "value": "0.3.90.1"
       },
       "doc": "CodeNotJSON is the code of [NotJSON] (0.3.90.1), for errs.HasCode.\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2834,7 +2834,7 @@
       "spelled": "func(from []byte, to []byte) ([]Edit, error)",
       "canonical": "func(from []byte, to []byte) ([]github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch.Edit, error)",
       "doc": "Diff returns the operations that turn the JSON document from into the JSON\ndocument to, in the order they apply — an empty slice when the two are the\nsame value — or NotJSON.\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2847,7 +2847,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.EditValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.EditValue",
       "doc": "Edit is one operation of a diff: its Op, its Path, the Value it writes\n(add, replace) and the Old value it replaces or removes (replace, remove).\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2865,7 +2865,7 @@
         "public": "A document to compare is not a JSON value"
       },
       "doc": "NotJSON refuses a document that is not exactly one JSON value; its fields\nname the document — \"from\" or \"to\" — and the offset, never its content.\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2878,7 +2878,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.Op",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.Op",
       "doc": "Op is what an operation does, as RFC 6902 names it.\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2892,7 +2892,7 @@
       "value": "\"remove\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.Remove",
       "doc": "Remove removes a member, or the element at the index.\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2906,7 +2906,7 @@
       "value": "\"replace\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch.Replace",
       "doc": "Replace replaces the value at the path, the whole document at \"\".\n",
-      "file": "codec/jsonpatch/facade_gen.go",
+      "file": "codec/jsonpatch/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2920,7 +2920,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Any",
       "doc": "Any is a value whose kind the type does not decide: an interface, a\njson.RawMessage, a type that writes its own JSON.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2934,7 +2934,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Array",
       "doc": "Array is a JSON array whose elements are Shape.Items.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2948,7 +2948,7 @@
       "value": "7",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Boolean",
       "doc": "Boolean is true or false.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2961,7 +2961,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.FieldValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.FieldValue",
       "doc": "Field is one member of an Object, and the Go field behind it.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2973,7 +2973,7 @@
       "spelled": "func[T any]() *Shape",
       "canonical": "func[T any]() *github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape.Shape",
       "doc": "For describes the values of T on the wire: Of(reflect.TypeFor[T]()).\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -2987,7 +2987,7 @@
       "value": "5",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Integer",
       "doc": "Integer is a JSON number the type holds as an integer; Format names the Go\nkind.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3000,7 +3000,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Kind",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Kind",
       "doc": "Kind is the JSON kind a value takes on the wire; its zero value is Any. It\nencodes as its lower-case name.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3014,7 +3014,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Map",
       "doc": "Map is a JSON object keyed by a Go map's keys, whose values are\nShape.Values.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3028,7 +3028,7 @@
       "value": "6",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Number",
       "doc": "Number is a JSON number the type holds as a float, or json.Number.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3042,7 +3042,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Object",
       "doc": "Object is a JSON object whose members are Shape.Fields: a struct.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3054,7 +3054,7 @@
       "spelled": "func(t reflect.Type) *Shape",
       "canonical": "func(t reflect.Type) *github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape.Shape",
       "doc": "Of describes the values of t on the wire. A nil t is Any. It never fails, and\nevery call returns a new tree the caller may keep and change.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3067,7 +3067,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.ShapeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.ShapeValue",
       "doc": "Shape describes the values of one Go type on the wire.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3081,7 +3081,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.String",
       "doc": "String is a JSON string.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3095,7 +3095,7 @@
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Unsupported",
       "doc": "Unsupported is a type encoding/json refuses to encode; a value holding one\nis refused whole.\n",
-      "file": "codec/jsonshape/facade_gen.go",
+      "file": "codec/jsonshape/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3112,7 +3112,7 @@
         "value": "0.3.7.1"
       },
       "doc": "CodeMarshalFailed is 0.3.7.1: a value MessagePack cannot represent,\nnesting past the bound, a writer's failure.\n",
-      "file": "codec/msgpack/facade_gen.go",
+      "file": "codec/msgpack/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3129,7 +3129,7 @@
         "value": "0.3.7.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.7.2: malformed or truncated input, past a\nbound, or a value the target cannot hold.\n",
-      "file": "codec/msgpack/facade_gen.go",
+      "file": "codec/msgpack/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3160,7 +3160,7 @@
         "public": "MessagePack encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/msgpack/facade_gen.go",
+      "file": "codec/msgpack/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3178,7 +3178,7 @@
         "public": "MessagePack decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/msgpack/facade_gen.go",
+      "file": "codec/msgpack/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3196,7 +3196,7 @@
         "public": "multipart boundary is missing or invalid"
       },
       "doc": "BoundaryInvalid is the sentinel of [CodeBoundaryInvalid].\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3213,7 +3213,7 @@
         "value": "0.3.41.4"
       },
       "doc": "CodeBoundaryInvalid is 0.3.41.4: no usable RFC 2046 boundary.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3230,7 +3230,7 @@
         "value": "0.3.41.5"
       },
       "doc": "CodeLimitExceeded is 0.3.41.5: a part, the part count or the body\ncrossed its bound.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3247,7 +3247,7 @@
         "value": "0.3.41.6"
       },
       "doc": "CodeLimitsInvalid is 0.3.41.6: a negative bound.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3264,7 +3264,7 @@
         "value": "0.3.41.1"
       },
       "doc": "CodeMarshalFailed is 0.3.41.1: a part could not be written.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3281,7 +3281,7 @@
         "value": "0.3.41.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.41.2: a malformed part, a part with no name,\na missing closing delimiter.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3298,7 +3298,7 @@
         "value": "0.3.41.3"
       },
       "doc": "CodeValueInvalid is 0.3.41.3: an unusable value — no name, or a CR, LF\nor NUL in a header field.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3310,7 +3310,7 @@
       "spelled": "func(body []byte) (value string, err error)",
       "canonical": "func(body []byte) (value string, err error)",
       "doc": "ContentType returns the Content-Type header value — \"multipart/form-data;\nboundary=…\", quoted when the boundary needs it — for a body Marshal wrote,\nread off its first delimiter line. A body with no recoverable delimiter is\nrefused with CodeBoundaryInvalid.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3323,7 +3323,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/multipart.FormValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/multipart.FormValue",
       "doc": "Form is the native value of the multipart/form-data Format: a whole body —\nits RFC 2046 boundary and its parts, in wire order. Marshal one to build an\nupload; Unmarshal into a *Form to read one. An empty Boundary asks Marshal\nto generate a delimiter; Unmarshal always fills it with the one it\nrecovered.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3354,7 +3354,7 @@
         "public": "multipart payload exceeds a configured limit"
       },
       "doc": "LimitExceeded is the sentinel of [CodeLimitExceeded].\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3372,7 +3372,7 @@
         "public": "multipart limits are not usable"
       },
       "doc": "LimitsInvalid is the sentinel of [CodeLimitsInvalid].\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3390,7 +3390,7 @@
         "public": "multipart encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3403,7 +3403,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/multipart.PartValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/multipart.PartValue",
       "doc": "Part is one section of a [Form]: a named field, optionally a filename and a\nmedia type, and the bytes. Name is required, and a CR, an LF or a NUL in\nName, FileName or ContentType is refused, never escaped. Decoding keeps a\nfilename's last path element only.\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3421,7 +3421,7 @@
         "public": "multipart decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3439,7 +3439,7 @@
         "public": "multipart codec rejected the value shape"
       },
       "doc": "ValueInvalid is the sentinel of [CodeValueInvalid].\n",
-      "file": "codec/multipart/facade_gen.go",
+      "file": "codec/multipart/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3456,7 +3456,7 @@
         "value": "0.3.11.1"
       },
       "doc": "CodeMarshalFailed is 0.3.11.1: a record has no JSON encoding.\n",
-      "file": "codec/ndjson/facade_gen.go",
+      "file": "codec/ndjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3473,7 +3473,7 @@
         "value": "0.3.11.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.11.2: a line is not JSON its element can\nhold.\n",
-      "file": "codec/ndjson/facade_gen.go",
+      "file": "codec/ndjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3490,7 +3490,7 @@
         "value": "0.3.11.3"
       },
       "doc": "CodeValueInvalid is 0.3.11.3: the value or the target is not a slice.\n",
-      "file": "codec/ndjson/facade_gen.go",
+      "file": "codec/ndjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3521,7 +3521,7 @@
         "public": "NDJSON encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/ndjson/facade_gen.go",
+      "file": "codec/ndjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3539,7 +3539,7 @@
         "public": "NDJSON decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/ndjson/facade_gen.go",
+      "file": "codec/ndjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3557,7 +3557,7 @@
         "public": "NDJSON codec requires a slice target"
       },
       "doc": "ValueInvalid is the sentinel of [CodeValueInvalid].\n",
-      "file": "codec/ndjson/facade_gen.go",
+      "file": "codec/ndjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3574,7 +3574,7 @@
         "value": "0.3.10.1"
       },
       "doc": "CodeMarshalFailed is 0.3.10.1: encoding/pem refused to write the block.\n",
-      "file": "codec/pem/facade_gen.go",
+      "file": "codec/pem/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3591,7 +3591,7 @@
         "value": "0.3.10.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.10.2: no PEM block in the input.\n",
-      "file": "codec/pem/facade_gen.go",
+      "file": "codec/pem/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3608,7 +3608,7 @@
         "value": "0.3.10.3"
       },
       "doc": "CodeValueInvalid is 0.3.10.3: the value is not a *pem.Block, or the\ntarget a **pem.Block.\n",
-      "file": "codec/pem/facade_gen.go",
+      "file": "codec/pem/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3639,7 +3639,7 @@
         "public": "PEM encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/pem/facade_gen.go",
+      "file": "codec/pem/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3657,7 +3657,7 @@
         "public": "PEM decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/pem/facade_gen.go",
+      "file": "codec/pem/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3675,7 +3675,7 @@
         "public": "PEM codec requires a *pem.Block value"
       },
       "doc": "ValueInvalid is the sentinel of [CodeValueInvalid].\n",
-      "file": "codec/pem/facade_gen.go",
+      "file": "codec/pem/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3692,7 +3692,7 @@
         "value": "0.3.72.8"
       },
       "doc": "CodeDecodeMisconfigured identifies a call no input can satisfy: a\nnon-positive bound, or a target that is not a non-nil pointer.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3709,7 +3709,7 @@
         "value": "0.3.72.2"
       },
       "doc": "CodeDocumentEmpty identifies a document of zero bytes (400).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3726,7 +3726,7 @@
         "value": "0.3.72.3"
       },
       "doc": "CodeDocumentMalformed identifies a document that is not exactly one\nwell-formed JSON value (400).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3743,7 +3743,7 @@
         "value": "0.3.72.1"
       },
       "doc": "CodeDocumentTooLarge identifies a document longer than the bound (413).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3760,7 +3760,7 @@
         "value": "0.3.72.7"
       },
       "doc": "CodeDocumentUnreadable identifies a reader that failed before the document\nended (400).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3777,7 +3777,7 @@
         "value": "0.3.72.6"
       },
       "doc": "CodeMediaTypeUnsupported identifies a request body that does not declare\nJSON (415).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3794,7 +3794,7 @@
         "value": "0.3.72.4"
       },
       "doc": "CodeMemberUnknown identifies a member the target does not declare (400).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3811,7 +3811,7 @@
         "value": "0.3.72.5"
       },
       "doc": "CodeValueMismatched identifies a value the target cannot hold (400).\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3823,7 +3823,7 @@
       "spelled": "func(r io.Reader, v any, maxBytes int64) error",
       "canonical": "func(r io.Reader, v any, maxBytes int64) error",
       "doc": "Decode reads exactly one JSON value from r into v, a non-nil pointer,\nreading at most maxBytes bytes of it — the bound plus the one byte that\nproves it was exceeded, never more. On a refusal v may be partly written.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3841,7 +3841,7 @@
         "public": "The JSON decoder was called with an argument it cannot use"
       },
       "doc": "DecodeMisconfigured refuses a call no input can satisfy.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3859,7 +3859,7 @@
         "public": "The JSON document is empty"
       },
       "doc": "DocumentEmpty reports a document of zero bytes.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3877,7 +3877,7 @@
         "public": "The JSON document is not well-formed"
       },
       "doc": "DocumentMalformed refuses a document that is not one well-formed value.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3895,7 +3895,7 @@
         "public": "The JSON document is larger than the limit"
       },
       "doc": "DocumentTooLarge refuses a document longer than the bound.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3913,7 +3913,7 @@
         "public": "The JSON document could not be read"
       },
       "doc": "DocumentUnreadable wraps a reader that failed before the document ended.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3927,7 +3927,7 @@
       "value": "256",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/codec/strictjson.MaxPointerBytes",
       "doc": "MaxPointerBytes bounds the JSON Pointer PointerOf returns; a longer one is\ncut back to the deepest ancestor that fits.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3945,7 +3945,7 @@
         "public": "The request body must be application/json or a +json media type"
       },
       "doc": "MediaTypeUnsupported refuses a request body that does not declare JSON.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3963,7 +3963,7 @@
         "public": "The JSON document has a member the target does not accept"
       },
       "doc": "MemberUnknown refuses a member the target does not declare.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3975,7 +3975,7 @@
       "spelled": "func(err error) (pointer string, ok bool)",
       "canonical": "func(err error) (pointer string, ok bool)",
       "doc": "PointerOf returns where a refused document went wrong, as a JSON Pointer\n(\"\" is the document itself), and whether err carries one. It is the\ndocument's own member names and indices, bounded to MaxPointerBytes — render\nit as untrusted text.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -3993,7 +3993,7 @@
         "public": "The JSON document has a value of the wrong type or out of range"
       },
       "doc": "ValueMismatched refuses a value the target cannot hold.\n",
-      "file": "codec/strictjson/facade_gen.go",
+      "file": "codec/strictjson/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4005,7 +4005,7 @@
       "spelled": "func(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error",
       "canonical": "func(w net/http.ResponseWriter, req *net/http.Request, v any, maxBytes int64) error",
       "doc": "DecodeRequest decodes the JSON body of req into v, a non-nil pointer, as\nstrictjson's Decode does, through http.MaxBytesReader, after refusing an\nempty body (CodeDocumentEmpty) and a body that does not declare JSON\n(CodeMediaTypeUnsupported). w is used only to have net/http close the\nconnection after an oversized body; nil is accepted.\n",
-      "file": "codec/strictjson/httpbody/facade_gen.go",
+      "file": "codec/strictjson/httpbody/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4022,7 +4022,7 @@
         "value": "0.3.22.4"
       },
       "doc": "CodeDepthExceeded is 0.3.22.4: nesting past 32 levels.\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4039,7 +4039,7 @@
         "value": "0.3.22.1"
       },
       "doc": "CodeMarshalFailed is 0.3.22.1: the value could not be encoded, or the\nwriter failed.\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4056,7 +4056,7 @@
         "value": "0.3.22.5"
       },
       "doc": "CodeSizeExceeded is 0.3.22.5: an input past 10 MiB.\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4073,7 +4073,7 @@
         "value": "0.3.22.6"
       },
       "doc": "CodeTruncated is 0.3.22.6: the input ends inside a record.\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4090,7 +4090,7 @@
         "value": "0.3.22.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.22.2: a malformed record, a type mismatch, or\nthe reader failed.\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4107,7 +4107,7 @@
         "value": "0.3.22.3"
       },
       "doc": "CodeUnsupportedType is 0.3.22.3: a channel, a function, a complex\nnumber, an unsafe pointer.\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4125,7 +4125,7 @@
         "public": "TLV nesting depth exceeds limit"
       },
       "doc": "DepthExceeded is the sentinel of [CodeDepthExceeded].\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4156,7 +4156,7 @@
         "public": "TLV encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4174,7 +4174,7 @@
         "public": "TLV input exceeds size limit"
       },
       "doc": "SizeExceeded is the sentinel of [CodeSizeExceeded].\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4192,7 +4192,7 @@
         "public": "TLV buffer truncated"
       },
       "doc": "Truncated is the sentinel of [CodeTruncated].\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4210,7 +4210,7 @@
         "public": "TLV decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4228,7 +4228,7 @@
         "public": "TLV codec cannot encode this type"
       },
       "doc": "UnsupportedType is the sentinel of [CodeUnsupportedType].\n",
-      "file": "codec/tlv/facade_gen.go",
+      "file": "codec/tlv/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4245,7 +4245,7 @@
         "value": "0.3.5.1"
       },
       "doc": "CodeMarshalFailed identifies a Go value TOML cannot represent (0.3.5.1).\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4262,7 +4262,7 @@
         "value": "0.3.5.2"
       },
       "doc": "CodeUnmarshalFailed identifies a document the decoder cannot read, or a\nvalue its target cannot hold (0.3.5.2).\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4288,7 +4288,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/toml.LocalDate",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/toml.LocalDate",
       "doc": "LocalDate is a calendar day in no time zone: what a TOML local date such as\n1979-05-27 decodes to in an untyped target. It writes and reads itself as\nYYYY-MM-DD, through String, MarshalText and UnmarshalText, and AsTime places\nit at midnight in a zone.\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4301,7 +4301,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/toml.LocalDateTime",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/toml.LocalDateTime",
       "doc": "LocalDateTime is a date and a time of day in no time zone: what a TOML local\ndate-time such as 1979-05-27T07:32:00 decodes to in an untyped target. AsTime\nplaces it in a zone.\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4314,7 +4314,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/toml.LocalTime",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/codec/toml.LocalTime",
       "doc": "LocalTime is a time of day in no time zone: what a TOML local time such as\n07:32:00.999 decodes to in an untyped target. Precision is the number of\nfractional digits the document wrote, which String writes back.\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4332,7 +4332,7 @@
         "public": "TOML encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4350,7 +4350,7 @@
         "public": "TOML decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/toml/facade_gen.go",
+      "file": "codec/toml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4367,7 +4367,7 @@
         "value": "0.3.3.1"
       },
       "doc": "CodeMarshalFailed is 0.3.3.1: encoding/xml could not encode the value.\n",
-      "file": "codec/xml/facade_gen.go",
+      "file": "codec/xml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4384,7 +4384,7 @@
         "value": "0.3.3.2"
       },
       "doc": "CodeUnmarshalFailed is 0.3.3.2: the input is not XML the target can\nhold.\n",
-      "file": "codec/xml/facade_gen.go",
+      "file": "codec/xml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4415,7 +4415,7 @@
         "public": "XML encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/xml/facade_gen.go",
+      "file": "codec/xml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4433,7 +4433,7 @@
         "public": "XML decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/xml/facade_gen.go",
+      "file": "codec/xml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4451,7 +4451,7 @@
         "public": "YAML aliases (*) are outside the supported subset"
       },
       "doc": "AliasRefused is the sentinel of [CodeAliasRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4469,7 +4469,7 @@
         "public": "YAML anchors (&) are outside the supported subset"
       },
       "doc": "AnchorRefused is the sentinel of [CodeAnchorRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4486,7 +4486,7 @@
         "value": "0.3.4.4"
       },
       "doc": "CodeAliasRefused identifies an alias (0.3.4.4).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4503,7 +4503,7 @@
         "value": "0.3.4.3"
       },
       "doc": "CodeAnchorRefused identifies an anchor (0.3.4.3).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4520,7 +4520,7 @@
         "value": "0.3.4.8"
       },
       "doc": "CodeComplexKeyRefused identifies a complex mapping key (0.3.4.8).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4537,7 +4537,7 @@
         "value": "0.3.4.9"
       },
       "doc": "CodeDirectiveRefused identifies a directive (0.3.4.9).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4554,7 +4554,7 @@
         "value": "0.3.4.10"
       },
       "doc": "CodeDuplicateKey identifies a mapping holding one key twice (0.3.4.10).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4571,7 +4571,7 @@
         "value": "0.3.4.11"
       },
       "doc": "CodeLeadingZeroRefused identifies an integer with a leading zero where\nits value matters (0.3.4.11).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4588,7 +4588,7 @@
         "value": "0.3.4.1"
       },
       "doc": "CodeMarshalFailed identifies a value the encoder cannot write (0.3.4.1).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4605,7 +4605,7 @@
         "value": "0.3.4.6"
       },
       "doc": "CodeMergeKeyRefused identifies a merge key (0.3.4.6).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4622,7 +4622,7 @@
         "value": "0.3.4.7"
       },
       "doc": "CodeMultiDocRefused identifies a second document (0.3.4.7).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4639,7 +4639,7 @@
         "value": "0.3.4.5"
       },
       "doc": "CodeTagRefused identifies an explicit tag (0.3.4.5).\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4656,7 +4656,7 @@
         "value": "0.3.4.2"
       },
       "doc": "CodeUnmarshalFailed identifies a document the decoder cannot read into\nits target (0.3.4.2); every refusal below carries it in its trail.\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4674,7 +4674,7 @@
         "public": "YAML complex keys (?) are outside the supported subset"
       },
       "doc": "ComplexKeyRefused is the sentinel of [CodeComplexKeyRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4692,7 +4692,7 @@
         "public": "YAML directives (%YAML, %TAG) are outside the supported subset"
       },
       "doc": "DirectiveRefused is the sentinel of [CodeDirectiveRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4710,7 +4710,7 @@
         "public": "YAML mapping holds the same key twice"
       },
       "doc": "DuplicateKey is the sentinel of [CodeDuplicateKey].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4741,7 +4741,7 @@
         "public": "YAML integer with a leading zero is octal in YAML 1.1 and decimal in 1.2"
       },
       "doc": "LeadingZeroRefused is the sentinel of [CodeLeadingZeroRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4759,7 +4759,7 @@
         "public": "YAML encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4777,7 +4777,7 @@
         "public": "YAML merge keys (<<) are outside the supported subset"
       },
       "doc": "MergeKeyRefused is the sentinel of [CodeMergeKeyRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4795,7 +4795,7 @@
         "public": "YAML input holds more than one document"
       },
       "doc": "MultipleDocumentsRefused is the sentinel of [CodeMultiDocRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4813,7 +4813,7 @@
         "public": "YAML tags (! and !!) are outside the supported subset"
       },
       "doc": "TagRefused is the sentinel of [CodeTagRefused].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4831,7 +4831,7 @@
         "public": "YAML decoding failed"
       },
       "doc": "UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].\n",
-      "file": "codec/yaml/facade_gen.go",
+      "file": "codec/yaml/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4844,7 +4844,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.Announcer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Announcer",
       "doc": "Announcer is the public alias for the pair of hooks both engines answer\nexactly as they are: OnWrite and OnDelete.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4861,7 +4861,7 @@
         "value": "0.3.80.2"
       },
       "doc": "CodeDocumentExists: Insert over a taken key.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4878,7 +4878,7 @@
         "value": "0.3.80.5"
       },
       "doc": "CodeDocumentKeyChanged: an Update's function changed the key.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4895,7 +4895,7 @@
         "value": "0.3.80.4"
       },
       "doc": "CodeDocumentKeyEmpty: the key function returned the empty string.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4912,7 +4912,7 @@
         "value": "0.3.80.1"
       },
       "doc": "CodeDocumentNotFound: no document under the key, or nobody holds the\nkey in a unique index.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4929,7 +4929,7 @@
         "value": "0.3.80.21"
       },
       "doc": "CodeDocumentNotTrashed: no document is in the trash under the key.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4946,7 +4946,7 @@
         "value": "0.3.80.8"
       },
       "doc": "CodeDocumentUndecodable: a stored document no longer fits the type.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4963,7 +4963,7 @@
         "value": "0.3.80.9"
       },
       "doc": "CodeDocumentUnencodable: encoding/json refused the value.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4980,7 +4980,7 @@
         "value": "0.3.80.12"
       },
       "doc": "CodeIndexBroken: the stored documents break a unique index.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -4997,7 +4997,7 @@
         "value": "0.3.80.7"
       },
       "doc": "CodeIndexNotUnique: Lookup on a multi-valued index.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5014,7 +5014,7 @@
         "value": "0.3.80.6"
       },
       "doc": "CodeIndexUnknown: a read named an index the store never declared.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5031,7 +5031,7 @@
         "value": "0.3.80.17"
       },
       "doc": "CodeKeyTooLong: a key is longer than the SQL store's key columns hold.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5048,7 +5048,7 @@
         "value": "0.3.80.11"
       },
       "doc": "CodeLoadFailed: the store's files cannot be read or are not a store's.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5065,7 +5065,7 @@
         "value": "0.3.80.10"
       },
       "doc": "CodePersistFailed: the filesystem refused the write; nothing changed.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5082,7 +5082,7 @@
         "value": "0.3.80.16"
       },
       "doc": "CodeStatementFailed: the SQL store's database did not complete a call.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5099,7 +5099,7 @@
         "value": "0.3.80.13"
       },
       "doc": "CodeStoreClosed: a call after Close.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5116,7 +5116,7 @@
         "value": "0.3.80.14"
       },
       "doc": "CodeStoreMisconfigured: Open refused its configuration.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5133,7 +5133,7 @@
         "value": "0.3.80.3"
       },
       "doc": "CodeUniqueKeyTaken: a unique index refused the write.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5150,7 +5150,7 @@
         "value": "0.3.80.19"
       },
       "doc": "CodeVersionNotFound: the document keeps no version of that number.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5167,7 +5167,7 @@
         "value": "0.3.80.22"
       },
       "doc": "CodeVersionsInvalid: versions PutDocument cannot write as they are given.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5184,7 +5184,7 @@
         "value": "0.3.80.18"
       },
       "doc": "CodeVersionsNotKept: a call on versions to a store that keeps none.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5201,7 +5201,7 @@
         "value": "0.3.80.20"
       },
       "doc": "CodeVersionsRewriteRefused: a rewrite returned what a rewrite may not.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5218,7 +5218,7 @@
         "value": "0.3.80.15"
       },
       "doc": "CodeWriteUnconfirmed: the write stands, its durability is in doubt.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5231,7 +5231,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.Collection[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Collection",
       "doc": "Collection is the public alias for the port of a store whose calls take no\ncontext, which [Store] implements: Get, List, Filter, Entries, Lookup and\nFind; Put, Insert, Replace, Update and Delete; OnWrite and OnDelete. It is\nwhat a caller depends on to stand a double in for a [Store]; Stats, Fold\nand Close are the engine's own.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5244,7 +5244,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.CollectionContext[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CollectionContext",
       "doc": "CollectionContext is the public alias for [Collection] with a context on\nevery call, which [SQLStore] implements; Count and Reindex are the engine's\nown.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5257,7 +5257,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.Config[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.Config",
       "doc": "Config is the public alias for a store's configuration: Key (required), FS\nand Path (both, or neither for a memory store), FoldAt, and Versions with\nits Clock and Held.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5271,7 +5271,7 @@
       "value": "1024",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/docstore.DefaultFoldAt",
       "doc": "DefaultFoldAt is the least number of overlay entries that folds the overlay\ninto the snapshot when [Config].FoldAt is zero.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5289,7 +5289,7 @@
         "public": "A document already has this key"
       },
       "doc": "DocumentExists refuses an insertion over a taken key.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5307,7 +5307,7 @@
         "public": "An update cannot change a document's key"
       },
       "doc": "DocumentKeyChanged refuses an update that renames.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5325,7 +5325,7 @@
         "public": "A document's key cannot be empty"
       },
       "doc": "DocumentKeyEmpty refuses a document whose key is empty.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5343,7 +5343,7 @@
         "public": "No document has this key"
       },
       "doc": "DocumentNotFound is a miss.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5361,7 +5361,7 @@
         "public": "No document with this key is in the trash"
       },
       "doc": "DocumentNotTrashed is a miss on the trash: no document is trashed under the key.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5379,7 +5379,7 @@
         "public": "A stored document does not match its type"
       },
       "doc": "DocumentUndecodable reports a stored document the type no longer fits.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5397,7 +5397,7 @@
         "public": "The document cannot be encoded"
       },
       "doc": "DocumentUnencodable refuses a value encoding/json cannot encode.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5410,7 +5410,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.EntryValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.EntryValue",
       "doc": "Entry is the public alias for one stored document as JSON, with its key.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5422,7 +5422,7 @@
       "spelled": "func[T any](name string, keys func(T) []string) IndexSpec[T]",
       "canonical": "func[T any](name string, keys func(T) []string) github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexSpec[T]",
       "doc": "Index declares an index where a document may have several keys and a key\nseveral documents. Empty keys are not indexed.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5440,7 +5440,7 @@
         "public": "The stored documents break a unique index"
       },
       "doc": "IndexBroken refuses documents that break a unique index.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5458,7 +5458,7 @@
         "public": "The index is not unique: read it with Find"
       },
       "doc": "IndexNotUnique refuses a Lookup on a multi-valued index.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5471,7 +5471,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.IndexSpec[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IndexSpec",
       "doc": "IndexSpec is the public alias for one secondary index's declaration, built\nby [Unique] or [Index] and given to [Open].\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5489,7 +5489,7 @@
         "public": "The store has no index of this name"
       },
       "doc": "IndexUnknown refuses a read of an undeclared index.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5502,7 +5502,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.KeyLister",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.KeyLister",
       "doc": "KeyLister is the public alias for the sibling of [Collection] that lists\nthe documents' keys alone, in key order and without a context, which\n[Store] implements: Keys.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5515,7 +5515,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.KeyListerContext",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.KeyListerContext",
       "doc": "KeyListerContext is the public alias for [KeyLister] with a context on\nevery call, which [SQLStore] implements.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5533,7 +5533,7 @@
         "public": "A key is longer than the store can keep"
       },
       "doc": "KeyTooLong refuses a key longer than the SQL store's key columns hold.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5551,7 +5551,7 @@
         "public": "The store's files could not be loaded"
       },
       "doc": "LoadFailed refuses files that are not a store's.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5565,7 +5565,7 @@
       "value": "64",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/docstore.MaxSQLIndexNameLen",
       "doc": "MaxSQLIndexNameLen is the longest index name a SQL store accepts, in bytes.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5579,7 +5579,7 @@
       "value": "1024",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/docstore.MaxSQLKeyLen",
       "doc": "MaxSQLKeyLen is the longest store key, and the longest index key as it\nreaches the table, a SQL store accepts, in bytes.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5593,7 +5593,7 @@
       "value": "58",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/docstore.MaxSQLTableLen",
       "doc": "MaxSQLTableLen is the longest table name [OpenSQL] and [SQLMigration]\naccept, in bytes: PostgreSQL's limit of 63, less what the store appends to\nderive its index table's name.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5605,7 +5605,7 @@
       "spelled": "func[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)",
       "canonical": "func[T any](cfg github.com/kitsunium/sdk/pkg/v1/data/docstore.Config[T], indexes ...github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexSpec[T]) (*github.com/kitsunium/sdk/pkg/v1/data/docstore.Store[T], error)",
       "doc": "Open builds a store from cfg with the secondary indexes given: in memory\nwithout a filesystem, otherwise loaded from it — the snapshot, the overlay\nreplayed on top, the indexes rebuilt. It creates the directories the store\nlives in, 0700, and writes its files 0600.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5617,7 +5617,7 @@
       "spelled": "func[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error)",
       "canonical": "func[T any](cfg github.com/kitsunium/sdk/pkg/v1/data/docstore.SQLConfig[T], indexes ...github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexSpec[T]) (*github.com/kitsunium/sdk/pkg/v1/data/docstore.SQLStore[T], error)",
       "doc": "OpenSQL builds a store over SQL from cfg with the secondary indexes given,\ndeclared as for [Open]. It sends no statement: its tables are\n[SQLMigration]'s, run by the caller's Migrator before the store is used.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5635,7 +5635,7 @@
         "public": "The document could not be written to storage"
       },
       "doc": "PersistFailed reports a write the filesystem refused.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5648,7 +5648,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.SQLConfig[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.SQLConfig",
       "doc": "SQLConfig is the public alias for a SQL store's configuration: Key,\nTransactor, Dialect and Table (required), IndexKey, and Versions with its\nClock and Held.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5660,7 +5660,7 @@
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
       "doc": "SQLMigration returns the migration that creates the two tables a SQL store\nnamed table keeps on dialect, numbered version for the caller's own version\ntable. Its Down drops both, and every document in them. Every statement does\nnothing when its table exists, so a run MySQL's implicit commit stopped\nhalfway completes when it runs again.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5673,7 +5673,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.SQLStore[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.SQLStore",
       "doc": "SQLStore is the public alias for the document store over SQL: Get, List,\nFilter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update\nand Delete write, and their Stamped forms say what the version they make\nrecords; Versions, Version, RewriteVersions and VersionWeight, Trash,\nRestore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's\ntransaction commits; Reindex files the stored documents again. Every call\ntakes a context.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5685,7 +5685,7 @@
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
       "doc": "SQLVersionsMigration returns the migration that creates the table a SQL\nstore named table keeps its versions in on dialect, numbered version for the\ncaller's own version table, beside [SQLMigration]'s. A store opened with\n[SQLConfig].Versions needs it. Its Down drops the table, and every version\nin it: run it to turn versions off for good.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5698,7 +5698,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.StampValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.StampValue",
       "doc": "Stamp is the public alias for what a Stamped write says about the version\nit makes: the Meta the version records, or InPlace — no version.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5716,7 +5716,7 @@
         "public": "The store's database did not complete the request"
       },
       "doc": "StatementFailed reports a call the SQL store's database did not\ncomplete; the driver's error is joined beside it, its text withheld.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5729,7 +5729,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/docstore.StatsValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.StatsValue",
       "doc": "Stats is the public alias for what a store says about itself: documents,\npending overlay entries, folds, the last automatic fold's failure, and\nwhat its versions weigh.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5742,7 +5742,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.Store[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.Store",
       "doc": "Store is the public alias for the document store: Get, List, Filter,\nEntries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and\nDelete write, and their Stamped forms say what the version they make\nrecords; Versions and Version read a document's versions, RewriteVersions\nrewrites its former ones, VersionWeight says what they weigh; Trash,\nRestore, Purge and Tombstones keep its trash; OnWrite and OnDelete\nannounce; Fold and Close bring it to rest.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5760,7 +5760,7 @@
         "public": "The store is closed"
       },
       "doc": "StoreClosed refuses a call after Close.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5778,7 +5778,7 @@
         "public": "The document store cannot be opened as configured"
       },
       "doc": "StoreMisconfigured refuses a configuration no store could honour.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5791,7 +5791,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue",
       "doc": "Tombstone is the public alias for a document in the trash, as Tombstones\nlists it: its Key, and the instant At it was trashed.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5804,7 +5804,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.Trashable",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Trashable",
       "doc": "Trashable is the public alias for the sibling of [Collection] that keeps a\ndocument's trash without a context, which [Store] implements: Trash,\nRestore, Purge and Tombstones.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5817,7 +5817,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext",
       "doc": "TrashableContext is the public alias for [Trashable] with a context on\nevery call, which [SQLStore] implements.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5829,7 +5829,7 @@
       "spelled": "func[T any](name string, key func(T) string) IndexSpec[T]",
       "canonical": "func[T any](name string, key func(T) string) github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexSpec[T]",
       "doc": "Unique declares a unique index over the one key key returns. An empty key is\nnot indexed, so any number of documents may have none.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5847,7 +5847,7 @@
         "public": "Another document already has this key in a unique index"
       },
       "doc": "UniqueKeyTaken refuses a write a unique index cannot file.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5860,7 +5860,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue",
       "doc": "Version is the public alias for one version of a document: its Number from\n1, the instant At the write that made it ran, the Meta that write carried,\nand the document as JSON.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5878,7 +5878,7 @@
         "public": "The document keeps no version of this number"
       },
       "doc": "VersionNotFound is a miss on a version: never made, or pruned.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5891,7 +5891,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeigher",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeigher",
       "doc": "VersionWeigher is the public alias for the sibling of [Collection] that\nreports what a store's versions weigh without a context, which [Store]\nimplements: VersionWeight.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5904,7 +5904,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeigherContext",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeigherContext",
       "doc": "VersionWeigherContext is the public alias for [VersionWeigher] with a\ncontext on every call, which [SQLStore] implements.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5917,7 +5917,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeightValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeightValue",
       "doc": "VersionWeight is the public alias for what a store's versions weigh, as\nVersionWeight reports it: its Former versions, its Trashed documents,\nand the Bytes of the JSON they hold.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5930,7 +5930,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter",
       "doc": "VersionWriter is the public alias for the sibling of [Collection] that\nwrites a document with its versions — numbers, instants, metadata — and\nits trash as they are given, which [Store] implements: PutDocument. A\ncopy from one engine to another needs it.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5943,7 +5943,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext",
       "doc": "VersionWriterContext is the public alias for [VersionWriter] with a\ncontext on every call, which [SQLStore] implements.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5956,7 +5956,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.Versioned[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Versioned",
       "doc": "Versioned is the public alias for the sibling of [Collection] that reads and\nwrites a document's versions without a context, which [Store] implements:\nthe four Stamped writes, Versions, Version and RewriteVersions.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5969,7 +5969,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.VersionedContext[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionedContext",
       "doc": "VersionedContext is the public alias for [Versioned] with a context on every\ncall, which [SQLStore] implements beside [CollectionContext].\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -5987,7 +5987,7 @@
         "public": "The document's versions cannot be written as they were given"
       },
       "doc": "VersionsInvalid refuses versions PutDocument cannot write as they are given.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6005,7 +6005,7 @@
         "public": "This store keeps no versions"
       },
       "doc": "VersionsNotKept refuses a call on versions to a store that keeps none.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6023,7 +6023,7 @@
         "public": "A rewrite of versions may only drop or rewrite the versions it was given"
       },
       "doc": "VersionsRewriteRefused refuses what a rewrite's function returned.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6041,7 +6041,7 @@
         "public": "The document was stored, but its durability could not be confirmed"
       },
       "doc": "WriteUnconfirmed reports a write that stands but may not survive a\npower loss.\n",
-      "file": "docstore/facade_gen.go",
+      "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6054,7 +6054,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Broker",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Broker",
       "doc": "Broker is the public alias for the queue contract. It is FROZEN at four\nmethods; capabilities arrive as siblings ([DeadLetterReader],\n[LeaseExtender], [Waker], [Rejecter], [DeadLetterManager],\n[DeadLetterWriter], [MessageReader], [MessageWriter]) reached by type\nassertion.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6071,7 +6071,7 @@
         "value": "0.2.23.7"
       },
       "doc": "CodeDeadLetterNotFound is [DeadLetterNotFound]'s code.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6088,7 +6088,7 @@
         "value": "0.2.23.8"
       },
       "doc": "CodeInvalidDeadLetter is [InvalidDeadLetter]'s code, the one sentinel ADR\n0178 added, for errs.HasCode.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6105,7 +6105,7 @@
         "value": "0.2.23.9"
       },
       "doc": "CodeInvalidMessage is [InvalidMessage]'s code, for errs.HasCode.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6122,7 +6122,7 @@
         "value": "0.2.23.6"
       },
       "doc": "CodeNotRetryable is the code [DoNotRetry] adds to a failure's wrap\ntrail: errs.HasCode(err, CodeNotRetryable) recognises the mark, where\nerrors.Is(err, NotRetryable) sees only an origin.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6139,7 +6139,7 @@
         "value": "0.3.53.5"
       },
       "doc": "CodeSQLQueueMisconfigured is [SQLQueueMisconfigured]'s code.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6151,7 +6151,7 @@
       "spelled": "func(ctx context.Context, broker Broker, cfg ConsumerConfig) error",
       "canonical": "func(ctx context.Context, broker github.com/kitsunium/sdk/pkg/v1/data/queue.Broker, cfg github.com/kitsunium/sdk/pkg/v1/data/queue.ConsumerConfig) error",
       "doc": "Consume runs cfg.Handler against broker until ctx is done, on\ncfg.Parallelism goroutines it owns.\n\nIt returns nil when ctx ends — a cancelled consumer is a stopped consumer,\nnot a failed one — and returns the broker's error when the STORAGE fails. A\nhandler's error is never returned: it is nacked, retried, and eventually\ndead-lettered, which is the entire point of the domain.\n\ncfg.HandlerIsIdempotent must be true; see the package documentation.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6164,7 +6164,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/queue.ConsumerConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/queue.ConsumerConfig",
       "doc": "ConsumerConfig is the public alias for [Consume]'s configuration.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6182,7 +6182,7 @@
         "public": "The consumer configuration is not runnable and was refused"
       },
       "doc": "ConsumerMisconfigured refuses a consumer with no Handler, or one whose\nauthor has not asserted HandlerIsIdempotent.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6195,7 +6195,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterValue",
       "doc": "DeadLetter is the public alias for one abandoned message and its cause.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6208,7 +6208,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterManager",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterManager",
       "doc": "DeadLetterManager is the public alias for the capability of replaying a\ndead letter into its queue, its count reset, or deleting it. Every broker\nhere implements it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6226,7 +6226,7 @@
         "public": "No dead letter has that identifier"
       },
       "doc": "DeadLetterNotFound refuses a replay or a deletion naming a dead letter\nthe store does not hold.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6239,7 +6239,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterReader",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterReader",
       "doc": "DeadLetterReader is the public alias for the capability of reading the\ndead-letter store back. Every broker here implements it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6252,7 +6252,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterWriter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterWriter",
       "doc": "DeadLetterWriter is the public alias for the capability of writing a dead\nletter into the store as it was recorded elsewhere — what a copy of a\nqueue from one broker to another needs. Every broker here implements it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6266,7 +6266,7 @@
       "value": "1048576",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.DefaultMaxMessageBytes",
       "doc": "DefaultMaxMessageBytes is the payload bound applied when\n[Policy].MaxMessageBytes is left at zero: one mebibyte.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6280,7 +6280,7 @@
       "value": "100000000",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/queue.DefaultPollInterval",
       "doc": "DefaultPollInterval is how long an idle worker waits before asking again\nwhen [ConsumerConfig].PollInterval is left at zero. With a [Waker] broker it\nbounds only how late another process's publication is noticed.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6293,7 +6293,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeliveryValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeliveryValue",
       "doc": "Delivery is the public alias for one message handed to one consumer,\ncarrying the lease that proves the claim and the count that says whether\nthis is a retry.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6305,7 +6305,7 @@
       "spelled": "func(cause error) error",
       "canonical": "func(cause error) error",
       "doc": "DoNotRetry marks cause as a failure no retry can fix: returned from a\n[Handler], it makes [Consume] dead-letter the message at once, with cause,\ninstead of handing it back for another attempt. An SDK error keeps its own\nreason, code and public words in the dead letter; any other error, or none,\nis recorded as [NotRetryable].\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6318,7 +6318,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/queue.FileConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/queue.FileConfig",
       "doc": "FileConfig is the public alias for [NewFile]'s configuration.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6331,7 +6331,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Handler",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Handler",
       "doc": "Handler is the public alias for the function that processes one delivery.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6349,7 +6349,7 @@
         "public": "The queue handler panicked and was recovered"
       },
       "doc": "HandlerPanicked reports a recovered handler panic. The message was\nnacked and the consumer kept running.\n\nThere is deliberately no HandlerFailed beside it: a handler that\nreturns an error has its error recorded in the dead letter unmodified,\nbecause a verdict wrapped around it would displace the reason whoever\nreads that record actually needs.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6367,7 +6367,7 @@
         "public": "A batch size must be positive"
       },
       "doc": "InvalidBatchSize refuses a non-positive batch size.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6385,7 +6385,7 @@
         "public": "The dead letter cannot be written as it was given"
       },
       "doc": "InvalidDeadLetter refuses a dead letter [DeadLetterWriter] cannot write\nas it was given; the \"field\" field names which value.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6403,7 +6403,7 @@
         "public": "The message cannot be written as it was given"
       },
       "doc": "InvalidMessage refuses a live message [MessageWriter] cannot write as it\nwas given; the \"field\" field names which value.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6416,7 +6416,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.LeaseValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.LeaseValue",
       "doc": "Lease is the public alias for a consumer's exclusive claim on one message.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6434,7 +6434,7 @@
         "public": "The lease on that message has expired and the acknowledgement was ignored"
       },
       "doc": "LeaseExpired reports an acknowledgement whose lease had already lapsed.\nNothing happened, and the message is elsewhere.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6447,7 +6447,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.LeaseExtender",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.LeaseExtender",
       "doc": "LeaseExtender is the public alias for the capability of renewing a lease a\nhandler is still working under. Every broker here implements it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6460,7 +6460,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.LiveMessageValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.LiveMessageValue",
       "doc": "LiveMessage is the public alias for one live message as a broker records it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6474,7 +6474,7 @@
       "value": "3153600000000000000",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.MaxDeadlineOffset",
       "doc": "MaxDeadlineOffset is the ceiling on [Policy].VisibilityTimeout and\n[Policy].RetryDelay: a century, refused above it rather than clamped,\nbecause a deadline past 2262 cannot be written into the durable broker's\nfile names and read back.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6488,7 +6488,7 @@
       "value": "63",
       "init": "go:github.com/kitsunium/sdk/internal/service/data/queue.MaxSQLTableLen",
       "doc": "MaxSQLTableLen is the longest table name [NewSQL] and [SQLMigration] accept,\nin bytes: PostgreSQL's identifier limit.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6501,7 +6501,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/queue.MemoryConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/queue.MemoryConfig",
       "doc": "MemoryConfig is the public alias for [NewMemory]'s configuration.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6514,7 +6514,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.MessageValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.MessageValue",
       "doc": "Message is the public alias for one unit of work as the broker minted it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6527,7 +6527,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.MessageReader",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.MessageReader",
       "doc": "MessageReader is the public alias for the capability of listing the live\nmessages — waiting and leased — without leasing one. Every broker here\nimplements it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6545,7 +6545,7 @@
         "public": "The message payload exceeds the queue's configured maximum size"
       },
       "doc": "MessageTooLarge refuses a payload above the policy's bound, at the\nproducer, where it can still be made smaller.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6558,7 +6558,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.MessageWriter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.MessageWriter",
       "doc": "MessageWriter is the public alias for the capability of writing a live\nmessage as another broker recorded it — its count, its instants. Every\nbroker here implements it.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6571,7 +6571,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.NackValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.NackValue",
       "doc": "Nack is the public alias for what [Broker].Nack decided: retried, or\ndead-lettered.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6583,7 +6583,7 @@
       "spelled": "func(cfg FileConfig) (broker Broker, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/queue.FileConfig) (broker github.com/kitsunium/sdk/pkg/v1/data/queue.Broker, err error)",
       "doc": "NewFile returns the durable broker: its whole state is the directory in\ncfg.Dir, so it survives the process that published into it and two brokers\nover one directory are one queue.\n\nIt refuses at construction — never at first use — a policy it cannot\nhonour, a directory it cannot use safely, and a platform with no atomic\nreplace or no flushable directory handle. Windows is such a platform: after\nthe directory checks — which read its access control lists there — NewFile\nreturns the SDK's UNSUPPORTED_PLATFORM, matched with\nerrors.Is(err, proc.UnsupportedPlatform).\n\nThe broker holds two directory descriptors and additionally implements\nio.Closer, which releases them — reached by type assertion, as the session\nfile store's is, so Broker grows no method:\n\n\tif closer, ok := broker.(io.Closer); ok { defer closer.Close() }\n\nThe messages stay on disk; every call after Close fails.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6595,7 +6595,7 @@
       "spelled": "func(cfg MemoryConfig) (broker Broker, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/queue.MemoryConfig) (broker github.com/kitsunium/sdk/pkg/v1/data/queue.Broker, err error)",
       "doc": "NewMemory returns the in-process test double: the port's full semantics,\nno directory, no flush, and nothing that survives the process.\n\nIt refuses the same policies [NewFile] refuses, through the same guard,\nwhich is what makes it an honest double.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6607,7 +6607,7 @@
       "spelled": "func(cfg SQLConfig) (broker Broker, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/queue.SQLConfig) (broker github.com/kitsunium/sdk/pkg/v1/data/queue.Broker, err error)",
       "doc": "NewSQL returns a durable broker whose queue is one table of the caller's\ndatabase, created by [SQLMigration]. Every call runs on the transaction its\ncontext carries for cfg.Transactor, so a message published inside that\ntransaction exists if and only if it commits. It sends no statement.\n\nIt refuses at construction — never at first use — a policy it cannot honour\nand a transactor, dialect or table it cannot use ([SQLQueueMisconfigured]).\nThe transactor must be the SDK's, or another core/data/sql Joiner and Deferrer.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6625,7 +6625,7 @@
         "public": "The message cannot be processed and was dead-lettered without a retry"
       },
       "doc": "NotRetryable is the failure no retry can fix: what a dead letter\nrecords when [DoNotRetry] marked an error with no public words of its\nown, or none at all.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6638,7 +6638,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue",
       "doc": "Policy is the public alias for the delivery discipline a broker enforces.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6656,7 +6656,7 @@
         "public": "The queue's storage refused an operation"
       },
       "doc": "QueueBackendFailed reports a refusal from a durable broker's storage:\nthe filesystem's, or a statement the SQL broker's database did not\ncomplete.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6674,7 +6674,7 @@
         "public": "The queue directory cannot be used safely"
       },
       "doc": "QueueDirectoryUnusable refuses a queue directory that is missing, is\nnot a directory, or is writable by accounts that must not be able to\ninject or drain messages.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6692,7 +6692,7 @@
         "public": "The queue policy is not one this broker can honour"
       },
       "doc": "QueueMisconfigured refuses a Policy field the broker cannot honour.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6705,7 +6705,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue",
       "doc": "Receipt is the public alias for the opaque handle to one lease. Do not\nparse it and do not construct one.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6718,7 +6718,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Rejecter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Rejecter",
       "doc": "Rejecter is the public alias for the capability of dead-lettering a leased\nmessage at once, with the cause that condemned it. Every broker here\nimplements it, and Consume uses it for a [DoNotRetry] failure.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6731,7 +6731,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/queue.SQLConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/queue.SQLConfig",
       "doc": "SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,\nDialect and Table (required), Policy, and Clock.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6743,7 +6743,7 @@
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
       "doc": "SQLMigration returns the migration that creates the one table an SQL queue\nnamed table keeps on dialect, numbered version for the caller's own version\ntable. Its Down drops the table, and every message in it. Its statement does\nnothing when the table exists.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6761,7 +6761,7 @@
         "public": "The SQL queue's configuration cannot be used"
       },
       "doc": "SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no\ntransactor, one it cannot join a transaction of, a dialect it cannot\nspell, or a table name it cannot use.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6779,7 +6779,7 @@
         "public": "The receipt does not name a lease this queue issued"
       },
       "doc": "UnknownReceipt refuses an acknowledgement naming a lease this queue\nnever issued.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6792,7 +6792,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.WakeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.WakeValue",
       "doc": "Wake is the public alias for what an idle consumer waits on: a signal the\nnext Publish or Nack in this process closes, and how long until something\nthe broker holds becomes receivable on its own.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6805,7 +6805,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Waker",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Waker",
       "doc": "Waker is the public alias for the capability of telling an idle consumer\nwhen to look again. Every broker here implements it, and Consume uses it; a\nbroker of your own that omits it is simply polled.\n",
-      "file": "queue/facade_gen.go",
+      "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6817,7 +6817,7 @@
       "spelled": "func(v string, w string) int",
       "canonical": "func(v string, w string) int",
       "doc": "Compare returns -1, 0 or +1 as v orders before, equal to or after w under\nSemVer precedence. Build metadata is ignored, so v1.0.0+a and v1.0.0+b\ncompare equal. An invalid string orders below every version and equal to\nevery other invalid string.\n",
-      "file": "semver/facade_gen.go",
+      "file": "semver/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6829,7 +6829,7 @@
       "spelled": "func(v string) bool",
       "canonical": "func(v string) bool",
       "doc": "IsPseudoVersion reports whether v is a Go pseudo-version, in any of its\nthree shapes, with or without build metadata. It recognises the shape: a\nstamp whose digits are no real instant still makes one, and\n[PseudoVersionTime] is what reports that the time does not read.\n",
-      "file": "semver/facade_gen.go",
+      "file": "semver/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6841,7 +6841,7 @@
       "spelled": "func(v string) bool",
       "canonical": "func(v string) bool",
       "doc": "IsValid reports whether v is a version: SemVer 2.0.0 with a leading \"v\",\nor one of the shorthands \"vMAJOR\" and \"vMAJOR.MINOR\".\n",
-      "file": "semver/facade_gen.go",
+      "file": "semver/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6853,7 +6853,7 @@
       "spelled": "func(v string) string",
       "canonical": "func(v string) string",
       "doc": "Prerelease returns the pre-release part of v with its leading hyphen —\n\"-rc.1\" for \"v1.0.0-rc.1+build\" — or \"\" when v has none: a release, a\nshorthand, or a string that is not a version, which [IsValid] tells apart.\n",
-      "file": "semver/facade_gen.go",
+      "file": "semver/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6865,7 +6865,7 @@
       "spelled": "func(v string) (string, bool)",
       "canonical": "func(v string) (string, bool)",
       "doc": "PseudoVersionRev returns the revision a pseudo-version names — by the\ntoolchain's convention a commit's first twelve hexadecimal digits — and\nreports whether v is a pseudo-version at all.\n",
-      "file": "semver/facade_gen.go",
+      "file": "semver/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6877,7 +6877,7 @@
       "spelled": "func(v string) (time.Time, bool)",
       "canonical": "func(v string) (time.Time, bool)",
       "doc": "PseudoVersionTime returns the commit time a pseudo-version carries, in UTC\nand to the second, and reports whether it could be read: false when v is\nnot a pseudo-version, or when its fourteen digits are no real instant.\n",
-      "file": "semver/facade_gen.go",
+      "file": "semver/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6890,7 +6890,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Aborter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Aborter",
       "doc": "Aborter is the public alias for the ADR 0039 sibling of [Transactor] that\nholds a function until the work a context carries is undone — its\nsavepoint or its transaction rolled back — and drops it with a commit: the\ncomplement of [Deferrer]. Discover it by type assertion.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6908,7 +6908,7 @@
         "public": "The database refused to open a transaction"
       },
       "doc": "BeginFailed reports a transaction the driver would not open.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6921,7 +6921,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Checker",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Checker",
       "doc": "Checker is the public alias for the bounded liveness probe.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6939,7 +6939,7 @@
         "public": "The transaction could not be committed and had no effect"
       },
       "doc": "CommitFailed reports a transaction that had NO effect.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6952,7 +6952,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/sql.Config",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/sql.Config",
       "doc": "Config is the public alias for the parameters every port is built from.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6970,7 +6970,7 @@
         "public": "The SQL configuration is incomplete and was refused"
       },
       "doc": "ConfigInvalid is returned by every constructor for a Config that could\nnever produce a working port.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6983,7 +6983,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Deferrer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Deferrer",
       "doc": "Deferrer is the public alias for the ADR 0039 sibling of [Transactor] that\nholds a function until the transaction a context carries has committed, and\ndrops it with a rollback. Discover it by type assertion.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -6996,7 +6996,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Dialect",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Dialect",
       "doc": "Dialect is the public alias for the closed set of SQL engines this SDK can\nspell. For SQL you write yourself, it spells the engine's vocabulary — the\ntokens the SDK's own statements are spelled with, never a statement:\n[Dialect].Placeholder renders a bind marker ($1 on PostgreSQL, ? on MySQL and\nSQLite), [Dialect].QuoteIdent a delimited name, its delimiter doubled\ninside, and [Dialect].ForUpdate and [Dialect].ForUpdateSkipLocked a row-lock\nclause, which SQLite — whose exclusion is its one write lock — renders as\nnothing. QuoteIdent validates nothing: check a name before you interpolate\nit. An unset Dialect renders no marker and no name, so a statement built\nfrom it fails rather than passing for another engine's.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7010,7 +7010,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.DialectMySQL",
       "doc": "DialectMySQL is MySQL 5.7+ / MariaDB 10.x with InnoDB.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7024,7 +7024,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.DialectPostgres",
       "doc": "DialectPostgres is PostgreSQL 9.1+.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7042,7 +7042,7 @@
         "public": "That SQL engine is recognised and deliberately not supported"
       },
       "doc": "DialectRefused is returned by ParseDialect for an engine this SDK\nrecognises and declines. The reason travels in a field.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7056,7 +7056,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.DialectSQLite",
       "doc": "DialectSQLite is SQLite 3.6.8+. It has no advisory lock, so [NewMigrator]\nserialises a run on the database file's write lock instead (ADR 0140).\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7074,7 +7074,7 @@
         "public": "Two migrations declare the same version"
       },
       "doc": "DuplicateMigration refuses two migrations declaring the same version.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7087,7 +7087,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Executor",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Executor",
       "doc": "Executor is the public alias for the read/write surface a statement runs\nagainst. *sql.DB, *sql.Tx and *sql.Conn all satisfy it with no adapter, and\nit deliberately carries no Commit, Rollback or Begin.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7105,7 +7105,7 @@
         "public": "The database is not reachable"
       },
       "doc": "HealthCheckFailed reports a database that answered the probe with an\nerror.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7123,7 +7123,7 @@
         "public": "The database did not answer the health check in time"
       },
       "doc": "HealthCheckTimeout reports a database that did not answer in time.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7141,7 +7141,7 @@
         "public": "The migration is not runnable and was refused"
       },
       "doc": "InvalidMigration is returned for a migration with version 0, an empty\nname, a nil Up or a nil Down.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7153,7 +7153,7 @@
       "spelled": "func(ctx context.Context, ex Executor) error",
       "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/pkg/v1/data/sql.Executor) error",
       "doc": "Irreversible is the [Step] a migration assigns to Down to declare, out loud,\nthat it cannot be reversed.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7166,7 +7166,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Joiner",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Joiner",
       "doc": "Joiner is the public alias for the ADR 0039 sibling of [Transactor] that\nsays where a statement issued under a context runs: in the transaction the\ncontext carries, or on the pool. Discover it by type assertion.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7179,7 +7179,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/sql.MigrateConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/sql.MigrateConfig",
       "doc": "MigrateConfig is the public alias for the migration runner's parameters.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7192,7 +7192,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue",
       "doc": "Migration is the public alias for one versioned schema change and its\nreversal.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7210,7 +7210,7 @@
         "public": "A migration did not apply and was rolled back"
       },
       "doc": "MigrationFailed reports a migration that did not apply; it was rolled\nback.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7228,7 +7228,7 @@
         "public": "That migration was declared irreversible and cannot be rolled back"
       },
       "doc": "MigrationIrreversible is what the Irreversible step returns.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7246,7 +7246,7 @@
         "public": "Another process is running migrations and did not finish in time"
       },
       "doc": "MigrationLockTimeout reports another process holding the migration lock\nfor the whole budget. Nothing was applied.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7264,7 +7264,7 @@
         "public": "That dialect has no advisory lock, so migrations cannot be serialised"
       },
       "doc": "MigrationLockUnsupported refuses a Migrator on a dialect with no lock\nthat dies with its holder. No dialect this SDK speaks answers it since\nSQLite's runner serialises on its file's write lock (ADR 0140).\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7282,7 +7282,7 @@
         "public": "A pending migration is older than one already applied"
       },
       "doc": "MigrationOutOfOrder refuses a pending migration older than one already\napplied.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7300,7 +7300,7 @@
         "public": "The database records a migration this build does not carry"
       },
       "doc": "MigrationUnknownVersion refuses a Down over a version this build does\nnot carry.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7313,7 +7313,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Migrator",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Migrator",
       "doc": "Migrator is the public alias for the schema-migration runner.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7331,7 +7331,7 @@
         "public": "A nested transaction cannot change isolation or read-only mode"
       },
       "doc": "NestedIsolation is returned when a nested Transact asks for isolation\nor read-only mode a savepoint cannot provide.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7343,7 +7343,7 @@
       "spelled": "func(cfg Config) (probe Checker, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/sql.Config) (probe github.com/kitsunium/sdk/pkg/v1/data/sql.Checker, err error)",
       "doc": "NewChecker returns a liveness probe bounded by cfg.CheckTimeout.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7355,7 +7355,7 @@
       "spelled": "func(cfg Config, mig MigrateConfig) (runner Migrator, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/sql.Config, mig github.com/kitsunium/sdk/pkg/v1/data/sql.MigrateConfig) (runner github.com/kitsunium/sdk/pkg/v1/data/sql.Migrator, err error)",
       "doc": "NewMigrator returns the migration runner. Every migration execution is\nserialised: on the session's advisory lock where the engine has one\n(PostgreSQL, MySQL), and on the database file's write lock on SQLite,\nwhich has none (ADR 0140). No dialect the SDK speaks is refused for the\nlock.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7367,7 +7367,7 @@
       "spelled": "func(cfg Config) (manager Transactor, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/sql.Config) (manager github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, err error)",
       "doc": "NewTransactor returns the transaction manager for cfg.DB, applying\ncfg.Pool to it.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7379,7 +7379,7 @@
       "spelled": "func(name string) (dialect Dialect, err error)",
       "canonical": "func(name string) (dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, err error)",
       "doc": "ParseDialect resolves a dialect name and never guesses. A recognised but\nunsupported engine returns [DialectRefused] carrying why; an unrecognised\none returns [UnknownDialect].\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7392,7 +7392,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/data/sql.PoolConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/sql.PoolConfig",
       "doc": "PoolConfig is the public alias for the connection-pool policy.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7410,7 +7410,7 @@
         "public": "The connection-pool policy is not one this SDK will apply"
       },
       "doc": "PoolMisconfigured refuses a pool policy whose zero value database/sql\nwould read as a decision nobody made — a non-positive MaxOpen.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7423,7 +7423,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Preparer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Preparer",
       "doc": "Preparer is the public alias for the ADR 0039 sibling of [Executor]: an\nexecutor that can also prepare a statement. Discover it by type assertion.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7441,7 +7441,7 @@
         "public": "Rolling the transaction back did not complete cleanly"
       },
       "doc": "RollbackFailed travels alongside the error that triggered the rollback.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7459,7 +7459,7 @@
         "public": "A savepoint statement was rejected by the database"
       },
       "doc": "SavepointFailed reports a rejected savepoint statement; the \"statement\"\nfield names which of the three.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7471,7 +7471,7 @@
       "spelled": "func(stmts ...string) Step",
       "canonical": "func(stmts ...string) github.com/kitsunium/sdk/pkg/v1/data/sql.Step",
       "doc": "Statements returns a [Step] that runs the given statements in order on the\ntransaction's executor.\n\nIt is the smallest useful helper and deliberately not a file loader: it\ninvents no directory layout, no naming convention and no parser. Where the\ntext comes from — a literal, an embed.FS, a generator — stays yours.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7484,7 +7484,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Step",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Step",
       "doc": "Step is the public alias for one direction of a migration.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7509,7 +7509,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Transactor",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Transactor",
       "doc": "Transactor is the public alias for the transaction manager.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7527,7 +7527,7 @@
         "public": "That transaction handle is no longer valid"
       },
       "doc": "TxClosed reports an Executor used after the scope that lent it\nreturned.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7540,7 +7540,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.TxFunc",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.TxFunc",
       "doc": "TxFunc is the public alias for a unit of work run inside a transaction.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7553,7 +7553,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.TxOptionsValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.TxOptionsValue",
       "doc": "TxOptions is the public alias for one transaction's isolation and\nread-only-ness. The zero value defers to the driver.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7571,7 +7571,7 @@
         "public": "The transaction is no longer usable and will not be committed"
       },
       "doc": "TxPoisoned refuses every operation on a transaction whose savepoint\nrollback failed. It is never committed.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7589,7 +7589,7 @@
         "public": "The SQL dialect is not one this SDK supports"
       },
       "doc": "UnknownDialect is returned by ParseDialect for a name this SDK has\nnever heard of.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7607,7 +7607,7 @@
         "public": "The version-table name is not a plain SQL identifier"
       },
       "doc": "VersionTableInvalid refuses a version-table name that is not a plain\nSQL identifier.\n",
-      "file": "sql/facade_gen.go",
+      "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7620,7 +7620,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/transform.Algorithm",
       "doc": "Algorithm is the name a Compressor registers under. The zero value is\nreserved as invalid.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7632,7 +7632,7 @@
       "spelled": "func() []Algorithm",
       "canonical": "func() []github.com/kitsunium/sdk/pkg/v1/data/transform.Algorithm",
       "doc": "Available returns the registered Algorithms, sorted.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7645,7 +7645,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor",
       "doc": "BoundedDecompressor is the optional extension of a Compressor that can be\ntold how much plaintext it may produce; DecompressBounded uses it when the\nscheme has it.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7662,7 +7662,7 @@
         "value": "0.2.5.4"
       },
       "doc": "CodeCompressedFrameInvalid identifies a malformed compressed frame of the\ncodec package, or a frame its decompression-bomb guard refused (0.2.5.4).\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7679,7 +7679,7 @@
         "value": "0.2.5.6"
       },
       "doc": "CodeDecompressedTooLarge identifies a stream whose plaintext would exceed\nthe ceiling its caller gave (0.2.5.6).\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7696,7 +7696,7 @@
         "value": "0.3.26.2"
       },
       "doc": "CodeFlateFailed identifies a stream compress/flate refused (0.3.26.2).\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7713,7 +7713,7 @@
         "value": "0.3.26.1"
       },
       "doc": "CodeGzipFailed identifies a stream compress/gzip refused, compressing or\ndecompressing (0.3.26.1).\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7730,7 +7730,7 @@
         "value": "0.2.5.1"
       },
       "doc": "CodeUnknownCompressor identifies an Algorithm no imported package has\nregistered (0.2.5.1).\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7747,7 +7747,7 @@
         "value": "0.3.26.3"
       },
       "doc": "CodeZlibFailed identifies a stream compress/zlib refused (0.3.26.3): the\nRFC 1950 envelope, told apart from raw DEFLATE because a stream one of\nthem refuses is often valid under the other.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7777,7 +7777,7 @@
         "public": "Compressed frame is malformed or exceeds the safety bound"
       },
       "doc": "CompressedFrameInvalid is the sentinel of [CodeCompressedFrameInvalid].\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7790,7 +7790,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/transform.Compressor",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/transform.Compressor",
       "doc": "Compressor is one compression scheme: Compress and Decompress append to dst.\nImplementations are safe for concurrent use.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7832,7 +7832,7 @@
         "public": "Decompressed payload exceeds the caller's ceiling"
       },
       "doc": "DecompressedTooLarge is the sentinel of [CodeDecompressedTooLarge],\nreturned as is.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7863,7 +7863,7 @@
         "public": "flate transform failed"
       },
       "doc": "FlateFailed is the sentinel of [CodeFlateFailed].\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7894,7 +7894,7 @@
         "public": "gzip transform failed"
       },
       "doc": "GzipFailed is the sentinel of [CodeGzipFailed]; the stdlib's error is\nkept beneath it.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7906,7 +7906,7 @@
       "spelled": "func(algo Algorithm) (c Compressor, ok bool)",
       "canonical": "func(algo github.com/kitsunium/sdk/pkg/v1/data/transform.Algorithm) (c github.com/kitsunium/sdk/pkg/v1/data/transform.Compressor, ok bool)",
       "doc": "Lookup returns the Compressor registered under algo.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7924,7 +7924,7 @@
         "public": "No compressor is registered under that algorithm"
       },
       "doc": "UnknownCompressor is the sentinel of [CodeUnknownCompressor], returned\nas is.\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7955,7 +7955,7 @@
         "public": "zlib transform failed"
       },
       "doc": "ZlibFailed is the sentinel of [CodeZlibFailed].\n",
-      "file": "transform/facade_gen.go",
+      "file": "transform/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7968,7 +7968,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.AtomicWriter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.AtomicWriter",
       "doc": "AtomicWriter is the public alias for the publication capability, reached by\ntype assertion on a filesystem this package did not build.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -7986,7 +7986,7 @@
         "public": "That directory still has entries in it"
       },
       "doc": "DirectoryNotEmpty is returned by Remove for a directory that still has\nentries. RemoveAll is the recursive call.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8004,7 +8004,7 @@
         "public": "The file was published but the directory entry was not flushed"
       },
       "doc": "DirectorySyncFailed is returned when the rename succeeded and the\ndirectory entry could not be flushed. The content IS published; only\nits survival across a power loss is in doubt, and it is deliberately\nnot rolled back.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8017,7 +8017,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.FS",
       "owner": "go:io/fs.FS",
       "doc": "FS is the public alias for the read half, which is io/fs.FS unchanged. It\nexists so a signature can say \"an SDK filesystem\" without implying that\nanything about reading is different here.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8030,7 +8030,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.FullFS",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.FullFS",
       "doc": "FullFS is the public alias for the union both constructors return: a\n[WritableFS] that is also an [AtomicWriter]. A parameter should still ask\nfor the narrowest thing it uses.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8048,7 +8048,7 @@
         "public": "That path is not usable on this filesystem"
       },
       "doc": "InvalidPath is returned for a name outside the fs.ValidPath grammar —\nrooted, empty, or carrying a \".\" or \"..\" element — and for the root\nitself on any call that writes or removes.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8066,7 +8066,7 @@
         "public": "A file mode is required and must be a plain permission mode"
       },
       "doc": "InvalidPermission is returned for a zero file mode, which is never read\nas \"pick a default\", and for any mode carrying setuid, setgid, sticky\nor a type bit.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8078,7 +8078,7 @@
       "spelled": "func() FullFS",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/data/vfs.FullFS",
       "doc": "NewMem returns an empty in-memory filesystem containing only its root.\n\nIt takes no arguments on purpose: every knob it could offer would be one a\nconsumer's test has to set before it can assert anything, and the value of\nthis type is that a filesystem double costs one line.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8090,7 +8090,7 @@
       "spelled": "func(root string) (filesystem FullFS, err error)",
       "canonical": "func(root string) (filesystem github.com/kitsunium/sdk/pkg/v1/data/vfs.FullFS, err error)",
       "doc": "NewOS opens root as a filesystem confined to that directory tree.\n\nIt returns proc.UnsupportedPlatform on a GOOS that lacks the mechanics this\nfilesystem's guarantees rest on, and [RootUnavailable] when the directory\ncannot be opened. Both are construction-time refusals, so a misconfiguration\nis reported where the program is wired rather than on the first write.\n\nThe filesystem holds the directory's descriptor and additionally implements\nio.Closer, which releases it; every call after Close fails.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8108,7 +8108,7 @@
         "public": "That path already holds something other than a file"
       },
       "doc": "NotRegularFile is returned when the name — or a component of it —\nexists and is not the kind of thing the call needs it to be.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8126,7 +8126,7 @@
         "public": "That path leaves the filesystem it was resolved against"
       },
       "doc": "PathEscaped is returned when a name resolved outside the filesystem's\nroot, and when a write's final component is a symbolic link.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8144,7 +8144,7 @@
         "public": "The filesystem could not publish that file"
       },
       "doc": "PublishFailed is returned when an atomic publication did not complete.\nThe previous content is intact and no temporary survives, so the\noperation is safe to retry and safe to abandon.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8162,7 +8162,7 @@
         "public": "The filesystem could not read that path"
       },
       "doc": "ReadFailed is returned when an open, stat or listing was refused. The\ncause stays in the chain, so errors.Is(err, fs.ErrNotExist) still\nanswers.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8180,7 +8180,7 @@
         "public": "The filesystem root could not be opened"
       },
       "doc": "RootUnavailable is returned by NewOS when the root cannot be opened:\nabsent, not a directory, or not searchable by this process.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8193,7 +8193,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.WritableFS",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.WritableFS",
       "doc": "WritableFS is the public alias for the write half: the four write verbs on\ntop of the embedded [FS]. It is frozen — a new capability arrives as a\nsibling interface, never as a fifth method.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     },
@@ -8211,7 +8211,7 @@
         "public": "The filesystem could not write that path"
       },
       "doc": "WriteFailed is returned when a create, write, mkdir or remove was\nrefused, and keeps its cause the same way.\n",
-      "file": "vfs/facade_gen.go",
+      "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
     }

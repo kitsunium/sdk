@@ -6,7 +6,7 @@ go_library(
     name = "msgpack",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "msgpack.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/msgpack",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "msgpack_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "msgpack_external_test.go",
     ],
     deps = [

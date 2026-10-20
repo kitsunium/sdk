@@ -23,10 +23,10 @@ go_test(
     name = "recycler_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "capped_external_test.go",
+        "gen_api_test.go",
+        "gen_perf_test.go",
         "perf_fixtures_test.go",
-        "perf_gen_test.go",
         "recycler_bench_test.go",
         "recycler_external_test.go",
         "recycler_internal_test.go",

@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "cbor.go",
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/cbor",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "cbor_test",
     srcs = [
-        "api_gen_test.go",
         "cbor_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":cbor",

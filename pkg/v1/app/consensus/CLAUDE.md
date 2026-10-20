@@ -4,7 +4,7 @@
 ## Purpose
 
 Public facade of the consensus domain (ADR 0152 D14), written by kit into
-`facade_gen.go` from `design/app/consensus.yaml`: aliases for every type a
+`gen_facade.go` from `design/app/consensus.yaml`: aliases for every type a
 published port speaks, `NewNode`, `Bootstrap`, the data directory and its
 offline operations — `ImportObserved` and `OpenSnapshot` among them, what a
 non-member observer rebuilds from beside `Node.ReadCommitted` —,
@@ -20,4 +20,4 @@ memory doubles, the wire codecs and the sentinels of both ranges.
 
 ## Do NOT
 
-- Hand-edit `facade_gen.go`.
+- Hand-edit `gen_facade.go`.

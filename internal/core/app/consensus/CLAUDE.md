@@ -16,8 +16,8 @@ storage and transport's), both declared here (ADR 0160).
 
 | File | Holds |
 |---|---|
-| `design_gen.go` | the ports, written by kit from `design/app/consensus.yaml` |
-| `codes_gen.go` | the codes and sentinels of both ranges, written by kit |
+| `gen_ports.go` | the ports, written by kit from `design/app/consensus.yaml` |
+| `gen_codes.go` | the codes and sentinels of both ranges, written by kit |
 | `doc.go` | the package comment |
 | `entry.go`, `identity.go`, `membership.go`, `message.go`, `snapshot.go`, `status.go` | the values |
 | `position.go`, `stamp.go`, `timing_contract.go` | the values two or more of the files above hold as a field, one file named after each (KTN-STRUCT-COLOCATE) |

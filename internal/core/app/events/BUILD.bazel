@@ -5,12 +5,12 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "events",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
         "events.go",
         "events_dispatch.go",
         "events_subscription.go",
+        "gen_codes.go",
+        "gen_ports.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/events",
     visibility = [
@@ -33,8 +33,8 @@ go_test(
     name = "events_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "events_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":events",

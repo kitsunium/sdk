@@ -82,7 +82,7 @@ A $NOTIFY\_SOCKET value beginning with '@' selects the abstract socket namespace
   - [func \(Notification\) Watchdog\(\) bool](<#Notification.Watchdog>)
 
 <a name="Listen"></a>
-## func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Listen() (l Listener, socketPath string, err error)
@@ -91,7 +91,7 @@ func Listen() (l Listener, socketPath string, err error)
 Listen creates a supervisor-side sd\_notify socket and returns the Listener plus the socketPath a child should be given via NOTIFY\_SOCKET. On non-Linux platforms it returns the UNSUPPORTED\_PLATFORM error.
 
 <a name="MainPID"></a>
-## func [MainPID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [MainPID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func MainPID(pid int) error
@@ -100,7 +100,7 @@ func MainPID(pid int) error
 MainPID advertises the main process PID to the supervisor (MAINPID=pid).
 
 <a name="Notify"></a>
-## func [Notify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Notify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Notify(state map[string]string) error
@@ -109,7 +109,7 @@ func Notify(state map[string]string) error
 Notify sends an sd\_notify datagram carrying the given NAME=value state to $NOTIFY\_SOCKET, or is a no-op returning nil when $NOTIFY\_SOCKET is unset.
 
 <a name="Ready"></a>
-## func [Ready](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Ready](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Ready() error
@@ -118,7 +118,7 @@ func Ready() error
 Ready notifies the supervisor that startup is complete (READY=1).
 
 <a name="Reloading"></a>
-## func [Reloading](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Reloading](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Reloading() error
@@ -127,7 +127,7 @@ func Reloading() error
 Reloading notifies the supervisor that a configuration reload has begun (RELOADING=1).
 
 <a name="Status"></a>
-## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Status(msg string) error
@@ -136,7 +136,7 @@ func Status(msg string) error
 Status publishes a single-line free-text status (STATUS=msg).
 
 <a name="Stopping"></a>
-## func [Stopping](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Stopping](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Stopping() error
@@ -145,7 +145,7 @@ func Stopping() error
 Stopping notifies the supervisor that shutdown has begun (STOPPING=1).
 
 <a name="Watchdog"></a>
-## func [Watchdog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [Watchdog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func Watchdog() error
@@ -154,7 +154,7 @@ func Watchdog() error
 Watchdog sends a watchdog keep-alive ping (WATCHDOG=1).
 
 <a name="WatchdogInterval"></a>
-## func [WatchdogInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## func [WatchdogInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 ```go
 func WatchdogInterval() (d time.Duration, ok bool)
@@ -163,7 +163,7 @@ func WatchdogInterval() (d time.Duration, ok bool)
 WatchdogInterval reports the watchdog ping interval the supervisor configured via $WATCHDOG\_USEC; ok is false when the variable is unset or malformed.
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 Listener is the supervisor side of the protocol: it owns the datagram socket a supervised child writes readiness to and yields one parsed, credential-verified Notification per Recv.
 
@@ -185,7 +185,7 @@ type Listener interface {
 ```
 
 <a name="Listener.Close"></a>
-### func \(Listener\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Listener\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Listener) Close() error
@@ -194,7 +194,7 @@ func (Listener) Close() error
 Close releases the socket and unblocks any in-flight Recv.
 
 <a name="Listener.Recv"></a>
-### func \(Listener\) [Recv](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Listener\) [Recv](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Listener) Recv() (NotificationValue, error)
@@ -203,7 +203,7 @@ func (Listener) Recv() (NotificationValue, error)
 Recv blocks until the next datagram arrives and returns it parsed, with the sender PID verified by the kernel. It returns a typed error on a malformed datagram or once the listener is closed.
 
 <a name="Notification"></a>
-## type [Notification](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/facade_gen.go>)
+## type [Notification](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
 Notification is a parsed sd\_notify datagram: the raw State field set plus the typed Status, MainPID, and kernel-verified SenderPID, with Ready/Reloading/ Stopping/Watchdog lifecycle accessors.
 

@@ -177,8 +177,14 @@ strict_mode: false
 # phases:
 #   enabled: [1, 2, 3, 4, 5, 6, 7]
 
-# Respect `// Code generated …` markers so generated files are skipped.
-skip_generated: true
+# The files kit generates are linted (kit's ADR 0014): every one is named
+# gen_*.go, and a finding in one is a defect of kit's to fix there — the
+# rules it can meet (comments above all) hold them as they hold hand-written
+# code. The rules that do not fit what kit writes, or that judge what the
+# design decides rather than how kit writes it, leave gen_*.go out one by
+# one, below under rules:, each with why (the audit of kitsunium/studio#74,
+# §5). No other file in the tree carries a generated header.
+skip_generated: false
 
 # Tags recognised by KTN-STRUCT-JSONTAG. Extend as we ship more codecs so the
 # audit keeps recognising legitimate struct-tag annotations.
@@ -220,9 +226,10 @@ exclude:
   # FlatBuffers / Cap'n Proto generated code.
   - "**/*.capnp.go"
   - "**/*_generated.go"
-  # Generic `*.gen.go` / `*_gen.go` marker used by stringer, mockgen, etc.
+  # Generic `*.gen.go` marker used by stringer, mockgen, etc. The files kit
+  # generates are gen_*.go and are linted (skip_generated above), each rule
+  # that does not fit them leaving them out under rules:.
   - "**/*.gen.go"
-  - "**/*_gen.go"
   # Mock files produced by mockgen / moq / counterfeiter.
   - "**/mocks/**"
   - "**/*_mock.go"
@@ -259,6 +266,47 @@ exclude:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 rules:
+  # ── The files kit generates (gen_*.go, kit's ADR 0014) ──────────────────
+  # They are linted like the rest (skip_generated: false). These rules leave
+  # them out, each for a reason measured on them (kitsunium/studio#74, §5):
+  #   - the facade's re-exports (gen_facade.go, ADR 0166) take their type and
+  #     their value from the package they re-export: KTN-CONST-TYPED would
+  #     turn an untyped constant typed (the design's `typed:` does it where it
+  #     is meant), KTN-CONST-IOTA judges the other package's values, and
+  #     KTN-STRUCT-COLOCATE a type that lives elsewhere by design;
+  #   - the facade keeps the design's block order, aliases, constants,
+  #     variables and forwarders interleaved as the design writes them:
+  #     KTN-CONST-ORDER, KTN-VAR-ORDER and KTN-VAR-GROUP wait for the owner's
+  #     decision to sort it, which would move every facade;
+  #   - a port's name and signatures (gen_ports.go) are the design's, the
+  #     owner's: KTN-INTERFACE-ERNAME and KTN-INTERFACE-ANYUSE judge the
+  #     design, not kit; KTN-INTERFACE-FILENAME wants interfaces in
+  #     *_interface.go, and kit names its files gen_*.
+  # Every other rule holds them: a finding there is kit's to fix.
+  KTN-CONST-TYPED:
+    exclude:
+      - "**/gen_*.go"
+  KTN-CONST-IOTA:
+    exclude:
+      - "**/gen_*.go"
+  KTN-STRUCT-COLOCATE:
+    exclude:
+      - "**/gen_*.go"
+  KTN-CONST-ORDER:
+    exclude:
+      - "**/gen_*.go"
+  KTN-VAR-ORDER:
+    exclude:
+      - "**/gen_*.go"
+  KTN-VAR-GROUP:
+    exclude:
+      - "**/gen_*.go"
+  KTN-INTERFACE-ERNAME:
+    exclude:
+      - "**/gen_*.go"
+  KTN-INTERFACE-FILENAME:
+    exclude:
+      - "**/gen_*.go"
   # KTN-INTERFACE-ANYUSE (info) — "prefer specific interface".
   #
   # Scoped exception: the codec packages implement a universal Codec
@@ -289,7 +337,7 @@ rules:
   # instead of a defect. A facade's declarations are "unrelated" to each other
   # by construction: they are a domain's whole vocabulary published side by
   # side. Since ADR 0166 every alias, re-export and forwarder of pkg/v1 lives in
-  # the package's facade_gen.go, which kit writes and this linter skips as
+  # the package's gen_facade.go, which kit writes and this linter skips as
   # generated, so the five facade files this list named until then
   # (security/authz/authz.go, app/i18n/i18n.go, net/server/server.go,
   # net/websocket/websocket.go, observe/trace/trace.go) now hold their package
@@ -298,7 +346,7 @@ rules:
   # data/codec/codec.go is the one left: it declares the codec's vocabulary —
   # the 26 Format constants, values of its own and not re-exports — beside the
   # dispatch verbs that take them. The Format alias and the forwarders that tied
-  # the two together moved to facade_gen.go (ADR 0166), so the constants now
+  # the two together moved to gen_facade.go (ADR 0166), so the constants now
   # read as 26 unrelated groups. Splitting them into a file of their own would
   # move 26 documented constants for a rule that cannot see the generated half
   # of the package; the README is generated from the package doc comment and
@@ -390,6 +438,10 @@ rules:
 
   KTN-INTERFACE-ANYUSE:
     exclude:
+      # A port's signature is the design's (gen_ports.go, kit's ADR 0014):
+      # consensus' Propose and Apply say `any` because the owner's design
+      # does (see the rules' head above).
+      - "**/gen_*.go"
       # internal/service/data/sql — `arg any` is database/sql's OWN bind-parameter
       # type. (*sql.Tx).ExecContext, QueryContext and QueryRowContext are all
       # `args ...any` in the standard library, and driver.Value is defined as a
@@ -504,7 +556,7 @@ rules:
       # and Pop() any are container/heap.Interface's own signatures: the
       # boxing IS what the benchmark prices. The rule's auto-exemption covered
       # it until the package gained the pin file kit generates
-      # (api_gen_test.go, skipped as generated — ADR 0163): measured, the
+      # (gen_api_test.go, skipped as generated — ADR 0163): measured, the
       # finding appears with that file in the package and goes with it. The
       # file alone, the bench's two signatures, nothing else of the package.
       - "**/internal/kernel/collections/heap/heap_bench_test.go"
@@ -557,7 +609,7 @@ rules:
     # `any`, and the methods that must honour it are exempt (Go requires the
     # identical signature): Node.Propose and the test machines' Apply entries
     # that stood here are gone. The declarations the rule would report in
-    # design_gen.go (StateMachine.Apply, Replicated.Propose) are generated and
+    # gen_ports.go (StateMachine.Apply, Replicated.Propose) are generated and
     # skipped. Two sites remain, none of them an implementation of a local
     # interface:
     #   - Node.submit and Node.applied1 carry the value the caller's machine

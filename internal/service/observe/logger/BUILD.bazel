@@ -37,10 +37,10 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "builder_bench_test.go",
         "builder_external_test.go",
         "builder_internal_test.go",
+        "gen_api_test.go",
         "handler_external_test.go",
         "handler_internal_test.go",
         "logger_external_test.go",

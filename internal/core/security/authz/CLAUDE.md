@@ -23,7 +23,7 @@ Every code of the domain is in this package; the engine declares none.
 | `decision.go` | `Decision` + `Abstain` / `Allow` / `Deny` + `Granted` / `Valid` / `String` |
 | `request_value.go` | `RequestValue` + `NewRequestValue` + `Subject` / `Action` / `Resource` / `Attr` / `AttrCount` |
 | `attr_value.go` | `AttrKind` (`KindInvalid` / `KindString` / `KindInt64` / `KindBool` / `KindStrings`) + `AttrValue` + `AttrString` / `AttrInt64` / `AttrBool` / `AttrStrings` + `Key` / `Kind`, the `(value, ok)` accessors and `Contains` |
-| `codes_gen.go` | `Code*` constants — ranges 0.2.26.* (verdicts) and 0.3.56.* (the engine's construction refusals); `PermissionDenied` / `AttributeMissing` / `AttributeKindMismatch` / `PolicyMisconfigured` — the verdicts — and `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` — the engine's construction refusals (`errs.Define`) — written by kit gen from `design/security/authz.yaml` (ADR 0164) |
+| `gen_codes.go` | `Code*` constants — ranges 0.2.26.* (verdicts) and 0.3.56.* (the engine's construction refusals); `PermissionDenied` / `AttributeMissing` / `AttributeKindMismatch` / `PolicyMisconfigured` — the verdicts — and `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` — the engine's construction refusals (`errs.Define`) — written by kit gen from `design/security/authz.yaml` (ADR 0164) |
 
 ## The frontier
 

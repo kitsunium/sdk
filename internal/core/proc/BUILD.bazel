@@ -5,10 +5,10 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "proc",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
         "exit.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "limit.go",
         "memory.go",
         "notification.go",
@@ -39,8 +39,8 @@ alias(
 go_test(
     name = "proc_test",
     srcs = [
-        "api_gen_test.go",
         "exit_external_test.go",
+        "gen_api_test.go",
         "limit_external_test.go",
         "notification_external_test.go",
         "proc_external_test.go",

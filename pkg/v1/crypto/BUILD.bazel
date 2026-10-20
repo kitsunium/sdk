@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "crypto.go",
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto",
     visibility = ["//visibility:public"],
@@ -28,9 +28,9 @@ alias(
 go_test(
     name = "crypto_test",
     srcs = [
-        "api_gen_test.go",
         "crypto_bench_test.go",
         "crypto_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":crypto",

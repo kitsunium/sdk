@@ -168,7 +168,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/scheduler.Unsupport
 Code `0.3.43.2` · reason `UNSUPPORTED_SYNTAX` · public "That cron syntax is outside the accepted subset"
 
 <a name="Every"></a>
-## func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 ```go
 func Every(period time.Duration) (schedule Schedule, err error)
@@ -177,7 +177,7 @@ func Every(period time.Duration) (schedule Schedule, err error)
 Every returns a Schedule due one period after each previous due instant. A non-positive period is refused. It is deliberately not spelled "@every": an interval is not a calendar expression.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 ```go
 func New(cfg Config) Scheduler
@@ -186,7 +186,7 @@ func New(cfg Config) Scheduler
 New returns a Scheduler. It cannot fail: a nil cfg.Clock falls back to the wall clock and a nil cfg.OnResult to no observation, both of which are working configurations. What can fail fails at Add and at Parse.
 
 <a name="Parse"></a>
-## func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 ```go
 func Parse(expr string) (schedule Schedule, err error)
@@ -195,7 +195,7 @@ func Parse(expr string) (schedule Schedule, err error)
 Parse compiles a five-field POSIX cron expression, evaluated in UTC. See the package documentation for the accepted subset and for what is refused.
 
 <a name="ParseInLocation"></a>
-## func [ParseInLocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## func [ParseInLocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 ```go
 func ParseInLocation(expr string, loc *time.Location) (schedule Schedule, err error)
@@ -204,7 +204,7 @@ func ParseInLocation(expr string, loc *time.Location) (schedule Schedule, err er
 ParseInLocation compiles a cron expression evaluated in loc. A nil loc is refused rather than read as UTC; use Parse to ask for UTC.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 Config is the public alias for the engine's construction parameters.
 
@@ -241,7 +241,7 @@ type Config struct {
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 Entry is the public alias for one named Schedule/Job registration.
 
@@ -273,7 +273,7 @@ type Entry struct {
 ```
 
 <a name="Job"></a>
-## type [Job](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## type [Job](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 Job is the public alias for the ctx-aware unit of scheduled work.
 
@@ -288,7 +288,7 @@ type Job func(ctx context.Context) error
 ```
 
 <a name="Result"></a>
-## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 Result is the public alias for one reported scheduling decision.
 
@@ -331,7 +331,7 @@ type Result struct {
 ```
 
 <a name="Schedule"></a>
-## type [Schedule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## type [Schedule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 Schedule is the public alias for the "when is this next due" port.
 
@@ -346,7 +346,7 @@ type Schedule func(after time.Time) (next time.Time, ok bool)
 ```
 
 <a name="Scheduler"></a>
-## type [Scheduler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/facade_gen.go>)
+## type [Scheduler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
 
 Scheduler is the public alias for the engine contract.
 
@@ -374,7 +374,7 @@ type Scheduler interface {
 ```
 
 <a name="Scheduler.Add"></a>
-### func \(Scheduler\) [Add](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/scheduler/design_gen.go>)
+### func \(Scheduler\) [Add](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/scheduler/gen_ports.go>)
 
 ```go
 func (Scheduler) Add(entry EntryValue) error
@@ -383,7 +383,7 @@ func (Scheduler) Add(entry EntryValue) error
 Add registers an entry. It is refused while Run is executing ([SchedulerRunning](#SchedulerRunning)), on a name already registered ([DuplicateJob](#DuplicateJob)), and on an entry that is not runnable — empty name, nil Job, nil Schedule ([InvalidEntry](#InvalidEntry)).
 
 <a name="Scheduler.Run"></a>
-### func \(Scheduler\) [Run](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/scheduler/design_gen.go>)
+### func \(Scheduler\) [Run](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/scheduler/gen_ports.go>)
 
 ```go
 func (Scheduler) Run(ctx context.Context) error

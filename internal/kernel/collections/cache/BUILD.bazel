@@ -32,10 +32,10 @@ alias(
 go_test(
     name = "cache_test",
     srcs = [
-        "api_gen_test.go",
         "cache_bench_test.go",
         "cache_external_test.go",
         "cache_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":cache"],
     deps = ["//internal/kernel/clock"],

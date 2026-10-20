@@ -29,7 +29,7 @@ kit_pinned() {
     return 1
   fi
   if ! command -v kit >/dev/null 2>&1; then
-    printf '%s: kit is not on PATH; install kit %s (kitsunium/platform) and retry\n' "$name" "$want" >&2
+    printf '%s: kit is not on PATH; install kit %s (kitsunium/studio) and retry\n' "$name" "$want" >&2
     return 1
   fi
   if ! have="$(kit version 2>/dev/null | awk 'NR == 1 { print $2 }')"; then

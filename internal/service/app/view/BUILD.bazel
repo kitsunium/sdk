@@ -39,9 +39,9 @@ go_test(
     name = "view_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "disclosure_external_test.go",
         "escape_external_test.go",
+        "gen_api_test.go",
         "html_external_test.go",
         "render_external_test.go",
         "texttemplate_external_test.go",

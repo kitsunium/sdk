@@ -268,7 +268,7 @@ doclinks:
 # machine. It needs the workspace's modules in the module cache, so its first
 # run may download them. It then writes docs/error-codes.yaml from the
 # documents it wrote (`error-codes`), and runs gazelle, which gives the pin
-# files kit gen writes — api_gen*_test.go, external tests — their test
+# files kit gen writes — gen_api*_test.go, external tests — their test
 # targets.
 api:
 	cd tools/genindex && GOWORK=off go run . -write-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
@@ -282,10 +282,10 @@ api:
 #     `make api` included;
 #   - -markers: on every cell, the code's exported (id, kind, canonical
 #     signature) set differs from the `// go:<id> <kind> <canonical>` markers
-#     of the api_gen*_test.go pins kit gen writes from design/ — a symbol
+#     of the gen_api*_test.go pins kit gen writes from design/ — a symbol
 #     added in the code alone, a function turned variable, a constraint
 #     widened, a struct tag, a receiver;
-#   - -digests: a generated file (a pin, or a design_gen.go port) whose header
+#   - -digests: a generated file (a pin, or a gen_ports.go port) whose header
 #     sha256 is no longer the bytes of the design file it names, or whose body
 #     was edited by hand — a design edit without `kit gen`.
 # What the pins hold themselves — a signature, a value, a type — the compiler
@@ -299,7 +299,8 @@ api-check:
 # unless `kit` is on PATH at the version design/sdk.yaml pins
 # (project.kit.version), the tree has no tracked change and no untracked file
 # carries the header; deletes exactly the tracked files whose first line is
-# kit's generated header — never by name, since `*_gen*.go` also matches
+# kit's generated header — never by name (every one is gen_*.go, ADR 0181,
+# but a name proves nothing), which also keeps out
 # hand-written files — and clears kit's section of
 # tools/alloc-lane-targets.txt; runs `kit gen`, then
 # `make api`; and fails on any `git diff` or any file it adds untracked.
@@ -322,8 +323,8 @@ from-zero:
 	bash scripts/from-zero.sh
 
 # `kit-coverage` prints, per package, how many exported declarations kit
-# writes — decl_gen.go's types and wrappers, facade_gen.go's re-exports,
-# codes_gen.go's sentinels, design_gen.go's ports — against those written by
+# writes — gen_decls.go's types and wrappers, gen_facade.go's re-exports,
+# gen_codes.go's sentinels, gen_ports.go's ports — against those written by
 # hand, the total, and the ten packages with the most still written by hand
 # (scripts/kit-coverage.sh over `kit design coverage`; ADR 0169). The honest
 # measure of "the SDK rebuilt by kit". A report, never a gate: it exits 0

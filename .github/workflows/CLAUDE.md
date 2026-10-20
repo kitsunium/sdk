@@ -140,7 +140,7 @@ low-level call can never silently drop a package (ADR 0018's build bar; local
 equivalent `bash scripts/cross-platform-audit.sh`, which needs bash 4). `go
 build` never compiles a `_test.go`; `go vet` type-checks it, so a test calling a
 helper only one GOOS defines fails the cells it breaks (ADR 0094). The pins
-kit writes from `design/` (`api_gen*_test.go`, ADR 0163) are test files, so
+kit writes from `design/` (`gen_api*_test.go`, ADR 0163) are test files, so
 this is where every cell compiles them: a symbol that differs from its design
 on one platform fails that platform's cell.
 

@@ -7,9 +7,9 @@ go_library(
     srcs = [
         "attr_value.go",
         "authz.go",
-        "codes_gen.go",
         "decision.go",
         "doc.go",
+        "gen_codes.go",
         "request_value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/security/authz",
@@ -33,8 +33,8 @@ go_test(
     name = "authz_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "authz_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":authz",

@@ -25,9 +25,9 @@ alias(
 go_test(
     name = "proc_test",
     srcs = [
-        "api_gen_test.go",
         "capability_external_test.go",
         "capability_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":proc"],
     deps = [

@@ -6,7 +6,7 @@ go_library(
     name = "cache",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/cache",
     visibility = ["//visibility:public"],
@@ -26,8 +26,8 @@ alias(
 go_test(
     name = "cache_test",
     srcs = [
-        "api_gen_test.go",
         "cache_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":cache",

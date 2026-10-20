@@ -218,7 +218,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/view.ViewMisconfigu
 Code `0.2.27.1` · reason `VIEW_MISCONFIGURED` · public "The view renderer cannot be built from the given configuration"
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 ```go
 func Available() []Engine
@@ -227,7 +227,7 @@ func Available() []Engine
 Available returns every registered [Engine](#Engine), sorted, so a program can print what its imports actually wired up.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 ```go
 func New(cfg Config) (renderer Renderer, err error)
@@ -240,7 +240,7 @@ Call it once, at start-up, and keep the result: see the package documentation's 
 An EMPTY tree is not an error. It produces a Renderer that refuses every name with [TemplateNotFound](#TemplateNotFound) — loud rather than inert (ADR 0031).
 
 <a name="Open"></a>
-## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 ```go
 func Open(name Engine, cfg Config) (renderer Renderer, err error)
@@ -251,7 +251,7 @@ Open resolves an [Engine](#Engine) by name and builds a [Renderer](#Renderer) fr
 It fails loudly on a name nobody claims — [EngineUnknown](#EngineUnknown) — rather than falling back to a default, because a fallback here would let a typo in a configuration file silently choose how every value in the program is escaped.
 
 <a name="Register"></a>
-## func [Register](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## func [Register](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 ```go
 func Register(f Factory) Factory
@@ -264,7 +264,7 @@ Registration is not merely a name binding. An engine in this registry MUST conte
 It panics on a nil factory, on the empty [Engine](#Engine) name, and when a DISTINCT factory already claims the name — at import, where the offender is visible.
 
 <a name="TrustHTML"></a>
-## func [TrustHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## func [TrustHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 ```go
 func TrustHTML(s string) TrustedHTML
@@ -275,7 +275,7 @@ TrustHTML marks s as HTML that is already safe to write unescaped.
 It is the one bypass the SDK offers and the only spelling it has, so "where does this codebase decide to trust markup?" is one grep with one answer. Read the package documentation before using it: the SDK cannot verify the assertion this call makes.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 Config parameterises every engine. FS is required; everything else has a defensible default.
 
@@ -321,7 +321,7 @@ type Config struct {
 ```
 
 <a name="Engine"></a>
-## type [Engine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## type [Engine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 Engine names a registered template engine. The zero value is the reserved invalid name.
 
@@ -336,7 +336,7 @@ type Engine string
 ```
 
 <a name="Factory"></a>
-## type [Factory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## type [Factory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 Factory is the plug-in contract an engine implements to enter the registry. Registering is a promise the security model rests on — see [Register](#Register).
 
@@ -362,7 +362,7 @@ type Factory interface {
 ```
 
 <a name="Factory.Engine"></a>
-### func \(Factory\) [Engine](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/design_gen.go>)
+### func \(Factory\) [Engine](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/gen_ports.go>)
 
 ```go
 func (Factory) Engine() Engine
@@ -371,7 +371,7 @@ func (Factory) Engine() Engine
 Engine returns the registry key this factory claims. It must be stable and non-empty.
 
 <a name="Factory.New"></a>
-### func \(Factory\) [New](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/design_gen.go>)
+### func \(Factory\) [New](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/gen_ports.go>)
 
 ```go
 func (Factory) New(cfg Config) (Renderer, error)
@@ -382,7 +382,7 @@ New builds a Renderer from cfg, parsing the whole template tree eagerly.
 Eager parsing is the point: a template that cannot be parsed, or cannot be contextually escaped, will fail identically forever, so the failure belongs in the process's first second — a deploy that does not come up — rather than in the first request that happens to reach that page.
 
 <a name="Renderer"></a>
-## type [Renderer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## type [Renderer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 Renderer turns a named template and a data value into a complete document: Render and ContentType.
 
@@ -428,7 +428,7 @@ type Renderer interface {
 ```
 
 <a name="Renderer.ContentType"></a>
-### func \(Renderer\) [ContentType](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/design_gen.go>)
+### func \(Renderer\) [ContentType](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/gen_ports.go>)
 
 ```go
 func (Renderer) ContentType() string
@@ -439,7 +439,7 @@ ContentType returns the media type the bytes from Render carry, ready to be writ
 It is a method rather than a package constant because it is the promise an engine makes about the escaping it performs. An engine that does not contextually escape HTML may not report an HTML content type, so a framework that writes this header verbatim (with X-Content-Type-Options: nosniff, which is the framework's job and not the SDK's) never labels unescaped output as a document the browser will parse as HTML.
 
 <a name="Renderer.Render"></a>
-### func \(Renderer\) [Render](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/design_gen.go>)
+### func \(Renderer\) [Render](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/view/gen_ports.go>)
 
 ```go
 func (Renderer) Render(ctx context.Context, name string, data any) ([]byte, error)
@@ -454,7 +454,7 @@ ctx is checked before the work starts and is otherwise not consulted: text/templ
 name is looked up exactly. A name the engine does not hold is [TemplateNotFound](#TemplateNotFound) — a Renderer built over an empty template set is a legitimate Renderer that refuses everything by name, which is a loud behaviour rather than an inert one (ADR 0031).
 
 <a name="TrustedHTML"></a>
-## type [TrustedHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/facade_gen.go>)
+## type [TrustedHTML](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/view/gen_facade.go>)
 
 TrustedHTML is an HTML fragment written WITHOUT escaping.
 

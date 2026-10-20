@@ -10,9 +10,9 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "postgres",
     srcs = [
-        "codes_gen.go",
         "credentials.go",
         "doc.go",
+        "gen_codes.go",
         "postgres.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/postgres",
@@ -35,13 +35,13 @@ alias(
 go_test(
     name = "postgres_test",
     srcs = [
-        "api_gen_test.go",
         "app_test.go",
         "database_test.go",
         "former_journal_test.go",
         "former_keys_test.go",
         "former_refs_test.go",
         "former_test.go",
+        "gen_api_test.go",
         "postgres_test.go",
         "server_test.go",
         "subsystems_test.go",

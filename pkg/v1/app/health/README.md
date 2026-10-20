@@ -376,7 +376,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/health.UnknownProbe
 Code `0.2.29.3` · reason `UNKNOWN_PROBE` · public "The requested health probe does not exist"
 
 <a name="Ask"></a>
-## func [Ask](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [Ask](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func Ask(ctx context.Context, cfg AskConfig) (status int, err error)
@@ -385,7 +385,7 @@ func Ask(ctx context.Context, cfg AskConfig) (status int, err error)
 Ask asks the process listening on cfg.Addr whether it is ready: one GET of cfg.Path over plain HTTP, the question a container's HEALTHCHECK asks. It returns the status the process answered — zero when no whole answer, body included, arrived within the bound — and a nil error exactly when that status is 200; otherwise the error is AskMisconfigured, AskUnreachable, AskTimeout or AskNotReady. See the package documentation for what the exchange refuses to do.
 
 <a name="Component"></a>
-## func [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func Component(registry Health, name string) corelc.ComponentValue
@@ -396,7 +396,7 @@ Component adapts a registry to pkg/v1/app/lifecycle: its Start runs the startup 
 Add it LAST — see the package documentation for why one rule covers both directions.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func New(cfg Config) Health
@@ -405,7 +405,7 @@ func New(cfg Config) Health
 New returns a Health. It cannot fail: a nil cfg.Clock falls back to the wall clock, a non-positive cfg.DefaultTimeout to DefaultCheckTimeout, and nil hooks to no observation. What can fail fails at registration.
 
 <a name="NewLivenessHandler"></a>
-## func [NewLivenessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [NewLivenessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func NewLivenessHandler(registry Health, cfg HandlerConfig) http.Handler
@@ -414,7 +414,7 @@ func NewLivenessHandler(registry Health, cfg HandlerConfig) http.Handler
 NewLivenessHandler serves the liveness probe: 200 unless the process is irrecoverable. Nothing outside the process can make it return 503, because nothing outside the process can be registered on it.
 
 <a name="NewReadinessHandler"></a>
-## func [NewReadinessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [NewReadinessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func NewReadinessHandler(registry Health, cfg HandlerConfig) http.Handler
@@ -423,7 +423,7 @@ func NewReadinessHandler(registry Health, cfg HandlerConfig) http.Handler
 NewReadinessHandler serves the readiness probe: 200 while the replica can take traffic (healthy OR degraded), 503 otherwise — including while starting and after Drain.
 
 <a name="NewStartupHandler"></a>
-## func [NewStartupHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [NewStartupHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func NewStartupHandler(registry Health, cfg HandlerConfig) http.Handler
@@ -432,7 +432,7 @@ func NewStartupHandler(registry Health, cfg HandlerConfig) http.Handler
 NewStartupHandler serves the startup probe: 200 once every startup check has passed, 503 while any has not.
 
 <a name="Worst"></a>
-## func [Worst](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## func [Worst](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ```go
 func Worst(a Status, b Status) Status
@@ -441,7 +441,7 @@ func Worst(a Status, b Status) Status
 Worst returns the more severe of two statuses — the SDK's whole aggregation rule, exported so a caller composing several registries applies the same one.
 
 <a name="AskConfig"></a>
-## type [AskConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [AskConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 AskConfig is the public alias for where a process listens and which path answers whether it is ready: Addr and Path are required, Timeout and Clock have working zeros.
 
@@ -475,7 +475,7 @@ type AskConfig struct {
 ```
 
 <a name="Check"></a>
-## type [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Check is the public alias for the ctx-aware body of a startup or readiness check. It is the shape a dependency call has.
 
@@ -490,7 +490,7 @@ type Check func(ctx context.Context) error
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Config is the public alias for the registry's construction parameters.
 
@@ -569,7 +569,7 @@ type Config struct {
 ```
 
 <a name="HandlerConfig"></a>
-## type [HandlerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [HandlerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 HandlerConfig is the public alias for a handler's body verbosity.
 
@@ -593,7 +593,7 @@ type HandlerConfig struct {
 ```
 
 <a name="Health"></a>
-## type [Health](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Health](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Health is the public alias for the registry contract.
 
@@ -634,7 +634,7 @@ type Health interface {
 ```
 
 <a name="Health.AddLiveness"></a>
-### func \(Health\) [AddLiveness](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/design_gen.go>)
+### func \(Health\) [AddLiveness](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/gen_ports.go>)
 
 ```go
 func (Health) AddLiveness(check LivenessCheckValue) error
@@ -643,7 +643,7 @@ func (Health) AddLiveness(check LivenessCheckValue) error
 AddLiveness registers process-local evidence that the process is not irrecoverable. The same refusals, over the liveness namespace.
 
 <a name="Health.AddReadiness"></a>
-### func \(Health\) [AddReadiness](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/design_gen.go>)
+### func \(Health\) [AddReadiness](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/gen_ports.go>)
 
 ```go
 func (Health) AddReadiness(check ReadinessCheckValue) error
@@ -652,7 +652,7 @@ func (Health) AddReadiness(check ReadinessCheckValue) error
 AddReadiness registers a check that gates routing. The same refusals, over the readiness namespace.
 
 <a name="Health.AddStartup"></a>
-### func \(Health\) [AddStartup](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/design_gen.go>)
+### func \(Health\) [AddStartup](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/gen_ports.go>)
 
 ```go
 func (Health) AddStartup(check StartupCheckValue) error
@@ -661,7 +661,7 @@ func (Health) AddStartup(check StartupCheckValue) error
 AddStartup registers a check that gates the startup probe. It is refused on an empty name or a nil body ([InvalidCheck](#InvalidCheck)), and on a name already registered for the startup probe ([DuplicateCheck](#DuplicateCheck)).
 
 <a name="Health.Drain"></a>
-### func \(Health\) [Drain](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/design_gen.go>)
+### func \(Health\) [Drain](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/gen_ports.go>)
 
 ```go
 func (Health) Drain()
@@ -672,7 +672,7 @@ Drain marks the process as going away: readiness reports not-ready from here on,
 It is idempotent and it is ONE-WAY. There is deliberately no Undrain: a process that has announced its departure has already had its endpoints withdrawn, and a flap would return live traffic to a process that is closing the very dependencies that traffic needs.
 
 <a name="Health.Probe"></a>
-### func \(Health\) [Probe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/design_gen.go>)
+### func \(Health\) [Probe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/health/gen_ports.go>)
 
 ```go
 func (Health) Probe(ctx context.Context, probe Probe) ReportValue
@@ -681,7 +681,7 @@ func (Health) Probe(ctx context.Context, probe Probe) ReportValue
 Probe answers one probe. It never returns an error: a probe that could not be answered IS an answer, and the answer is the report's Status (see \[ReportValue]). A Probe value this package never mints reports StatusUnhealthy carrying one [UnknownProbe](#UnknownProbe) result, rather than defaulting to a verdict nobody asked for.
 
 <a name="LivenessCheck"></a>
-## type [LivenessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [LivenessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 LivenessCheck is the public alias for process-local evidence that the process is not irrecoverable.
 
@@ -711,7 +711,7 @@ type LivenessCheck struct {
 ```
 
 <a name="Probe"></a>
-## type [Probe](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Probe](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Probe is the public alias for which of the three questions is being asked.
 
@@ -735,7 +735,7 @@ func (Probe) String() string
 String renders the probe for a log line. An out-of-range value renders as "unknown" rather than a number, because a Probe reaching a log with a value this package never mints is a defect worth reading as one.
 
 <a name="ReadinessCheck"></a>
-## type [ReadinessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [ReadinessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 ReadinessCheck is the public alias for a check that gates routing. Every dependency check belongs here.
 
@@ -789,7 +789,7 @@ type ReadinessCheck struct {
 ```
 
 <a name="Report"></a>
-## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Report is the public alias for one probe's whole answer.
 
@@ -817,7 +817,7 @@ type Report struct {
 ```
 
 <a name="Result"></a>
-## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Result is the public alias for one check's answer.
 
@@ -875,7 +875,7 @@ Age returns how stale this answer is as of now, which is zero for anything measu
 It takes the instant rather than reading a clock so that the value type keeps no time source of its own: the engine already has an injected one, and a second, hidden, wall-clock read inside a domain value is exactly the thing that makes a staleness assertion untestable.
 
 <a name="SelfCheck"></a>
-## type [SelfCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [SelfCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 SelfCheck is the public alias for the body of a LIVENESS check. It takes no context, which is what keeps a dependency call out of the probe that restarts the process.
 
@@ -890,7 +890,7 @@ type SelfCheck func() error
 ```
 
 <a name="StartupCheck"></a>
-## type [StartupCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [StartupCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 StartupCheck is the public alias for a check that gates startup.
 
@@ -921,7 +921,7 @@ type StartupCheck struct {
 ```
 
 <a name="Status"></a>
-## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/facade_gen.go>)
+## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/health/gen_facade.go>)
 
 Status is the public alias for a check's or a probe's verdict.
 

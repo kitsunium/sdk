@@ -39,13 +39,13 @@ alias(
 go_test(
     name = "git_test",
     srcs = [
-        "api_gen_test.go",
         "changed_set_external_test.go",
         "changed_set_internal_test.go",
         "diff_parse_bench_test.go",
         "diff_parse_internal_test.go",
         "exec_internal_test.go",
         "fsfixture_internal_test.go",
+        "gen_api_test.go",
         "gitdir_deferred_external_test.go",
         "gitdir_external_test.go",
         "gitdir_internal_test.go",

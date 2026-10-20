@@ -350,7 +350,7 @@ func Marshal(v any) ([]byte, error)
 Marshal encodes v, which must encode as a document, into a slice the caller owns.
 
 <a name="NewDateTimeFromTime"></a>
-## func [NewDateTimeFromTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## func [NewDateTimeFromTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 ```go
 func NewDateTimeFromTime(t time.Time) DateTime
@@ -359,7 +359,7 @@ func NewDateTimeFromTime(t time.Time) DateTime
 NewDateTimeFromTime returns the DateTime t falls in, truncated to the millisecond.
 
 <a name="NewDecimal128"></a>
-## func [NewDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## func [NewDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 ```go
 func NewDecimal128(high uint64, low uint64) Decimal128
@@ -368,7 +368,7 @@ func NewDecimal128(high uint64, low uint64) Decimal128
 NewDecimal128 returns the decimal whose BID encoding is high (the first eight bytes) and low (the last eight).
 
 <a name="ObjectIDFromHex"></a>
-## func [ObjectIDFromHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## func [ObjectIDFromHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 ```go
 func ObjectIDFromHex(s string) (ObjectID, error)
@@ -377,7 +377,7 @@ func ObjectIDFromHex(s string) (ObjectID, error)
 ObjectIDFromHex parses the 24-digit hexadecimal form of an ObjectID, in either case.
 
 <a name="ParseDecimal128"></a>
-## func [ParseDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## func [ParseDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 ```go
 func ParseDecimal128(s string) (Decimal128, error)
@@ -395,7 +395,7 @@ func Unmarshal(data []byte, v any) error
 Unmarshal decodes one BSON document into v, a non-nil pointer or map. The input is checked whole before v is written.
 
 <a name="A"></a>
-## type [A](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [A](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 A is an array.
 
@@ -410,7 +410,7 @@ type A[] any
 ```
 
 <a name="Binary"></a>
-## type [Binary](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Binary](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Binary is bytes and the subtype naming what they are.
 
@@ -448,7 +448,7 @@ func (Binary) IsZero() bool
 IsZero reports whether b is the empty generic binary — what omitempty leaves out.
 
 <a name="CodeWithScope"></a>
-## type [CodeWithScope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [CodeWithScope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 CodeWithScope is the deprecated JavaScript with its scope document.
 
@@ -477,7 +477,7 @@ func (CodeWithScope) String() string
 String renders c for a log line or a test failure.
 
 <a name="D"></a>
-## type [D](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [D](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 D is a document whose element order matters.
 
@@ -492,7 +492,7 @@ type D[] E
 ```
 
 <a name="DBPointer"></a>
-## type [DBPointer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [DBPointer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 DBPointer is the deprecated namespace-and-ObjectID pointer.
 
@@ -539,7 +539,7 @@ func (DBPointer) String() string
 String renders p for a log line or a test failure.
 
 <a name="DateTime"></a>
-## type [DateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [DateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 DateTime is milliseconds since the Unix epoch, UTC.
 
@@ -581,7 +581,7 @@ func (*DateTime) UnmarshalJSON(data []byte) error
 UnmarshalJSON reads the textual form MarshalJSON writes. A JSON null leaves dt unchanged, as it leaves a time.Time.
 
 <a name="Decimal128"></a>
-## type [Decimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Decimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Decimal128 is an IEEE 754-2008 128-bit decimal, converted exactly or not at all.
 
@@ -659,7 +659,7 @@ func (*Decimal128) UnmarshalJSON(data []byte) error
 UnmarshalJSON reads a JSON string holding the string form, or the extended-JSON object {"$numberDecimal": "…"}. A JSON null leaves d unchanged.
 
 <a name="E"></a>
-## type [E](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [E](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 E is one element of a D.
 
@@ -679,7 +679,7 @@ type E struct {
 ```
 
 <a name="JavaScript"></a>
-## type [JavaScript](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [JavaScript](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 JavaScript is JavaScript code.
 
@@ -694,7 +694,7 @@ type JavaScript string
 ```
 
 <a name="M"></a>
-## type [M](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [M](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 M is a document whose element order does not; its keys are written sorted.
 
@@ -709,7 +709,7 @@ type M map[string]any
 ```
 
 <a name="MaxKey"></a>
-## type [MaxKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [MaxKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 MaxKey sorts higher than every other value.
 
@@ -724,7 +724,7 @@ type MaxKey struct{}
 ```
 
 <a name="MinKey"></a>
-## type [MinKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [MinKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 MinKey sorts lower than every other value.
 
@@ -739,7 +739,7 @@ type MinKey struct{}
 ```
 
 <a name="Null"></a>
-## type [Null](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Null](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Null is an explicit null, for a D.
 
@@ -754,7 +754,7 @@ type Null struct{}
 ```
 
 <a name="ObjectID"></a>
-## type [ObjectID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [ObjectID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 ObjectID is the twelve-byte identifier; its text and JSON forms are 24 hexadecimal digits.
 
@@ -841,7 +841,7 @@ func (*ObjectID) UnmarshalText(text []byte) error
 UnmarshalText reads the hexadecimal form MarshalText writes.
 
 <a name="Regex"></a>
-## type [Regex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Regex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Regex is a pattern and its options.
 
@@ -888,7 +888,7 @@ func (Regex) String() string
 String renders r for a log line or a test failure.
 
 <a name="Symbol"></a>
-## type [Symbol](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Symbol](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Symbol is the deprecated symbol.
 
@@ -903,7 +903,7 @@ type Symbol string
 ```
 
 <a name="Timestamp"></a>
-## type [Timestamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Timestamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Timestamp is the replication timestamp: seconds and an increment.
 
@@ -968,7 +968,7 @@ func (Timestamp) IsZero() bool
 IsZero reports whether t is the zero timestamp — what omitempty leaves out.
 
 <a name="Undefined"></a>
-## type [Undefined](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/facade_gen.go>)
+## type [Undefined](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
 
 Undefined is the deprecated undefined value.
 

@@ -46,7 +46,7 @@ It is not a cache: nothing is remembered once the call completes, so two SEQUENT
   - [func \(PanicValue\) String\(\) string](<#PanicValue.String>)
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/facade_gen.go>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/gen_facade.go>)
 
 Group deduplicates concurrent calls that name the same key. The zero value is ready to use; a Group must not be copied after first use, and is safe for any number of goroutines.
 
@@ -126,7 +126,7 @@ InFlight reports how many keys a [Group.Do](#Group.Do) arriving now would JOIN r
 It is NOT a count of running calls. A key that was Forgotten, or whose every caller abandoned it, stops being counted while its fn may still be running — Forget drops the entry and not the work, and abandonment is a departure and not a kill — so a forgotten key that a later Do re-issued counts ONCE while two calls for it run.
 
 <a name="PanicValue"></a>
-## type [PanicValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/facade_gen.go>)
+## type [PanicValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/singleflight/gen_facade.go>)
 
 PanicValue carries a panic raised inside a deduplicated call to every caller waiting on it: Raised is the value the panic carried, verbatim, and Stack the stack of the goroutine that ran fn, captured at recovery. Its String method renders both, so an uncaught re-raise prints fn's stack rather than only the waiter's.
 

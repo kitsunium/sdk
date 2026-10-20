@@ -522,7 +522,7 @@ func Bool(key string, val bool) Attr
 Bool builds an Attr carrying a boolean value.
 
 <a name="Build"></a>
-## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func Build(lg Logger, lv Level) Builder
@@ -531,7 +531,7 @@ func Build(lg Logger, lv Level) Builder
 Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool, so the steady-state per-call cost is one heap allocation per emit — the handler clones the accumulated attrs on Send, and that clone escapes. See BENCH.md.
 
 <a name="ConsoleStderr"></a>
-## func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func ConsoleStderr() Sink
@@ -540,7 +540,7 @@ func ConsoleStderr() Sink
 ConsoleStderr returns the stderr console Sink used by Default. Exposed so callers building a Multi() topology can wire stderr alongside richer transports without re-implementing the convenience constructor.
 
 <a name="ConsoleStdout"></a>
-## func [ConsoleStdout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [ConsoleStdout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func ConsoleStdout() Sink
@@ -667,7 +667,7 @@ func Int64(key string, val int64) Attr
 Int64 builds an Attr carrying an int64 value.
 
 <a name="LevelGate"></a>
-## func [LevelGate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [LevelGate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func LevelGate(sink Sink, min Level) Sink
@@ -680,7 +680,7 @@ The floor is the one given, for every level — Info included. A dropped record 
 A nil sink yields nil, which [Multi](#Multi) skips and [NewWithSink](#NewWithSink) refuses with [SinkConfigRequired](#SinkConfigRequired).
 
 <a name="LogAttrs"></a>
-## func [LogAttrs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [LogAttrs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr)
@@ -689,7 +689,7 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 LogAttrs is the slice-overload of Logger.Log that avoids the variadic slice allocation imposed by Logger.Log(... Attr). Pre-built attribute slices flow through this entry point without per-call boxing.
 
 <a name="Multi"></a>
-## func [Multi](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [Multi](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func Multi(branches ...Sink) Sink
@@ -698,7 +698,7 @@ func Multi(branches ...Sink) Sink
 Multi is a thin wrapper around the internal multi (fan-out) sink. It broadcasts every record to each branch in order and aggregates per-sink failures via errors.Join under the FANOUT\_WRITE\_FAILED sentinel.
 
 <a name="NewCredentialValue"></a>
-## func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func NewCredentialValue(accessKeyID string, secretAccessKey string, sessionToken string) CredentialValue
@@ -716,7 +716,7 @@ func NewJSONEncoder() Encoder
 NewJSONEncoder returns a structured single-line JSON encoder, rendering each record as one encoding/json-compatible object per line: {"ts":…,"level":…,"msg":…,\<flat attrs>}. Grouped attributes flatten to dotted keys ("g1.g2.key") to match the text encoder's convention. Pass it to NewWithSink via SinkConfig.Encoder for machine-readable output.
 
 <a name="NewLevelVar"></a>
-## func [NewLevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [NewLevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func NewLevelVar(initial Level) *LevelVar
@@ -725,7 +725,7 @@ func NewLevelVar(initial Level) *LevelVar
 NewLevelVar returns a LevelVar seeded with initial. Hold the returned pointer where a sink or gate can read its Level, then call Set to raise or lower the live threshold. Pair it with ParseLevel to retune from an env or flag value.
 
 <a name="NewMemorySink"></a>
-## func [NewMemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [NewMemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func NewMemorySink() *MemorySink
@@ -819,7 +819,7 @@ lg, _ := logger.NewWithSink(logger.SinkConfig{
 ```
 
 <a name="ParseLevel"></a>
-## func [ParseLevel](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [ParseLevel](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func ParseLevel(name string) (lvl Level, err error)
@@ -890,7 +890,7 @@ func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Warn emits a RecordEvent at LevelWarn through lg.
 
 <a name="WithCaller"></a>
-## func [WithCaller](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## func [WithCaller](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ```go
 func WithCaller(lg Logger, skip int) Logger
@@ -918,7 +918,7 @@ For an SDK error it emits error.code, error.reason and error.public, then one er
 The result is meant to be spread into an emission call, e.g. logger.Error(ctx, lg, "op failed", logger.WithError(err)...).
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Attr is the stable alias for the internal AttrValue key/value pair.
 
@@ -938,7 +938,7 @@ type Attr struct {
 ```
 
 <a name="Builder"></a>
-## type [Builder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Builder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Builder is the stable alias for the internal chainable Builder. Returned by Build, every typed accessor (Str / Int / Bool / …) returns the receiver so callers compose the chain in a single expression. Send terminates the chain — callers MUST NOT use the builder after Send.
 
@@ -1064,7 +1064,7 @@ func (Builder) Uint64(key string, val uint64) Builder
 Uint64 appends a uint64 attribute.
 
 <a name="CloudWatchConfig"></a>
-## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 CloudWatchConfig configures the "cloudwatch" writer. Same import-gated resolution as S3Config.
 
@@ -1130,7 +1130,7 @@ type Config struct {
 ```
 
 <a name="ConsoleConfig"></a>
-## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ConsoleConfig configures the "console" writer (stream + optional MinLevel). The zero value targets os.Stderr (ADR 0030).
 
@@ -1151,7 +1151,7 @@ type ConsoleConfig struct {
 ```
 
 <a name="ConsoleStream"></a>
-## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 ConsoleStream selects which standard stream the console writer targets. Its zero value is StreamStderr (ADR 0030).
 
@@ -1166,7 +1166,7 @@ type ConsoleStream uint8
 ```
 
 <a name="CredentialProvider"></a>
-## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 CredentialProvider yields short-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
 
@@ -1185,7 +1185,7 @@ type CredentialProvider interface {
 ```
 
 <a name="CredentialProvider.Credentials"></a>
-### func \(CredentialProvider\) [Credentials](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/writer/design_gen.go>)
+### func \(CredentialProvider\) [Credentials](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/writer/gen_ports.go>)
 
 ```go
 func (CredentialProvider) Credentials(ctx context.Context) (creds CredentialValue, err error)
@@ -1194,7 +1194,7 @@ func (CredentialProvider) Credentials(ctx context.Context) (creds CredentialValu
 Credentials returns the current credential set, or an error when it cannot be obtained (expired role, unreachable STS, …).
 
 <a name="CredentialValue"></a>
-## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted>".
 
@@ -1254,7 +1254,7 @@ func (CredentialValue) String() string
 String implements fmt.Stringer and always redacts so the secret never reaches a log line through %v / %s.
 
 <a name="Encoder"></a>
-## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Encoder is the stable alias for the internal service encoder interface. The default text encoder is exposed via TextEncoder; structured output is injected through NewWithSink via SinkConfig.Encoder (see NewJSONEncoder) when callers need machine-readable output.
 
@@ -1278,7 +1278,7 @@ type Encoder interface {
 ```
 
 <a name="Encoder.Append"></a>
-### func \(Encoder\) [Append](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Encoder\) [Append](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Encoder) Append(dst []byte, groups []string, r RecordEvent) (out []byte)
@@ -1287,7 +1287,7 @@ func (Encoder) Append(dst []byte, groups []string, r RecordEvent) (out []byte)
 Append serialises r onto dst and returns the (possibly re-allocated) buffer. groups carries the active group prefix stack — encoders are responsible for rendering it as their format-specific prefix ("g1.g2.key" for text, nested objects for JSON).
 
 <a name="Encoder.Name"></a>
-### func \(Encoder\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Encoder\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Encoder) Name() (name string)
@@ -1296,7 +1296,7 @@ func (Encoder) Name() (name string)
 Name returns the canonical encoder identifier ("text", "ndjson", "json"). Useful for diagnostic dumps and metrics tagging.
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 FileConfig configures the "file" writer (path + optional MinLevel).
 
@@ -1318,7 +1318,7 @@ type FileConfig struct {
 ```
 
 <a name="Format"></a>
-## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Format is the typed wire-format identifier accepted by FromConfig. It is a stable alias onto the core codec dispatch surface, so a consumer names a format with the same string values the codec facade exposes.
 
@@ -1351,7 +1351,7 @@ func (Format) String() string
 String implements fmt.Stringer and returns the raw identifier.
 
 <a name="Kind"></a>
-## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Kind is the stable alias for the internal payload discriminant carried by a Value. Switch on it to select the matching typed accessor (String, Int64, Float64, …) instead of paying for an \`any\` assertion at render time.
 
@@ -1375,7 +1375,7 @@ func (Kind) String() string
 String returns the lowercase textual label associated with the Kind receiver, suitable for diagnostic dumps and golden test fixtures. "string", "time", "uint64", "group" — or "unknown" for future variants.
 
 <a name="Level"></a>
-## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Level is the stable alias for the internal severity type.
 
@@ -1399,7 +1399,7 @@ func (Level) String() string
 String returns the uppercase textual label associated with the Level receiver.
 
 <a name="LevelVar"></a>
-## type [LevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [LevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 LevelVar is the stable alias for the atomic Level holder. Its zero value reports LevelInfo; Set and Level are safe for concurrent use, so one goroutine can retune the floor while a sink reads it on the hot path.
 
@@ -1432,7 +1432,7 @@ func (*LevelVar) Set(lvl Level)
 Set replaces the current threshold with lvl. The store is atomic, so a concurrent Level caller observes either the old or the new value, never a torn read.
 
 <a name="Leveler"></a>
-## type [Leveler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Leveler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Leveler is the stable alias for the internal one-method level port. A custom Sink reads Level on each record so the threshold can change at runtime; both LevelVar and any constant-returning type satisfy it.
 
@@ -1451,7 +1451,7 @@ type Leveler interface {
 ```
 
 <a name="Leveler.Level"></a>
-### func \(Leveler\) [Level](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/level/design_gen.go>)
+### func \(Leveler\) [Level](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/level/gen_ports.go>)
 
 ```go
 func (Leveler) Level() Level
@@ -1460,7 +1460,7 @@ func (Leveler) Level() Level
 Level reports the current threshold; implementations MUST be safe for concurrent callers reading while another goroutine mutates the value.
 
 <a name="Logger"></a>
-## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Logger is the stable alias for the internal core.Logger interface.
 
@@ -1488,7 +1488,7 @@ type Logger interface {
 ```
 
 <a name="Logger.Enabled"></a>
-### func \(Logger\) [Enabled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Logger\) [Enabled](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Logger) Enabled(ctx context.Context, lv level.Level) (enabled bool)
@@ -1497,7 +1497,7 @@ func (Logger) Enabled(ctx context.Context, lv level.Level) (enabled bool)
 Enabled reports whether a record at the given level would be emitted.
 
 <a name="Logger.Log"></a>
-### func \(Logger\) [Log](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Logger\) [Log](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Logger) Log(ctx context.Context, lv level.Level, msg string, attrs ...AttrValue)
@@ -1506,7 +1506,7 @@ func (Logger) Log(ctx context.Context, lv level.Level, msg string, attrs ...Attr
 Log emits a RecordEvent at the given level with the supplied message and attrs. Implementations SHOULD short-circuit when Enabled returns false to avoid unnecessary formatting work.
 
 <a name="Logger.With"></a>
-### func \(Logger\) [With](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Logger\) [With](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Logger) With(attrs ...AttrValue) (child Logger)
@@ -1515,7 +1515,7 @@ func (Logger) With(attrs ...AttrValue) (child Logger)
 With returns a derived Logger whose emitted records always include the supplied attrs. The receiver MUST NOT be mutated.
 
 <a name="Logger.WithGroup"></a>
-### func \(Logger\) [WithGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Logger\) [WithGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Logger) WithGroup(name string) (child Logger)
@@ -1524,7 +1524,7 @@ func (Logger) WithGroup(name string) (child Logger)
 WithGroup returns a derived Logger whose subsequent attributes are namespaced under the given group name. Empty names MUST be a no-op.
 
 <a name="MemorySink"></a>
-## type [MemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [MemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 MemorySink is a Sink that buffers a defensive snapshot of every received record in a mutex-guarded slice. It is intended for tests that assert on what was logged. Pass it to NewWithSink (it satisfies Sink), retrieve the buffered records with Records, and clear them with Reset.
 
@@ -1593,7 +1593,7 @@ func (*MemorySink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 Write appends a defensive snapshot of r to the buffer and reports len(p) as written. The encoder's bytes p are intentionally ignored — the sink retains the structured record, not its serialised form. The Attrs slice is deep-cloned, including any nested KindGroup payloads, so later caller mutation cannot corrupt recorded history.
 
 <a name="Record"></a>
-## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Record is the stable alias for the internal RecordEvent value passed to Sink.Write. Consumers implementing custom Sinks reach for this type rather than reimporting the internal core.logger package.
 
@@ -1629,7 +1629,7 @@ type Record struct {
 ```
 
 <a name="RecordSnapshot"></a>
-## type [RecordSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [RecordSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 RecordSnapshot is a buffered copy of a single recorded log event. It is the element type returned by MemorySink.Records, letting tests assert on a record's Level, Message, and Attrs without parsing an encoder's byte output. It is the same type as Record (an alias of the core RecordEvent).
 
@@ -1665,7 +1665,7 @@ type RecordSnapshot struct {
 ```
 
 <a name="RotFileConfig"></a>
-## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 RotFileConfig configures the "rotfile" writer — a size- and/or age-capped, optionally gzip-compressed on-disk file that rotates Path -> Path.1 … up to MaxBackups (Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery / MinLevel). Usable as a value once github.com/kitsunium/sdk/pkg/v1/observe/logger/writer is blank-imported (it self-registers the "rotfile" factory alongside console and file); pass it via WriterSpec{Name: "rotfile", Config: cfg} to NewMulti.
 
@@ -1719,7 +1719,7 @@ type RotFileConfig struct {
 ```
 
 <a name="S3Config"></a>
-## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 S3Config configures the "s3" writer. Usable as a value without the AWS SDK; it resolves to a working sink only once third-party/aws/writer/s3 is imported.
 
@@ -1768,7 +1768,7 @@ type S3Config struct {
 ```
 
 <a name="Sink"></a>
-## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 Sink is the stable alias for the internal core.Sink port. Consumers compose Sink instances (console / file / syslog / async / multi …) and pass them to NewWithSink to wire a custom transport pipeline.
 
@@ -1795,7 +1795,7 @@ type Sink interface {
 ```
 
 <a name="Sink.Close"></a>
-### func \(Sink\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Sink\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Sink) Close() (err error)
@@ -1804,7 +1804,7 @@ func (Sink) Close() (err error)
 Close releases any resources held by the sink (file descriptors, AWS clients, network connections). Sinks MAY refuse subsequent Writes after Close returns; callers MUST NOT use the sink after closing it.
 
 <a name="Sink.Flush"></a>
-### func \(Sink\) [Flush](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Sink\) [Flush](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Sink) Flush(ctx context.Context) (err error)
@@ -1813,7 +1813,7 @@ func (Sink) Flush(ctx context.Context) (err error)
 Flush forces any buffered records out. A no-op for synchronous sinks.
 
 <a name="Sink.Write"></a>
-### func \(Sink\) [Write](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/design_gen.go>)
+### func \(Sink\) [Write](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
 
 ```go
 func (Sink) Write(ctx context.Context, r RecordEvent, p []byte) (n int, err error)
@@ -1852,7 +1852,7 @@ type TopologyConfig struct {
 ```
 
 <a name="TraceContext"></a>
-## type [TraceContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [TraceContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 TraceContext is the stable alias for the trace correlation a Record carries: the trace and span identifiers of the span the record was emitted inside. The zero value means "no trace here" and renders nothing.
 
@@ -1905,7 +1905,7 @@ IsValid reports whether the pair names a span a backend can join: both identifie
 Both are required rather than either, and that follows the data model rather than convenience: "if a SpanId is provided, the corresponding TraceId should also be included" (specification/logs/data-model.md, Trace Context Fields). The only producer in this SDK is a W3C span context, which is itself invalid unless both identifiers are set, so a half-populated pair never reaches an encoder through a supported path — and if one is forged by hand, emitting half of it would produce a field no query can join on.
 
 <a name="TraceContextSource"></a>
-## type [TraceContextSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [TraceContextSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 TraceContextSource is the stable alias for the port that reads a TraceContext off a context.Context. Every Logger built by this package is wired to TraceContextFromContext.
 
@@ -1934,7 +1934,7 @@ type WriterEntryConfig struct {
 ```
 
 <a name="WriterName"></a>
-## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 WriterName is the stable alias for a registered writer key ("console" / "file" / "rotfile" / "s3" / "cloudwatch").
 
@@ -1967,7 +1967,7 @@ func (WriterName) String() string
 String implements fmt.Stringer and returns the raw identifier.
 
 <a name="WriterSpec"></a>
-## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/facade_gen.go>)
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
 WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec{Name: "file", Config: logger.FileConfig{Path: …}}. It is a type alias onto internal/core/observe/logger/writer, so the public type is identity-equal to the internal writer model (alias-based public surface, zero runtime cost).
 

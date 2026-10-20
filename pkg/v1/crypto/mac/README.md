@@ -65,7 +65,7 @@ KeyLen is the required symmetric key length in bytes (256-bit) — the length [N
 Initialised with `github.com/kitsunium/sdk/internal/core/crypto.KeyLen`.
 
 <a name="NewKey"></a>
-## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/mac/facade_gen.go>)
+## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/mac/gen_facade.go>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)
@@ -101,7 +101,7 @@ type Algorithm string
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/mac/facade_gen.go>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/mac/gen_facade.go>)
 
 Key is an opaque, redacting 256-bit symmetric key — the same key type used by the AEAD surface. Build one with [NewKey](#NewKey); its String output is "\<redacted>".
 

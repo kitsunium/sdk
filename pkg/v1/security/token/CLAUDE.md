@@ -18,13 +18,13 @@ is the maintainer's half.
 
 | File | Surface |
 |---|---|
-| `doc.go` | the package comment — kit writes it from the design (ADR 0167): the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `facade_gen.go` (ADR 0166), then the package doc proper |
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167): the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `gen_facade.go` (ADR 0166), then the package doc proper |
 | `token.go` | `PrivateClaim` / `SetPrivateClaim` |
-| `facade_gen.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0166): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, the four `Algorithm*` values, the seven `Claim*` names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 29 verdict vars re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 29 `Code*` constants re-exported for `errs.HasCode` |
+| `gen_facade.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0166): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, the four `Algorithm*` values, the seven `Claim*` names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 29 verdict vars re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 29 `Code*` constants re-exported for `errs.HasCode` |
 
 ## Why the codes are re-exported
 
-`facade_gen.go` declares `CodeExpired errs.Code = coretoken.CodeExpired` and
+`gen_facade.go` declares `CodeExpired errs.Code = coretoken.CodeExpired` and
 twenty-eight siblings. These are **re-exports, not declarations**: the ranges
 `0.2.13.*` and `0.3.44.*` stay owned by `internal/core/security/token` — where
 every code of the token domain is declared since ADR 0160 — and `0.3.42.*` by
@@ -112,7 +112,7 @@ reason `Claims` aliases `ClaimsValue`.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/token.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`gen_facade.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/security/token.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `gen_facade.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `gen_facade.go` edited by hand.
 
 ## Verification
 

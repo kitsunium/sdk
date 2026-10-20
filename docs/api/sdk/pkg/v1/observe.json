@@ -88,7 +88,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.AttrValue",
       "doc": "Attr is the stable alias for the internal AttrValue key/value pair.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -112,7 +112,7 @@
       "spelled": "func(lg Logger, lv Level) Builder",
       "canonical": "func(lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, lv github.com/kitsunium/sdk/pkg/v1/observe/logger.Level) github.com/kitsunium/sdk/pkg/v1/observe/logger.Builder",
       "doc": "Build returns a chainable Builder bound to lg at the supplied level.\nBuilders are recycled through a sync.Pool, so the steady-state per-call\ncost is one heap allocation per emit — the handler clones the accumulated\nattrs on Send, and that clone escapes. See BENCH.md.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -125,7 +125,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/logger.Builder",
       "doc": "Builder is the stable alias for the internal chainable Builder. Returned\nby Build, every typed accessor (Str / Int / Bool / …) returns the receiver\nso callers compose the chain in a single expression. Send terminates the\nchain — callers MUST NOT use the builder after Send.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -138,7 +138,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.CloudWatchConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.CloudWatchConfig",
       "doc": "CloudWatchConfig configures the \"cloudwatch\" writer. Same import-gated\nresolution as S3Config.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -154,7 +154,7 @@
         "value": "1.1.0.2"
       },
       "doc": "CodeSinkConfigRequired identifies a NewWithSink call with\nSinkConfig.Sink == nil; the v1 façade refuses to default silently to\na console sink so callers see the misconfiguration immediately. The\nidentifier is qualified with \"Config\" so the AST audit can distinguish\nit from the service-layer sink/handler validation (0.3.1.4).\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -170,7 +170,7 @@
         "value": "1.1.0.4"
       },
       "doc": "CodeTopologyInvalid identifies a FromConfig call whose config blob is\nmalformed, names an unregistered writer, or whose Factory/DecodeConfig\nrejected its options. The error path is redacted: it names only the writer\nand the failure kind, never any decoded credential or option value (ADR 0014).\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -186,7 +186,7 @@
         "value": "1.1.0.1"
       },
       "doc": "CodeWriterRequired identifies a NewText call with Config.Writer == nil;\nthe v1 façade refuses to default silently to stderr.\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -202,7 +202,7 @@
         "value": "1.1.0.3"
       },
       "doc": "CodeWriterSpecInvalid identifies a NewMulti call with no WriterSpec entries;\nthe façade refuses to build a logger that fans out to nothing (ADR 0012).\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -244,7 +244,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.ConsoleConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.ConsoleConfig",
       "doc": "ConsoleConfig configures the \"console\" writer (stream + optional MinLevel).\nThe zero value targets os.Stderr (ADR 0030).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -256,7 +256,7 @@
       "spelled": "func() Sink",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink",
       "doc": "ConsoleStderr returns the stderr console Sink used by Default. Exposed\nso callers building a Multi() topology can wire stderr alongside richer\ntransports without re-implementing the convenience constructor.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -268,7 +268,7 @@
       "spelled": "func() Sink",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink",
       "doc": "ConsoleStdout returns the stdout console Sink. Same rationale as\nConsoleStderr — exposed for Multi() compositions.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -281,7 +281,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.ConsoleStream",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.ConsoleStream",
       "doc": "ConsoleStream selects which standard stream the console writer targets. Its\nzero value is StreamStderr (ADR 0030).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -294,7 +294,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialProvider",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialProvider",
       "doc": "CredentialProvider yields short-lived credentials on demand for the network\nwriters; the SDK never logs or wraps the returned material.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -307,7 +307,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialValue",
       "doc": "CredentialValue is the opaque, redacting credential set returned by a\nCredentialProvider; its String output is always \"<redacted>\".\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -368,7 +368,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/logger/encoder.Encoder",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.Encoder",
       "doc": "Encoder is the stable alias for the internal service encoder interface.\nThe default text encoder is exposed via TextEncoder; structured output is\ninjected through NewWithSink via SinkConfig.Encoder (see NewJSONEncoder)\nwhen callers need machine-readable output.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -393,7 +393,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.FileConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.FileConfig",
       "doc": "FileConfig configures the \"file\" writer (path + optional MinLevel).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -418,7 +418,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Format",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/codec.Format",
       "doc": "Format is the typed wire-format identifier accepted by FromConfig. It is a\nstable alias onto the core codec dispatch surface, so a consumer names a\nformat with the same string values the codec facade exposes.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -491,7 +491,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.Kind",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.Kind",
       "doc": "Kind is the stable alias for the internal payload discriminant carried by a\nValue. Switch on it to select the matching typed accessor (String, Int64,\nFloat64, …) instead of paying for an `any` assertion at render time.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -505,7 +505,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindAny",
       "doc": "KindAny tags a Value whose payload is an unconstrained interface. It is also\nthe zero value of Kind, so an unrecognised future variant degrades here\nrather than panicking.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -519,7 +519,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindBool",
       "doc": "KindBool tags a Value carrying a boolean payload.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -533,7 +533,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindDuration",
       "doc": "KindDuration tags a Value carrying a time.Duration payload.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -547,7 +547,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindFloat64",
       "doc": "KindFloat64 tags a Value carrying a float64 payload.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -561,7 +561,7 @@
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindGroup",
       "doc": "KindGroup tags a Value whose payload is a nested []Attr. Producers that\ntarget the bundled text and JSON encoders flatten groups into dotted keys\ninstead, since neither encoder renders a group payload directly.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -575,7 +575,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindInt64",
       "doc": "KindInt64 tags a Value carrying an int64 payload (also covers int / int32,\nwhich IntValue widens on the way in).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -589,7 +589,7 @@
       "value": "5",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindString",
       "doc": "KindString tags a Value carrying a string payload.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -603,7 +603,7 @@
       "value": "6",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindTime",
       "doc": "KindTime tags a Value carrying a time.Time payload.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -617,7 +617,7 @@
       "value": "7",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger.KindUint64",
       "doc": "KindUint64 tags a Value carrying an unsigned 64-bit integer payload.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -630,7 +630,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/level.Level",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Level",
       "doc": "Level is the stable alias for the internal severity type.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -644,7 +644,7 @@
       "value": "-4",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Debug",
       "doc": "LevelDebug selects records describing detailed tracing information.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -658,7 +658,7 @@
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Error",
       "doc": "LevelError selects records describing failures needing action.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -670,7 +670,7 @@
       "spelled": "func(sink Sink, min Level) Sink",
       "canonical": "func(sink github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink, min github.com/kitsunium/sdk/pkg/v1/observe/logger.Level) github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink",
       "doc": "LevelGate returns a Sink that passes to sink the records whose level is at\nor above min and drops the others, delegating Flush and Close. It is how one\nbranch of a [Multi] fan-out sees less than another: the pipeline's\n[SinkConfig].MinLevel is set to the lowest level any branch wants, and the\nnarrower branches are gated.\n\nThe floor is the one given, for every level — Info included. A dropped\nrecord reports success (every byte accepted, no error), so a fan-out never\ncounts it as a failed write. The gate holds nothing of its own: Flush and\nClose reach sink unchanged, and closing the gate closes sink.\n\nA nil sink yields nil, which [Multi] skips and [NewWithSink] refuses with\n[SinkConfigRequired].\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -684,7 +684,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Info",
       "doc": "LevelInfo selects records describing routine operational events.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -697,7 +697,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/level.Var",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Var",
       "doc": "LevelVar is the stable alias for the atomic Level holder. Its zero value\nreports LevelInfo; Set and Level are safe for concurrent use, so one\ngoroutine can retune the floor while a sink reads it on the hot path.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -711,7 +711,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Warn",
       "doc": "LevelWarn selects records describing abnormal but recoverable conditions.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -724,7 +724,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/level.Leveler",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/level.Leveler",
       "doc": "Leveler is the stable alias for the internal one-method level port. A custom\nSink reads Level on each record so the threshold can change at runtime; both\nLevelVar and any constant-returning type satisfy it.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -736,7 +736,7 @@
       "spelled": "func(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr)",
       "canonical": "func(ctx context.Context, lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, lv github.com/kitsunium/sdk/pkg/v1/observe/logger.Level, msg string, attrs []github.com/kitsunium/sdk/pkg/v1/observe/logger.Attr)",
       "doc": "LogAttrs is the slice-overload of Logger.Log that avoids the variadic\nslice allocation imposed by Logger.Log(... Attr). Pre-built attribute\nslices flow through this entry point without per-call boxing.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -749,7 +749,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.Logger",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.Logger",
       "doc": "Logger is the stable alias for the internal core.Logger interface.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -762,7 +762,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory.Memory",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory.Memory",
       "doc": "MemorySink is a Sink that buffers a defensive snapshot of every received\nrecord in a mutex-guarded slice. It is intended for tests that assert on\nwhat was logged. Pass it to NewWithSink (it satisfies Sink), retrieve the\nbuffered records with Records, and clear them with Reset.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -774,7 +774,7 @@
       "spelled": "func(branches ...Sink) Sink",
       "canonical": "func(branches ...github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink) github.com/kitsunium/sdk/pkg/v1/observe/logger.Sink",
       "doc": "Multi is a thin wrapper around the internal multi (fan-out) sink. It\nbroadcasts every record to each branch in order and aggregates per-sink\nfailures via errors.Join under the FANOUT_WRITE_FAILED sentinel.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -786,7 +786,7 @@
       "spelled": "func(accessKeyID string, secretAccessKey string, sessionToken string) CredentialValue",
       "canonical": "func(accessKeyID string, secretAccessKey string, sessionToken string) github.com/kitsunium/sdk/pkg/v1/observe/logger.CredentialValue",
       "doc": "NewCredentialValue builds a CredentialValue from AWS SigV4 material. An empty\nsessionToken is valid for long-lived keys.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -810,7 +810,7 @@
       "spelled": "func(initial Level) *LevelVar",
       "canonical": "func(initial github.com/kitsunium/sdk/pkg/v1/observe/logger.Level) *github.com/kitsunium/sdk/pkg/v1/observe/logger.LevelVar",
       "doc": "NewLevelVar returns a LevelVar seeded with initial. Hold the returned pointer\nwhere a sink or gate can read its Level, then call Set to raise or lower the\nlive threshold. Pair it with ParseLevel to retune from an env or flag value.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -822,7 +822,7 @@
       "spelled": "func() *MemorySink",
       "canonical": "func() *github.com/kitsunium/sdk/pkg/v1/observe/logger.MemorySink",
       "doc": "NewMemorySink returns an empty MemorySink ready to record received records.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -894,7 +894,7 @@
       "spelled": "func(name string) (lvl Level, err error)",
       "canonical": "func(name string) (lvl github.com/kitsunium/sdk/pkg/v1/observe/logger.Level, err error)",
       "doc": "ParseLevel maps a canonical lowercase level name (debug / info / warn /\nerror) to its Level, the strict inverse of a lowercased Level.String. Input\nis trimmed and lowercased before matching. Unknown names return the zero\nLevel and a redacted LevelUnknown error — the offending input is never echoed.\n\nUnlike the internal best-effort config path, this surface reports the miss so\na caller validating an env/flag value can reject it rather than silently\nfalling back to Info.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -907,7 +907,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent",
       "doc": "Record is the stable alias for the internal RecordEvent value passed to\nSink.Write. Consumers implementing custom Sinks reach for this type\nrather than reimporting the internal core.logger package.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -920,7 +920,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent",
       "doc": "RecordSnapshot is a buffered copy of a single recorded log event. It is the\nelement type returned by MemorySink.Records, letting tests assert on a\nrecord's Level, Message, and Attrs without parsing an encoder's byte output.\nIt is the same type as Record (an alias of the core RecordEvent).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -933,7 +933,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.RotFileConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.RotFileConfig",
       "doc": "RotFileConfig configures the \"rotfile\" writer — a size- and/or age-capped,\noptionally gzip-compressed on-disk file that rotates Path -> Path.1 … up to\nMaxBackups (Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery\n/ MinLevel). Usable as a value once\ngithub.com/kitsunium/sdk/pkg/v1/observe/logger/writer is blank-imported (it\nself-registers the \"rotfile\" factory alongside console and file); pass it via\nWriterSpec{Name: \"rotfile\", Config: cfg} to NewMulti.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -946,7 +946,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.S3Config",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.S3Config",
       "doc": "S3Config configures the \"s3\" writer. Usable as a value without the AWS SDK;\nit resolves to a working sink only once third-party/aws/writer/s3 is imported.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -959,7 +959,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.Sink",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.Sink",
       "doc": "Sink is the stable alias for the internal core.Sink port. Consumers\ncompose Sink instances (console / file / syslog / async / multi …) and\npass them to NewWithSink to wire a custom transport pipeline.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1005,7 +1005,7 @@
         "public": "Logger SinkConfig requires an explicit sink"
       },
       "doc": "SinkConfigRequired is returned when NewWithSink is called with\nSinkConfig.Sink==nil. Callers that want a console sink use\nlogger.ConsoleStderr / ConsoleStdout or stick to logger.Default()\nfor the legacy text-on-stderr wiring.\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1019,7 +1019,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.ConsoleStderr",
       "doc": "StreamStderr selects os.Stderr for the console writer (zero value, so a\nConsoleConfig{} written without an opinion lands here — ADR 0030).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1033,7 +1033,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.ConsoleStdout",
       "doc": "StreamStdout selects os.Stdout for the console writer. Because stdout is\na protocol channel for many processes, it is reachable only by name.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1112,7 +1112,7 @@
         "public": "Logger topology config is invalid"
       },
       "doc": "TopologyInvalid is returned by FromConfig when the config blob cannot be\ndecoded, names a writer no imported package has registered, or a writer's\nFactory/DecodeConfig rejected its options. The message is redacted: it\nnames only the writer and the failure kind, never a decoded credential or\noption value (the SECRET GATE of ADR 0014 §D5).\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1125,7 +1125,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.TraceContextValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.TraceContextValue",
       "doc": "TraceContext is the stable alias for the trace correlation a Record carries:\nthe trace and span identifiers of the span the record was emitted inside.\nThe zero value means \"no trace here\" and renders nothing.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1150,7 +1150,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger.TraceContextSource",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger.TraceContextSource",
       "doc": "TraceContextSource is the stable alias for the port that reads a\nTraceContext off a context.Context. Every Logger built by this package is\nwired to TraceContextFromContext.\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1198,7 +1198,7 @@
       "spelled": "func(lg Logger, skip int) Logger",
       "canonical": "func(lg github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger, skip int) github.com/kitsunium/sdk/pkg/v1/observe/logger.Logger",
       "doc": "WithCaller returns a derived Logger whose emitted records carry a \"source\"\nattribute resolving the call site into file:line:function. The skip argument\nis the extra stack-frame offset reserved for wrapper layers; pass 0 for\ndirect callers. The returned Logger shares the original's sink and encoder;\nthe only change is the added annotation, so the option is safe to layer onto\nany Logger built by this package.\n\n\tlg, _ := logger.Default()\n\tlg = logger.WithCaller(lg, 0)\n\tlg.Info(ctx, \"ready\") // record now carries source=…/main.go:42:main.run\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1249,7 +1249,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.Name",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.Name",
       "doc": "WriterName is the stable alias for a registered writer key\n(\"console\" / \"file\" / \"rotfile\" / \"s3\" / \"cloudwatch\").\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1266,7 +1266,7 @@
         "public": "Logger config requires an explicit writer"
       },
       "doc": "WriterRequired is returned when NewText is called with Config.Writer==nil.\nCallers that want the \"stderr convenience\" use Default() instead.\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1279,7 +1279,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/logger/writer.Spec",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/logger/writer.Spec",
       "doc": "WriterSpec names a writer and carries its concrete config. Read at call sites\nas logger.WriterSpec{Name: \"file\", Config: logger.FileConfig{Path: …}}. It is\na type alias onto internal/core/observe/logger/writer, so the public type is identity-equal\nto the internal writer model (alias-based public surface, zero runtime cost).\n",
-      "file": "logger/facade_gen.go",
+      "file": "logger/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1296,7 +1296,7 @@
         "public": "NewMulti requires at least one writer spec"
       },
       "doc": "WriterSpecInvalid is returned when NewMulti is called with zero\nWriterSpec entries. Supply at least one named writer (and blank-import\nits package) so the fan-out has a destination.\n",
-      "file": "logger/codes_gen.go",
+      "file": "logger/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1312,7 +1312,7 @@
         "value": "1.1.1.1"
       },
       "doc": "CodeLoggerRequired identifies a NewHandler / New call with a nil Logger.\nThe bridge refuses to build a handler that discards silently: its whole\npurpose is to guarantee a single pipeline, and a bridge to nowhere would\nbreak that guarantee precisely where the caller believed it held.\n",
-      "file": "logger/slogbridge/codes_gen.go",
+      "file": "logger/slogbridge/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1329,7 +1329,7 @@
         "public": "slog bridge requires an explicit logger"
       },
       "doc": "LoggerRequired is returned when NewHandler or New is called with a nil\nLogger. Build the destination first (logger.NewText / NewWithSink /\nDefault), then bridge it — there is no \"default destination\" here, by the\nsame reasoning that made NewText refuse to default to stderr (ADR 0002).\n",
-      "file": "logger/slogbridge/codes_gen.go",
+      "file": "logger/slogbridge/gen_codes.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1366,7 +1366,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.AsyncMeter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.AsyncMeter",
       "doc": "AsyncMeter is the public alias for the sibling port that registers\nobservable (asynchronous) instruments.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1379,7 +1379,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue",
       "doc": "Attr is the public alias for one typed dimension of a series.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1392,7 +1392,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.AttrKind",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKind",
       "doc": "AttrKind is the public alias for an attribute value's type tag.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1406,7 +1406,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindBool",
       "doc": "AttrKindBool marks a bool-valued attribute.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1420,7 +1420,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindFloat64",
       "doc": "AttrKindFloat64 marks an IEEE-754 double attribute.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1434,7 +1434,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindInt64",
       "doc": "AttrKindInt64 marks a signed 64-bit integer attribute.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1448,7 +1448,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindInvalid",
       "doc": "AttrKindInvalid marks an attribute whose value no constructor ever set.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1462,7 +1462,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString",
       "doc": "AttrKindString marks a string-valued attribute.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1474,7 +1474,7 @@
       "spelled": "func() []ExporterName",
       "canonical": "func() []github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName",
       "doc": "AvailableExporters returns the sorted list of registered exporter names.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1486,7 +1486,7 @@
       "spelled": "func(key string, value bool) Attr",
       "canonical": "func(key string, value bool) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr",
       "doc": "Bool returns a bool-valued attribute.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1499,7 +1499,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Counter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Counter",
       "doc": "Counter is the public alias for a monotonic sum instrument.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1513,7 +1513,7 @@
       "value": "2000",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/metrics.DefaultMaxSeriesPerInstrument",
       "doc": "DefaultMaxSeriesPerInstrument is the cardinality bound NewMeter applies,\nand the value a non-positive MeterConfig knob clamps to.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1527,7 +1527,7 @@
       "value": "1048576",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/metrics.DefaultOTLPMaxResponseBytes",
       "doc": "DefaultOTLPMaxResponseBytes caps how much of a collector's response is\nread. The body is the one length a remote party controls in this\nexchange, and a conforming response is a few hundred bytes.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1541,7 +1541,7 @@
       "value": "10000000000",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/metrics.DefaultOTLPTimeout",
       "doc": "DefaultOTLPTimeout bounds one OTLP/HTTP export round trip when\nOTLPHTTPConfig leaves Timeout unset. It is the OpenTelemetry protocol\nexporter specification's own default, not a figure this SDK invented.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1555,7 +1555,7 @@
       "value": "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultScopeName",
       "doc": "DefaultScopeName names this SDK as the instrumenting library when a\ncaller declares no scope of their own.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1568,7 +1568,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Describer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Describer",
       "doc": "Describer is the public alias for the sibling port that documents an\ninstrument NAME. It is deliberately NOT part of FullMeter — reach it by type\nassertion, and read the false case as \"this meter records no description\".\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1586,7 +1586,7 @@
         "public": "That instrument name already carries a different description"
       },
       "doc": "DescriptionConflict is raised when a second, DIFFERENT description is\nbound to an instrument name that already has one.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1598,7 +1598,7 @@
       "spelled": "func(snap Snapshot) (doc []byte, err error)",
       "canonical": "func(snap github.com/kitsunium/sdk/pkg/v1/observe/metrics.Snapshot) (doc []byte, err error)",
       "doc": "EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest:\nexactly the bytes that go in the body of a POST to /v1/metrics under\nContent-Type: application/json.\n\nIt does no I/O, so it is the half of OTLP support that is testable on its\nown — and the half NewOTLPHTTPExporter calls before it touches a socket.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1610,7 +1610,7 @@
       "spelled": "func(name ExporterName, snap Snapshot) error",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/pkg/v1/observe/metrics.Snapshot) error",
       "doc": "Export ships snap through the exporter registered as name.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1628,7 +1628,7 @@
         "public": "The metrics exporter failed to ship the snapshot"
       },
       "doc": "ExportFailed wraps an exporter's shipping failure.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1641,7 +1641,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Exporter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Exporter",
       "doc": "Exporter is the public alias for a snapshot shipper.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1654,7 +1654,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName",
       "doc": "ExporterName is the public alias for an exporter's registry key.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1666,7 +1666,7 @@
       "spelled": "func(key string, value float64) Attr",
       "canonical": "func(key string, value float64) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr",
       "doc": "Float64 returns a double attribute. A float is a measurement rather than a\ndimension, and it is keyed on its bit pattern — see the core documentation.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1679,7 +1679,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Float64Callback",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Float64Callback",
       "doc": "Float64Callback is the public alias for a double observable's callback.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1692,7 +1692,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.FullMeter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.FullMeter",
       "doc": "FullMeter is the public alias for the union of all three — what NewMeter\nreturns.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1705,7 +1705,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Gauge",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Gauge",
       "doc": "Gauge is the public alias for a sampled-reading instrument.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1718,7 +1718,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.GaugeMetricValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.GaugeMetricValue",
       "doc": "GaugeMetric is the public alias for every series of one gauge instrument name.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1731,7 +1731,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.GaugeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.GaugeValue",
       "doc": "GaugePoint is the public alias for one gauge series.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1744,7 +1744,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Histogram",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Histogram",
       "doc": "Histogram is the public alias for a bucketed distribution instrument.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1757,7 +1757,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.HistogramMetricValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.HistogramMetricValue",
       "doc": "HistogramMetric is the public alias for every series of one histogram\ninstrument name, plus its temporality.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1770,7 +1770,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.HistogramValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.HistogramValue",
       "doc": "HistogramPoint is the public alias for one histogram series.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1788,7 +1788,7 @@
         "public": "That instrument name is already registered with a different kind"
       },
       "doc": "InstrumentKindConflict is raised when a name is reused across kinds.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1800,7 +1800,7 @@
       "spelled": "func(key string, value int64) Attr",
       "canonical": "func(key string, value int64) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr",
       "doc": "Int64 returns a signed-integer attribute.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1813,7 +1813,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Int64Callback",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Int64Callback",
       "doc": "Int64Callback is the public alias for an integer observable's callback.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1831,7 +1831,7 @@
         "public": "An attribute key is empty or repeated, or its value was never set"
       },
       "doc": "InvalidAttribute is raised when an attribute set has an empty or\nrepeated key, or a value no constructor ever set.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1849,7 +1849,7 @@
         "public": "An instrument description must not be empty"
       },
       "doc": "InvalidDescription is raised when Describe is handed an empty\ndescription, which would document nothing.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1867,7 +1867,7 @@
         "public": "An attribute key is not a valid Prometheus label name"
       },
       "doc": "InvalidLabelName is returned by the Prometheus connector when an\nattribute key is not a valid Prometheus label name.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1885,7 +1885,7 @@
         "public": "An instrument name is not a valid Prometheus metric name"
       },
       "doc": "InvalidMetricName is returned by the Prometheus connector when an\ninstrument name is not a valid Prometheus metric name.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1903,7 +1903,7 @@
         "public": "That aggregation temporality is not one this SDK declares"
       },
       "doc": "InvalidTemporality is raised when a MeterConfig carries a Temporality\nthat is none of the three constants.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1916,7 +1916,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Meter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Meter",
       "doc": "Meter is the public alias for the frozen instrument factory: Counter, Gauge,\nHistogram and Collect.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1929,7 +1929,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/metrics.MeterConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/metrics.MeterConfig",
       "doc": "MeterConfig is the public alias for a Meter's configuration.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1941,7 +1941,7 @@
       "spelled": "func() FullMeter",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/observe/metrics.FullMeter",
       "doc": "NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its\nresolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative,\nservice.name=unknown_service, this SDK as the scope, and the system clock.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1953,7 +1953,7 @@
       "spelled": "func(cfg MeterConfig) FullMeter",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/observe/metrics.MeterConfig) github.com/kitsunium/sdk/pkg/v1/observe/metrics.FullMeter",
       "doc": "NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset\nfield resolves to a working value and none of them to an inert one.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1965,7 +1965,7 @@
       "spelled": "func(name ExporterName, cfg OTLPHTTPConfig) (exporter Exporter, err error)",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/pkg/v1/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter, err error)",
       "doc": "NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is.\n\nIt is never registered, and it never retries — compose resilience.NewRetry\nwith OTLPRetryable instead. A refused endpoint fails here, at wiring, rather\nthan at the first scrape.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1977,7 +1977,7 @@
       "spelled": "func(name ExporterName, dst io.Writer) Exporter",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, dst io.Writer) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter",
       "doc": "NewOTLPJSONExporter returns an Exporter writing each snapshot to dst as one\nnewline-terminated OTLP/JSON document, so a stream of exports is NDJSON. It\nis not auto-registered; the registered \"otlpjson\" exporter is this, on\nstderr.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -1989,7 +1989,7 @@
       "spelled": "func(name ExporterName, dst io.Writer) Exporter",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, dst io.Writer) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter",
       "doc": "NewPrometheusExporter returns an Exporter rendering the Prometheus text\nexposition format to dst under name (not auto-registered). Hand it the\nhttp.ResponseWriter of a /metrics handler; the registered \"prometheus\"\nexporter targets stderr and is a diagnostic, not a scrape endpoint.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2001,7 +2001,7 @@
       "spelled": "func(name ExporterName, dst io.Writer) Exporter",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, dst io.Writer) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter",
       "doc": "NewTextExporter returns a text Exporter writing to dst under name (not\nauto-registered).\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2019,7 +2019,7 @@
         "public": "The OTLP endpoint is not an absolute http or https URL with a path"
       },
       "doc": "OTLPEndpointInvalid is returned by NewOTLPHTTPExporter when the endpoint\nis not an absolute http(s) URL carrying the signal path.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2037,7 +2037,7 @@
         "public": "The OTLP collector rejected the metrics payload"
       },
       "doc": "OTLPExportRejected is returned when a collector refuses the payload with\na status the specification marks non-retryable.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2055,7 +2055,7 @@
         "public": "The OTLP collector is unreachable or overloaded"
       },
       "doc": "OTLPExportUnavailable is returned when an OTLP/HTTP export fails\ntransiently — a transport fault, or HTTP 429/502/503/504. It is the one\nOTLPRetryable reports true for.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2068,7 +2068,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPHTTPConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPHTTPConfig",
       "doc": "OTLPHTTPConfig is the public alias for an OTLP/HTTP exporter's configuration.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2086,7 +2086,7 @@
         "public": "That histogram's buckets have no OTLP representation"
       },
       "doc": "OTLPInvalidBucketLayout is returned by the OTLP/JSON encoder when a\nhistogram's buckets are not one count more than strictly-increasing\nfinite bounds.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2100,7 +2100,7 @@
       "value": "\"/v1/metrics\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPMetricsPath",
       "doc": "OTLPMetricsPath is the URL path OTLP/HTTP reserves for the metrics\nsignal. An OTLP endpoint is a full URL used as-is, so append this to a\ncollector's base address rather than hoping the SDK guesses it.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2118,7 +2118,7 @@
         "public": "The OTLP collector accepted the request but rejected some data points"
       },
       "doc": "OTLPPartialSuccess is returned when a collector accepts the request but\nrejects some of its data points. The specification forbids retrying it.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2130,7 +2130,7 @@
       "spelled": "func(err error) bool",
       "canonical": "func(err error) bool",
       "doc": "OTLPRetryable reports whether err is an OTLP/HTTP failure the specification\nsays may be replayed: a transport fault, or HTTP 429 / 502 / 503 / 504.\nIts signature is resilience.RetryConfig.Retryable's, so it drops in without\nan adapter.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2148,7 +2148,7 @@
         "public": "That aggregation temporality has no OTLP representation"
       },
       "doc": "OTLPUnresolvedTemporality is returned by the OTLP/JSON encoder when a\nmetric's temporality is neither delta nor cumulative. The schema's\nUNSPECIFIED value is documented as one that MUST NOT be used.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2161,7 +2161,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveFloat64",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveFloat64",
       "doc": "ObserveFloat64 is the public alias for the reporting function a double\nobservable callback is handed.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2174,7 +2174,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveInt64",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveInt64",
       "doc": "ObserveInt64 is the public alias for the reporting function an integer\nobservable callback is handed.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2188,7 +2188,7 @@
       "value": "\"sdk_metric_overflow\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.OverflowAttrKey",
       "doc": "OverflowAttrKey is the reserved attribute naming a meter's aggregated\noverflow series. It appears in a snapshot only once an instrument has\nexceeded its cardinality bound, and its value is the boolean true.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2200,7 +2200,7 @@
       "spelled": "func(e Exporter) Exporter",
       "canonical": "func(e github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter",
       "doc": "RegisterExporter adds e to the process-wide exporter registry.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2218,7 +2218,7 @@
         "public": "An attribute key is reserved by the Prometheus exposition format"
       },
       "doc": "ReservedLabelName is returned by the Prometheus connector when an\nattribute key is legal but reserved — a \"__\" prefix, or \"le\" on a\nhistogram.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2231,7 +2231,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue",
       "doc": "Resource is the public alias for the producer's identity, carried once per\nsnapshot.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2244,7 +2244,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue",
       "doc": "Scope is the public alias for the instrumentation's identity, carried once\nper snapshot.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2258,7 +2258,7 @@
       "value": "\"service.name\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.ServiceNameKey",
       "doc": "ServiceNameKey is the attribute key the OTel resource semantic\nconventions reserve for the logical name of the service.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2271,7 +2271,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue",
       "doc": "Snapshot is the public alias for a whole-meter point-in-time copy.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2283,7 +2283,7 @@
       "spelled": "func(key string, value string) Attr",
       "canonical": "func(key string, value string) github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr",
       "doc": "String returns a string-valued attribute. It is the shortest of the four\nconstructors to write because a string dimension is the common one.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2296,7 +2296,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.SumMetricValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.SumMetricValue",
       "doc": "SumMetric is the public alias for every series of one sum instrument name,\nplus its temporality and monotonicity.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2309,7 +2309,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.SumValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.SumValue",
       "doc": "SumPoint is the public alias for one sum series.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2322,7 +2322,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Temporality",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Temporality",
       "doc": "Temporality is the public alias for a metric's aggregation temporality.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2336,7 +2336,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.TemporalityCumulative",
       "doc": "TemporalityCumulative reports the window since the series started.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2350,7 +2350,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.TemporalityDelta",
       "doc": "TemporalityDelta reports the window since the previous collection.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2364,7 +2364,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.TemporalityUnspecified",
       "doc": "TemporalityUnspecified is the unset zero value; it resolves to\nTemporalityCumulative and never reaches a Snapshot.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2382,7 +2382,7 @@
         "public": "No metrics exporter is registered under that name"
       },
       "doc": "UnknownExporter is returned by Export when no exporter matches the name.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2396,7 +2396,7 @@
       "value": "\"unknown_service\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.UnknownService",
       "doc": "UnknownService is the service.name the specification mandates when a\nproducer supplies none.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2414,7 +2414,7 @@
         "public": "The Prometheus exposition format carries cumulative metrics only"
       },
       "doc": "UnsupportedTemporality is returned by the Prometheus connector when the\nsnapshot is not cumulative — a delta one, which the exposition format\ncannot express, or a hand-built one whose temporality is unresolved.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2427,7 +2427,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.UpDownCounter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.UpDownCounter",
       "doc": "UpDownCounter is the public alias for a non-monotonic sum instrument.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2440,7 +2440,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.UpDownMeter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.UpDownMeter",
       "doc": "UpDownMeter is the public alias for the sibling port that mints the\nnon-monotonic sum Meter cannot.\n",
-      "file": "metrics/facade_gen.go",
+      "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2452,7 +2452,7 @@
       "spelled": "func(name string) string",
       "canonical": "func(name string) string",
       "doc": "CanonicalName spells a function the same way whoever named it.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2464,7 +2464,7 @@
       "spelled": "func(ctx context.Context, window time.Duration) (*Profile, error)",
       "canonical": "func(ctx context.Context, window time.Duration) (*github.com/kitsunium/sdk/pkg/v1/observe/profiling.Profile, error)",
       "doc": "CaptureCPU samples the process's CPU for window and returns the profile.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2482,7 +2482,7 @@
         "public": "The profile was abandoned before its window ended"
       },
       "doc": "CaptureCanceled is a CPU capture whose context ended before the window\n(503); errors.Is still finds the context's error.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2500,7 +2500,7 @@
         "public": "The profile could not be written"
       },
       "doc": "CaptureFailed wraps an error runtime/pprof returned while writing a\nprofile.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2512,7 +2512,7 @@
       "spelled": "func() (*Profile, error)",
       "canonical": "func() (*github.com/kitsunium/sdk/pkg/v1/observe/profiling.Profile, error)",
       "doc": "CaptureHeap returns the live heap, after a garbage collection.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2529,7 +2529,7 @@
         "value": "0.3.89.3"
       },
       "doc": "CodeCaptureCanceled identifies a CPU capture whose context ended before its\nwindow (0.3.89.3).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2546,7 +2546,7 @@
         "value": "0.3.89.4"
       },
       "doc": "CodeCaptureFailed identifies a profile runtime/pprof could not write\n(0.3.89.4).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2563,7 +2563,7 @@
         "value": "0.3.89.5"
       },
       "doc": "CodeProfileMalformed identifies bytes that are not a well-formed pprof\nprofile, or a hand-built profile Fold cannot read (0.3.89.5).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2580,7 +2580,7 @@
         "value": "0.3.89.6"
       },
       "doc": "CodeProfileTooLarge identifies a profile over MaxProfileBytes, or whose\nstacks exceed MaxFrames (0.3.89.6).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2597,7 +2597,7 @@
         "value": "0.3.89.2"
       },
       "doc": "CodeProfilerBusy identifies a CPU capture refused because the process's one\nCPU profiler is running (0.3.89.2).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2614,7 +2614,7 @@
         "value": "0.3.89.7"
       },
       "doc": "CodeSampleTypeMissing identifies a fold asked for a sample type the profile\ndoes not measure (0.3.89.7).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2631,7 +2631,7 @@
         "value": "0.3.89.1"
       },
       "doc": "CodeWindowInvalid identifies a CPU window not positive or over MaxCPUWindow\n(0.3.89.1).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2645,7 +2645,7 @@
       "value": "64",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.DefaultFlameMaxDepth",
       "doc": "DefaultFlameMaxDepth is how deep the flame graph goes when\nFoldConfig.FlameMaxDepth is not positive.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2659,7 +2659,7 @@
       "value": "5764607523034235/1152921504606846976",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.DefaultFlameMinShare",
       "doc": "DefaultFlameMinShare prunes a flame frame costing less than this share of\nthe total when FoldConfig.FlameMinShare is outside (0, 1): half a percent.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2673,7 +2673,7 @@
       "value": "25",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.DefaultTopFunctions",
       "doc": "DefaultTopFunctions is how many functions Folded.Top lists when\nFoldConfig.TopFunctions is not positive.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2687,7 +2687,7 @@
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.DefaultTopPerOwner",
       "doc": "DefaultTopPerOwner is how many functions each owner's Top lists when\nFoldConfig.TopPerOwner is not positive.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2700,7 +2700,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.FlameNodeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.FlameNodeValue",
       "doc": "FlameNode is one frame of a flame graph.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2714,7 +2714,7 @@
       "value": "\"root\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.FlameRoot",
       "doc": "FlameRoot is the name of a flame graph's root frame.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2726,7 +2726,7 @@
       "spelled": "func(p *Profile, cfg FoldConfig) (Folded, error)",
       "canonical": "func(p *github.com/kitsunium/sdk/pkg/v1/observe/profiling.Profile, cfg github.com/kitsunium/sdk/pkg/v1/observe/profiling.FoldConfig) (github.com/kitsunium/sdk/pkg/v1/observe/profiling.Folded, error)",
       "doc": "Fold charges every sample of p to an owner and adds it all up.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2739,7 +2739,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/profiling.FoldConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.FoldConfig",
       "doc": "FoldConfig says how Fold reads a profile; every zero field has a default.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2752,7 +2752,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.FoldedValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.FoldedValue",
       "doc": "Folded is a profile folded, in the sample type's own unit.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2765,7 +2765,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.FrameValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.FrameValue",
       "doc": "Frame is one frame of a stack.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2778,7 +2778,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.FunctionCostValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.FunctionCostValue",
       "doc": "FunctionCost is what one function cost.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2791,7 +2791,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.GoroutineValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.GoroutineValue",
       "doc": "Goroutine is one goroutine, as the runtime's dump describes it.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2804,7 +2804,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.GoroutineGroupValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.GoroutineGroupValue",
       "doc": "GoroutineGroup is goroutines sharing their labels, state and top frame.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2816,7 +2816,7 @@
       "spelled": "func() ([]Goroutine, error)",
       "canonical": "func() ([]github.com/kitsunium/sdk/pkg/v1/observe/profiling.Goroutine, error)",
       "doc": "Goroutines returns every goroutine of the process.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2829,7 +2829,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/profiling.GroupConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.GroupConfig",
       "doc": "GroupConfig says how GroupGoroutines groups.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2841,7 +2841,7 @@
       "spelled": "func(gs []Goroutine, cfg GroupConfig) []GoroutineGroup",
       "canonical": "func(gs []github.com/kitsunium/sdk/pkg/v1/observe/profiling.Goroutine, cfg github.com/kitsunium/sdk/pkg/v1/observe/profiling.GroupConfig) []github.com/kitsunium/sdk/pkg/v1/observe/profiling.GoroutineGroup",
       "doc": "GroupGoroutines groups goroutines by labels, state and top frame, largest\nfirst.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2855,7 +2855,7 @@
       "value": "300000000000",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.MaxCPUWindow",
       "doc": "MaxCPUWindow is the longest window CaptureCPU samples.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2869,7 +2869,7 @@
       "value": "4194304",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.MaxFrames",
       "doc": "MaxFrames bounds the frames Parse builds: each location's once, and every\ncopy a sample's stack makes of them.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2883,7 +2883,7 @@
       "value": "67108864",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.MaxProfileBytes",
       "doc": "MaxProfileBytes bounds what Parse reads, compressed and inflated alike.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2896,7 +2896,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.OwnerCostValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.OwnerCostValue",
       "doc": "OwnerCost is what one owner cost.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2908,7 +2908,7 @@
       "spelled": "func(data []byte) (*Profile, error)",
       "canonical": "func(data []byte) (*github.com/kitsunium/sdk/pkg/v1/observe/profiling.Profile, error)",
       "doc": "Parse decodes a pprof profile, gzipped or not.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2920,7 +2920,7 @@
       "spelled": "func(dump []byte) []Goroutine",
       "canonical": "func(dump []byte) []github.com/kitsunium/sdk/pkg/v1/observe/profiling.Goroutine",
       "doc": "ParseGoroutines reads a goroutine dump; it never fails.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2933,7 +2933,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.ProfileValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.ProfileValue",
       "doc": "Profile is a decoded pprof profile.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2951,7 +2951,7 @@
         "public": "That is not a well-formed pprof profile"
       },
       "doc": "ProfileMalformed refuses bytes that are not a well-formed pprof profile —\nthe field names the part, the input is never quoted — and a nil profile or\na sample short of values handed to Fold.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2969,7 +2969,7 @@
         "public": "The profile is too large to read"
       },
       "doc": "ProfileTooLarge refuses a profile over MaxProfileBytes, compressed or\ninflated, or whose stacks would take more than MaxFrames frames.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -2987,7 +2987,7 @@
         "public": "A CPU profile is already being recorded"
       },
       "doc": "ProfilerBusy refuses a CPU capture while the process's one CPU profiler is\nrunning, whoever started it (409).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3000,7 +3000,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.SampleValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.SampleValue",
       "doc": "Sample is one sample: a stack, a value per sample type, and labels.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3013,7 +3013,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/profiling.SampleTypeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.SampleTypeValue",
       "doc": "SampleType names what a value measures and its unit.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3031,7 +3031,7 @@
         "public": "The profile does not measure that"
       },
       "doc": "SampleTypeMissing refuses a fold asked for a sample type the profile does\nnot measure.\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3049,7 +3049,7 @@
         "public": "A CPU profile needs a window longer than zero and at most five minutes"
       },
       "doc": "WindowInvalid refuses a CPU window not positive or over MaxCPUWindow (400).\n",
-      "file": "profiling/facade_gen.go",
+      "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3061,7 +3061,7 @@
       "spelled": "func(params SamplingParams) bool",
       "canonical": "func(params github.com/kitsunium/sdk/pkg/v1/observe/trace.SamplingParams) bool",
       "doc": "AlwaysSample keeps every root trace.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3074,7 +3074,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue",
       "doc": "Attr is one typed dimension. It is the SAME type as\n[github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr], deliberately: an attribute is\nOTel's common.proto, shared by every signal, so a value built for a metric is\naccepted by a span and the reverse.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3087,7 +3087,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.AttrKind",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKind",
       "doc": "AttrKind discriminates an Attr's value type.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3101,7 +3101,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindBool",
       "doc": "AttrKindBool marks a bool-valued attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3115,7 +3115,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindFloat64",
       "doc": "AttrKindFloat64 marks an IEEE-754 double attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3129,7 +3129,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindInt64",
       "doc": "AttrKindInt64 marks a signed 64-bit integer attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3143,7 +3143,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindInvalid",
       "doc": "AttrKindInvalid is the zero value and names no type.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3157,7 +3157,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString",
       "doc": "AttrKindString marks a string-valued attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3169,7 +3169,7 @@
       "spelled": "func() []ExporterName",
       "canonical": "func() []github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName",
       "doc": "AvailableExporters returns the sorted list of registered names. The OTLP/HTTP\nemitter never appears in it.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3181,7 +3181,7 @@
       "spelled": "func(key string, value bool) Attr",
       "canonical": "func(key string, value bool) github.com/kitsunium/sdk/pkg/v1/observe/trace.Attr",
       "doc": "Bool returns a bool-valued attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3194,7 +3194,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.Carrier",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.Carrier",
       "doc": "Carrier is the two-method surface a header set presents for propagation. It is\nexactly http.Header's Get/Set pair, so http.Header satisfies it with no\nadapter.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3206,7 +3206,7 @@
       "spelled": "func(tracer Tracer) corenet.Middleware[http.RoundTripper]",
       "canonical": "func(tracer github.com/kitsunium/sdk/pkg/v1/observe/trace.Tracer) github.com/kitsunium/sdk/internal/core/net.Middleware[net/http.RoundTripper]",
       "doc": "ClientMiddleware returns a middleware tracing every outbound request and\nINJECTING the traceparent into it. It decorates the RoundTripper, so no call\nsite can skip it, and it clones the request rather than mutating one the caller\nstill holds.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3218,7 +3218,7 @@
       "spelled": "func(parent context.Context, spanContext SpanContext) context.Context",
       "canonical": "func(parent context.Context, spanContext github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext) context.Context",
       "doc": "ContextWithSpanContext returns a copy of parent carrying spanContext. An\ninvalid context is still stored: it is how \"this scope deliberately has no\ntrace\" is expressed, and it shadows any outer one.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3232,7 +3232,7 @@
       "value": "2048",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultMaxSpans",
       "doc": "DefaultMaxSpans is a Recorder's default bound. There is no \"unbounded\"\nsetting, because a buffer nobody drains is how a tracing integration takes a\nprocess down.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3246,7 +3246,7 @@
       "value": "1048576",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultOTLPMaxResponseBytes",
       "doc": "DefaultOTLPMaxResponseBytes caps the response body read: 1 MiB.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3260,7 +3260,7 @@
       "value": "10000000000",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultOTLPTimeout",
       "doc": "DefaultOTLPTimeout bounds one export round trip: 10s, the OpenTelemetry\nspecification's own default for OTEL_EXPORTER_OTLP_TIMEOUT.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3274,7 +3274,7 @@
       "value": "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DefaultScopeName",
       "doc": "DefaultScopeName names this package as the instrumenting library when a caller\ndeclares no scope. It is deliberately NOT the metrics one: a scope names the\nlibrary that produced THIS signal.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3292,7 +3292,7 @@
         "public": "A trace exporter is already registered under that name"
       },
       "doc": "DuplicateRegistration is the boot-time registry panic sentinel.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3304,7 +3304,7 @@
       "spelled": "func(spans Spans) (doc []byte, err error)",
       "canonical": "func(spans github.com/kitsunium/sdk/pkg/v1/observe/trace.Spans) (doc []byte, err error)",
       "doc": "EncodeOTLPJSON renders spans as ONE OTLP/JSON ExportTraceServiceRequest —\nexactly the bytes that go in the body of a POST to /v1/traces. It does no I/O,\nso an encoding question never becomes a network question.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3322,7 +3322,7 @@
         "public": "Trace identifier generation failed to read secure random bytes"
       },
       "doc": "EntropyFailed is kept for code that matches it: nothing returns it since\nGo 1.24, whose crypto/rand.Read never fails, so minting an identifier\ncannot fail.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3335,7 +3335,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.EventValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.EventValue",
       "doc": "Event is a timestamped point inside a span.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3349,7 +3349,7 @@
       "value": "\"exception\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ExceptionEventName",
       "doc": "ExceptionEventName is the reserved event name RecordError writes.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3363,7 +3363,7 @@
       "value": "\"exception.message\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ExceptionMessageKey",
       "doc": "ExceptionMessageKey names a recorded error's message.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3377,7 +3377,7 @@
       "value": "\"exception.type\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ExceptionTypeKey",
       "doc": "ExceptionTypeKey names a recorded error's stable identity.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3389,7 +3389,7 @@
       "spelled": "func(name ExporterName, spans Spans) error",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, spans github.com/kitsunium/sdk/pkg/v1/observe/trace.Spans) error",
       "doc": "Export ships spans through the SpanExporter registered as name.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3407,7 +3407,7 @@
         "public": "The trace exporter failed to ship the spans"
       },
       "doc": "ExportFailed wraps an exporter's failure.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3420,7 +3420,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName",
       "doc": "ExporterName is the typed key a SpanExporter registers under.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3432,7 +3432,7 @@
       "spelled": "func(carrier Carrier) SpanContext",
       "canonical": "func(carrier github.com/kitsunium/sdk/pkg/v1/observe/trace.Carrier) github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext",
       "doc": "Extract reads a span context out of carrier, returning the invalid zero value\nwhen there is nothing usable. It returns no error on purpose — see the package\ndocumentation.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3446,7 +3446,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.FlagSampled",
       "doc": "FlagSampled is the traceparent sampled bit — the one flag version 00 defines,\nand the one the whole sampling design travels in.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3458,7 +3458,7 @@
       "spelled": "func(key string, value float64) Attr",
       "canonical": "func(key string, value float64) github.com/kitsunium/sdk/pkg/v1/observe/trace.Attr",
       "doc": "Float64 returns a double attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3470,7 +3470,7 @@
       "spelled": "func(context SpanContext) (header string, ok bool)",
       "canonical": "func(context github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext) (header string, ok bool)",
       "doc": "FormatTraceParent renders a span context as a version-00 traceparent,\nreporting ok=false when the context names no joinable span — an all-zero\nidentifier is a header every conforming receiver must ignore, so there is\nnothing to write. Undefined flag bits are masked here, which is where this SDK\nacts as a producer.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3484,7 +3484,7 @@
       "value": "\"http.request.method\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.HTTPRequestMethodKey",
       "doc": "HTTPRequestMethodKey is the request method attribute the middlewares record.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3498,7 +3498,7 @@
       "value": "\"http.response.status_code\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.HTTPResponseStatusCodeKey",
       "doc": "HTTPResponseStatusCodeKey is the response status attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3510,7 +3510,7 @@
       "spelled": "func(context SpanContext, carrier Carrier)",
       "canonical": "func(context github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext, carrier github.com/kitsunium/sdk/pkg/v1/observe/trace.Carrier)",
       "doc": "Inject writes context into carrier as a traceparent, plus a tracestate when the\nvendor list is non-empty. An invalid context writes NOTHING — not an empty\nheader, not a zero-filled one.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3522,7 +3522,7 @@
       "spelled": "func(key string, value int64) Attr",
       "canonical": "func(key string, value int64) github.com/kitsunium/sdk/pkg/v1/observe/trace.Attr",
       "doc": "Int64 returns a signed-integer attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3540,7 +3540,7 @@
         "public": "An attribute key is empty or repeated, or its value was never set"
       },
       "doc": "InvalidAttribute is the panic sentinel for an unusable attribute set —\nan empty or repeated key, or a value no constructor set — on a span, an\nevent, a link or a Resource. It is this package's own code; the metrics\none is a different sentinel for the same defect in that signal.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3558,7 +3558,7 @@
         "public": "A sampling ratio must be greater than 0 and at most 1"
       },
       "doc": "InvalidSampleRatio reports a fraction Ratio will not accept — including\nexactly 0, which also spells \"unconfigured\".\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3576,7 +3576,7 @@
         "public": "A span name must not be empty"
       },
       "doc": "InvalidSpanName is the panic sentinel for a Start with no name.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3594,7 +3594,7 @@
         "public": "The traceparent header is not a valid W3C trace context"
       },
       "doc": "InvalidTraceParent reports a traceparent header that cannot be read.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3612,7 +3612,7 @@
         "public": "The tracestate header is not a valid W3C trace state list"
       },
       "doc": "InvalidTraceState reports a tracestate header that cannot be read.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3625,7 +3625,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanKind",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKind",
       "doc": "Kind says how a span relates to its neighbours.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3639,7 +3639,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKindClient",
       "doc": "KindClient is making an outbound synchronous request.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3653,7 +3653,7 @@
       "value": "5",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKindConsumer",
       "doc": "KindConsumer is handling a message enqueued earlier.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3667,7 +3667,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKindInternal",
       "doc": "KindInternal is work inside one process.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3681,7 +3681,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKindProducer",
       "doc": "KindProducer is enqueuing a message handled later, elsewhere.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3695,7 +3695,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKindServer",
       "doc": "KindServer is handling an inbound synchronous request.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3709,7 +3709,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanKindUnspecified",
       "doc": "KindUnspecified is SPAN_KIND_UNSPECIFIED; it resolves to KindInternal.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3722,7 +3722,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.LinkValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.LinkValue",
       "doc": "Link points at a causally related span in another trace.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3734,7 +3734,7 @@
       "spelled": "func(name ExporterName) (e SpanExporter, ok bool)",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName) (e github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanExporter, ok bool)",
       "doc": "LookupExporter returns the SpanExporter registered under name.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3748,7 +3748,7 @@
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.MaxTraceStateMembers",
       "doc": "MaxTraceStateMembers is the W3C list cap: 32 members, from the grammar itself\nrather than from a ceiling this SDK invented.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3760,7 +3760,7 @@
       "spelled": "func(params SamplingParams) bool",
       "canonical": "func(params github.com/kitsunium/sdk/pkg/v1/observe/trace.SamplingParams) bool",
       "doc": "NeverSample drops every root trace. It exists so \"off\" has a NAME a reviewer\ncan grep for, rather than a rate of zero that is indistinguishable from a field\nnobody set.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3772,7 +3772,7 @@
       "spelled": "func(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error)",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/pkg/v1/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanExporter, err error)",
       "doc": "NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP\ncollector. It is deliberately NOT in the registry: arming a network client from\nan import is worse than arming a writer, and no endpoint could be a correct\ndefault. It does not retry either — use OTLPRetryable with\n[github.com/kitsunium/sdk/pkg/v1/app/resilience].\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3784,7 +3784,7 @@
       "spelled": "func(name ExporterName, dst io.Writer) SpanExporter",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, dst io.Writer) github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanExporter",
       "doc": "NewOTLPJSONExporter returns a SpanExporter writing each batch to dst as one\nnewline-terminated OTLP/JSON document. It is not registered — bind it yourself.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3796,7 +3796,7 @@
       "spelled": "func(cfg RecorderConfig) *Recorder",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/observe/trace.RecorderConfig) *github.com/kitsunium/sdk/pkg/v1/observe/trace.Recorder",
       "doc": "NewRecorder builds the in-memory span destination. Its Sink is what a\nTracerConfig takes, and its Collect DRAINS — a Recorder has exactly one reader.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3808,7 +3808,7 @@
       "spelled": "func() (id SpanID, err error)",
       "canonical": "func() (id github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanID, err error)",
       "doc": "NewSpanID draws a fresh random span identifier.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3820,7 +3820,7 @@
       "spelled": "func() (id TraceID, err error)",
       "canonical": "func() (id github.com/kitsunium/sdk/pkg/v1/observe/trace.TraceID, err error)",
       "doc": "NewTraceID draws a fresh random trace identifier.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3832,7 +3832,7 @@
       "spelled": "func(cfg TracerConfig) *SDKTracer",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/observe/trace.TracerConfig) *github.com/kitsunium/sdk/pkg/v1/observe/trace.SDKTracer",
       "doc": "NewTracer builds a Tracer from cfg, applying every clamp once. It cannot fail:\nevery field of TracerConfig has a resolved meaning, and the inputs that CAN be\nrefused — a sampling ratio, an OTLP endpoint — are refused by their own\nconstructors before they reach here.\n\nIt returns the concrete [SDKTracer] rather than the [Tracer] port, so a caller\nkeeps Resource and Scope, and anything the concrete type grows later, without\nthe port having to grow (ADR 0039).\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3850,7 +3850,7 @@
         "public": "The OTLP endpoint must be an absolute http(s) URL with a path"
       },
       "doc": "OTLPEndpointInvalid reports an endpoint that cannot address a collector.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3868,7 +3868,7 @@
         "public": "The trace collector rejected the export"
       },
       "doc": "OTLPExportRejected reports a permanent refusal by the collector.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3886,7 +3886,7 @@
         "public": "The trace collector is unavailable"
       },
       "doc": "OTLPExportUnavailable reports a transient failure worth retrying.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3899,7 +3899,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/trace.OTLPHTTPConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/trace.OTLPHTTPConfig",
       "doc": "OTLPHTTPConfig configures the OTLP/HTTP exporter.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3917,7 +3917,7 @@
         "public": "A span carries an all-zero trace or span identifier"
       },
       "doc": "OTLPInvalidSpanContext reports a span with an all-zero identifier.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3935,7 +3935,7 @@
         "public": "The trace collector accepted the request but rejected some spans"
       },
       "doc": "OTLPPartialSuccess reports an accepted request with rejected spans.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3947,7 +3947,7 @@
       "spelled": "func(err error) bool",
       "canonical": "func(err error) bool",
       "doc": "OTLPRetryable reports whether err is an OTLP/HTTP failure the specification\nsays may be replayed. Its signature is exactly resilience.RetryConfig.Retryable's.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3965,7 +3965,7 @@
         "public": "A span reached the exporter without an end time"
       },
       "doc": "OTLPSpanNotEnded reports a span that reached the encoder unended.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3979,7 +3979,7 @@
       "value": "\"/v1/traces\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.OTLPTracesPath",
       "doc": "OTLPTracesPath is the OTLP/HTTP path for the trace signal. Append it to a\ncollector's base URL yourself, so the whole address is one readable string.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -3991,7 +3991,7 @@
       "spelled": "func(root Sampler) Sampler",
       "canonical": "func(root github.com/kitsunium/sdk/pkg/v1/observe/trace.Sampler) github.com/kitsunium/sdk/pkg/v1/observe/trace.Sampler",
       "doc": "ParentBased returns a Sampler that honours a valid parent's decision and\nconsults root only at the start of a trace. It is what almost every deployment\nwants — see the package documentation on why re-deciding produces a trace with\nholes in it. A nil root clamps to AlwaysSample.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4003,7 +4003,7 @@
       "spelled": "func(text string) (id SpanID, err error)",
       "canonical": "func(text string) (id github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanID, err error)",
       "doc": "ParseSpanID reads 16 lowercase hex digits, refusing an all-zero result.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4015,7 +4015,7 @@
       "spelled": "func(text string) (id TraceID, err error)",
       "canonical": "func(text string) (id github.com/kitsunium/sdk/pkg/v1/observe/trace.TraceID, err error)",
       "doc": "ParseTraceID reads 32 lowercase hex digits, refusing an all-zero result.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4027,7 +4027,7 @@
       "spelled": "func(header string) (context SpanContext, err error)",
       "canonical": "func(header string) (context github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext, err error)",
       "doc": "ParseTraceParent reads a traceparent header value, with a typed error. It is\nthe diagnostic form of Extract: use it when you are debugging a header, not\nwhen you are serving a request.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4039,7 +4039,7 @@
       "spelled": "func(header string) (state TraceState, err error)",
       "canonical": "func(header string) (state github.com/kitsunium/sdk/pkg/v1/observe/trace.TraceState, err error)",
       "doc": "ParseTraceState reads a tracestate header value. It refuses the whole header\nrather than salvaging the members it understood: a half-parsed list forwarded\nto the next hop is a list this process invented.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4051,7 +4051,7 @@
       "spelled": "func(fraction float64) (sampler Sampler, err error)",
       "canonical": "func(fraction float64) (sampler github.com/kitsunium/sdk/pkg/v1/observe/trace.Sampler, err error)",
       "doc": "Ratio returns a Sampler keeping a deterministic fraction of root traces,\ndecided on the trace id so two services reach the same verdict for the same id.\n\nIt REFUSES exactly 0, and that refusal is the point. A float64 left unset, a\nJSON document missing the key and a YAML `rate:` with nothing after it all\nproduce 0.0 — so a rate of zero means both \"sample nothing\" and \"nobody\nconfigured this\", and nothing in the type can tell them apart. The failure is\nsilent: no error, no log, and no telemetry, where the absence of telemetry IS\nthe symptom. Say NeverSample for none and AlwaysSample (or Ratio(1)) for all.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4063,7 +4063,7 @@
       "spelled": "func(span Span, err error)",
       "canonical": "func(span github.com/kitsunium/sdk/pkg/v1/observe/trace.Span, err error)",
       "doc": "RecordError records err on span as the conventional `exception` event and marks\nthe span ERROR.\n\nIt is a helper rather than a Span method because what an error's type is, and\nwhether recording one should also set the status, are judgements about the\ncaller's error model — and a port method would freeze this SDK's answer into\nevery downstream implementation (ADR 0039).\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4076,7 +4076,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/trace.Recorder",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/trace.Recorder",
       "doc": "Recorder accumulates finished spans in memory and hands them out in\nbatches. It is the in-tree SpanSink.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4089,7 +4089,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/trace.RecorderConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/trace.RecorderConfig",
       "doc": "RecorderConfig configures a Recorder.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4101,7 +4101,7 @@
       "spelled": "func(e SpanExporter) SpanExporter",
       "canonical": "func(e github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanExporter) github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanExporter",
       "doc": "RegisterExporter inserts e under e.Name(). It panics on a nil exporter or a\ndistinct exporter claiming a taken name.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4114,7 +4114,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue",
       "doc": "Resource identifies the producer of the telemetry. The same type a MeterConfig\ntakes, so a process cannot carry two Resources that disagree about\nservice.name — which is the key a backend correlates a trace with a metric on.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4127,7 +4127,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/trace.Tracer",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/trace.Tracer",
       "doc": "SDKTracer is the concrete [Tracer] that [NewTracer] returns: the port's\nStart, plus Resource and Scope, which read back what it stamps on every\nspan it starts. The port keeps the name Tracer; this is the SDK's\nimplementation of it, in OpenTelemetry's sense of API and SDK. Name it\nto keep a tracer in a field, or to pass one to a function of your own.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4140,7 +4140,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.Sampler",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.Sampler",
       "doc": "Sampler decides whether a ROOT trace is recorded. A func port, so it cannot\ngrow a method at all.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4153,7 +4153,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SamplingParams",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SamplingParams",
       "doc": "SamplingParams is everything a Sampler sees.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4166,7 +4166,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue",
       "doc": "Scope identifies the instrumentation that started the spans.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4180,7 +4180,7 @@
       "value": "\"server.address\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.ServerAddressKey",
       "doc": "ServerAddressKey is the host attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4192,7 +4192,7 @@
       "spelled": "func(tracer Tracer) corenet.Middleware[http.Handler]",
       "canonical": "func(tracer github.com/kitsunium/sdk/pkg/v1/observe/trace.Tracer) github.com/kitsunium/sdk/internal/core/net.Middleware[net/http.Handler]",
       "doc": "ServerMiddleware returns a middleware tracing every inbound request: it\nextracts the parent context from the headers, starts a SERVER span named by the\nrequest method, and records the status. A malformed traceparent starts a new\ntrace and never fails the request.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4206,7 +4206,7 @@
       "value": "\"service.name\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/otel.ServiceNameKey",
       "doc": "ServiceNameKey is the resource attribute a backend joins a trace to a metric\non. It is the same constant pkg/v1/observe/metrics exports, so the two signals cannot\ndisagree about the spelling.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4219,7 +4219,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.Span",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.Span",
       "doc": "Span is one live, recording span. FROZEN at five methods (ADR 0039).\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4232,7 +4232,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanContextValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanContextValue",
       "doc": "SpanContext is the immutable identity of a span — what travels in a\ntraceparent and what a child inherits.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4244,7 +4244,7 @@
       "spelled": "func(ctx context.Context) SpanContext",
       "canonical": "func(ctx context.Context) github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext",
       "doc": "SpanContextFromContext returns the span context carried by ctx, or the invalid\nzero value when there is none.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4257,7 +4257,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanValue",
       "doc": "SpanData is one FINISHED span — what a SpanSink receives and an exporter\nships. The live one is [Span].\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4270,7 +4270,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter",
       "doc": "SpanExporter ships a batch of finished spans to a backend.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4283,7 +4283,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanID",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanID",
       "doc": "SpanID identifies one span: eight octets, rendered as 16 lowercase hex\ndigits. The all-zero value is invalid, and is also how \"no parent\" is spelled.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4296,7 +4296,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanParams",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanParams",
       "doc": "SpanParams are the facts a span is born with. The zero value is an INTERNAL\nspan starting now.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4309,7 +4309,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpanSink",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpanSink",
       "doc": "SpanSink receives every sampled span at End. A func port, for the same reason.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4322,7 +4322,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue",
       "doc": "Spans is a batch of finished spans plus the Resource and Scope that describe\nall of them.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4335,7 +4335,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.StatusValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.StatusValue",
       "doc": "Status is a span's recorded outcome.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4348,7 +4348,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.StatusCode",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.StatusCode",
       "doc": "StatusCode is a span's verdict: unset, ok or error.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4362,7 +4362,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.StatusError",
       "doc": "StatusError is a failure.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4376,7 +4376,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.StatusOK",
       "doc": "StatusOK is an explicit success assertion by the developer.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4390,7 +4390,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.StatusUnset",
       "doc": "StatusUnset is the default: no explicit judgement. It does NOT mean \"it\nworked\" — a backend applies its own heuristics, and claiming OK on the\ncaller's behalf would suppress them.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4402,7 +4402,7 @@
       "spelled": "func(key string, value string) Attr",
       "canonical": "func(key string, value string) github.com/kitsunium/sdk/pkg/v1/observe/trace.Attr",
       "doc": "String returns a string-valued attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4415,7 +4415,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.TraceFlags",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.TraceFlags",
       "doc": "TraceFlags is the traceparent flag byte. Only bit 0, sampled, is defined.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4428,7 +4428,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.TraceID",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.TraceID",
       "doc": "TraceID identifies one trace: sixteen octets, rendered as 32 lowercase hex\ndigits. The all-zero value is invalid.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4442,7 +4442,7 @@
       "value": "\"traceparent\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.TraceParentHeader",
       "doc": "TraceParentHeader is the W3C header carrying the span context.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4456,7 +4456,7 @@
       "value": "55",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.TraceParentLen",
       "doc": "TraceParentLen is the length of a version-00 traceparent: 55 characters.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4469,7 +4469,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.StateValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.StateValue",
       "doc": "TraceState is the parsed tracestate header: an ordered vendor list, leftmost\nfirst. Immutable.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4483,7 +4483,7 @@
       "value": "\"tracestate\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.TraceStateHeader",
       "doc": "TraceStateHeader is the W3C header carrying the vendor list.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4496,7 +4496,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.Tracer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.Tracer",
       "doc": "Tracer starts spans. FROZEN at one method (ADR 0039).\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4509,7 +4509,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/observe/trace.TracerConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/observe/trace.TracerConfig",
       "doc": "TracerConfig configures a Tracer. Every field has a resolved meaning\nwhen left unset.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4523,7 +4523,7 @@
       "value": "\"url.full\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.URLFullKey",
       "doc": "URLFullKey is the outbound URL attribute, recorded on CLIENT spans.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4537,7 +4537,7 @@
       "value": "\"url.path\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.URLPathKey",
       "doc": "URLPathKey is the inbound request path attribute, in its ESCAPED form.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4551,7 +4551,7 @@
       "value": "\"url.scheme\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.URLSchemeKey",
       "doc": "URLSchemeKey is the request scheme attribute.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4569,7 +4569,7 @@
         "public": "No trace exporter is registered under that name"
       },
       "doc": "UnknownExporter reports a name no imported package registered.\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     },
@@ -4583,7 +4583,7 @@
       "value": "\"00\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/trace.VersionSupported",
       "doc": "VersionSupported is the traceparent version this SDK emits: \"00\".\n",
-      "file": "trace/facade_gen.go",
+      "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
     }

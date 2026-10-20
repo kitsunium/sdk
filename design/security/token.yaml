@@ -1542,7 +1542,7 @@ packages:
       Package token — the typed verdicts an issuer, a verifier or a key loader
       returns.
 
-      Match them with errs.HasCode (the codes are re-exported in facade_gen.go) or
+      Match them with errs.HasCode (the codes are re-exported in gen_facade.go) or
       errs.HasReason. Their Public halves name WHICH check refused a token and
       never echo a value out of it — not an audience, not an issuer, not a key id,
       not a claim. The JWK* verdicts are the key loaders' — ParseJWK and

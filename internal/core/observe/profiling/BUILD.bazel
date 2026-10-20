@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "profiling",
     srcs = [
-        "codes_gen.go",
         "doc.go",
         "folded.go",
+        "gen_codes.go",
         "goroutine.go",
         "profile.go",
     ],
@@ -31,8 +31,8 @@ alias(
 go_test(
     name = "profiling_test",
     srcs = [
-        "api_gen_test.go",
         "errors_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":profiling",

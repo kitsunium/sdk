@@ -44,7 +44,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/collections/heap.Heap[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/heap.Heap",
       "doc": "Heap is a binary heap ordered by the comparison given to [New].\n\n[Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the\ntop one in O(log n), and [Heap].Peek returns it without removing it, both\nreporting false on an empty heap; [Heap].Len counts the elements.\n\nThe zero value is NOT usable — a heap with no comparison has no order — and\na Heap is not safe for concurrent use.\n",
-      "file": "heap/facade_gen.go",
+      "file": "heap/gen_facade.go",
       "layer": "public",
       "family": "collections"
     },
@@ -56,7 +56,7 @@
       "spelled": "func[T any](cmp func(a T, b T) int) *Heap[T]",
       "canonical": "func[T any](cmp func(a T, b T) int) *github.com/kitsunium/sdk/pkg/v1/collections/heap.Heap[T]",
       "doc": "New builds an empty [Heap] ordered by cmp, which returns a negative number\nwhen a sorts before b, zero on a tie and a positive one otherwise. A nil cmp\npanics here, at the call that made the mistake.\n",
-      "file": "heap/facade_gen.go",
+      "file": "heap/gen_facade.go",
       "layer": "public",
       "family": "collections"
     },
@@ -74,7 +74,7 @@
         "public": "Ring buffer capacity must be positive"
       },
       "doc": "CapZero is returned by New for a capacity that is not positive: a ring\nthat can hold nothing is a configuration mistake, not a queue.\n",
-      "file": "ring/facade_gen.go",
+      "file": "ring/gen_facade.go",
       "layer": "public",
       "family": "collections"
     },
@@ -92,7 +92,7 @@
         "public": "Ring buffer is empty"
       },
       "doc": "Empty is returned by TryRead when no item is waiting; the caller\ndecides whether to wait on a signal or yield — never to spin.\n",
-      "file": "ring/facade_gen.go",
+      "file": "ring/gen_facade.go",
       "layer": "public",
       "family": "collections"
     },
@@ -110,7 +110,7 @@
         "public": "Ring buffer is at capacity"
       },
       "doc": "Full is returned by TryWrite when every slot is taken; the caller\ndecides whether to drop, retry or slow its producer.\n",
-      "file": "ring/facade_gen.go",
+      "file": "ring/gen_facade.go",
       "layer": "public",
       "family": "collections"
     },
@@ -122,7 +122,7 @@
       "spelled": "func[T any](capacity int) (Queue[T], error)",
       "canonical": "func[T any](capacity int) (github.com/kitsunium/sdk/pkg/v1/collections/ring.Queue[T], error)",
       "doc": "New returns an empty [Queue] holding at most capacity items, or [CapZero]\nwhen capacity is not positive. The storage is allocated once, here.\n",
-      "file": "ring/facade_gen.go",
+      "file": "ring/gen_facade.go",
       "layer": "public",
       "family": "collections"
     },
@@ -135,7 +135,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/collections/ring.Queue[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/ring.Queue",
       "doc": "Queue is the single-producer, single-consumer ring.\n\nTryWrite enqueues an item without blocking, or returns [Full]. TryRead\ndequeues the oldest item without blocking, or returns [Empty]; the slot it\nread is cleared, so the queue keeps no reference to an item it handed out.\nCapacity is the number of items the ring holds when full, fixed at [New].\nLen is a snapshot count — the producer or the consumer may move it before\nthe caller acts on it.\n\nIts four methods are frozen: a published interface grows by a sibling,\nnever by a fifth method (ADR 0039).\n",
-      "file": "ring/facade_gen.go",
+      "file": "ring/gen_facade.go",
       "layer": "public",
       "family": "collections"
     }

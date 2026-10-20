@@ -213,9 +213,9 @@ func writePinsAs(t *testing.T, root string, doc *apiDocument, design string, wit
 	files := map[string][]string{}
 	for _, s := range doc.Symbols {
 		dir := strings.TrimPrefix(strings.TrimPrefix(s.Package, fixtureModule), "/")
-		name := "api_gen_test.go"
+		name := "gen_api_test.go"
 		if len(s.Platforms) > 0 {
-			name = "api_gen_1_test.go"
+			name = "gen_api_1_test.go"
 		}
 		key := filepath.Join(dir, name)
 		line := fmt.Sprintf("// go:%s %s %s", strings.TrimPrefix(s.ID, idPrefix), s.Kind, s.Canonical)
@@ -227,7 +227,7 @@ func writePinsAs(t *testing.T, root string, doc *apiDocument, design string, wit
 	if withDocs {
 		for _, p := range doc.Packages {
 			dir := strings.TrimPrefix(strings.TrimPrefix(p.Path, fixtureModule), "/")
-			for _, name := range []string{"api_gen_test.go", "api_gen_1_test.go"} {
+			for _, name := range []string{"gen_api_test.go", "gen_api_1_test.go"} {
 				key := filepath.Join(dir, name)
 				if _, ok := files[key]; ok {
 					files[key] = append([]string{packageMarkerPrefix + p.Path + markerDocPrefix + textDigest(p.Doc)}, files[key]...)
@@ -245,7 +245,7 @@ func writePinsAs(t *testing.T, root string, doc *apiDocument, design string, wit
 	}
 	for key, markers := range files {
 		body := "\n"
-		if strings.HasSuffix(key, "api_gen_1_test.go") {
+		if strings.HasSuffix(key, "gen_api_1_test.go") {
 			body += "//go:build windows\n\n"
 		}
 		body += "package " + filepath.Base(filepath.Dir(key)) + "_test\n\n" + strings.Join(markers, "\n") + "\n"
@@ -280,7 +280,7 @@ func TestCheckAPIMarkers(t *testing.T) {
 		{
 			name: "a missing marker",
 			change: func(t *testing.T, root string) {
-				edit(t, root, "internal/core/lock/api_gen_test.go", "// go:"+fixtureModule+"/internal/core/lock.Default const untyped string\n", "")
+				edit(t, root, "internal/core/lock/gen_api_test.go", "// go:"+fixtureModule+"/internal/core/lock.Default const untyped string\n", "")
 			},
 			want: []string{"go:" + fixtureModule + "/internal/core/lock.Default: undeclared"},
 		},
@@ -325,7 +325,7 @@ func TestCheckAPIMarkers(t *testing.T) {
 		{
 			name: "a Windows-only marker removed",
 			change: func(t *testing.T, root string) {
-				edit(t, root, "internal/core/lock/api_gen_1_test.go", "// go:"+fixtureModule+"/internal/core/lock.Mandatory const untyped bool\n", "")
+				edit(t, root, "internal/core/lock/gen_api_1_test.go", "// go:"+fixtureModule+"/internal/core/lock.Mandatory const untyped bool\n", "")
 			},
 			want: []string{"go:" + fixtureModule + "/internal/core/lock.Mandatory: undeclared", "(on windows/amd64)"},
 		},
@@ -446,7 +446,7 @@ func TestCheckAPIDocDigests(t *testing.T) {
 // removed each fail, naming the file.
 func TestCheckAPIDigests(t *testing.T) {
 	t.Parallel()
-	pin := "internal/core/lock/api_gen_test.go"
+	pin := "internal/core/lock/gen_api_test.go"
 	type tc struct {
 		// name describes the case.
 		name string

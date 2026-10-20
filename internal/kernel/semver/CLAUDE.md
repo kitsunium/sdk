@@ -23,7 +23,7 @@ x/mod's do, so the package needs no `PP` range, no `codeRangeOwners` row and no
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0168): `IsValid`, `Prerelease` and `IsPseudoVersion`, each one call of its unexported body — each measured to inline, its body inlined into it, and its `pkg/v1/data/semver` forwarder too |
+| `gen_decls.go` | written by kit gen from the design (ADR 0168): `IsValid`, `Prerelease` and `IsPseudoVersion`, each one call of its unexported body — each measured to inline, its body inlined into it, and its `pkg/v1/data/semver` forwarder too |
 | `semver.go` | the bodies `isValid` and `prerelease`, and `Compare` whole: its body costs 511 and does not inline, so a wrapper over it, inlined at a direct call, would be a call more through a func value — `slices.SortFunc(list, Compare)` (ADR 0168) |
 | `pseudo.go` | `isPseudoVersion`'s body, and `PseudoVersionRev` and `PseudoVersionTime` whole — a wrapper over the first (78) would not inline, and one over the second would push its `pkg/v1` forwarder from 70 to 83 (ADR 0168) —; the stamp and where it may sit |
 | `parse.go` | the one-pass parser (`components`, `parse`, `identifiers`) and the precedence helpers |
@@ -81,7 +81,7 @@ refuses. Sorting is `slices.SortFunc(list, semver.Compare)`.
 | `oracle_external_test.go` | differential tests against three oracles written from the documents — the regular expression SemVer 2.0.0 publishes, the toolchain's pseudo-version pattern, and §11 over `math/big` — on ~23 000 one-edit mutants of every seed, plus three fuzz targets |
 | `parse_internal_test.go` | the one-comparison `isDigit` / `isLetter` against their plain ranges, over all 256 bytes |
 | `perf_fixtures_test.go` | `//go:build !race` — the fixtures of the design's budgets (`allocs: 0` on every function, ADR 0165): one call each, over every branch that could allocate |
-| `perf_gen_test.go` | written by kit gen from those budgets: each fixture's call counted over 30 000 calls after as many warm-up calls; run by the alloc lane only (rule 12, kit's section of `tools/alloc-lane-targets.txt`) |
+| `gen_perf_test.go` | written by kit gen from those budgets: each fixture's call counted over 30 000 calls after as many warm-up calls; run by the alloc lane only (rule 12, kit's section of `tools/alloc-lane-targets.txt`) |
 | `semver_bench_test.go` | the figures in `BENCH.md` |
 
 ## Do NOT

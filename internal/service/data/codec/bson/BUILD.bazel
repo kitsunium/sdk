@@ -50,7 +50,6 @@ alias(
 go_test(
     name = "bson_test",
     srcs = [
-        "api_gen_test.go",
         "bson_bench_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",
@@ -58,6 +57,7 @@ go_test(
         "decode_internal_test.go",
         "encode_internal_test.go",
         "fuzz_external_test.go",
+        "gen_api_test.go",
         "types_external_test.go",
     ],
     embed = [":bson"],

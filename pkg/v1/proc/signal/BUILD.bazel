@@ -6,7 +6,7 @@ go_library(
     name = "signal",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/signal",
     visibility = ["//visibility:public"],
@@ -25,7 +25,7 @@ alias(
 go_test(
     name = "signal_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "signal_external_test.go",
         "signal_other_test.go",
         "signal_windows_test.go",

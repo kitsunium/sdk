@@ -224,7 +224,7 @@ func Execute(ctx context.Context, cfg Config, root Command, args []string) error
 Execute is the one-line form of [New](#New) followed by [Executor](#Executor).Execute. It returns the same errors both would: a construction refusal carries EX\_CONFIG (78), so a caller that only wants a status can pass the result straight to [Status](#Status).
 
 <a name="FlagSource"></a>
-## func [FlagSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## func [FlagSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 ```go
 func FlagSource(invocation Invocation) *FlagSourceValue
@@ -235,7 +235,7 @@ FlagSource turns the flags an operator ACTUALLY TYPED on one invocation into a c
 It walks flag.FlagSet.Visit and never VisitAll: an unset flag contributes NOTHING, so a flag whose default is the Go zero cannot silently override the configuration file on every run. The flag name is the config key verbatim, with no case or separator transformation, because a rename rule is a second grammar whose failure mode is a key that quietly matches nothing.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 ```go
 func New(cfg Config, root Command) (runner Executor, err error)
@@ -263,7 +263,7 @@ os.Exit(cli.Status(app.Execute(ctx, os.Args[1:])))
 ```
 
 <a name="Action"></a>
-## type [Action](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [Action](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 Action is what one command does — see [Command](#Command).
 
@@ -278,7 +278,7 @@ type Action func(ctx context.Context, invocation InvocationValue) error
 ```
 
 <a name="Binder"></a>
-## type [Binder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [Binder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 Binder declares one command's flags onto the stdlib set that parses them.
 
@@ -293,7 +293,7 @@ type Binder func(flags *flag.FlagSet)
 ```
 
 <a name="Command"></a>
-## type [Command](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [Command](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 Command is one declared command: a name, what it says about itself, its flags, and EITHER an [Action](#Action) OR sub-commands.
 
@@ -343,7 +343,7 @@ func (Command) IsGroup() bool
 IsGroup reports whether this command dispatches to children rather than running an [Action](#Action). It reads the declaration rather than a flag set at construction, so it answers the same on a CommandValue the caller has just written and on one the engine has already validated.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 Config configures [New](#New) — two writers, and deliberately nothing else.
 
@@ -383,7 +383,7 @@ type Config struct {
 ```
 
 <a name="Executor"></a>
-## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 Executor resolves an argument vector against a command tree and runs it.
 
@@ -408,7 +408,7 @@ type Executor interface {
 ```
 
 <a name="Executor.Execute"></a>
-### func \(Executor\) [Execute](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/cli/design_gen.go>)
+### func \(Executor\) [Execute](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/cli/gen_ports.go>)
 
 ```go
 func (Executor) Execute(ctx context.Context, args []string) error
@@ -419,7 +419,7 @@ Execute resolves args against the tree and runs the command it names. args is th
 It returns nil when the command succeeded AND when help was requested, because asking for help is not a failure. Every other outcome is an \*errs.Error whose exit status the caller reads with errs.ExitCodeOf.
 
 <a name="FlagSourceValue"></a>
-## type [FlagSourceValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [FlagSourceValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 FlagSourceValue is one invocation's typed flags as a config layer.
 
@@ -443,7 +443,7 @@ func (*FlagSourceValue) Load() (values map[string]any, err error)
 Load returns the layer. It satisfies internal/core/app/config.Source.
 
 <a name="Invocation"></a>
-## type [Invocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/facade_gen.go>)
+## type [Invocation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/cli/gen_facade.go>)
 
 Invocation is one resolved command line as an [Action](#Action) sees it.
 

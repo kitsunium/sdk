@@ -7,9 +7,9 @@ go_library(
     srcs = [
         "address_value.go",
         "attachment_value.go",
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "header.go",
         "message_value.go",
         "value.go",
@@ -35,7 +35,7 @@ go_test(
     name = "mail_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "port_external_test.go",
     ],
     deps = [

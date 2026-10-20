@@ -44,8 +44,8 @@ alias(
 go_test(
     name = "studioengine_test",
     srcs = [
-        "api_gen_test.go",
         "env_internal_test.go",
+        "gen_api_test.go",
         "profile_internal_test.go",
         "studio_internal_test.go",
         "words_internal_test.go",

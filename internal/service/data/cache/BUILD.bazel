@@ -43,9 +43,9 @@ go_test(
     name = "cache_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "cache_bench_test.go",
         "chain_external_test.go",
+        "gen_api_test.go",
         "memory_external_test.go",
         "memory_internal_test.go",
     ],

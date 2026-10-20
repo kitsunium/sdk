@@ -6,7 +6,7 @@ go_library(
     name = "group",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "group.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/concur/group",
@@ -23,9 +23,9 @@ alias(
 go_test(
     name = "group_test",
     srcs = [
-        "api_gen_1_test.go",
-        "api_gen_2_test.go",
-        "api_gen_test.go",
+        "gen_api_1_test.go",
+        "gen_api_2_test.go",
+        "gen_api_test.go",
         "group_external_test.go",
     ],
     deps = [

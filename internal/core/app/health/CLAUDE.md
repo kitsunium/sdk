@@ -14,8 +14,8 @@ and fail faster. **The probe caused the outage.**
 
 **The port is generated from the design** (ADR 0163): `Health` is declared,
 with its doc comment, under `ports:` in `design/app/health.yaml`, and `kit gen`
-writes it into `design_gen.go`. A port or its doc comment changes in the
-design, then `kit gen`, then `make api` — never in `design_gen.go`, whose
+writes it into `gen_ports.go`. A port or its doc comment changes in the
+design, then `kit gen`, then `make api` — never in `gen_ports.go`, whose
 header digests `make api-check` verifies. It moved there from `health.go`,
 content moved and never deleted.
 

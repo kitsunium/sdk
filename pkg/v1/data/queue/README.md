@@ -472,7 +472,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.UnknownRecei
 Code `0.2.23.3` · reason `UNKNOWN_RECEIPT` · public "The receipt does not name a lease this queue issued"
 
 <a name="Consume"></a>
-## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ```go
 func Consume(ctx context.Context, broker Broker, cfg ConsumerConfig) error
@@ -485,7 +485,7 @@ It returns nil when ctx ends — a cancelled consumer is a stopped consumer, not
 cfg.HandlerIsIdempotent must be true; see the package documentation.
 
 <a name="DoNotRetry"></a>
-## func [DoNotRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## func [DoNotRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ```go
 func DoNotRetry(cause error) error
@@ -494,7 +494,7 @@ func DoNotRetry(cause error) error
 DoNotRetry marks cause as a failure no retry can fix: returned from a [Handler](#Handler), it makes [Consume](#Consume) dead-letter the message at once, with cause, instead of handing it back for another attempt. An SDK error keeps its own reason, code and public words in the dead letter; any other error, or none, is recorded as [NotRetryable](#NotRetryable).
 
 <a name="NewFile"></a>
-## func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ```go
 func NewFile(cfg FileConfig) (broker Broker, err error)
@@ -513,7 +513,7 @@ if closer, ok := broker.(io.Closer); ok { defer closer.Close() }
 The messages stay on disk; every call after Close fails.
 
 <a name="NewMemory"></a>
-## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (broker Broker, err error)
@@ -524,7 +524,7 @@ NewMemory returns the in-process test double: the port's full semantics, no dire
 It refuses the same policies [NewFile](#NewFile) refuses, through the same guard, which is what makes it an honest double.
 
 <a name="NewSQL"></a>
-## func [NewSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## func [NewSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ```go
 func NewSQL(cfg SQLConfig) (broker Broker, err error)
@@ -535,7 +535,7 @@ NewSQL returns a durable broker whose queue is one table of the caller's databas
 It refuses at construction — never at first use — a policy it cannot honour and a transactor, dialect or table it cannot use ([SQLQueueMisconfigured](#SQLQueueMisconfigured)). The transactor must be the SDK's, or another core/data/sql Joiner and Deferrer.
 
 <a name="SQLMigration"></a>
-## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ```go
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -544,7 +544,7 @@ func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migrat
 SQLMigration returns the migration that creates the one table an SQL queue named table keeps on dialect, numbered version for the caller's own version table. Its Down drops the table, and every message in it. Its statement does nothing when the table exists.
 
 <a name="Broker"></a>
-## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
 
@@ -628,7 +628,7 @@ type Broker interface {
 ```
 
 <a name="Broker.Ack"></a>
-### func \(Broker\) [Ack](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(Broker\) [Ack](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (Broker) Ack(ctx context.Context, receipt ReceiptValue) error
@@ -641,7 +641,7 @@ A receipt whose lease has already lapsed is [LeaseExpired](#LeaseExpired) and re
 A receipt this broker never issued, or one it cannot parse, is [UnknownReceipt](#UnknownReceipt).
 
 <a name="Broker.Nack"></a>
-### func \(Broker\) [Nack](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(Broker\) [Nack](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (Broker) Nack(ctx context.Context, receipt ReceiptValue, cause error) (NackValue, error)
@@ -656,7 +656,7 @@ cause is recorded. What is kept of it is the implementation's to document, and t
 A lapsed or unknown receipt is refused exactly as [Broker.Ack](#Broker.Ack) refuses it.
 
 <a name="Broker.Publish"></a>
-### func \(Broker\) [Publish](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(Broker\) [Publish](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (Broker) Publish(ctx context.Context, payload []byte) (MessageValue, error)
@@ -671,7 +671,7 @@ When it returns nil, a durable implementation has flushed the message to its dev
 A payload larger than \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge); an empty payload is legitimate, because a message whose whole meaning is its arrival is a normal thing to send.
 
 <a name="Broker.Receive"></a>
-### func \(Broker\) [Receive](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(Broker\) [Receive](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (Broker) Receive(ctx context.Context, max int) ([]DeliveryValue, error)
@@ -684,7 +684,7 @@ Each returned message is invisible to every other consumer until its \[DeliveryV
 max must be positive: [InvalidBatchSize](#InvalidBatchSize) otherwise, rather than an empty slice forever from a consumer loop that spins and processes nothing.
 
 <a name="ConsumerConfig"></a>
-## type [ConsumerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [ConsumerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 ConsumerConfig is the public alias for [Consume](#Consume)'s configuration.
 
@@ -761,7 +761,7 @@ type ConsumerConfig struct {
 ```
 
 <a name="DeadLetter"></a>
-## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 DeadLetter is the public alias for one abandoned message and its cause.
 
@@ -804,7 +804,7 @@ type DeadLetter struct {
 ```
 
 <a name="DeadLetterManager"></a>
-## type [DeadLetterManager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [DeadLetterManager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 DeadLetterManager is the public alias for the capability of replaying a dead letter into its queue, its count reset, or deleting it. Every broker here implements it.
 
@@ -838,7 +838,7 @@ type DeadLetterManager interface {
 ```
 
 <a name="DeadLetterManager.DeleteDeadLetter"></a>
-### func \(DeadLetterManager\) [DeleteDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(DeadLetterManager\) [DeleteDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (DeadLetterManager) DeleteDeadLetter(ctx context.Context, id string) error
@@ -847,7 +847,7 @@ func (DeadLetterManager) DeleteDeadLetter(ctx context.Context, id string) error
 DeleteDeadLetter removes the dead letter id for good, payload, cause and all. It is the only call in the domain that destroys a message without its consumer's acknowledgement, and it is never made by the SDK itself. An id the store does not hold is [DeadLetterNotFound](#DeadLetterNotFound).
 
 <a name="DeadLetterManager.ReplayDeadLetter"></a>
-### func \(DeadLetterManager\) [ReplayDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(DeadLetterManager\) [ReplayDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (DeadLetterManager) ReplayDeadLetter(ctx context.Context, id string) error
@@ -858,7 +858,7 @@ ReplayDeadLetter moves the dead letter id back into the queue, visible at once, 
 An id the store does not hold is [DeadLetterNotFound](#DeadLetterNotFound), and nothing is queued. Two replays of one dead letter racing each other may both queue it on a broker that cannot tell them apart, which is a duplicate the at-least-once guarantee already permits; the brokers say which they are.
 
 <a name="DeadLetterReader"></a>
-## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 DeadLetterReader is the public alias for the capability of reading the dead-letter store back. Every broker here implements it.
 
@@ -881,7 +881,7 @@ type DeadLetterReader interface {
 ```
 
 <a name="DeadLetterReader.DeadLetters"></a>
-### func \(DeadLetterReader\) [DeadLetters](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(DeadLetterReader\) [DeadLetters](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (DeadLetterReader) DeadLetters(ctx context.Context, max int) ([]DeadLetterValue, error)
@@ -892,7 +892,7 @@ DeadLetters returns up to max dead letters, oldest first. It does NOT remove the
 max must be positive ([InvalidBatchSize](#InvalidBatchSize)).
 
 <a name="DeadLetterWriter"></a>
-## type [DeadLetterWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [DeadLetterWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 DeadLetterWriter is the public alias for the capability of writing a dead letter into the store as it was recorded elsewhere — what a copy of a queue from one broker to another needs. Every broker here implements it.
 
@@ -929,7 +929,7 @@ type DeadLetterWriter interface {
 ```
 
 <a name="DeadLetterWriter.PutDeadLetter"></a>
-### func \(DeadLetterWriter\) [PutDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(DeadLetterWriter\) [PutDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (DeadLetterWriter) PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
@@ -942,7 +942,7 @@ dead.Message.ID must be empty: the identifier is the broker's to mint, as [Broke
 It is never delivered and wakes no consumer. A broker that joins the transaction ctx carries (ADR 0151) writes it in that transaction, so it exists if and only if the transaction commits.
 
 <a name="Delivery"></a>
-## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Delivery is the public alias for one message handed to one consumer, carrying the lease that proves the claim and the count that says whether this is a retry.
 
@@ -977,7 +977,7 @@ type Delivery struct {
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 FileConfig is the public alias for [NewFile](#NewFile)'s configuration.
 
@@ -1023,7 +1023,7 @@ type FileConfig struct {
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Handler is the public alias for the function that processes one delivery.
 
@@ -1038,7 +1038,7 @@ type Handler func(ctx context.Context, delivery DeliveryValue) error
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Lease is the public alias for a consumer's exclusive claim on one message.
 
@@ -1065,7 +1065,7 @@ type Lease struct {
 ```
 
 <a name="LeaseExtender"></a>
-## type [LeaseExtender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [LeaseExtender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 LeaseExtender is the public alias for the capability of renewing a lease a handler is still working under. Every broker here implements it.
 
@@ -1104,7 +1104,7 @@ type LeaseExtender interface {
 ```
 
 <a name="LeaseExtender.Extend"></a>
-### func \(LeaseExtender\) [Extend](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(LeaseExtender\) [Extend](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (LeaseExtender) Extend(ctx context.Context, receipt ReceiptValue, by time.Duration) (LeaseValue, error)
@@ -1119,7 +1119,7 @@ A lapsed lease is [LeaseExpired](#LeaseExpired) and is NOT renewed, even when no
 A non-positive by is [QueueMisconfigured](#QueueMisconfigured): the two readings of zero — "lapse now" and "never lapse" — are opposites and both harmful. So is a by whose deadline reaches past what a durable implementation can record (2262, Unix nanoseconds): it is refused before anything moves, and the lease the caller holds stays valid. Validate never sees this duration, so [MaxDeadlineOffset](#MaxDeadlineOffset) cannot bound it; the instant itself is checked.
 
 <a name="LiveMessage"></a>
-## type [LiveMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [LiveMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 LiveMessage is the public alias for one live message as a broker records it.
 
@@ -1149,7 +1149,7 @@ type LiveMessage struct {
 ```
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 MemoryConfig is the public alias for [NewMemory](#NewMemory)'s configuration.
 
@@ -1175,7 +1175,7 @@ type MemoryConfig struct {
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Message is the public alias for one unit of work as the broker minted it.
 
@@ -1211,7 +1211,7 @@ type Message struct {
 ```
 
 <a name="MessageReader"></a>
-## type [MessageReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [MessageReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 MessageReader is the public alias for the capability of listing the live messages — waiting and leased — without leasing one. Every broker here implements it.
 
@@ -1239,7 +1239,7 @@ type MessageReader interface {
 ```
 
 <a name="MessageReader.Messages"></a>
-### func \(MessageReader\) [Messages](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(MessageReader\) [Messages](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (MessageReader) Messages(ctx context.Context, after string, max int) ([]LiveMessageValue, error)
@@ -1250,7 +1250,7 @@ Messages returns up to max live messages whose identifier sorts after after — 
 max must be positive ([InvalidBatchSize](#InvalidBatchSize)).
 
 <a name="MessageWriter"></a>
-## type [MessageWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [MessageWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 MessageWriter is the public alias for the capability of writing a live message as another broker recorded it — its count, its instants. Every broker here implements it.
 
@@ -1287,7 +1287,7 @@ type MessageWriter interface {
 ```
 
 <a name="MessageWriter.PutMessage"></a>
-### func \(MessageWriter\) [PutMessage](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(MessageWriter\) [PutMessage](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (MessageWriter) PutMessage(ctx context.Context, live LiveMessageValue) (string, error)
@@ -1300,7 +1300,7 @@ live.Message.ID must be empty: the identifier is the broker's to mint, as [Broke
 A broker that joins the transaction ctx carries (ADR 0151) writes it in that transaction, so it exists if and only if the transaction commits, and wakes its consumers after the commit, as a publication does.
 
 <a name="Nack"></a>
-## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Nack is the public alias for what [Broker](#Broker).Nack decided: retried, or dead-lettered.
 
@@ -1327,7 +1327,7 @@ type Nack struct {
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Policy is the public alias for the delivery discipline a broker enforces.
 
@@ -1427,7 +1427,7 @@ Validate reports whether the policy is one a broker can honour, and refuses it B
 It lives in core so that the memory, file and SQL brokers refuse identical inputs identically — the property that makes the first usable as a test double for the other two. It is the same instrument core/data/vfs's ValidatePath and ValidatePerm are, for the same reason.
 
 <a name="Receipt"></a>
-## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Receipt is the public alias for the opaque handle to one lease. Do not parse it and do not construct one.
 
@@ -1442,7 +1442,7 @@ type Receipt string
 ```
 
 <a name="Rejecter"></a>
-## type [Rejecter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Rejecter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Rejecter is the public alias for the capability of dead-lettering a leased message at once, with the cause that condemned it. Every broker here implements it, and Consume uses it for a [DoNotRetry](#DoNotRetry) failure.
 
@@ -1469,7 +1469,7 @@ type Rejecter interface {
 ```
 
 <a name="Rejecter.Reject"></a>
-### func \(Rejecter\) [Reject](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(Rejecter\) [Reject](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (Rejecter) Reject(ctx context.Context, receipt ReceiptValue, cause error) error
@@ -1480,7 +1480,7 @@ Reject moves the leased message named by receipt to the dead-letter store with c
 A lapsed receipt is [LeaseExpired](#LeaseExpired) and one this broker cannot read is [UnknownReceipt](#UnknownReceipt), exactly as [Broker.Ack](#Broker.Ack) refuses them; neither moves anything.
 
 <a name="SQLConfig"></a>
-## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 SQLConfig is the public alias for [NewSQL](#NewSQL)'s configuration: Transactor, Dialect and Table (required), Policy, and Clock.
 
@@ -1527,7 +1527,7 @@ type SQLConfig struct {
 ```
 
 <a name="Wake"></a>
-## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Wake is the public alias for what an idle consumer waits on: a signal the next Publish or Nack in this process closes, and how long until something the broker holds becomes receivable on its own.
 
@@ -1561,7 +1561,7 @@ type Wake struct {
 ```
 
 <a name="Waker"></a>
-## type [Waker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+## type [Waker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
 Waker is the public alias for the capability of telling an idle consumer when to look again. Every broker here implements it, and Consume uses it; a broker of your own that omits it is simply polled.
 
@@ -1582,7 +1582,7 @@ type Waker interface {
 ```
 
 <a name="Waker.Wake"></a>
-### func \(Waker\) [Wake](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+### func \(Waker\) [Wake](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
 
 ```go
 func (Waker) Wake() WakeValue

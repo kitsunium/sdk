@@ -410,7 +410,7 @@ func Compose(msg Message) (raw []byte, err error)
 Compose renders msg to the RFC 5322 wire form using the system clock and crypto/rand. It is the one-line form of [NewComposer](#NewComposer).
 
 <a name="EnvelopeOf"></a>
-## func [EnvelopeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [EnvelopeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func EnvelopeOf(msg Message) (envelope Envelope, err error)
@@ -421,7 +421,7 @@ EnvelopeOf validates msg and derives the SMTP envelope a transport would issue f
 It returns the first typed refusal [Validate](#Validate) would, and the zero [Envelope](#Envelope) with it: an envelope built from an unvalidated message is a list of strings that may each carry a CRLF.
 
 <a name="NewCapture"></a>
-## func [NewCapture](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [NewCapture](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func NewCapture(keep int) FullTransport
@@ -430,7 +430,7 @@ func NewCapture(keep int) FullTransport
 NewCapture returns NewMemory's double keeping only the last keep deliveries — DefaultCaptureKeep when keep is not positive: the transport a development server and a test deliver through.
 
 <a name="NewComposer"></a>
-## func [NewComposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [NewComposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func NewComposer(cfg ComposerConfig) *Composer
@@ -441,7 +441,7 @@ NewComposer returns a composer that renders a [Message](#Message) to the RFC 532
 A [ComposerConfig](#ComposerConfig) with a fixed clock and a fixed randomness source makes composition byte-deterministic.
 
 <a name="NewMemory"></a>
-## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func NewMemory() FullTransport
@@ -452,7 +452,7 @@ NewMemory returns a transport that composes every message and records the result
 It takes no arguments on purpose: every knob it could offer is one a test has to set before it can assert anything, and the value of a double is that it costs one line.
 
 <a name="NewSMTP"></a>
-## func [NewSMTP](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [NewSMTP](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func NewSMTP(cfg SMTPConfig) (transport Transport, err error)
@@ -463,7 +463,7 @@ NewSMTP returns a transport that delivers over SMTP, refusing at construction an
 It holds no pooled connection: it dials per send, and a caller that wants one session for many messages asks for it through [BatchSender](#BatchSender).
 
 <a name="ParseURL"></a>
-## func [ParseURL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [ParseURL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func ParseURL(raw string) (cfg SMTPConfig, err error)
@@ -472,7 +472,7 @@ func ParseURL(raw string) (cfg SMTPConfig, err error)
 ParseURL reads smtp://user:password@host:port?tls=starttls|implicit|none, or smtps://…, into an [SMTPConfig](#SMTPConfig) that [NewSMTP](#NewSMTP) accepts; see the package documentation for the grammar and its defaults. On a refusal it returns the zero SMTPConfig and an error that never quotes the URL.
 
 <a name="Validate"></a>
-## func [Validate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## func [Validate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ```go
 func Validate(msg Message) error
@@ -483,7 +483,7 @@ Validate reports whether msg can be composed and sent, returning the first typed
 It is exported so a caller can reject a message at the edge — where a form was submitted — rather than at the transport, and get the same verdict either way.
 
 <a name="Address"></a>
-## type [Address](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Address](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Address is the public alias for one RFC 5322 mailbox.
 
@@ -516,7 +516,7 @@ func (Address) IsZero() bool
 IsZero reports whether the address carries no addr-spec at all, which is the zero value a caller gets from an unfilled struct field.
 
 <a name="Attachment"></a>
-## type [Attachment](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Attachment](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Attachment is the public alias for one file or inline part. A non-empty ContentID makes it inline.
 
@@ -555,7 +555,7 @@ func (*Attachment) Inline() bool
 Inline reports whether this part is referenced from the body rather than listed as a file.
 
 <a name="BatchSender"></a>
-## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 BatchSender is the public alias for the sibling that sends several messages over one session.
 
@@ -574,7 +574,7 @@ type BatchSender interface {
 ```
 
 <a name="BatchSender.SendBatch"></a>
-### func \(BatchSender\) [SendBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/design_gen.go>)
+### func \(BatchSender\) [SendBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/gen_ports.go>)
 
 ```go
 func (BatchSender) SendBatch(ctx context.Context, msgs []MessageValue) error
@@ -583,7 +583,7 @@ func (BatchSender) SendBatch(ctx context.Context, msgs []MessageValue) error
 SendBatch sends every message in msgs and returns the joined failures. A nil error means every message was accepted.
 
 <a name="Composer"></a>
-## type [Composer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Composer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Composer is the public alias for the type that turns a [Message](#Message) into the RFC 5322 wire form without sending anything.
 
@@ -622,7 +622,7 @@ No container is emitted for a single child. A multipart/alternative with one alt
 Inside multipart/alternative the PLAIN part comes first. RFC 2046 §5.1.4 orders alternatives "in increasing order of preference" and tells a receiver to display the last one it understands — so a composer that writes HTML first has just asked every client to show the plain text.
 
 <a name="ComposerConfig"></a>
-## type [ComposerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [ComposerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 ComposerConfig is the public alias for the composer's optional clock and randomness source. Both clamp rather than refuse.
 
@@ -645,7 +645,7 @@ type ComposerConfig struct {
 ```
 
 <a name="Delivery"></a>
-## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Delivery is the public alias for one record of what a transport put on the wire: the envelope, and the composed bytes.
 
@@ -666,7 +666,7 @@ type Delivery struct {
 ```
 
 <a name="Envelope"></a>
-## type [Envelope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Envelope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Envelope is the public alias for the SMTP envelope: one MAIL FROM and every RCPT TO, Bcc included.
 
@@ -688,7 +688,7 @@ type Envelope struct {
 ```
 
 <a name="FullTransport"></a>
-## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 FullTransport is the public alias for the union [NewMemory](#NewMemory) returns. A parameter should still ask for the narrowest thing it uses.
 
@@ -707,7 +707,7 @@ type FullTransport interface {
 ```
 
 <a name="HeaderField"></a>
-## type [HeaderField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [HeaderField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 HeaderField is the public alias for one additional header. It is a slice element rather than a map entry so a composed message is deterministic and so a field may legitimately repeat.
 
@@ -730,7 +730,7 @@ type HeaderField struct {
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Message is the public alias for one mail, as a value.
 
@@ -788,7 +788,7 @@ type Message struct {
 ```
 
 <a name="Outbox"></a>
-## type [Outbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Outbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Outbox is the public alias for the sibling that exposes what was sent. Only the in-memory transport implements it.
 
@@ -809,7 +809,7 @@ type Outbox interface {
 ```
 
 <a name="Outbox.Reset"></a>
-### func \(Outbox\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/design_gen.go>)
+### func \(Outbox\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/gen_ports.go>)
 
 ```go
 func (Outbox) Reset()
@@ -818,7 +818,7 @@ func (Outbox) Reset()
 Reset discards the record, so one test's messages are not another's.
 
 <a name="Outbox.Sent"></a>
-### func \(Outbox\) [Sent](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/design_gen.go>)
+### func \(Outbox\) [Sent](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/gen_ports.go>)
 
 ```go
 func (Outbox) Sent() []DeliveryValue
@@ -827,7 +827,7 @@ func (Outbox) Sent() []DeliveryValue
 Sent returns the deliveries recorded so far, oldest first. The returned slice and every byte slice in it are the caller's own copy.
 
 <a name="SMTPConfig"></a>
-## type [SMTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [SMTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 SMTPConfig is the public alias for the SMTP transport's configuration.
 
@@ -910,7 +910,7 @@ func (SMTPConfig) String() string
 String renders the configuration with field names and the password redacted — the %+v form.
 
 <a name="TLSMode"></a>
-## type [TLSMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [TLSMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 TLSMode is the public alias for the encryption mode. Its zero value is refused.
 
@@ -934,7 +934,7 @@ func (TLSMode) String() string
 String renders the mode for a log or an error field.
 
 <a name="Transport"></a>
-## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/facade_gen.go>)
+## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/gen_facade.go>)
 
 Transport is the public alias for the frozen port. A new capability arrives as a sibling interface reached by type assertion, never as a second method (ADR 0039).
 
@@ -961,7 +961,7 @@ type Transport interface {
 ```
 
 <a name="Transport.Send"></a>
-### func \(Transport\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/design_gen.go>)
+### func \(Transport\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/mail/gen_ports.go>)
 
 ```go
 func (Transport) Send(ctx context.Context, msg MessageValue) error
