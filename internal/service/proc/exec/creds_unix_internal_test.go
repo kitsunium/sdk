@@ -88,7 +88,8 @@ func Test_resolveUser(t *testing.T) {
 		{name: "a numeric uid with no passwd entry, beside a Group", in: strconv.Itoa(int(orphanUID)), groupGiven: true, wantUID: orphanUID},
 		//: issue #450: refused rather than resolved with root's gid.
 		{name: "a numeric uid with no passwd entry, alone", in: strconv.Itoa(int(orphanUID)), wantErr: true},
-		{name: "the largest numeric uid with no passwd entry, alone", in: "4294967294", wantErr: true},
+		//: a large uid, but not 4294967294: macOS's passwd names that one nobody.
+		{name: "a large numeric uid with no passwd entry, alone", in: "3999999999", wantErr: true},
 		{name: "a name that does not resolve", in: absentName, wantErr: true},
 		{name: "a name that does not resolve, beside a Group", in: absentName, groupGiven: true, wantErr: true},
 		{name: "an empty name", in: "", wantErr: true},
