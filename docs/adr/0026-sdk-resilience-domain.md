@@ -121,7 +121,7 @@ Two contracts were tightened during review, both before any release:
   two existing policies, not a new policy.)
 - Wait-mode (blocking) bulkhead/rate-limiter (v1 is reject-mode).
 - ~~Half-open concurrency control (v1 admits HalfOpen trials without a probe cap).~~
-  **Closed on 2026-10-21 (#467)**, with no new knob: HalfOpen admits ONE trial at
+  **Closed on 2026-10-21 ([issue 467](https://github.com/kitsunium/sdk/issues/467))**, with no new knob: HalfOpen admits ONE trial at
   a time and every other call returns `CircuitOpen` until it settles — the "one
   HalfOpen trial" `BreakerConfig.OpenDuration` already promised. A trial whose
   error the classifier rejects, or whose operation panics, frees the slot for
