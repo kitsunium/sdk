@@ -6,7 +6,9 @@
 package docstore_test
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
@@ -145,4 +147,60 @@ func TestAStoreWithoutIndexesRefusesAnInvalidKey(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	refusedAsUnencodable(t, store.Put(account{ID: "k\xff", Email: "\xfe"}), "", "k\xff", "Put")
 	must(t, store.Put(account{ID: "k", Email: "\xfe"}))
+}
+
+// binaryDoc is a document whose key is bytes: JSON carries them as base64, so
+// a decoded document can hold a key that is not valid UTF-8 — the shape
+// PutDocument receives, which never went through Put's checks.
+type binaryDoc struct {
+	ID    []byte `json:"id"`
+	Email []byte `json:"email,omitempty"`
+}
+
+// binaryKey is binaryDoc's key function.
+func binaryKey(d binaryDoc) string { return string(d.ID) }
+
+// binaryIndex is binaryDoc's unique index.
+func binaryIndex() coredocstore.IndexSpec[binaryDoc] {
+	return coredocstore.Unique("email", func(d binaryDoc) string { return string(d.Email) })
+}
+
+// binaryVersions is one current version of d.
+func binaryVersions(t *testing.T, d binaryDoc) []coredocstore.VersionValue {
+	t.Helper()
+	raw, err := json.Marshal(d)
+	must(t, err)
+	return []coredocstore.VersionValue{{Number: 1, At: time.Unix(0, 0).UTC(), JSON: raw}}
+}
+
+// TestPutDocumentRefusesAnInvalidUTF8Key pins the review of #459 on
+// PutDocument, which prepares a document from its JSON rather than through
+// encodeAs: a store key or an index key that is not valid UTF-8 is refused
+// DOCUMENT_UNENCODABLE by both engines, as Put refuses it, and the valid one
+// beside it is written.
+func TestPutDocumentRefusesAnInvalidUTF8Key(t *testing.T) {
+	t.Parallel()
+	bad := binaryDoc{ID: []byte("k\xff")}
+	badIndex := binaryDoc{ID: []byte("k"), Email: []byte("e\xfe")}
+	good := binaryDoc{ID: []byte("k"), Email: []byte("e")}
+	file, err := docstore.Open(docstore.Config[binaryDoc]{Key: binaryKey, Versions: 2}, binaryIndex())
+	must(t, err)
+	t.Cleanup(func() { _ = file.Close() })
+	refusedAsUnencodable(t, file.PutDocument("k\xff", binaryVersions(t, bad), time.Time{}), "", "k\xff", "file PutDocument of a key")
+	refusedAsUnencodable(t, file.PutDocument("k", binaryVersions(t, badIndex), time.Time{}), "email", "e\xfe", "file PutDocument of an index key")
+	must(t, file.PutDocument("k", binaryVersions(t, good), time.Time{}))
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		engine := newSQLEngine(dialect, accountsTable)
+		store, oerr := docstore.OpenSQL(docstore.SQLConfig[binaryDoc]{
+			Key: binaryKey, Transactor: newSQLTransactor(t, engine, dialect), Dialect: dialect, Table: accountsTable, Versions: 2,
+		}, binaryIndex())
+		must(t, oerr)
+		ctx := t.Context()
+		refusedAsUnencodable(t, store.PutDocument(ctx, "k\xff", binaryVersions(t, bad), time.Time{}), "", "k\xff", "SQL PutDocument of a key")
+		refusedAsUnencodable(t, store.PutDocument(ctx, "k", binaryVersions(t, badIndex), time.Time{}), "email", "e\xfe", "SQL PutDocument of an index key")
+		if roles := engine.roles(); len(roles) != 0 {
+			t.Fatalf("a refused key reached the database: %v", roles)
+		}
+		must(t, store.PutDocument(ctx, "k", binaryVersions(t, good), time.Time{}))
+	})
 }

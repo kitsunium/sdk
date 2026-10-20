@@ -84,3 +84,32 @@ func TestAPreEncodedRowThatIsNotJSONIsRefused(t *testing.T) {
 		t.Fatalf("Append() = %q, %v; want the prior contents and MARSHAL_FAILED", out, err)
 	}
 }
+
+// TestAPointerToPreEncodedRowsStaysJSON pins the review of #462: a non-nil
+// *[][]byte, which the codec takes like the slice it points to, is written
+// as JSON records — never as base64 strings — newline or not, and a nil one
+// is refused VALUE_INVALID.
+func TestAPointerToPreEncodedRowsStaysJSON(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		rows [][]byte
+		want string
+	}{
+		{rows: [][]byte{[]byte(`{"a":1}`), []byte(`[2]`)}, want: "{\"a\":1}\n[2]\n"},
+		{rows: [][]byte{[]byte(`{"a":1}`), []byte("{\n\"b\": 2\n}")}, want: "{\"a\":1}\n{\"b\":2}\n"},
+	}
+	for _, tc := range cases {
+		out, err := ndjson.Codec.Marshal(&tc.rows)
+		if err != nil || string(out) != tc.want {
+			t.Fatalf("Marshal(&%q) = %q, %v; want %q", tc.rows, out, err, tc.want)
+		}
+		appended, err := ndjson.Codec.(codec.Appender).Append(nil, &tc.rows)
+		if err != nil || string(appended) != tc.want {
+			t.Fatalf("Append(&%q) = %q, %v; want %q", tc.rows, appended, err, tc.want)
+		}
+	}
+	var none *[][]byte
+	if _, err := ndjson.Codec.Marshal(none); !errs.HasCode(err, corendjson.CodeNDJSONValueInvalid) {
+		t.Fatalf("Marshal(nil *[][]byte) = %v, want VALUE_INVALID", err)
+	}
+}

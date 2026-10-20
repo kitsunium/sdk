@@ -217,10 +217,11 @@ types:
       from the near tier for its whole TTL, forever under NoExpiry. So every
       write announces itself first: it counts itself in writing, then moves
       generation under the promotion lock — which waits for every promotion
-      already past its check to finish writing — and only then touches a tier. A
-      promotion, under the read side of that lock, writes only when no write is
-      running and none began since it read generation, before its far read. A
-      skipped promotion costs one later fall-through, never a stale hit.
+      already past its check to finish writing — and only then touches a tier;
+      it moves generation again when it ends. A promotion, under the read side of
+      that lock, writes only when no write is running and none began or ended
+      since it read generation, before its far read. A skipped promotion costs
+      one later fall-through, never a stale hit.
     fields:
       - name: tiers
         type: "[]tier[V]"
@@ -233,7 +234,9 @@ types:
           write, and taken for writing by a write announcing itself.
         name: promoting
         type: sync.RWMutex
-      - doc: generation moves once per write, when it announces itself.
+      - doc: |-
+          generation moves twice per write: when it announces itself, and when
+          it ends.
         name: generation
         type: atomic.Uint64
       - doc: writing counts the writes announced and not finished.
@@ -274,7 +277,11 @@ types:
           the write defers finish. See the type comment.
         name: announce
         recv: c *chainStore[V]
-      - doc: finish ends an announced write.
+      - doc: |-
+          finish ends an announced write. It moves generation again, before writing
+          drops: a promotion whose walk began while this write ran — its seen read
+          after announce, its far read perhaps before the far write landed — then
+          fails its check even when it comes after the write ended.
         name: finish
         recv: c *chainStore[V]
       - doc: Set writes far-to-near and stops at the first failure. See the type comment.

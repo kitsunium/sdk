@@ -132,9 +132,11 @@ completion in between would see its effect overwritten by that older copy —
 served for the near TTL, forever under `NoExpiry`. So every write
 **announces itself** before it touches a tier (`announce`): it counts itself
 in `writing`, then moves `generation` under `promoting`'s write lock, which
-waits out every promotion already past its check. A promotion reads
-`generation` before its walk and, under `promoting`'s read lock, writes only
-when no write is running and none began since. A skipped promotion costs one
+waits out every promotion already past its check; `finish` moves
+`generation` again when the write ends. A promotion reads `generation` before
+its walk and, under `promoting`'s read lock, writes only when no write is
+running and none began or ended since — so a write already running when the
+walk began, and finished before the check, is caught too. A skipped promotion costs one
 later fall-through, never a stale hit; with no write around it, it promotes as
 before. `chain_race_external_test.go` places each write inside the far read of
 a `Fetch` and of a `Load`, on two and three tiers, with gated tiers — no sleep.

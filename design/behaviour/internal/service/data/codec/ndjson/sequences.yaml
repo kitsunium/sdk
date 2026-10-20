@@ -147,13 +147,21 @@ sequences:
       - return: "*(*[][]byte)(unsafe.Pointer(&rows))"
   - of: asRawMessages
     steps:
-      - bind: rows, isRaw
-        eval: v.([][]byte)
-      - opt:
-          do:
-            - return: v
-          when: "!isRaw"
-      - return: "*(*[]stdjson.RawMessage)(unsafe.Pointer(&rows))"
+      - typeswitch:
+          bind: rows
+          cases:
+            - do:
+                - return: "*(*[]stdjson.RawMessage)(unsafe.Pointer(&rows))"
+              types: "[][]byte"
+            - do:
+                - opt:
+                    do:
+                      - return: v
+                    when: rows == nil
+                - return: "*(*[]stdjson.RawMessage)(unsafe.Pointer(rows))"
+              types: "*[][]byte"
+          "on": v
+      - return: v
   - of: appendNDJSONRaw
     participants:
       - id: caller

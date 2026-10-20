@@ -262,3 +262,38 @@ func TestAPromotionWithNoWriteAroundItStillPromotes(t *testing.T) {
 		}
 	}
 }
+
+// TestAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk pins the ordering a
+// review of #460 found: a Set already running when the Fetch reads the
+// generation — announced, its far write not landed — finishes during the
+// Fetch's far read. The Fetch read the old value; its promotion must not
+// write it over the new one the Set left in the near tier.
+func TestAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	chain, gated := raceChain(t, 2)
+	near, far := gated[0], gated[1]
+	if err := far.Set(ctx, "k", forever("v1")); err != nil {
+		t.Fatal(err)
+	}
+	farWrite := far.armSet()
+	written := inBackground(func() {
+		if err := chain.Set(ctx, "k", forever("new")); err != nil {
+			t.Errorf("Set() = %v", err)
+		}
+	})
+	<-farWrite.reached // announced; the far tier still holds v1
+	farRead := far.armFetch()
+	fetched := inBackground(func() { _, _, _ = chain.Fetch(ctx, "k") })
+	<-farRead.reached // the Fetch has read v1
+	close(farWrite.release)
+	<-written
+	close(farRead.release)
+	<-fetched
+	if v, ok := heldInTier(t, near, "k"); !ok || v != "new" {
+		t.Fatalf("the near tier holds %q, %v after the Set returned; want new", v, ok)
+	}
+	if v, _, _ := chain.Fetch(ctx, "k"); v != "new" {
+		t.Fatalf("the chain serves %q, want new", v)
+	}
+}

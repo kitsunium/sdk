@@ -191,9 +191,13 @@ sequences:
         kind: actor
       - id: (*chainStore).finish
         kind: self
+      - id: c.generation.Add
+        kind: value
       - id: c.writing.Add
         kind: value
     steps:
+      - eval: c.generation.Add(1)
+        to: c.generation.Add
       - eval: c.writing.Add(-1)
         to: c.writing.Add
   - of: (*chainStore).Set

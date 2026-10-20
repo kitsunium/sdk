@@ -45,10 +45,11 @@ const minChainTiers int = 2
 // from the near tier for its whole TTL, forever under NoExpiry. So every
 // write announces itself first: it counts itself in writing, then moves
 // generation under the promotion lock — which waits for every promotion
-// already past its check to finish writing — and only then touches a tier. A
-// promotion, under the read side of that lock, writes only when no write is
-// running and none began since it read generation, before its far read. A
-// skipped promotion costs one later fall-through, never a stale hit.
+// already past its check to finish writing — and only then touches a tier;
+// it moves generation again when it ends. A promotion, under the read side of
+// that lock, writes only when no write is running and none began or ended
+// since it read generation, before its far read. A skipped promotion costs
+// one later fall-through, never a stale hit.
 type chainStore[V any] struct {
 	tiers          []tier[V]
 	onPromoteError func(key string, err error)
@@ -56,7 +57,8 @@ type chainStore[V any] struct {
 	// promoting is held for reading by a promotion from its check to its last
 	// write, and taken for writing by a write announcing itself.
 	promoting sync.RWMutex
-	// generation moves once per write, when it announces itself.
+	// generation moves twice per write: when it announces itself, and when
+	// it ends.
 	generation atomic.Uint64
 	// writing counts the writes announced and not finished.
 	writing atomic.Int64
@@ -227,8 +229,12 @@ func (c *chainStore[V]) announce() {
 	c.promoting.Unlock()
 }
 
-// finish ends an announced write.
+// finish ends an announced write. It moves generation again, before writing
+// drops: a promotion whose walk began while this write ran — its seen read
+// after announce, its far read perhaps before the far write landed — then
+// fails its check even when it comes after the write ended.
 func (c *chainStore[V]) finish() {
+	c.generation.Add(1)
 	c.writing.Add(-1)
 }
 

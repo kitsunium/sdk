@@ -182,14 +182,25 @@ func rawMessageView(rows []stdjson.RawMessage) [][]byte {
 // as the JSON it holds, validated and compacted onto one line. Without the
 // re-typing the output's format changed with the rows' content (#462).
 func asRawMessages(v any) any {
-	rows, isRaw := v.([][]byte)
-	//: only the [][]byte shape needs it; []json.RawMessage already is.
-	if !isRaw {
-		//: anything else, unchanged.
-		return v
+	//: only the [][]byte shape needs it, given or pointed to — asSlice takes
+	//: both; []json.RawMessage already is JSON.
+	switch rows := v.(type) {
+	//: the rows themselves.
+	case [][]byte:
+		//: the reverse of rawMessageView: the same bit-identical layout.
+		return *(*[]stdjson.RawMessage)(unsafe.Pointer(&rows))
+	//: a non-nil pointer to them; a nil one is asSlice's to refuse.
+	case *[][]byte:
+		//: nil stays nil, and VALUE_INVALID.
+		if rows == nil {
+			//: unchanged.
+			return v
+		}
+		//: the rows it points to, re-typed.
+		return *(*[]stdjson.RawMessage)(unsafe.Pointer(rows))
 	}
-	//: the reverse of rawMessageView: the same bit-identical layout.
-	return *(*[]stdjson.RawMessage)(unsafe.Pointer(&rows))
+	//: anything else, unchanged.
+	return v
 }
 
 // appendNDJSONRaw appends rows + '\n' separators onto dst. Refuses any
