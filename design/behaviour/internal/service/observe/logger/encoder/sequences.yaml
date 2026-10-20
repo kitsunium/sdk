@@ -65,38 +65,23 @@ sequences:
         kind: actor
       - id: appendJSONHeader
         kind: self
-      - id: appendJSONString
-        kind: internal
       - id: appendTimestamp
+        kind: internal
+      - id: appendJSONString
         kind: internal
     steps:
       - set: dst
-        to: appendJSONString
-        value: appendJSONString(dst, "ts")
-      - set: dst
-        value: append(dst, ':')
-      - set: dst
-        value: append(dst, '"')
+        value: append(dst, jsonTimestampOpen...)
       - set: dst
         to: appendTimestamp
         value: appendTimestamp(dst, r.Time)
       - set: dst
-        value: append(dst, '"', ',')
-      - set: dst
-        to: appendJSONString
-        value: appendJSONString(dst, "level")
-      - set: dst
-        value: append(dst, ':')
+        value: append(dst, jsonLevelMember...)
       - set: dst
         to: appendJSONString
         value: appendJSONString(dst, r.Level.String())
       - set: dst
-        value: append(dst, ',')
-      - set: dst
-        to: appendJSONString
-        value: appendJSONString(dst, "msg")
-      - set: dst
-        value: append(dst, ':')
+        value: append(dst, jsonMessageMember...)
       - return: appendJSONString(dst, r.Message)
         to: appendJSONString
   - of: appendJSONTraceContext
@@ -260,6 +245,53 @@ sequences:
         to: appendJSONEscaped
         value: appendJSONEscaped(dst, s)
       - return: append(dst, '"')
+  - of: appendJSONEscaped
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONEscaped
+        kind: self
+      - id: appendJSONByteEscape
+        kind: internal
+    steps:
+      - bind: start
+        eval: "0"
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - continue: true
+                when: c >= jsonControlCeiling && c != '\\' && c != '"'
+            - set: dst
+              to: appendJSONByteEscape
+              value: appendJSONByteEscape(append(dst, s[start:i]...), c)
+            - set: start
+              value: i + 1
+          key: i
+          range: len(s)
+      - return: append(dst, s[start:]...)
+  - of: appendJSONByteEscape
+    steps:
+      - switch:
+          cases:
+            - case: "'\\\\', '\"'"
+              do:
+                - return: append(dst, '\\', c)
+            - case: "'\\n'"
+              do:
+                - return: append(dst, '\\', 'n')
+            - case: "'\\r'"
+              do:
+                - return: append(dst, '\\', 'r')
+            - case: "'\\t'"
+              do:
+                - return: append(dst, '\\', 't')
+            - default: true
+              do:
+                - return: append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
+          "on": c
   - of: NewText
     steps:
       - opt:

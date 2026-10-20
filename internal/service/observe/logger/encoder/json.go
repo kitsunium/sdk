@@ -50,6 +50,16 @@ const jsonNibbleShift byte = 4
 // jsonNibbleMask isolates the low nibble of a byte for the \u00XX escape.
 const jsonNibbleMask byte = 0x0f
 
+// jsonTimestampOpen opens the object's first member, "ts", up to the opening
+// quote of its value.
+const jsonTimestampOpen string = `"ts":"`
+
+// jsonLevelMember closes the "ts" value and names the "level" member.
+const jsonLevelMember string = `","level":`
+
+// jsonMessageMember separates the "level" value from the "msg" member.
+const jsonMessageMember string = `,"msg":`
+
 // jsonEncoder renders records as a single structured JSON object line.
 // Unexported so the public surface is the Encoder interface returned by
 // NewJSON.
@@ -108,20 +118,17 @@ func (e *jsonEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 
 // appendJSONHeader writes the fixed-order "ts","level","msg" members into dst.
 func appendJSONHeader(dst []byte, r corelogger.RecordEvent) []byte {
-	dst = appendJSONString(dst, "ts")
-	dst = append(dst, ':')
-	dst = append(dst, '"')
+	//: the three member names are constants with nothing to escape, so each
+	//: is appended with its punctuation as one literal rather than run
+	//: through the escaper on every record.
+	dst = append(dst, jsonTimestampOpen...)
 	//: appendTimestamp renders timestampLayout — the one layout both encoders
 	//: share — byte for byte, at 5-6× AppendFormat's speed. See timestamp.go
 	//: and BENCH.md §5.2.
 	dst = appendTimestamp(dst, r.Time)
-	dst = append(dst, '"', ',')
-	dst = appendJSONString(dst, "level")
-	dst = append(dst, ':')
+	dst = append(dst, jsonLevelMember...)
 	dst = appendJSONString(dst, r.Level.String())
-	dst = append(dst, ',')
-	dst = appendJSONString(dst, "msg")
-	dst = append(dst, ':')
+	dst = append(dst, jsonMessageMember...)
 	//: Message is escaped as a JSON string — no separate framing sanitiser is
 	//: needed because JSON escaping already neutralises CR/LF/NUL.
 	return appendJSONString(dst, r.Message)
@@ -251,32 +258,53 @@ func appendJSONString(dst []byte, s string) []byte {
 
 // appendJSONEscaped writes the JSON-escaped body of s onto dst without the
 // surrounding quotes, so callers can compose multi-part keys before quoting.
+//
+// The bytes that need no escape are copied in RUNS — one append per stretch
+// between two escapes, one for the whole string in the common case of a key
+// or value with nothing to escape — instead of one append per byte, which
+// paid a capacity check and a store for every byte of every member.
 func appendJSONEscaped(dst []byte, s string) []byte {
+	//: start is the first byte of the run not yet copied.
+	start := 0
 	//: escape each byte that the JSON grammar forbids inside a string literal.
 	for i := range len(s) {
 		c := s[i]
-		//: route the byte through the matching escape form.
-		switch {
-		//: backslash and quote take their two-byte escapes.
-		case c == '\\' || c == '"':
-			dst = append(dst, '\\', c)
-		//: newline takes the short \n escape.
-		case c == '\n':
-			dst = append(dst, '\\', 'n')
-		//: carriage return takes the short \r escape.
-		case c == '\r':
-			dst = append(dst, '\\', 'r')
-		//: tab takes the short \t escape.
-		case c == '\t':
-			dst = append(dst, '\\', 't')
-		//: remaining control bytes need a \u00XX escape.
-		case c < jsonControlCeiling:
-			dst = append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
-		//: printable bytes pass through unchanged.
-		default:
-			dst = append(dst, c)
+		//: a byte that passes through unchanged extends the current run.
+		if c >= jsonControlCeiling && c != '\\' && c != '"' {
+			continue
 		}
+		//: flush the run, then the byte's escape in place of the byte.
+		dst = appendJSONByteEscape(append(dst, s[start:i]...), c)
+		start = i + 1
 	}
-	//: hand back the buffer with the escaped body appended.
-	return dst
+	//: hand back the buffer with the last run appended.
+	return append(dst, s[start:]...)
+}
+
+// appendJSONByteEscape appends the escape of one byte the JSON grammar forbids
+// verbatim inside a string literal: '"', '\\' or a byte below U+0020.
+func appendJSONByteEscape(dst []byte, c byte) []byte {
+	//: route the byte through the matching escape form.
+	switch c {
+	//: backslash and quote take their two-byte escapes.
+	case '\\', '"':
+		//: the byte itself, behind a backslash.
+		return append(dst, '\\', c)
+	//: newline takes the short \n escape.
+	case '\n':
+		//: two bytes.
+		return append(dst, '\\', 'n')
+	//: carriage return takes the short \r escape.
+	case '\r':
+		//: two bytes.
+		return append(dst, '\\', 'r')
+	//: tab takes the short \t escape.
+	case '\t':
+		//: two bytes.
+		return append(dst, '\\', 't')
+	//: remaining control bytes need a \u00XX escape.
+	default:
+		//: six bytes, the two hex digits from the nibbles.
+		return append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
+	}
 }

@@ -271,6 +271,45 @@ func Test_appendJSONEscaped(t *testing.T) {
 	}
 }
 
+// Test_appendJSONEscapedRunsMatchBytewise holds the run-copying escaper to the
+// byte-at-a-time form it replaced: every byte value, alone, at the start, in
+// the middle and at the end of a run, and two escapes back to back — so a run
+// boundary off by one byte cannot pass.
+func Test_appendJSONEscapedRunsMatchBytewise(t *testing.T) {
+	t.Parallel()
+	for b := range 256 {
+		c := string([]byte{byte(b)})
+		for _, in := range []string{c, c + "tail", "head" + c, "head" + c + "tail", c + c, "a" + c + "\"" + c + "z"} {
+			if got, want := string(appendJSONEscaped([]byte("pre"), in)), "pre"+bytewiseJSONEscape(in); got != want {
+				t.Fatalf("appendJSONEscaped(%q) = %q, want %q", in, got, want)
+			}
+		}
+	}
+}
+
+// bytewiseJSONEscape is the reference: one decision per byte, exactly the
+// escapes appendJSONEscaped documents.
+func bytewiseJSONEscape(s string) string {
+	var out []byte
+	for i := range len(s) {
+		switch c := s[i]; {
+		case c == '\\' || c == '"':
+			out = append(out, '\\', c)
+		case c == '\n':
+			out = append(out, '\\', 'n')
+		case c == '\r':
+			out = append(out, '\\', 'r')
+		case c == '\t':
+			out = append(out, '\\', 't')
+		case c < 0x20:
+			out = append(out, '\\', 'u', '0', '0', jsonHexDigits[c>>4], jsonHexDigits[c&0x0f])
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(out)
+}
+
 func Test_jsonEncoderName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -159,21 +159,26 @@ func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 // the scrub existed, but only here — so a line break in any of them forged a
 // log line. One function shared by both renderers cannot drift from itself.
 func AppendSanitized(dst []byte, text string) []byte {
-	//: walk text byte-by-byte; ASCII control-char check is cheap and the
-	//: allocation cost matches the existing append pattern in this file.
+	//: the bytes that pass through are copied in RUNS — one append for the
+	//: whole text when it holds no framing byte, which is every ordinary
+	//: message — not one append per byte. start is the first byte of the run
+	//: not yet copied.
+	start := 0
+	//: walk text byte-by-byte (UTF-8 multi-byte runes never contain bytes in
+	//: 0x00..0x1F, so a byte-level scan is safe).
 	for i := range len(text) {
 		b := text[i]
-		//: framing-sensitive bytes collapse to a single space per occurrence.
-		if b == '\n' || b == '\r' || b == 0 {
-			dst = append(dst, ' ')
+		//: every other byte passes through verbatim: it extends the run.
+		if b != '\n' && b != '\r' && b != 0 {
 			continue
 		}
-		//: every other byte passes through verbatim (UTF-8 multi-byte runes
-		//: never contain bytes in 0x00..0x1F, so byte-level scan is safe).
-		dst = append(dst, b)
+		//: framing-sensitive bytes collapse to a single space per occurrence.
+		dst = append(dst, text[start:i]...)
+		dst = append(dst, ' ')
+		start = i + 1
 	}
-	//: hand back the sanitized buffer with framing-sensitive bytes scrubbed.
-	return dst
+	//: hand back the sanitized buffer with the last run appended.
+	return append(dst, text[start:]...)
 }
 
 // appendAttrWithGroups prepends the active group prefix stack to the
