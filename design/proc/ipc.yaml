@@ -467,7 +467,6 @@ packages:
           absolute or not private.
         in:
           - name: app
-            type: string
           - name: fallback
             type: string
         name: RuntimeDirOr
@@ -726,7 +725,6 @@ packages:
           forward: svcipc.RuntimeDirOr
           in:
             - name: app
-              type: string
             - name: fallback
               type: string
           name: RuntimeDirOr
