@@ -16,7 +16,7 @@ one. Its contract — the two ports, the values and the codes — is
 | `Config` | type alias | the engine's configuration, `internal/service/proc/ipc.Config` (ADR 0074 — one engine's configuration is the engine's) |
 | `Listen` | func | returns the socket engine behind the `Listener` port, or a nil port with the refusal |
 | `NewDialer` | func | returns the engine behind the `Dialer` port; the configuration is checked and copied once |
-| `Dial`, `RuntimeDir` | func | delegate verbatim |
+| `Dial`, `RuntimeDir`, `RuntimeDirOr` (ADR 0181) | func | delegate verbatim |
 | `Code*` | const | the nine codes, for `errs.HasCode`, aliasing the core |
 
 ## The ports, and what changed for a caller
