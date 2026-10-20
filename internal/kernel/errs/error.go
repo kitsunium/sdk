@@ -15,16 +15,12 @@ const defaultHTTPStatus int = 500
 // override it. 70 matches sysexits EX_SOFTWARE (internal software error).
 const defaultExitCode int = 70
 
-// errorBuilderInitialCap is the initial allocation Grow hint for the
-// strings.Builder used by (*Error).Error when a trail is present. Matches
-// the average rendered length of "[code REASON] public" for the SDK's
-// existing sentinel surface.
-const errorBuilderInitialCap int = 64
+// trailSeparator precedes each wrap-site code in (*Error).Error's header.
+const trailSeparator string = " <- "
 
-// errorBuilderPerTrailEntry is the per-trail-entry allocation hint added
-// on top of errorBuilderInitialCap. Each trail entry adds " <- M.L.P.S"
-// (~12 bytes for a typical dotted-quad code).
-const errorBuilderPerTrailEntry int = 12
+// truncatedMarker follows the trail in (*Error).Error's header when its
+// middle links were dropped. Verbatim: operators grep for "(truncated)".
+const truncatedMarker string = " (truncated)"
 
 // Error is the SDK-wide typed error. Fields are unexported — consumers
 // obtain values via the getter methods on *Error or via the Of-accessors
@@ -356,26 +352,28 @@ func (e *Error) matchesSentinel(te *Error, target error) bool {
 //
 // Truncated trails append " (truncated)" before the Reason marker.
 func (e *Error) Error() string {
-	//: fast path — no trail, cheapest formatting.
-	if len(e.trail) == 0 {
-		//: single concat keeps the no-trail path zero-builder.
-		return "[" + e.code.String() + " " + e.reason + "] " + e.public
-	}
-	//: trail present — assemble via strings.Builder to avoid n^2 concat.
+	//: the result is the one allocation: its exact length is known before a
+	//: byte is written, and every code is rendered in place through a stack
+	//: scratch rather than as a string of its own.
 	var builder strings.Builder
-	builder.Grow(errorBuilderInitialCap + errorBuilderPerTrailEntry*len(e.trail))
+	builder.Grow(e.renderedLen())
+	var scratch [codeMaxLen]byte
 	builder.WriteByte('[')
-	builder.WriteString(e.code.String())
-	//: render each wrap-site code preceded by the ASCII separator.
-	for _, trailCode := range e.trail {
-		//: " <- " keeps the rendered form one-line, ASCII-safe.
-		builder.WriteString(" <- ")
-		builder.WriteString(trailCode.String())
-	}
-	//: append the truncation marker before the Reason when middle links dropped.
-	if e.trailTruncated {
-		//: marker is verbatim — operators grep for "(truncated)".
-		builder.WriteString(" (truncated)")
+	builder.Write(appendCode(scratch[:0], e.code))
+	//: the trail section exists only when a wrap site was recorded — the
+	//: truncation marker included, as before.
+	if len(e.trail) > 0 {
+		//: render each wrap-site code preceded by the ASCII separator.
+		for _, trailCode := range e.trail {
+			//: " <- " keeps the rendered form one-line, ASCII-safe.
+			builder.WriteString(trailSeparator)
+			builder.Write(appendCode(scratch[:0], trailCode))
+		}
+		//: append the truncation marker before the Reason when middle links dropped.
+		if e.trailTruncated {
+			//: marker is verbatim — operators grep for "(truncated)".
+			builder.WriteString(truncatedMarker)
+		}
 	}
 	builder.WriteByte(' ')
 	builder.WriteString(e.reason)
@@ -383,6 +381,28 @@ func (e *Error) Error() string {
 	builder.WriteString(e.public)
 	//: hand back the finalised representation.
 	return builder.String()
+}
+
+// renderedLen returns len(e.Error()) without rendering it: the brackets,
+// the spaces and the separators around each code, Reason and Public.
+func (e *Error) renderedLen() int {
+	//: "[" + code + " " + reason + "] " + public.
+	size := len("[ ] ") + codeLen(e.code) + len(e.reason) + len(e.public)
+	//: the trail section is rendered only when a wrap site exists.
+	if len(e.trail) > 0 {
+		//: " <- " + code per wrap site.
+		for _, trailCode := range e.trail {
+			//: the separator and the code's exact width.
+			size += len(trailSeparator) + codeLen(trailCode)
+		}
+		//: the marker, when middle links were dropped.
+		if e.trailTruncated {
+			//: verbatim marker length.
+			size += len(truncatedMarker)
+		}
+	}
+	//: the exact length Error writes.
+	return size
 }
 
 // Source returns the wrapped cause attached by Wrap.

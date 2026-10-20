@@ -143,18 +143,82 @@ sequences:
       - return: Serial(c)
   - of: Code.String
     steps:
-      - return: |-
-          itoaDecimal(uint8(c.Major())) + "." +
-          		itoaDecimal(uint8(c.Layer())) + "." +
-          		itoaDecimal(uint8(c.Package())) + "." +
-          		itoaDecimal(uint8(c.Serial()))
+      - var:
+          name: buf
+          type: "[codeMaxLen]byte"
+      - return: string(appendCode(buf[:0], c))
   - of: Code.Padded
+    participants:
+      - id: caller
+        kind: actor
+      - id: Code.Padded
+        kind: self
+      - id: appendPadded3
+        kind: internal
+    steps:
+      - var:
+          name: buf
+          type: "[codeMaxLen]byte"
+      - bind: dst
+        eval: appendPadded3(buf[:0], uint8(c.Major()))
+        to: appendPadded3
+      - set: dst
+        value: append(dst, '.')
+      - set: dst
+        to: appendPadded3
+        value: appendPadded3(dst, uint8(c.Layer()))
+      - set: dst
+        value: append(dst, '.')
+      - set: dst
+        to: appendPadded3
+        value: appendPadded3(dst, uint8(c.Package()))
+      - set: dst
+        value: append(dst, '.')
+      - return: string(appendPadded3(dst, uint8(c.Serial())))
+  - of: appendCode
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendCode
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        to: strconv
+        value: strconv.AppendUint(dst, uint64(c.Major()), decimalBase)
+      - set: dst
+        value: append(dst, '.')
+      - set: dst
+        to: strconv
+        value: strconv.AppendUint(dst, uint64(c.Layer()), decimalBase)
+      - set: dst
+        value: append(dst, '.')
+      - set: dst
+        to: strconv
+        value: strconv.AppendUint(dst, uint64(c.Package()), decimalBase)
+      - set: dst
+        value: append(dst, '.')
+      - return: strconv.AppendUint(dst, uint64(c.Serial()), decimalBase)
+        to: strconv
+  - of: codeLen
     steps:
       - return: |-
-          itoaPadded3(uint8(c.Major())) + "." +
-          		itoaPadded3(uint8(c.Layer())) + "." +
-          		itoaPadded3(uint8(c.Package())) + "." +
-          		itoaPadded3(uint8(c.Serial()))
+          octetLen(uint8(c.Major())) + octetLen(uint8(c.Layer())) +
+          		octetLen(uint8(c.Package())) + octetLen(uint8(c.Serial())) + 3
+  - of: octetLen
+    steps:
+      - switch:
+          cases:
+            - case: octet < padThreshold10
+              do:
+                - return: "1"
+            - case: octet < padThreshold100
+              do:
+                - return: "2"
+            - default: true
+              do:
+                - return: "3"
   - of: itoaDecimal
     participants:
       - id: caller
@@ -166,27 +230,13 @@ sequences:
     steps:
       - return: strconv.Itoa(int(octet))
         to: strconv
-  - of: itoaPadded3
-    participants:
-      - id: caller
-        kind: actor
-      - id: itoaPadded3
-        kind: self
-      - id: strconv
-        kind: stdlib
+  - of: appendPadded3
     steps:
-      - switch:
-          cases:
-            - case: octet < padThreshold10
-              do:
-                - return: "\"00\" + strconv.Itoa(int(octet))"
-            - case: octet < padThreshold100
-              do:
-                - return: "\"0\" + strconv.Itoa(int(octet))"
-            - default: true
-              do:
-                - return: strconv.Itoa(int(octet))
-                  to: strconv
+      - return: |-
+          append(dst,
+          		'0'+octet/padThreshold100,
+          		'0'+octet/padThreshold10%padThreshold10,
+          		'0'+octet%padThreshold10)
   - of: WithHTTPStatus
     steps:
       - return:
@@ -477,38 +527,42 @@ sequences:
         kind: value
       - id: builder.WriteByte
         kind: value
+      - id: builder.Write
+        kind: value
       - id: builder.WriteString
         kind: value
       - id: builder.String
         kind: value
     steps:
-      - opt:
-          do:
-            - return: "\"[\" + e.code.String() + \" \" + e.reason + \"] \" + e.public"
-          when: len(e.trail) == 0
       - var:
           name: builder
           type: strings.Builder
-      - eval: builder.Grow(errorBuilderInitialCap + errorBuilderPerTrailEntry*len(e.trail))
+      - eval: builder.Grow(e.renderedLen())
         to: builder.Grow
+      - var:
+          name: scratch
+          type: "[codeMaxLen]byte"
       - eval: builder.WriteByte('[')
         to: builder.WriteByte
-      - eval: builder.WriteString(e.code.String())
-        to: builder.WriteString
-      - loop:
-          do:
-            - eval: builder.WriteString(" <- ")
-              to: builder.WriteString
-            - eval: builder.WriteString(trailCode.String())
-              to: builder.WriteString
-          key: _
-          range: e.trail
-          value: trailCode
+      - eval: builder.Write(appendCode(scratch[:0], e.code))
+        to: builder.Write
       - opt:
           do:
-            - eval: builder.WriteString(" (truncated)")
-              to: builder.WriteString
-          when: e.trailTruncated
+            - loop:
+                do:
+                  - eval: builder.WriteString(trailSeparator)
+                    to: builder.WriteString
+                  - eval: builder.Write(appendCode(scratch[:0], trailCode))
+                    to: builder.Write
+                key: _
+                range: e.trail
+                value: trailCode
+            - opt:
+                do:
+                  - eval: builder.WriteString(truncatedMarker)
+                    to: builder.WriteString
+                when: e.trailTruncated
+          when: len(e.trail) > 0
       - eval: builder.WriteByte(' ')
         to: builder.WriteByte
       - eval: builder.WriteString(e.reason)
@@ -519,6 +573,28 @@ sequences:
         to: builder.WriteString
       - return: builder.String()
         to: builder.String
+  - of: (*Error).renderedLen
+    steps:
+      - bind: size
+        eval: len("[ ] ") + codeLen(e.code) + len(e.reason) + len(e.public)
+      - opt:
+          do:
+            - loop:
+                do:
+                  - op: +=
+                    set: size
+                    value: len(trailSeparator) + codeLen(trailCode)
+                key: _
+                range: e.trail
+                value: trailCode
+            - opt:
+                do:
+                  - op: +=
+                    set: size
+                    value: len(truncatedMarker)
+                when: e.trailTruncated
+          when: len(e.trail) > 0
+      - return: size
   - of: (*Error).Source
     steps:
       - return: e.source
@@ -788,8 +864,28 @@ sequences:
     steps:
       - return: "&PrefixMatcher{prefix: prefix, mask: mask}"
   - of: (*PrefixMatcher).String
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PrefixMatcher).String
+        kind: self
+      - id: appendCode
+        kind: internal
     steps:
-      - return: "\"PrefixMatcher{prefix=\" + p.prefix.String() + \", mask=\" + p.mask.String() + \"}\""
+      - var:
+          name: buf
+          type: "[len(prefixMatcherOpen) + len(prefixMatcherMask) + len(\"}\") + 2*codeMaxLen]byte"
+      - bind: dst
+        eval: append(buf[:0], prefixMatcherOpen...)
+      - set: dst
+        to: appendCode
+        value: appendCode(dst, p.prefix)
+      - set: dst
+        value: append(dst, prefixMatcherMask...)
+      - set: dst
+        to: appendCode
+        value: appendCode(dst, p.mask)
+      - return: string(append(dst, '}'))
   - of: (*PrefixMatcher).Error
     participants:
       - id: caller

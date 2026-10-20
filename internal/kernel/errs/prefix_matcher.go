@@ -20,9 +20,23 @@ func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher {
 
 // String returns a diagnostic representation of the matcher.
 func (p *PrefixMatcher) String() string {
-	//: rely on Code.String() for each component — canonical dotted form.
-	return "PrefixMatcher{prefix=" + p.prefix.String() + ", mask=" + p.mask.String() + "}"
+	//: both codes in their canonical dotted form, written in place into a
+	//: stack buffer sized for the longest rendering: the result string is
+	//: the one allocation.
+	var buf [len(prefixMatcherOpen) + len(prefixMatcherMask) + len("}") + 2*codeMaxLen]byte
+	dst := append(buf[:0], prefixMatcherOpen...)
+	dst = appendCode(dst, p.prefix)
+	dst = append(dst, prefixMatcherMask...)
+	dst = appendCode(dst, p.mask)
+	//: the caller's copy.
+	return string(append(dst, '}'))
 }
+
+// prefixMatcherOpen opens PrefixMatcher.String's rendering.
+const prefixMatcherOpen string = "PrefixMatcher{prefix="
+
+// prefixMatcherMask separates the prefix from the mask in PrefixMatcher.String.
+const prefixMatcherMask string = ", mask="
 
 // Error implements the `error` interface so PrefixMatcher is usable as a
 // target for `errors.Is`. Returning an error-looking string is the ONLY

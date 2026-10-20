@@ -53,6 +53,14 @@ constants:
         type: uint8
         value: "100"
     name: padThreshold100
+  - doc: |-
+      codeMaxLen is the longest rendering of a Code in either form:
+      "255.255.255.255" and "MMM.LLL.PPP.SSS" are both fifteen bytes.
+    items:
+      - name: codeMaxLen
+        type: int
+        value: "15"
+    name: codeMaxLen
   - grouped: true
     items:
       - comment: "0.0.0.1"
@@ -107,25 +115,20 @@ constants:
         type: int
         value: "70"
     name: defaultExitCode
-  - doc: |-
-      errorBuilderInitialCap is the initial allocation Grow hint for the
-      strings.Builder used by (*Error).Error when a trail is present. Matches
-      the average rendered length of "[code REASON] public" for the SDK's
-      existing sentinel surface.
+  - doc: trailSeparator precedes each wrap-site code in (*Error).Error's header.
     items:
-      - name: errorBuilderInitialCap
-        type: int
-        value: "64"
-    name: errorBuilderInitialCap
+      - name: trailSeparator
+        type: string
+        value: "\" <- \""
+    name: trailSeparator
   - doc: |-
-      errorBuilderPerTrailEntry is the per-trail-entry allocation hint added
-      on top of errorBuilderInitialCap. Each trail entry adds " <- M.L.P.S"
-      (~12 bytes for a typical dotted-quad code).
+      truncatedMarker follows the trail in (*Error).Error's header when its
+      middle links were dropped. Verbatim: operators grep for "(truncated)".
     items:
-      - name: errorBuilderPerTrailEntry
-        type: int
-        value: "12"
-    name: errorBuilderPerTrailEntry
+      - name: truncatedMarker
+        type: string
+        value: "\" (truncated)\""
+    name: truncatedMarker
   - doc: decimalBase is the radix used when rendering integer FieldValue payloads.
     items:
       - name: decimalBase
@@ -242,6 +245,18 @@ constants:
       - doc: octetIdxSerial is the index of the Serial octet inside the parsed array.
         name: octetIdxSerial
     name: octetIdxMajor
+  - doc: prefixMatcherOpen opens PrefixMatcher.String's rendering.
+    items:
+      - name: prefixMatcherOpen
+        type: string
+        value: "\"PrefixMatcher{prefix=\""
+    name: prefixMatcherOpen
+  - doc: prefixMatcherMask separates the prefix from the mask in PrefixMatcher.String.
+    items:
+      - name: prefixMatcherMask
+        type: string
+        value: "\", mask=\""
+    name: prefixMatcherMask
   - doc: |-
       registrySentinel is a compile-time marker that the registry audit is
       expected to run in this package. It has no runtime behaviour beyond
@@ -321,8 +336,12 @@ files:
       - Code.Serial
       - Code.String
       - Code.Padded
+      - codeMaxLen
+      - appendCode
+      - codeLen
+      - octetLen
       - itoaDecimal
-      - itoaPadded3
+      - appendPadded3
     name: code.go
   - decls:
       - CodeInvalidCode
@@ -332,8 +351,8 @@ files:
   - decls:
       - defaultHTTPStatus
       - defaultExitCode
-      - errorBuilderInitialCap
-      - errorBuilderPerTrailEntry
+      - trailSeparator
+      - truncatedMarker
       - Error
       - DefineOption
       - WithHTTPStatus
@@ -357,6 +376,7 @@ files:
       - (*Error).matchesPrefix
       - (*Error).matchesSentinel
       - (*Error).Error
+      - (*Error).renderedLen
       - (*Error).Source
       - (*Error).Unwrap
       - (*Error).HTTPStatus
@@ -402,6 +422,8 @@ files:
       - PrefixMatcher
       - NewPrefixMatcher
       - (*PrefixMatcher).String
+      - prefixMatcherOpen
+      - prefixMatcherMask
       - (*PrefixMatcher).Error
       - (*PrefixMatcher).Prefix
       - (*PrefixMatcher).Mask
@@ -472,15 +494,34 @@ functions:
     params: mm Major, ll Layer, pp PkgCode, ss Serial
     results: Code
   - doc: |-
+      appendCode appends the canonical dotted form of c — the bytes String
+      returns — onto dst, so a renderer that composes a larger string (Error,
+      PrefixMatcher.String) writes the code in place instead of allocating it.
+    name: appendCode
+    params: dst []byte, c Code
+    results: "[]byte"
+  - doc: |-
+      codeLen returns len(c.String()) without rendering it, so a renderer can
+      size its one allocation exactly.
+    name: codeLen
+    params: c Code
+    results: int
+  - doc: octetLen returns the number of decimal digits of an unpadded octet.
+    name: octetLen
+    params: octet uint8
+    results: int
+  - doc: |-
       itoaDecimal returns the decimal representation of a uint8 (0-255) UNPADDED.
-      Internal helper — exported sibling is Code.String().
+      Internal helper for ParseCode's diagnostics; the renderers use appendCode.
     name: itoaDecimal
     params: octet uint8
     results: string
-  - doc: itoaPadded3 returns the zero-padded 3-digit decimal form ("000".. "255").
-    name: itoaPadded3
-    params: octet uint8
-    results: string
+  - doc: |-
+      appendPadded3 appends the zero-padded 3-digit decimal form ("000".. "255")
+      of octet onto dst.
+    name: appendPadded3
+    params: dst []byte, octet uint8
+    results: "[]byte"
   - name: WithHTTPStatus
     params: status int
     results: DefineOption
@@ -784,6 +825,12 @@ types:
       - name: Error
         recv: e *Error
         results: string
+      - doc: |-
+          renderedLen returns len(e.Error()) without rendering it: the brackets,
+          the spaces and the separators around each code, Reason and Public.
+        name: renderedLen
+        recv: e *Error
+        results: int
       - name: Source
         recv: e *Error
         results: error

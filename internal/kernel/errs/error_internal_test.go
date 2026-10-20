@@ -317,3 +317,22 @@ func Test_Error_matchesSentinel(t *testing.T) {
 		})
 	}
 }
+
+// Test_renderedLenIsExact pins (*Error).renderedLen to the length Error
+// writes — with no trail, with one, and past maxTrailLen where the
+// truncation marker appears — so the one Grow is never short (a second
+// allocation) nor long (wasted bytes).
+func Test_renderedLenIsExact(t *testing.T) {
+	t.Parallel()
+	err := &Error{code: Pack(1, 2, 3, 4), reason: "ORIGIN", public: "origin failed"}
+	for wraps := range maxTrailLen + 3 {
+		rendered := err.Error()
+		if got := err.renderedLen(); got != len(rendered) {
+			t.Fatalf("after %d wraps: renderedLen() = %d, len(Error()) = %d (%q)", wraps, got, len(rendered), rendered)
+		}
+		err = Wrap(err, WrapParams{Code: Pack(255, 10, PkgCode(uint8(wraps)), 7)})
+	}
+	if !err.TrailTruncated() {
+		t.Fatal("the sweep never reached a truncated trail")
+	}
+}

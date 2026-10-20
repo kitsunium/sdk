@@ -119,7 +119,7 @@ func Test_itoaDecimal(t *testing.T) {
 	}
 }
 
-func Test_itoaPadded3(t *testing.T) {
+func Test_appendPadded3(t *testing.T) {
 	t.Parallel()
 	const expectedWidth int = 3
 	type tc struct {
@@ -138,13 +138,43 @@ func Test_itoaPadded3(t *testing.T) {
 	for _, tcase := range tests {
 		t.Run(tcase.name, func(t *testing.T) {
 			t.Parallel()
-			got := itoaPadded3(tcase.input)
+			got := string(appendPadded3(nil, tcase.input))
 			if got != tcase.want {
-				t.Errorf("itoaPadded3(%d) = %q, want %q", tcase.input, got, tcase.want)
+				t.Errorf("appendPadded3(%d) = %q, want %q", tcase.input, got, tcase.want)
 			}
 			if len(got) != expectedWidth {
-				t.Errorf("itoaPadded3(%d) not length %d: %q", tcase.input, expectedWidth, got)
+				t.Errorf("appendPadded3(%d) not length %d: %q", tcase.input, expectedWidth, got)
 			}
 		})
+	}
+}
+
+// Test_octetRenderingsAgree sweeps every octet value: appendCode's digits are
+// strconv's, codeLen is the length String returns, and Padded is the unpadded
+// form left-filled to three digits — so the renderers that write a code in
+// place cannot drift from the canonical form.
+func Test_octetRenderingsAgree(t *testing.T) {
+	t.Parallel()
+	for octet := range 256 {
+		o := uint8(octet)
+		want := itoaDecimal(o)
+		code := Pack(Major(o), Layer(o), PkgCode(o), Serial(o))
+		dotted := want + "." + want + "." + want + "." + want
+		if got := code.String(); got != dotted {
+			t.Fatalf("Code(%d…).String() = %q, want %q", o, got, dotted)
+		}
+		if got := codeLen(code); got != len(dotted) {
+			t.Fatalf("codeLen(%d…) = %d, want %d", o, got, len(dotted))
+		}
+		padded := string(appendPadded3(nil, o))
+		for len(want) < len(padded) {
+			want = "0" + want
+		}
+		if padded != want {
+			t.Fatalf("appendPadded3(%d) = %q, want %q", o, padded, want)
+		}
+		if got := code.Padded(); got != padded+"."+padded+"."+padded+"."+padded {
+			t.Fatalf("Code(%d…).Padded() = %q", o, got)
+		}
 	}
 }
