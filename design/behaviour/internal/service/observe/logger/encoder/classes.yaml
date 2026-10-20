@@ -383,24 +383,7 @@ functions:
     name: appendTraceContext
     params: dst []byte, r corelogger.RecordEvent
     results: "[]byte"
-  - doc: |-
-      AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
-      with a single space so the content can never inject a new frame in a
-      line-framed downstream sink. Other control characters are preserved to
-      keep the rendering faithful; only framing-sensitive bytes are stripped.
-      It scrubs every attacker-influenceable textual field — the Message, group
-      names, and attribute keys — not just the Message (V110).
-
-      It is exported for one caller outside this package: the legacy
-      service/observe/logger.TextHandler, which renders the same line shape without going
-      through an Encoder. That handler once appended all three fields verbatim —
-      the scrub existed, but only here — so a line break in any of them forged a
-      log line. One function shared by both renderers cannot drift from itself.
-
-      The bytes that pass through are copied in RUNS — one append for the whole
-      text when it holds no framing byte, which is every ordinary message — not
-      one append per byte.
-    name: AppendSanitized
+  - name: AppendSanitized
     params: dst []byte, text string
     results: "[]byte"
   - doc: |-

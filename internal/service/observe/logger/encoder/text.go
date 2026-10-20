@@ -158,12 +158,11 @@ func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 // through an Encoder. That handler once appended all three fields verbatim —
 // the scrub existed, but only here — so a line break in any of them forged a
 // log line. One function shared by both renderers cannot drift from itself.
-//
-// The bytes that pass through are copied in RUNS — one append for the whole
-// text when it holds no framing byte, which is every ordinary message — not
-// one append per byte.
 func AppendSanitized(dst []byte, text string) []byte {
-	//: start is the first byte of the run not yet copied.
+	//: the bytes that pass through are copied in RUNS — one append for the
+	//: whole text when it holds no framing byte, which is every ordinary
+	//: message — not one append per byte. start is the first byte of the run
+	//: not yet copied.
 	start := 0
 	//: walk text byte-by-byte (UTF-8 multi-byte runes never contain bytes in
 	//: 0x00..0x1F, so a byte-level scan is safe).
