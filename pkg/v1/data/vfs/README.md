@@ -191,7 +191,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/vfs.WriteFailed`.
 Code `0.2.25.5` · reason `WRITE_FAILED` · public "The filesystem could not write that path"
 
 <a name="NewMem"></a>
-## func [NewMem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go>)
+## func [NewMem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
 ```go
 func NewMem() FullFS
@@ -202,7 +202,7 @@ NewMem returns an empty in-memory filesystem containing only its root.
 It takes no arguments on purpose: every knob it could offer would be one a consumer's test has to set before it can assert anything, and the value of this type is that a filesystem double costs one line.
 
 <a name="NewOS"></a>
-## func [NewOS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go>)
+## func [NewOS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
 ```go
 func NewOS(root string) (filesystem FullFS, err error)
@@ -215,7 +215,7 @@ It returns proc.UnsupportedPlatform on a GOOS that lacks the mechanics this file
 The filesystem holds the directory's descriptor and additionally implements io.Closer, which releases it; every call after Close fails.
 
 <a name="AtomicWriter"></a>
-## type [AtomicWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go>)
+## type [AtomicWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
 AtomicWriter is the public alias for the publication capability, reached by type assertion on a filesystem this package did not build.
 
@@ -245,7 +245,7 @@ type AtomicWriter interface {
 ```
 
 <a name="AtomicWriter.WriteAtomic"></a>
-### func \(AtomicWriter\) [WriteAtomic](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/design_gen.go>)
+### func \(AtomicWriter\) [WriteAtomic](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
 
 ```go
 func (AtomicWriter) WriteAtomic(name string, data []byte, perm fs.FileMode) error
@@ -258,7 +258,7 @@ The contract on FAILURE is why this method exists, and it is what [PublishFailed
 Durability beyond the process is the implementation's to describe: the operating-system filesystem flushes the file AND the directory entry, while an in-memory one has no device to flush and says so.
 
 <a name="FS"></a>
-## type [FS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go>)
+## type [FS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
 FS is the public alias for the read half, which is io/fs.FS unchanged. It exists so a signature can say "an SDK filesystem" without implying that anything about reading is different here.
 
@@ -269,7 +269,7 @@ type FS = corevfs.FS
 FS is an alias of `io/fs.FS`.
 
 <a name="FullFS"></a>
-## type [FullFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go>)
+## type [FullFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
 FullFS is the public alias for the union both constructors return: a [WritableFS](#WritableFS) that is also an [AtomicWriter](#AtomicWriter). A parameter should still ask for the narrowest thing it uses.
 
@@ -287,7 +287,7 @@ type FullFS interface {
 ```
 
 <a name="WritableFS"></a>
-## type [WritableFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/facade_gen.go>)
+## type [WritableFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
 WritableFS is the public alias for the write half: the four write verbs on top of the embedded [FS](#FS). It is frozen — a new capability arrives as a sibling interface, never as a fifth method.
 
@@ -322,7 +322,7 @@ type WritableFS interface {
 ```
 
 <a name="WritableFS.MkdirAll"></a>
-### func \(WritableFS\) [MkdirAll](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/design_gen.go>)
+### func \(WritableFS\) [MkdirAll](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
 
 ```go
 func (WritableFS) MkdirAll(name string, perm fs.FileMode) error
@@ -331,7 +331,7 @@ func (WritableFS) MkdirAll(name string, perm fs.FileMode) error
 MkdirAll creates name and every missing parent, applying perm to each directory it creates. An existing directory is success; an existing non-directory is [NotRegularFile](#NotRegularFile).
 
 <a name="WritableFS.Remove"></a>
-### func \(WritableFS\) [Remove](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/design_gen.go>)
+### func \(WritableFS\) [Remove](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
 
 ```go
 func (WritableFS) Remove(name string) error
@@ -340,7 +340,7 @@ func (WritableFS) Remove(name string) error
 Remove removes one file or one EMPTY directory. A non-empty directory is [DirectoryNotEmpty](#DirectoryNotEmpty) rather than a recursive delete, because the two are different decisions and only one of them is reversible by accident.
 
 <a name="WritableFS.RemoveAll"></a>
-### func \(WritableFS\) [RemoveAll](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/design_gen.go>)
+### func \(WritableFS\) [RemoveAll](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
 
 ```go
 func (WritableFS) RemoveAll(name string) error
@@ -349,7 +349,7 @@ func (WritableFS) RemoveAll(name string) error
 RemoveAll removes name and everything beneath it. A name that does not exist is success — the caller asked for it to be gone, and it is.
 
 <a name="WritableFS.WriteFile"></a>
-### func \(WritableFS\) [WriteFile](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/design_gen.go>)
+### func \(WritableFS\) [WriteFile](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
 
 ```go
 func (WritableFS) WriteFile(name string, data []byte, perm fs.FileMode) error

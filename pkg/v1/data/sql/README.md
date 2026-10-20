@@ -432,7 +432,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.VersionTableIn
 Code `0.3.54.16` · reason `VERSION_TABLE_INVALID` · public "The version-table name is not a plain SQL identifier"
 
 <a name="Irreversible"></a>
-## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 ```go
 func Irreversible(ctx context.Context, ex Executor) error
@@ -441,7 +441,7 @@ func Irreversible(ctx context.Context, ex Executor) error
 Irreversible is the [Step](#Step) a migration assigns to Down to declare, out loud, that it cannot be reversed.
 
 <a name="NewChecker"></a>
-## func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 ```go
 func NewChecker(cfg Config) (probe Checker, err error)
@@ -450,7 +450,7 @@ func NewChecker(cfg Config) (probe Checker, err error)
 NewChecker returns a liveness probe bounded by cfg.CheckTimeout.
 
 <a name="NewMigrator"></a>
-## func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 ```go
 func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
@@ -459,7 +459,7 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
 NewMigrator returns the migration runner. Every migration execution is serialised: on the session's advisory lock where the engine has one (PostgreSQL, MySQL), and on the database file's write lock on SQLite, which has none (ADR 0140). No dialect the SDK speaks is refused for the lock.
 
 <a name="NewTransactor"></a>
-## func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 ```go
 func NewTransactor(cfg Config) (manager Transactor, err error)
@@ -468,7 +468,7 @@ func NewTransactor(cfg Config) (manager Transactor, err error)
 NewTransactor returns the transaction manager for cfg.DB, applying cfg.Pool to it.
 
 <a name="ParseDialect"></a>
-## func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 ```go
 func ParseDialect(name string) (dialect Dialect, err error)
@@ -477,7 +477,7 @@ func ParseDialect(name string) (dialect Dialect, err error)
 ParseDialect resolves a dialect name and never guesses. A recognised but unsupported engine returns [DialectRefused](#DialectRefused) carrying why; an unrecognised one returns [UnknownDialect](#UnknownDialect).
 
 <a name="Statements"></a>
-## func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 ```go
 func Statements(stmts ...string) Step
@@ -499,7 +499,7 @@ Transact runs fn inside a transaction with the driver's default isolation.
 It is the ergonomic form of [Transactor](#Transactor).Transact for the common case. The port itself keeps the options parameter so it never needs a second method (ADR 0039); this helper keeps the call site short.
 
 <a name="Aborter"></a>
-## type [Aborter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Aborter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Aborter is the public alias for the ADR 0039 sibling of [Transactor](#Transactor) that holds a function until the work a context carries is undone — its savepoint or its transaction rolled back — and drops it with a commit: the complement of [Deferrer](#Deferrer). Discover it by type assertion.
 
@@ -542,7 +542,7 @@ type Aborter interface {
 ```
 
 <a name="Aborter.OnAbort"></a>
-### func \(Aborter\) [OnAbort](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Aborter\) [OnAbort](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Aborter) OnAbort(ctx context.Context, fn func(ctx context.Context)) (held bool)
@@ -559,7 +559,7 @@ For a function held with OnAbort and another with Defer under the same scope, ex
 OnAbort reports false and holds nothing when ctx carries no open transaction of this transactor. There is nothing to undo, so fn is the caller's again. A nil fn holds nothing and gets the same answer.
 
 <a name="Checker"></a>
-## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Checker is the public alias for the bounded liveness probe.
 
@@ -579,7 +579,7 @@ type Checker interface {
 ```
 
 <a name="Checker.Check"></a>
-### func \(Checker\) [Check](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Checker\) [Check](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Checker) Check(ctx context.Context) error
@@ -588,7 +588,7 @@ func (Checker) Check(ctx context.Context) error
 Check probes the database under a bounded budget and returns nil when it answered. A non-nil error is always typed and never carries the connection string.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Config is the public alias for the parameters every port is built from.
 
@@ -625,7 +625,7 @@ type Config struct {
 ```
 
 <a name="Deferrer"></a>
-## type [Deferrer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Deferrer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Deferrer is the public alias for the ADR 0039 sibling of [Transactor](#Transactor) that holds a function until the transaction a context carries has committed, and drops it with a rollback. Discover it by type assertion.
 
@@ -657,7 +657,7 @@ type Deferrer interface {
 ```
 
 <a name="Deferrer.Defer"></a>
-### func \(Deferrer\) [Defer](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Deferrer\) [Defer](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Deferrer) Defer(ctx context.Context, fn func()) (held bool)
@@ -670,7 +670,7 @@ The held functions run once, in the order they were held, on the goroutine that 
 Defer reports false and holds nothing when ctx carries no open transaction of this transactor. There is no commit to wait for, so fn is the caller's again, usually to run at once. A nil fn holds nothing and gets the same answer.
 
 <a name="Dialect"></a>
-## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Dialect is the public alias for the closed set of SQL engines this SDK can spell. For SQL you write yourself, it spells the engine's vocabulary — the tokens the SDK's own statements are spelled with, never a statement: [Dialect](#Dialect).Placeholder renders a bind marker ($1 on PostgreSQL, ? on MySQL and SQLite), [Dialect](#Dialect).QuoteIdent a delimited name, its delimiter doubled inside, and [Dialect](#Dialect).ForUpdate and [Dialect](#Dialect).ForUpdateSkipLocked a row-lock clause, which SQLite — whose exclusion is its one write lock — renders as nothing. QuoteIdent validates nothing: check a name before you interpolate it. An unset Dialect renders no marker and no name, so a statement built from it fails rather than passing for another engine's.
 
@@ -760,7 +760,7 @@ func (Dialect) Valid() bool
 Valid reports whether d is a dialect this domain can actually spell.
 
 <a name="Executor"></a>
-## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Executor is the public alias for the read/write surface a statement runs against. \*sql.DB, \*sql.Tx and \*sql.Conn all satisfy it with no adapter, and it deliberately carries no Commit, Rollback or Begin.
 
@@ -782,7 +782,7 @@ type Executor interface {
 ```
 
 <a name="Executor.ExecContext"></a>
-### func \(Executor\) [ExecContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Executor\) [ExecContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Executor) ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error)
@@ -791,7 +791,7 @@ func (Executor) ExecContext(ctx context.Context, query string, args ...any) (std
 ExecContext runs a statement that returns no rows.
 
 <a name="Executor.QueryContext"></a>
-### func \(Executor\) [QueryContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Executor\) [QueryContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Executor) QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)
@@ -800,7 +800,7 @@ func (Executor) QueryContext(ctx context.Context, query string, args ...any) (*s
 QueryContext runs a statement that returns rows. The caller closes them.
 
 <a name="Executor.QueryRowContext"></a>
-### func \(Executor\) [QueryRowContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Executor\) [QueryRowContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Executor) QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row
@@ -809,7 +809,7 @@ func (Executor) QueryRowContext(ctx context.Context, query string, args ...any) 
 QueryRowContext runs a statement expected to return at most one row.
 
 <a name="Joiner"></a>
-## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Joiner is the public alias for the ADR 0039 sibling of [Transactor](#Transactor) that says where a statement issued under a context runs: in the transaction the context carries, or on the pool. Discover it by type assertion.
 
@@ -837,7 +837,7 @@ type Joiner interface {
 ```
 
 <a name="Joiner.Join"></a>
-### func \(Joiner\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Joiner\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Joiner) Join(ctx context.Context) (ex Executor, inTx bool)
@@ -850,7 +850,7 @@ When ctx carries a transaction THIS transactor opened, that is the executor of t
 When ctx carries none — no transaction, or only another transactor's — it is the pool, outside any transaction, and inTx is false.
 
 <a name="MigrateConfig"></a>
-## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 MigrateConfig is the public alias for the migration runner's parameters.
 
@@ -884,7 +884,7 @@ type MigrateConfig struct {
 ```
 
 <a name="Migration"></a>
-## type [Migration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Migration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Migration is the public alias for one versioned schema change and its reversal.
 
@@ -933,7 +933,7 @@ Validate reports why the migration could never run, or nil.
 It is a method on the value rather than a check inside the runner so a caller can validate a set at start-up — before any connection exists — which is where a wiring fault should be found.
 
 <a name="Migrator"></a>
-## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Migrator is the public alias for the schema-migration runner.
 
@@ -960,7 +960,7 @@ type Migrator interface {
 ```
 
 <a name="Migrator.Down"></a>
-### func \(Migrator\) [Down](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Migrator\) [Down](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Migrator) Down(ctx context.Context, target uint64) error
@@ -969,7 +969,7 @@ func (Migrator) Down(ctx context.Context, target uint64) error
 Down reverses every applied migration whose version is STRICTLY GREATER than target, in descending order, each in its own transaction, under the migration lock. Down(ctx, 0) reverses everything.
 
 <a name="Migrator.Plan"></a>
-### func \(Migrator\) [Plan](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Migrator\) [Plan](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Migrator) Plan(ctx context.Context) ([]MigrationValue, error)
@@ -978,7 +978,7 @@ func (Migrator) Plan(ctx context.Context) ([]MigrationValue, error)
 Plan reports what Up would apply, in the order it would apply it, WITHOUT applying anything and without taking the migration lock. It is the dry run: a read of the version table and a set difference.
 
 <a name="Migrator.Up"></a>
-### func \(Migrator\) [Up](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Migrator\) [Up](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Migrator) Up(ctx context.Context) error
@@ -987,7 +987,7 @@ func (Migrator) Up(ctx context.Context) error
 Up applies every pending migration in ascending version order, each in its own transaction, under the migration lock.
 
 <a name="PoolConfig"></a>
-## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 PoolConfig is the public alias for the connection-pool policy.
 
@@ -1031,7 +1031,7 @@ type PoolConfig struct {
 ```
 
 <a name="Preparer"></a>
-## type [Preparer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Preparer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Preparer is the public alias for the ADR 0039 sibling of [Executor](#Executor): an executor that can also prepare a statement. Discover it by type assertion.
 
@@ -1049,7 +1049,7 @@ type Preparer interface {
 ```
 
 <a name="Preparer.PrepareContext"></a>
-### func \(Preparer\) [PrepareContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Preparer\) [PrepareContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Preparer) PrepareContext(ctx context.Context, query string) (*stdsql.Stmt, error)
@@ -1058,7 +1058,7 @@ func (Preparer) PrepareContext(ctx context.Context, query string) (*stdsql.Stmt,
 PrepareContext compiles a statement. The caller closes it.
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Step is the public alias for one direction of a migration.
 
@@ -1073,7 +1073,7 @@ type Step func(ctx context.Context, ex Executor) error
 ```
 
 <a name="Transactor"></a>
-## type [Transactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [Transactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 Transactor is the public alias for the transaction manager.
 
@@ -1100,7 +1100,7 @@ type Transactor interface {
 ```
 
 <a name="Transactor.Transact"></a>
-### func \(Transactor\) [Transact](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+### func \(Transactor\) [Transact](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
 
 ```go
 func (Transactor) Transact(ctx context.Context, opts TxOptionsValue, fn TxFunc) error
@@ -1113,7 +1113,7 @@ If ctx already carries a transaction opened by THIS Transactor, fn runs inside a
 A panic inside fn is NOT recovered: the deferred rollback still runs, and the panic reaches the caller with its original stack.
 
 <a name="TxFunc"></a>
-## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 TxFunc is the public alias for a unit of work run inside a transaction.
 
@@ -1128,7 +1128,7 @@ type TxFunc func(ctx context.Context, ex Executor) error
 ```
 
 <a name="TxOptions"></a>
-## type [TxOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+## type [TxOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
 TxOptions is the public alias for one transaction's isolation and read-only-ness. The zero value defers to the driver.
 

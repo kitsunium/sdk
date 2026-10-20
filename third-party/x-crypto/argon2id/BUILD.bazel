@@ -26,10 +26,10 @@ alias(
 go_test(
     name = "argon2id_test",
     srcs = [
-        "api_gen_test.go",
         "argon2id_bench_test.go",
         "argon2id_external_test.go",
         "argon2id_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":argon2id"],
     deps = [

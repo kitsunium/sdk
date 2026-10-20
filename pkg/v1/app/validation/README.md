@@ -217,7 +217,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/validation.Unsuppor
 Code `0.3.47.7` · reason `UNSUPPORTED_TARGET` · public "Struct tag validation requires a struct type"
 
 <a name="All"></a>
-## func [All](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [All](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func All[T any](constraints ...Constraint[T]) Constraint[T]
@@ -226,7 +226,7 @@ func All[T any](constraints ...Constraint[T]) Constraint[T]
 All runs every constraint and reports everything they found. It is the default shape of the engine; All with no constraint accepts everything.
 
 <a name="AtLeast"></a>
-## func [AtLeast](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [AtLeast](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func AtLeast[T cmp.Ordered](lo T) Constraint[T]
@@ -235,7 +235,7 @@ func AtLeast[T cmp.Ordered](lo T) Constraint[T]
 AtLeast refuses a value below lo; the bound is inclusive. It is the programmatic spelling of the \`min=\` struct tag, and both report the rule "min".
 
 <a name="AtMost"></a>
-## func [AtMost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [AtMost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func AtMost[T cmp.Ordered](hi T) Constraint[T]
@@ -244,7 +244,7 @@ func AtMost[T cmp.Ordered](hi T) Constraint[T]
 AtMost refuses a value above hi; the bound is inclusive. It is the programmatic spelling of the \`max=\` struct tag.
 
 <a name="Between"></a>
-## func [Between](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Between](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Between[T cmp.Ordered](lo T, hi T) (constraint Constraint[T], err error)
@@ -253,7 +253,7 @@ func Between[T cmp.Ordered](lo T, hi T) (constraint Constraint[T], err error)
 Between refuses a value outside \[lo, hi]. lo > hi is refused at construction: an inverted interval is satisfied by nothing.
 
 <a name="Check"></a>
-## func [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Check[T any](value T, constraints ...Constraint[T]) error
@@ -262,7 +262,7 @@ func Check[T any](value T, constraints ...Constraint[T]) error
 Check runs constraints against value at the root path and converts the result to the SDK error model — the one-line bridge to config.Validator.
 
 <a name="Count"></a>
-## func [Count](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Count](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Count[E any](minLen int, maxLen int) (constraint Constraint[[]E], err error)
@@ -271,7 +271,7 @@ func Count[E any](minLen int, maxLen int) (constraint Constraint[[]E], err error
 Count refuses a slice whose element count falls outside \[min, max]. max may be [Unbounded](#Unbounded). Count(1, Unbounded) is how presence is expressed for a slice.
 
 <a name="Each"></a>
-## func [Each](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Each](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Each[T, E any](name string, get func(T) []E, constraints ...Constraint[E]) (constraint Constraint[T], err error)
@@ -280,7 +280,7 @@ func Each[T, E any](name string, get func(T) []E, constraints ...Constraint[E]) 
 Each applies constraints to every element of a slice member of T reached through get, locating each element's violations at "name\[i]".
 
 <a name="Field"></a>
-## func [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Field[T, F any](name string, get func(T) F, constraints ...Constraint[F]) (constraint Constraint[T], err error)
@@ -289,7 +289,7 @@ func Field[T, F any](name string, get func(T) F, constraints ...Constraint[F]) (
 Field applies constraints to a member of T reached through get, locating every violation at the parent path extended by name. It uses no reflection.
 
 <a name="First"></a>
-## func [First](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [First](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func First[T any](constraints ...Constraint[T]) Constraint[T]
@@ -298,7 +298,7 @@ func First[T any](constraints ...Constraint[T]) Constraint[T]
 First runs the constraints in order and stops at the one that refuses. It is a real short-circuit, not a filtered report.
 
 <a name="JoinField"></a>
-## func [JoinField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [JoinField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func JoinField(base string, name string) string
@@ -307,7 +307,7 @@ func JoinField(base string, name string) string
 JoinField extends a path with a member name — JoinField("user", "zip") is "user.zip". The grammar does not quote, so a member name that itself contains '.', '\[' or ']' yields a path indistinguishable from a nested or indexed one.
 
 <a name="JoinIndex"></a>
-## func [JoinIndex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [JoinIndex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func JoinIndex(base string, index int) string
@@ -316,7 +316,7 @@ func JoinIndex(base string, index int) string
 JoinIndex extends a path with an element position — JoinIndex("a", 2) is "a\[2]".
 
 <a name="Length"></a>
-## func [Length](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Length](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Length(minRunes int, maxRunes int) (constraint Constraint[string], err error)
@@ -325,7 +325,7 @@ func Length(minRunes int, maxRunes int) (constraint Constraint[string], err erro
 Length refuses a string whose RUNE count falls outside \[min, max]. max may be [Unbounded](#Unbounded). It counts runes, not grapheme clusters.
 
 <a name="Matches"></a>
-## func [Matches](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Matches](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Matches(pattern string) (constraint Constraint[string], err error)
@@ -334,7 +334,7 @@ func Matches(pattern string) (constraint Constraint[string], err error)
 Matches refuses a string the pattern does not match. The pattern is compiled at construction, and Go's RE2 has no backtracking — a pattern cannot be turned into a denial of service by the value it is shown.
 
 <a name="Must"></a>
-## func [Must](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Must](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Must[T any](constraint Constraint[T], err error) Constraint[T]
@@ -343,7 +343,7 @@ func Must[T any](constraint Constraint[T], err error) Constraint[T]
 Must returns constraint, panicking when err is non-nil. It is the regexp.MustCompile idiom, for a package-level validator built from literals at init. Do NOT use it on a bound that comes from configuration.
 
 <a name="OneOf"></a>
-## func [OneOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [OneOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func OneOf[T comparable](allowed ...T) (constraint Constraint[T], err error)
@@ -352,7 +352,7 @@ func OneOf[T comparable](allowed ...T) (constraint Constraint[T], err error)
 OneOf refuses a value absent from allowed. An empty allowed set is refused at construction: it is a forgotten argument, not a permissive rule.
 
 <a name="Required"></a>
-## func [Required](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Required](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Required[T comparable]() Constraint[T]
@@ -361,7 +361,7 @@ func Required[T comparable]() Constraint[T]
 Required refuses the zero value of T. It cannot distinguish "not supplied" from "supplied as zero" — declare the field as a pointer when that matters.
 
 <a name="Struct"></a>
-## func [Struct](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## func [Struct](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 ```go
 func Struct[T any](cfg StructConfig) (constraint Constraint[T], err error)
@@ -372,7 +372,7 @@ Struct compiles the \`validate\` tags of T into a Constraint, caching the plan p
 Accepted: required, min, max, minlen, maxlen, mincount, maxcount, oneof=a|b|c, dive. Refused BY NAME, each saying what to do instead: pattern / regex (a regexp cannot live in a comma-separated tag), email, url, uuid, dive into a map, and any unknown rule.
 
 <a name="Constraint"></a>
-## type [Constraint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## type [Constraint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 Constraint is the public alias for the value-checking port. It is a FUNC type, so it cannot grow a method and break a downstream implementer (ADR 0039).
 
@@ -387,7 +387,7 @@ type Constraint[T any] func(path string, value T) ReportValue
 ```
 
 <a name="Report"></a>
-## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 Report is the public alias for everything one validation found wrong. Its zero value — nil — is a passing report.
 
@@ -442,7 +442,7 @@ func (Report) Paths() []string
 Paths returns the located path of every violation, in report order. It is the shape an HTTP layer wants when it maps a report onto a form: the caller already knows its own field names, and needs the SDK to say which ones.
 
 <a name="StructConfig"></a>
-## type [StructConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## type [StructConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 StructConfig is the public alias for a compiled struct validator's options.
 
@@ -466,7 +466,7 @@ type StructConfig struct {
 ```
 
 <a name="Violation"></a>
-## type [Violation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/facade_gen.go>)
+## type [Violation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/validation/gen_facade.go>)
 
 Violation is the public alias for one located failure.
 

@@ -41,10 +41,10 @@ go_test(
     name = "scheduler_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "config_external_test.go",
         "cron_dst_external_test.go",
         "cron_external_test.go",
+        "gen_api_test.go",
         "nosleep_external_test.go",
         "run_external_test.go",
     ],

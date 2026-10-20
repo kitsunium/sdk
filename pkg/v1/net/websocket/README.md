@@ -395,7 +395,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.WSUpgradeUnsupporte
 Code `0.2.11.28` · reason `WS_UPGRADE_UNSUPPORTED` · public "The connection cannot be upgraded"
 
 <a name="AcceptKey"></a>
-## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func AcceptKey(key string) string
@@ -406,7 +406,7 @@ AcceptKey computes the Sec-WebSocket-Accept value for a client's Sec-WebSocket-K
 It is exported for tests and for anyone writing a client handshake by hand. The digest is SHA-1 by the RFC's own instruction and is not a security primitive: its job is to prove the server parsed the handshake rather than replaying it, so a cached 101 cannot pass for a live upgrade.
 
 <a name="AllowAnyOrigin"></a>
-## func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func AllowAnyOrigin() Option
@@ -417,7 +417,7 @@ AllowAnyOrigin disables the origin check.
 It has to be written out because the browser's same-origin policy does not apply to WebSocket: any page may open a connection to this server and the browser will attach the user's cookies to the handshake. Reach for it when authentication does not ride on ambient credentials — a bearer token, a signed ticket — which is exactly when the origin proves nothing anyway.
 
 <a name="AllowOrigins"></a>
-## func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func AllowOrigins(origins ...string) Option
@@ -428,7 +428,7 @@ AllowOrigins replaces the default same-origin rule with an exact allowlist.
 The comparison is on the whole Origin header — scheme, host and port — case-insensitively. Matching the host alone would accept http:// for an https server, which is the downgrade the check exists to notice. Behind a proxy that terminates TLS this is the only way to have the scheme checked at all: the request arrives in plaintext there, so the default rule cannot see which scheme the browser used.
 
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -439,7 +439,7 @@ DrainSignal returns the channel closed when the server serving this request begi
 [Conn](#Conn) watches it for you. It is re-exported here because a handler often wants to stop its own work at the same moment, and a nil channel blocks forever, so a select that watches it needs no nil check.
 
 <a name="MaxFrameSize"></a>
-## func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func MaxFrameSize(n int64) Option
@@ -450,7 +450,7 @@ MaxFrameSize bounds one frame's ANNOUNCED payload length.
 It is separate from [MaxMessageSize](#MaxMessageSize) because it is enforced at a different moment: against the header, before a byte is read or allocated. A ceiling above the message ceiling can never be reached and is refused as a mistake.
 
 <a name="MaxMessageSize"></a>
-## func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func MaxMessageSize(n int64) Option
@@ -461,7 +461,7 @@ MaxMessageSize bounds one reassembled message.
 Zero is clamped to [DefaultMaxMessageSize](#DefaultMaxMessageSize), negative is refused. There is deliberately no "unbounded" setting: the length is announced by the peer in a 64-bit field, and fragmentation lets it keep announcing more, so an unbounded ceiling is not a configuration choice — it is a remote memory allocator.
 
 <a name="PingInterval"></a>
-## func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func PingInterval(d time.Duration) Option
@@ -474,7 +474,7 @@ Zero does not mean "never": it is clamped to [DefaultPingInterval](#DefaultPingI
 The heartbeat counts frames the handler has READ, so it keeps a connection open only while one goroutine loops on [Conn](#Conn).Receive; a connection nobody reads is ended within two intervals, however healthy the peer.
 
 <a name="Subprotocols"></a>
-## func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func Subprotocols(names ...string) Option
@@ -487,7 +487,7 @@ The SERVER's order decides. A client advertises what it can speak; choosing amon
 Each name must be an RFC 7230 token, since the chosen one is written into the response verbatim; a name with a space, a comma or a quote is refused at Upgrade. The list is copied, so reusing the slice changes nothing later.
 
 <a name="Upgrade"></a>
-## func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error)
@@ -500,7 +500,7 @@ On failure it has ALREADY written the HTTP response — a 426 carrying the versi
 The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until [Conn](#Conn).Close.
 
 <a name="WithoutPing"></a>
-## func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func WithoutPing() Option
@@ -509,7 +509,7 @@ func WithoutPing() Option
 WithoutPing disables the heartbeat, and with it the connection's only liveness check. Use it where the transport provides its own.
 
 <a name="WriteTimeout"></a>
-## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 ```go
 func WriteTimeout(d time.Duration) Option
@@ -520,7 +520,7 @@ WriteTimeout bounds how long one frame's write may take.
 It is per-frame on purpose: a group's WriteTimeout is an absolute deadline for one HTTP response, and this connection outlives the response entirely. Zero is clamped to [DefaultWriteTimeout](#DefaultWriteTimeout), negative is refused.
 
 <a name="CloseCode"></a>
-## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 CloseCode is the status code a Close frame carries (RFC 6455 §7.4).
 
@@ -557,7 +557,7 @@ Sendable reports whether the code may appear in a Close frame on the wire.
 It is deliberately a property of the CODE rather than a check inside the sender, because the same question is asked twice from opposite directions: a peer that sends 1006 is committing a protocol error, and so is this endpoint if it ever does. One predicate, both directions, no chance of the two drifting apart.
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 Conn is one upgraded WebSocket connection.
 
@@ -684,7 +684,7 @@ func (*Conn) Subprotocol() string
 Subprotocol returns the subprotocol the handshake agreed on, or "" when none was.
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 Message is one complete WebSocket application message.
 
@@ -716,7 +716,7 @@ func (Message) OpCode() WSOpCode
 OpCode returns the frame opcode this message is carried under.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/facade_gen.go>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
 Option configures a Conn.
 

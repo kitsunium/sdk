@@ -228,7 +228,7 @@ StdioNull connects every stream to the null device: output is discarded and the 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc.StdioNull`.
 
 <a name="Build"></a>
-## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 ```go
 func Build() (info BuildInfo, ok bool)
@@ -246,7 +246,7 @@ func MustStart(ctx context.Context, spec Spec) Process
 MustStart is like [Start](#Start) but panics with the typed error when the spawn fails — UnsupportedPlatform off Unix/Windows, InvalidSpec, RlimitFailed, … It is the idiomatic Go MustX opt-in (like [regexp.MustCompile](https://pkg.go.dev/regexp#MustCompile)) for a consumer that chooses crash-on-failure at its own startup; the SDK itself never panics, and [Start](#Start) is the non-panicking form for normal use. The panic value is the typed error, so a top-level recover() can classify it via errs.CodeOf / HasCode.
 
 <a name="ParseBuild"></a>
-## func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 ```go
 func ParseBuild(info *debug.BuildInfo) BuildInfo
@@ -255,7 +255,7 @@ func ParseBuild(info *debug.BuildInfo) BuildInfo
 ParseBuild describes a BuildInfo from elsewhere — one a test builds by hand, or debug.ParseBuildInfo's reading of another binary — exactly as Build describes the running one.
 
 <a name="Self"></a>
-## func [Self](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## func [Self](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 ```go
 func Self() Stats
@@ -264,7 +264,7 @@ func Self() Stats
 Self takes a snapshot of the running process. It never fails: a figure the platform cannot give is zero, and Stats.CPUEstimated says when CPUTime is the runtime's estimate rather than the kernel's count.
 
 <a name="Start"></a>
-## func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 ```go
 func Start(ctx context.Context, spec Spec) (proc Process, err error)
@@ -273,7 +273,7 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error)
 Start spawns the process described by spec and returns a live Process handle. It delegates to internal/service/proc/exec; ctx is honoured up to the fork/exec boundary. A bare Spec.Path is searched in the child's PATH (see the package documentation). On Windows the Unix-only Spec fields are refused with UnsupportedPlatform; on platforms that are neither Unix nor Windows, Start itself returns UnsupportedPlatform.
 
 <a name="BuildInfo"></a>
-## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 BuildInfo is what the running binary was built from: the toolchain, the main package, the main module with its version-control stamp, and every dependency followed through its replacement. It is an alias of the service value.
 
@@ -308,7 +308,7 @@ func (*BuildInfo) Module(path string) (found ModuleValue, ok bool)
 Module returns the module whose path is path — the main module or one of the dependencies — and whether the build contains it.
 
 <a name="Distribution"></a>
-## type [Distribution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Distribution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Distribution is one of the Go runtime's cumulative histograms, read as durations: Count, and Quantile(q) as the upper bound of the bucket that reaches q. It is an alias of the service value.
 
@@ -347,7 +347,7 @@ func (Distribution) Quantile(q float64) time.Duration
 Quantile returns the q-th quantile of the distribution, q in \[0, 1]: the UPPER bound of the bucket where the cumulative count reaches q of the total — an upper estimate, which is the honest reading of a bucketed histogram. q outside \[0, 1] is clamped, NaN is read as 0, and an empty distribution is zero. A bucket whose upper bound is infinite answers with its lower bound.
 
 <a name="ExitResult"></a>
-## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 ExitResult is the outcome of a finished process — exit code, terminating signal, and resource usage. It is an alias of the core port's ExitValue.
 
@@ -390,7 +390,7 @@ func (ExitResult) Success() bool
 Success reports whether the process exited normally with status zero.
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Limit is a soft/hard resource-limit pair for setrlimit(2). It is an alias of the core port's LimitValue.
 
@@ -410,7 +410,7 @@ type Limit struct {
 ```
 
 <a name="Module"></a>
-## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Module is one module of the running binary, with its release, its commit and its local directory told apart. It is an alias of the service value.
 
@@ -459,7 +459,7 @@ type Module struct {
 ```
 
 <a name="Process"></a>
-## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup, and a group-aware Stop. It is an alias of the core port interface.
 
@@ -493,7 +493,7 @@ type Process interface {
 ```
 
 <a name="Process.PID"></a>
-### func \(Process\) [PID](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Process\) [PID](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Process) PID() int
@@ -502,7 +502,7 @@ func (Process) PID() int
 PID reports the process identifier of the leader.
 
 <a name="Process.Signal"></a>
-### func \(Process\) [Signal](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Process\) [Signal](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Process) Signal(sig Signal) error
@@ -511,7 +511,7 @@ func (Process) Signal(sig Signal) error
 Signal delivers sig to the leader process only.
 
 <a name="Process.SignalGroup"></a>
-### func \(Process\) [SignalGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Process\) [SignalGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Process) SignalGroup(sig Signal) error
@@ -520,7 +520,7 @@ func (Process) SignalGroup(sig Signal) error
 SignalGroup delivers sig to the leader's entire process group (kill(-pgid, sig)), reaching forked grandchildren — the KillMode=control-group analogue.
 
 <a name="Process.Stop"></a>
-### func \(Process\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Process\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Process) Stop(ctx context.Context, grace time.Duration, sig Signal) error
@@ -529,7 +529,7 @@ func (Process) Stop(ctx context.Context, grace time.Duration, sig Signal) error
 Stop terminates the process group gracefully: it sends sig, waits up to grace for exit, then escalates to SIGKILL. It returns when the process has exited or ctx is cancelled.
 
 <a name="Process.Wait"></a>
-### func \(Process\) [Wait](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Process\) [Wait](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Process) Wait() (ExitValue, error)
@@ -538,7 +538,7 @@ func (Process) Wait() (ExitValue, error)
 Wait blocks until the process exits and returns its ExitValue — the real one even when a running Reaper collected the child first. It is safe to call once; concurrent or repeated calls observe the same outcome. Under StdioCapture it returns only after every captured byte has reached the caller's writers; if a writer itself failed, the ExitValue still reports the real exit status and the error is StdioCaptureFailed.
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Resource identifies a per-process resource governed by setrlimit(2). It is an alias of the core port type.
 
@@ -571,7 +571,7 @@ func (Resource) String() string
 String reports the canonical lowercase name of r (e.g. "nofile"), or "unknown" for an unrecognised value. The names match the suffix of the systemd Limit\* directives.
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Signal is a typed, platform-portable OS signal. It is an alias of the core port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
 
@@ -622,7 +622,7 @@ func (Signal) String() string
 String reports the canonical upper-case name of s (e.g. "SIGTERM"). An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
 
 <a name="Spec"></a>
-## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Spec is the immutable description of a process to spawn — executable, environment, credentials, isolation topology, and scheduling attributes. It is an alias of the core port type.
 
@@ -712,7 +712,7 @@ type Spec struct {
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 Stats is the running process at one instant: identity, scheduler settings, goroutines, heap, collections with their pause distribution, scheduling latency, and CPU time. Every count is cumulative since the process started. It is an alias of the service value.
 
@@ -777,7 +777,7 @@ type Stats struct {
 ```
 
 <a name="StdioMode"></a>
-## type [StdioMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/facade_gen.go>)
+## type [StdioMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
 StdioMode selects how a spawned child's standard streams (stdin, stdout, stderr) are wired. It is an alias of the core port type; set it on Spec.Stdio. The zero value is StdioInherit.
 

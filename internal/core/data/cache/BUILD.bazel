@@ -6,10 +6,10 @@ go_library(
     name = "cache",
     srcs = [
         "cache_interface.go",
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
         "entry.go",
+        "gen_codes.go",
+        "gen_ports.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/data/cache",
     visibility = [
@@ -32,8 +32,8 @@ go_test(
     name = "cache_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "cache_external_test.go",
+        "gen_api_test.go",
         "service_range_external_test.go",
     ],
     deps = [

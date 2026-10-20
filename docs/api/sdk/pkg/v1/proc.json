@@ -298,7 +298,7 @@
       "spelled": "func() (info BuildInfo, ok bool)",
       "canonical": "func() (info github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.BuildInfo, ok bool)",
       "doc": "Build describes what the running binary was built from, and reports false\nwhen the binary carries no build information.\n",
-      "file": "buildinfo/facade_gen.go",
+      "file": "buildinfo/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -311,7 +311,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
       "doc": "BuildInfo is what the running binary was built from: the toolchain, the\nmain package, the main module with its version-control stamp, and every\ndependency followed through its replacement. It is an alias of the service\nvalue, and the same type as pkg/v1/proc/process.BuildInfo.\n",
-      "file": "buildinfo/facade_gen.go",
+      "file": "buildinfo/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -324,7 +324,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
       "doc": "Module is one module of the running binary, with its release, its commit\nand its local directory told apart. It is an alias of the service value,\nand the same type as pkg/v1/proc/process.Module.\n",
-      "file": "buildinfo/facade_gen.go",
+      "file": "buildinfo/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -336,7 +336,7 @@
       "spelled": "func(info *debug.BuildInfo) BuildInfo",
       "canonical": "func(info *runtime/debug.BuildInfo) github.com/kitsunium/sdk/pkg/v1/proc/buildinfo.BuildInfo",
       "doc": "ParseBuild describes a BuildInfo from elsewhere — one a test builds by\nhand, or debug.ParseBuildInfo's reading of another binary — exactly as\nBuild describes the running one.\n",
-      "file": "buildinfo/facade_gen.go",
+      "file": "buildinfo/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -348,7 +348,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "Available reports whether a kernel-enforced control-group backend is usable: on\nLinux, that the unified cgroup v2 hierarchy is mounted AND a sub-group can be\ncreated under it by the caller; on Windows, that Job Objects are available\n(always true); on FreeBSD, that the kernel carries RACCT. It returns false on\nplatforms with no backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), on cgroup v1,\nand on a Linux host where the hierarchy is read-only.\n",
-      "file": "cgroup/facade_gen.go",
+      "file": "cgroup/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -360,7 +360,7 @@
       "spelled": "func(name string, opts ...Option) (g Group, err error)",
       "canonical": "func(name string, opts ...github.com/kitsunium/sdk/pkg/v1/proc/cgroup.Option) (g github.com/kitsunium/sdk/pkg/v1/proc/cgroup.Group, err error)",
       "doc": "Create makes a new control group named name and returns a Group bound to it —\na cgroup v2 sub-group under the delegated root on Linux, a Job Object on\nWindows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the\nLinux hierarchy is absent or not delegated, CgroupCreateFailed when creation\nfails, and UnsupportedPlatform on a platform with no control-group backend\n(darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris).\n",
-      "file": "cgroup/facade_gen.go",
+      "file": "cgroup/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -373,7 +373,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Group",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Group",
       "doc": "Group is a handle to a cgroup v2 control group: set controller ceilings,\nattach processes, and remove the group. It aliases the core proc.Group port.\n",
-      "file": "cgroup/facade_gen.go",
+      "file": "cgroup/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -398,7 +398,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/cgroup.Option",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/cgroup.Option",
       "doc": "Option customises a Create call (functional-option pattern). It aliases the\nservice Option type; construct options with WithRoot.\n",
-      "file": "cgroup/facade_gen.go",
+      "file": "cgroup/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -410,7 +410,7 @@
       "spelled": "func(root string) Option",
       "canonical": "func(root string) github.com/kitsunium/sdk/pkg/v1/proc/cgroup.Option",
       "doc": "WithRoot overrides the parent directory under which Create makes the new\ncontrol group, targeting a delegated sub-tree instead of the top-level mount.\nIt is a cgroup v2 path: on Windows and FreeBSD, whose backends have no\nhierarchy, it is accepted and ignored.\n",
-      "file": "cgroup/facade_gen.go",
+      "file": "cgroup/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -427,7 +427,7 @@
         "value": "0.3.91.8"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -444,7 +444,7 @@
         "value": "0.3.91.6"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -461,7 +461,7 @@
         "value": "0.3.91.2"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -478,7 +478,7 @@
         "value": "0.3.91.7"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -495,7 +495,7 @@
         "value": "0.3.91.3"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -512,7 +512,7 @@
         "value": "0.3.91.4"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -529,7 +529,7 @@
         "value": "0.3.91.1"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -546,7 +546,7 @@
         "value": "0.3.91.9"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -563,7 +563,7 @@
         "value": "0.3.91.5"
       },
       "doc": "The codes, for errs.HasCode: a caller must tell \"another daemon runs\"\n(IN_USE: talk to it) from \"the directory or the path to it is not private\"\n(fix the deployment, or look for whoever planted a component) from \"nobody\nanswers\" (start one).\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -576,7 +576,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/ipc.Config",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/ipc.Config",
       "doc": "Config is where a private socket lives and who, besides its own\naccount, may use it — the engine's configuration, shared by both ends.\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -589,7 +589,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc/ipc.Conn",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc/ipc.Conn",
       "doc": "Conn is a connection with its peer's identity.\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -614,7 +614,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc/ipc.Dialer",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc/ipc.Dialer",
       "doc": "Dialer is the connecting end of a private socket: it reaches the\nlistener its configuration names, and refuses one it cannot trust\nbefore a byte is sent.\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -639,7 +639,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc/ipc.Listener",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc/ipc.Listener",
       "doc": "Listener is the accepting end of a private socket: it hands out the\nconnections of admitted peers only, and closes and counts the others.\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -664,7 +664,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc/ipc.PeerValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc/ipc.PeerValue",
       "doc": "Peer is who is at the other end of a connection, as the kernel says.\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -676,7 +676,7 @@
       "spelled": "func(app string) string",
       "canonical": "func(app string) string",
       "doc": "RuntimeDir is where an application's private sockets belong on this\nmachine. It creates nothing.\n",
-      "file": "ipc/facade_gen.go",
+      "file": "ipc/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -688,7 +688,7 @@
       "spelled": "func() Limit",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/proc/memlimit.Limit",
       "doc": "Apply derives the Go soft memory limit from the tightest control-group cap\ngoverning this process and installs it, returning what it read, what it\nderived, and what decided the outcome.\n\nIt stands aside — leaving the runtime default in place — when GOMEMLIMIT is\nalready set, when no cgroup declares a cap, and when the derived limit is too\nsmall to be useful. Those three are told apart by Limit.Source.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -701,7 +701,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.MemoryLimitValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.MemoryLimitValue",
       "doc": "Limit is an immutable record of one derivation: the allowance read, the limit\nderived, and the source that decided it. It aliases the core proc type.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -715,7 +715,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.MemorySourceBelowFloor",
       "doc": "MemorySourceBelowFloor reports that a cap was found but the limit derived from\nit fell under the usable floor and was discarded.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -729,7 +729,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.MemorySourceCgroup",
       "doc": "MemorySourceCgroup reports the one outcome that yields a limit: a real cap was\nread from the control-group hierarchy and the derived value was applied.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -743,7 +743,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.MemorySourceOperator",
       "doc": "MemorySourceOperator reports that GOMEMLIMIT carried a non-empty value, which\nthe runtime has already applied. It re-exports the core enum value so consumers\nqualify it as memlimit.MemorySourceOperator.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -757,7 +757,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.MemorySourceUnconstrained",
       "doc": "MemorySourceUnconstrained reports that no control group governing this process\ndeclares a memory cap.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -770,7 +770,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.MemorySource",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.MemorySource",
       "doc": "Source names what decided the soft memory limit. It aliases the core proc type.\n",
-      "file": "memlimit/facade_gen.go",
+      "file": "memlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -782,7 +782,7 @@
       "spelled": "func() (info BuildInfo, ok bool)",
       "canonical": "func() (info github.com/kitsunium/sdk/pkg/v1/proc/process.BuildInfo, ok bool)",
       "doc": "Build describes what the running binary was built from, and reports false\nwhen the binary carries no build information.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -795,7 +795,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.BuildValue",
       "doc": "BuildInfo is what the running binary was built from: the toolchain, the\nmain package, the main module with its version-control stamp, and every\ndependency followed through its replacement. It is an alias of the service\nvalue.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -808,7 +808,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/self.DistributionValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/self.DistributionValue",
       "doc": "Distribution is one of the Go runtime's cumulative histograms, read as\ndurations: Count, and Quantile(q) as the upper bound of the bucket that\nreaches q. It is an alias of the service value.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -821,7 +821,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.ExitValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.ExitValue",
       "doc": "ExitResult is the outcome of a finished process — exit code, terminating\nsignal, and resource usage. It is an alias of the core port's ExitValue.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -834,7 +834,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.LimitValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.LimitValue",
       "doc": "Limit is a soft/hard resource-limit pair for setrlimit(2). It is an alias of\nthe core port's LimitValue.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -847,7 +847,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/buildinfo.ModuleValue",
       "doc": "Module is one module of the running binary, with its release, its commit\nand its local directory told apart. It is an alias of the service value.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -871,7 +871,7 @@
       "spelled": "func(info *debug.BuildInfo) BuildInfo",
       "canonical": "func(info *runtime/debug.BuildInfo) github.com/kitsunium/sdk/pkg/v1/proc/process.BuildInfo",
       "doc": "ParseBuild describes a BuildInfo from elsewhere — one a test builds by\nhand, or debug.ParseBuildInfo's reading of another binary — exactly as\nBuild describes the running one.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -884,7 +884,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Process",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Process",
       "doc": "Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup,\nand a group-aware Stop. It is an alias of the core port interface.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -897,7 +897,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Resource",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Resource",
       "doc": "Resource identifies a per-process resource governed by setrlimit(2). It is an\nalias of the core port type.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -911,7 +911,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceAS",
       "doc": "ResourceAS limits the process virtual address-space size (RLIMIT_AS).\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -925,7 +925,7 @@
       "value": "5",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceCPU",
       "doc": "ResourceCPU limits CPU time in seconds (RLIMIT_CPU).\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -939,7 +939,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceCore",
       "doc": "ResourceCore limits the size of a core dump in bytes (RLIMIT_CORE).\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -953,7 +953,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceNoFile",
       "doc": "ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE).\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1030,7 +1030,7 @@
       "spelled": "func() Stats",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/proc/process.Stats",
       "doc": "Self takes a snapshot of the running process. It never fails: a figure the\nplatform cannot give is zero, and Stats.CPUEstimated says when CPUTime is\nthe runtime's estimate rather than the kernel's count.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1043,7 +1043,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Signal",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Signal",
       "doc": "Signal is a typed, platform-portable OS signal. It is an alias of the core\nport type, so process.SIGTERM and a signal parsed elsewhere compare equal.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1056,7 +1056,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Spec",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Spec",
       "doc": "Spec is the immutable description of a process to spawn — executable,\nenvironment, credentials, isolation topology, and scheduling attributes. It is\nan alias of the core port type.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1068,7 +1068,7 @@
       "spelled": "func(ctx context.Context, spec Spec) (proc Process, err error)",
       "canonical": "func(ctx context.Context, spec github.com/kitsunium/sdk/pkg/v1/proc/process.Spec) (proc github.com/kitsunium/sdk/pkg/v1/proc/process.Process, err error)",
       "doc": "Start spawns the process described by spec and returns a live Process handle.\nIt delegates to internal/service/proc/exec; ctx is honoured up to the\nfork/exec boundary. A bare Spec.Path is searched in the child's PATH (see\nthe package documentation). On Windows the Unix-only Spec fields are refused\nwith UnsupportedPlatform; on platforms that are neither Unix nor Windows,\nStart itself returns UnsupportedPlatform.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1081,7 +1081,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/self.StatsValue",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/self.StatsValue",
       "doc": "Stats is the running process at one instant: identity, scheduler settings,\ngoroutines, heap, collections with their pause distribution, scheduling\nlatency, and CPU time. Every count is cumulative since the process started.\nIt is an alias of the service value.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1095,7 +1095,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.StdioCapture",
       "doc": "StdioCapture connects the child to Spec.Stdout/Stderr (io.Writer) and\nSpec.Stdin (io.Reader); a nil stream falls back to the null device for that\none stream. The systemd analogue is StandardOutput=/StandardError=/StandardInput=.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1109,7 +1109,7 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.StdioInherit",
       "doc": "StdioInherit shares the parent's stdin/stdout/stderr with the child — the\ndefault and the only behaviour before per-process wiring existed.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1122,7 +1122,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.StdioMode",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.StdioMode",
       "doc": "StdioMode selects how a spawned child's standard streams (stdin, stdout,\nstderr) are wired. It is an alias of the core port type; set it on Spec.Stdio.\nThe zero value is StdioInherit.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1136,7 +1136,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.StdioNull",
       "doc": "StdioNull connects every stream to the null device: output is discarded and\nthe child's stdin returns EOF immediately.\n",
-      "file": "process/facade_gen.go",
+      "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1148,7 +1148,7 @@
       "spelled": "func() bool",
       "canonical": "func() bool",
       "doc": "IsPID1 reports whether the current process is the init process (pid 1). It is\nfalse on platforms where the convention does not apply.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1160,7 +1160,7 @@
       "spelled": "func(opts ...Option) Reaper",
       "canonical": "func(opts ...github.com/kitsunium/sdk/pkg/v1/proc/reaper.Option) github.com/kitsunium/sdk/pkg/v1/proc/reaper.Reaper",
       "doc": "New returns a [Reaper] configured by opts. On Unix it is a SIGCHLD-driven\nwaitpid loop; elsewhere it is a no-op. The reaper starts idle — call Start.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1173,7 +1173,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/reaper.Option",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/reaper.Option",
       "doc": "Option configures a [Reaper] returned by [New]. It is an alias of the service\noption type so callers compose options without importing internal packages.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1191,7 +1191,7 @@
         "public": "Could not reap child processes"
       },
       "doc": "ReapFailed is returned by a sweep when wait4 fails with an error other\nthan the benign ECHILD (\"no children\") condition.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1204,7 +1204,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Reaper",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Reaper",
       "doc": "Reaper collects terminated child processes so they do not linger as zombies —\nthe core duty of any PID1 or subreaper. It is an alias of the core port; the\nconcrete value is platform-selected by [New].\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1216,7 +1216,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "SetChildSubreaper marks the calling process as a child subreaper so orphaned\ndescendants reparent to it rather than to PID1. It returns [SubreaperFailed]\non a prctl error and [UnsupportedPlatform] off Unix.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1234,7 +1234,7 @@
         "public": "Could not enable child-subreaper mode"
       },
       "doc": "SubreaperFailed is returned by [SetChildSubreaper] when\nprctl(PR_SET_CHILD_SUBREAPER) fails to arm subreaper mode.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1252,7 +1252,7 @@
         "public": "This operation is not supported on this platform"
       },
       "doc": "UnsupportedPlatform is returned by [SetChildSubreaper] on platforms\nwithout a prctl(PR_SET_CHILD_SUBREAPER) equivalent (e.g. Windows).\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1264,7 +1264,7 @@
       "spelled": "func(fn func(int)) Option",
       "canonical": "func(fn func(int)) github.com/kitsunium/sdk/pkg/v1/proc/reaper.Option",
       "doc": "WithOnReap registers fn as a post-sweep observer receiving the number of\nchildren reaped in each sweep (including zero). fn must not block. On illumos\nand Solaris the loop also sweeps once a second, so there an idle reaper calls\nfn with zero once a second.\n",
-      "file": "reaper/facade_gen.go",
+      "file": "reaper/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1276,7 +1276,7 @@
       "spelled": "func(pid int, limits map[Resource]Limit) error",
       "canonical": "func(pid int, limits map[github.com/kitsunium/sdk/pkg/v1/proc/rlimit.Resource]github.com/kitsunium/sdk/pkg/v1/proc/rlimit.Limit) error",
       "doc": "Apply sets the soft/hard ceilings in limits on the process identified by pid.\nA pid of 0 targets the calling process; any other pid targets that process via\nprlimit64(2) and needs CAP_SYS_RESOURCE. It returns UnknownResource for an\nunmapped resource, RlimitFailed on a syscall failure, and UnsupportedPlatform\noff Linux.\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1289,7 +1289,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.LimitValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.LimitValue",
       "doc": "Limit is an immutable soft/hard setrlimit(2) pair. It aliases the core proc\nLimitValue type.\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1303,7 +1303,7 @@
       "value": "18446744073709551615",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.LimitInfinity",
       "doc": "LimitInfinity is the soft/hard value meaning \"no limit\" (RLIM_INFINITY).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1315,7 +1315,7 @@
       "spelled": "func(limits map[Resource]Limit) error",
       "canonical": "func(limits map[github.com/kitsunium/sdk/pkg/v1/proc/rlimit.Resource]github.com/kitsunium/sdk/pkg/v1/proc/rlimit.Limit) error",
       "doc": "PrepareSysProcAttr validates limits without issuing any syscall and reports\nwhether they can be applied on this platform, returning the same typed errors\nApply would (UnknownResource / UnsupportedPlatform). Use it to fail fast at\nSpec-construction time; Go's SysProcAttr has no rlimit field, so the actual\napplication happens post-fork via Apply.\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1328,7 +1328,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Resource",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Resource",
       "doc": "Resource is the abstract, platform-portable resource enum mapped to a\nRLIMIT_* constant by the service layer. It aliases the core proc type.\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1342,7 +1342,7 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceAS",
       "doc": "ResourceAS limits the process virtual address-space size (RLIMIT_AS).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1356,7 +1356,7 @@
       "value": "5",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceCPU",
       "doc": "ResourceCPU limits CPU time in seconds (RLIMIT_CPU).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1370,7 +1370,7 @@
       "value": "3",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceCore",
       "doc": "ResourceCore limits the core-dump size in bytes (RLIMIT_CORE).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1384,7 +1384,7 @@
       "value": "7",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceData",
       "doc": "ResourceData limits the process data-segment size (RLIMIT_DATA).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1398,7 +1398,7 @@
       "value": "6",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceFSize",
       "doc": "ResourceFSize limits the largest file the process may create (RLIMIT_FSIZE).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1412,7 +1412,7 @@
       "value": "9",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceMemLock",
       "doc": "ResourceMemLock limits bytes that may be locked into RAM (RLIMIT_MEMLOCK).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1426,7 +1426,7 @@
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceNProc",
       "doc": "ResourceNProc limits the number of processes for the real uid (RLIMIT_NPROC).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1440,7 +1440,7 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceNoFile",
       "doc": "ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE). It\nre-exports the core enum value so consumers qualify it as rlimit.ResourceNoFile.\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1454,7 +1454,7 @@
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/core/proc.ResourceStack",
       "doc": "ResourceStack limits the process stack size (RLIMIT_STACK).\n",
-      "file": "rlimit/facade_gen.go",
+      "file": "rlimit/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1466,7 +1466,7 @@
       "spelled": "func(sigs ...Signal) (ch <-chan Signal, stop func())",
       "canonical": "func(sigs ...github.com/kitsunium/sdk/pkg/v1/proc/signal.Signal) (ch <-chan github.com/kitsunium/sdk/pkg/v1/proc/signal.Signal, stop func())",
       "doc": "Notify subscribes to sigs and returns a receive-only channel of typed Signals\nplus an idempotent, leak-free stop function. Each delivery is translated to a\ntyped Signal; the channel is buffered so a burst is not dropped, and stop\ndetaches the subscription and closes the channel.\n",
-      "file": "signal/facade_gen.go",
+      "file": "signal/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1478,7 +1478,7 @@
       "spelled": "func(name string) (sig Signal, err error)",
       "canonical": "func(name string) (sig github.com/kitsunium/sdk/pkg/v1/proc/signal.Signal, err error)",
       "doc": "Parse resolves a signal from its name or number — the canonical \"SIGTERM\", the\nbare \"TERM\", or the numeric \"15\", all case-insensitive — returning a typed\nUNKNOWN_SIGNAL error for anything the platform table does not define.\n",
-      "file": "signal/facade_gen.go",
+      "file": "signal/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1490,7 +1490,7 @@
       "spelled": "func(src <-chan Signal, target Target) error",
       "canonical": "func(src <-chan github.com/kitsunium/sdk/pkg/v1/proc/signal.Signal, target github.com/kitsunium/sdk/pkg/v1/proc/signal.Target) error",
       "doc": "Relay reads signals from src and forwards each to target until src closes —\nvia kill(2) on Unix, via TerminateProcess or a console control event on\nWindows. A positive target is a pid; a target below -1 addresses the process\ngroup whose id is -target. It returns nil on a clean drain and a typed\nRELAY_FAILED error on the first delivery failure (UNSUPPORTED_PLATFORM on a\nplatform that is neither Unix nor Windows).\n",
-      "file": "signal/facade_gen.go",
+      "file": "signal/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1503,7 +1503,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Signal",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Signal",
       "doc": "Signal is a typed, platform-portable OS signal. It aliases the domain type, so\na value parsed here interoperates with the rest of the SDK process domain.\n",
-      "file": "signal/facade_gen.go",
+      "file": "signal/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1516,7 +1516,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/proc/signal.Target",
       "owner": "go:github.com/kitsunium/sdk/internal/service/proc/signal.Target",
       "doc": "Target names the recipient of a relayed signal: a positive value is a pid; a\nvalue below -1 addresses the process group whose id is its absolute value.\n",
-      "file": "signal/facade_gen.go",
+      "file": "signal/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1528,7 +1528,7 @@
       "spelled": "func(unsetEnv bool) (files []*os.File, err error)",
       "canonical": "func(unsetEnv bool) (files []*os.File, err error)",
       "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\nhonouring LISTEN_PID. When unsetEnv is true the activation environment is\ncleared so a grandchild does not re-inherit it. An empty or foreign activation\nset yields nil with no error; off Unix it returns UnsupportedPlatform.\n",
-      "file": "systemd/listen/facade_gen.go",
+      "file": "systemd/listen/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1540,7 +1540,7 @@
       "spelled": "func(unsetEnv bool) (listeners []net.Listener, err error)",
       "canonical": "func(unsetEnv bool) (listeners []net.Listener, err error)",
       "doc": "Listeners returns the inherited stream sockets wrapped as net.Listener (the\nunderlying *os.File is closed after the dup). Same gating and platform\nbehaviour as Files.\n",
-      "file": "systemd/listen/facade_gen.go",
+      "file": "systemd/listen/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1552,7 +1552,7 @@
       "spelled": "func(child *Spec, named map[string]net.Listener) error",
       "canonical": "func(child *github.com/kitsunium/sdk/pkg/v1/proc/systemd/listen.Spec, named map[string]net.Listener) error",
       "doc": "Prepare (activator side) appends each named listener's socket to child as an\ninherited fd and sets LISTEN_FDS / LISTEN_FDNAMES in child.Env so the spawned\nprocess recovers them via Files/Listeners. Off Unix it returns\nUnsupportedPlatform.\n",
-      "file": "systemd/listen/facade_gen.go",
+      "file": "systemd/listen/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1565,7 +1565,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Spec",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Spec",
       "doc": "Spec is the process spawn specification an activator augments via Prepare. It\naliases the core port type, so the same value drives process.Start.\n",
-      "file": "systemd/listen/facade_gen.go",
+      "file": "systemd/listen/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1577,7 +1577,7 @@
       "spelled": "func(unsetEnv bool) (named map[string][]*os.File, err error)",
       "canonical": "func(unsetEnv bool) (named map[string][]*os.File, err error)",
       "doc": "WithNames returns the inherited sockets grouped by their LISTEN_FDNAMES name;\nduplicate names group several fds under one key.\n",
-      "file": "systemd/listen/facade_gen.go",
+      "file": "systemd/listen/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1589,7 +1589,7 @@
       "spelled": "func() (l Listener, socketPath string, err error)",
       "canonical": "func() (l github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify.Listener, socketPath string, err error)",
       "doc": "Listen creates a supervisor-side sd_notify socket and returns the Listener plus\nthe socketPath a child should be given via NOTIFY_SOCKET. On non-Linux\nplatforms it returns the UNSUPPORTED_PLATFORM error.\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1602,7 +1602,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.Listener",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.Listener",
       "doc": "Listener is the supervisor side of the protocol: it owns the datagram socket a\nsupervised child writes readiness to and yields one parsed, credential-verified\nNotification per Recv.\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1614,7 +1614,7 @@
       "spelled": "func(pid int) error",
       "canonical": "func(pid int) error",
       "doc": "MainPID advertises the main process PID to the supervisor (MAINPID=pid).\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1627,7 +1627,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.NotificationValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/proc.NotificationValue",
       "doc": "Notification is a parsed sd_notify datagram: the raw State field set plus the\ntyped Status, MainPID, and kernel-verified SenderPID, with Ready/Reloading/\nStopping/Watchdog lifecycle accessors.\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1639,7 +1639,7 @@
       "spelled": "func(state map[string]string) error",
       "canonical": "func(state map[string]string) error",
       "doc": "Notify sends an sd_notify datagram carrying the given NAME=value state to\n$NOTIFY_SOCKET, or is a no-op returning nil when $NOTIFY_SOCKET is unset.\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1651,7 +1651,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Ready notifies the supervisor that startup is complete (READY=1).\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1663,7 +1663,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Reloading notifies the supervisor that a configuration reload has begun\n(RELOADING=1).\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1675,7 +1675,7 @@
       "spelled": "func(msg string) error",
       "canonical": "func(msg string) error",
       "doc": "Status publishes a single-line free-text status (STATUS=msg).\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1687,7 +1687,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Stopping notifies the supervisor that shutdown has begun (STOPPING=1).\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1699,7 +1699,7 @@
       "spelled": "func() error",
       "canonical": "func() error",
       "doc": "Watchdog sends a watchdog keep-alive ping (WATCHDOG=1).\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     },
@@ -1711,7 +1711,7 @@
       "spelled": "func() (d time.Duration, ok bool)",
       "canonical": "func() (d time.Duration, ok bool)",
       "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC; ok is false when the variable is unset or malformed.\n",
-      "file": "systemd/notify/facade_gen.go",
+      "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"
     }

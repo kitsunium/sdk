@@ -12,10 +12,10 @@ go_library(
     name = "yaml",
     srcs = [
         "codec.go",
-        "codes_gen.go",
         "decoder.go",
         "doc.go",
         "encoder.go",
+        "gen_codes.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/codec/yaml",
     visibility = ["//visibility:public"],
@@ -36,7 +36,6 @@ alias(
 go_test(
     name = "yaml_test",
     srcs = [
-        "api_gen_test.go",
         "codec_bench_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",
@@ -44,6 +43,7 @@ go_test(
         "decoder_internal_test.go",
         "differential_fuzz_external_test.go",
         "encoder_internal_test.go",
+        "gen_api_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":yaml"],

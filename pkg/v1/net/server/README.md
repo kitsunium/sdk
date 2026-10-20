@@ -285,7 +285,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.UnsupportedNetwork`
 Code `0.2.11.3` · reason `UNSUPPORTED_NETWORK` · public "The network type is not supported"
 
 <a name="Adopt"></a>
-## func [Adopt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [Adopt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func Adopt(names ...string) GroupOption
@@ -298,7 +298,7 @@ Socket activation is what makes a zero-downtime restart possible: the supervisor
 A named socket the supervisor did not pass is SocketAdoptFailed, never a silent fallback to binding: a service that quietly binds its own port has lost exactly the property activation exists to provide. The same holds on Windows, which has no socket activation at all: Start fails there with SocketAdoptFailed, whose cause field names UNSUPPORTED\_PLATFORM.
 
 <a name="BatchSize"></a>
-## func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func BatchSize(n int) GroupOption
@@ -307,7 +307,7 @@ func BatchSize(n int) GroupOption
 BatchSize sets how many datagrams one read attempts to collect. One disables batching; zero selects the platform default. Where the platform cannot batch, State reports the degradation rather than hiding it.
 
 <a name="Chain"></a>
-## func [Chain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [Chain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func Chain(h Handler, middlewares ...Middleware) Handler
@@ -318,7 +318,7 @@ Chain applies middlewares to a handler, outermost first.
 Chain(h, a, b, c) yields a(b(c(h))): the first middleware listed is the first to see a connection, matching how the list reads at the call site.
 
 <a name="ChainPacket"></a>
-## func [ChainPacket](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [ChainPacket](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
@@ -327,7 +327,7 @@ func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
 ChainPacket applies middlewares to a datagram handler, outermost first.
 
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -340,7 +340,7 @@ It is how a handler that holds a connection open indefinitely — an event strea
 A nil channel blocks forever, so a select that watches it needs no nil check and behaves correctly on a server that publishes nothing.
 
 <a name="HandshakeTimeout"></a>
-## func [HandshakeTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [HandshakeTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func HandshakeTimeout(d time.Duration) GroupOption
@@ -351,7 +351,7 @@ HandshakeTimeout bounds the TLS negotiation on the group's listeners.
 Unset does not mean unbounded, unlike the other three. The handshake runs on the connection's own goroutine — the listener does not negotiate in Accept, which is what keeps one slow peer from stalling the accept path for everyone — so it is the one phase that can be stalled before any handler exists to notice, and a peer that connects and says nothing would otherwise hold a goroutine and a slot under MaxConns indefinitely. It falls back to a domain default instead.
 
 <a name="IdleTimeout"></a>
-## func [IdleTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [IdleTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func IdleTimeout(d time.Duration) GroupOption
@@ -362,7 +362,7 @@ IdleTimeout bounds how long a connection may sit with no traffic at all.
 It is enforced on the read side, where silence is observable: a read is bounded by whichever of ReadTimeout and IdleTimeout is tighter. Setting both therefore narrows the bound rather than replacing it, which is what the two options together are asking for.
 
 <a name="Listen"></a>
-## func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func Listen(network string, addr string) GroupOption
@@ -373,7 +373,7 @@ Listen adds an address to a group. Repeat it to bind several addresses to one ha
 On Windows, whose AF\_UNIX sockets are stream-only, a "unixgram" or "unixpacket" address fails Start with the SDK's UNSUPPORTED\_PLATFORM, before any socket is opened; "unix" is served there as everywhere else.
 
 <a name="MaxConns"></a>
-## func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func MaxConns(n int) GroupOption
@@ -384,7 +384,7 @@ MaxConns caps how many connections a group serves at once.
 The budget is per group, not per socket: a group listening on a TCP port and a Unix socket, or sharded across several listeners, shares one ceiling — which is what an operator sizing a server actually means. Beyond it a connection is accepted and closed immediately with ConnLimitReached, because a refusal the peer can observe beats a timeout it cannot tell from a hang. Zero means no ceiling.
 
 <a name="MaxHeaderBytes"></a>
-## func [MaxHeaderBytes](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [MaxHeaderBytes](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func MaxHeaderBytes(n int) GroupOption
@@ -395,7 +395,7 @@ MaxHeaderBytes caps the bytes net/http reads for a request's line and header fie
 Unset (or non-positive) keeps net/http's default of 1 MiB, which applied silently before this option existed. net/http reads a small fixed allowance past the cap before refusing. No effect on a group that does not serve HTTP.
 
 <a name="MaxPacketSize"></a>
-## func [MaxPacketSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [MaxPacketSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func MaxPacketSize(n int) GroupOption
@@ -406,7 +406,7 @@ MaxPacketSize caps the datagram size a group accepts.
 A larger datagram is dropped and counted in [State](#State).OversizedPackets, never delivered. Truncating would hand the handler a prefix indistinguishable from a complete message, which is a correctness problem rather than a capacity one; a drop it can observe in State is the honest answer.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func New(opts ...Option) *Server
@@ -415,7 +415,7 @@ func New(opts ...Option) *Server
 New builds a server.
 
 <a name="ReadBufferSize"></a>
-## func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func ReadBufferSize(n int) GroupOption
@@ -424,7 +424,7 @@ func ReadBufferSize(n int) GroupOption
 ReadBufferSize sizes the per-connection scratch buffer handed to the handler by Conn.Buffer. It is recycled with the connection, which is what lets a handler read without allocating per connection.
 
 <a name="ReadHeaderTimeout"></a>
-## func [ReadHeaderTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [ReadHeaderTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func ReadHeaderTimeout(d time.Duration) GroupOption
@@ -435,7 +435,7 @@ ReadHeaderTimeout bounds the HEADER phase of an HTTP request on its own: the req
 The header phase is the one a slowloris stalls — a byte every few seconds, never finishing a line — and the one an honest client finishes in milliseconds, so it deserves a bound far shorter than a read timeout sized for an upload. A client that stalls there is disconnected at d. Unset (or non-positive) keeps the earlier behaviour: the header phase is bounded by [ReadTimeout](#ReadTimeout). No effect on a group that does not serve HTTP.
 
 <a name="ReadTimeout"></a>
-## func [ReadTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [ReadTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func ReadTimeout(d time.Duration) GroupOption
@@ -446,7 +446,7 @@ ReadTimeout bounds one read from the peer.
 It is refreshed per read, not installed once when the connection is accepted: a deadline set at accept time would be a budget for the connection's whole life, which a peer trickling one byte at a time stays comfortably inside. On a group serving an http.Handler the same value becomes net/http's own ReadTimeout — and its ReadHeaderTimeout too, unless [ReadHeaderTimeout](#ReadHeaderTimeout) sets the header phase apart — so it is refreshed per request there.
 
 <a name="Shards"></a>
-## func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func Shards(n int) GroupOption
@@ -457,7 +457,7 @@ Shards sets how many listeners to open on each of the group's addresses.
 Zero selects one per core; one disables sharding. Where the platform (Windows has no SO\_REUSEPORT) or the socket family (a Unix socket) cannot shard, the count collapses to one. An explicit count that collapses is reported in State with the reason; zero collapsing is not, since it asked for nothing a single listener fails to give.
 
 <a name="TLS"></a>
-## func [TLS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [TLS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func TLS(id tlsid.Identity) GroupOption
@@ -466,7 +466,7 @@ func TLS(id tlsid.Identity) GroupOption
 TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when the identity requires a client certificate.
 
 <a name="WithDrainTimeout"></a>
-## func [WithDrainTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [WithDrainTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func WithDrainTimeout(d time.Duration) Option
@@ -475,7 +475,7 @@ func WithDrainTimeout(d time.Duration) Option
 WithDrainTimeout bounds how long Shutdown waits for in-flight connections before severing them.
 
 <a name="WriteTimeout"></a>
-## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ```go
 func WriteTimeout(d time.Duration) GroupOption
@@ -484,7 +484,7 @@ func WriteTimeout(d time.Duration) GroupOption
 WriteTimeout bounds one write to the peer, refreshed per write.
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Conn is one accepted stream connection. It embeds net.Conn.
 
@@ -511,7 +511,7 @@ type Conn interface {
 ```
 
 <a name="Conn.Buffer"></a>
-### func \(Conn\) [Buffer](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Conn\) [Buffer](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Conn) Buffer() []byte
@@ -520,7 +520,7 @@ func (Conn) Buffer() []byte
 Buffer returns a connection-scoped scratch buffer sized by the group's read-buffer limit. It is recycled with the connection, which is what lets a handler read without allocating per connection.
 
 <a name="Conn.Group"></a>
-### func \(Conn\) [Group](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Conn\) [Group](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Conn) Group() string
@@ -529,7 +529,7 @@ func (Conn) Group() string
 Group returns the name of the listener group that accepted this connection, so one handler serving several groups can tell them apart.
 
 <a name="Conn.ID"></a>
-### func \(Conn\) [ID](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Conn\) [ID](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Conn) ID() uint64
@@ -538,7 +538,7 @@ func (Conn) ID() uint64
 ID returns the monotonic identifier assigned at accept time, for correlating log lines belonging to one connection.
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Group is a set of listeners sharing one handler, middleware chain and policy.
 
@@ -602,7 +602,7 @@ func (*Group) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *Strea
 Use appends middlewares, outermost first.
 
 <a name="GroupOption"></a>
-## type [GroupOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [GroupOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 GroupOption configures a Group.
 
@@ -617,7 +617,7 @@ type GroupOption func(*StreamGroup)
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Handler serves one accepted stream connection.
 
@@ -634,14 +634,14 @@ type Handler interface {
 ```
 
 <a name="Handler.ServeConn"></a>
-### func \(Handler\) [ServeConn](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Handler\) [ServeConn](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Handler) ServeConn(ctx context.Context, c Conn) error
 ```
 
 <a name="HandlerFunc"></a>
-## type [HandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [HandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 HandlerFunc adapts a plain function to Handler.
 
@@ -665,7 +665,7 @@ func (HandlerFunc) ServeConn(ctx context.Context, c Conn) error
 ServeConn implements ConnHandler by calling f.
 
 <a name="ListenerState"></a>
-## type [ListenerState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [ListenerState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 ListenerState reports one bound listener, including any fallback.
 
@@ -700,7 +700,7 @@ type ListenerState struct {
 ```
 
 <a name="Middleware"></a>
-## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Middleware decorates a handler with another of the same type.
 
@@ -715,7 +715,7 @@ type Middleware[H any] func(next H) H
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Option configures a Server.
 
@@ -730,7 +730,7 @@ type Option func(*Server)
 ```
 
 <a name="Packet"></a>
-## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Packet is one received datagram.
 
@@ -759,7 +759,7 @@ type Packet interface {
 ```
 
 <a name="Packet.Data"></a>
-### func \(Packet\) [Data](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Packet\) [Data](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Packet) Data() []byte
@@ -768,7 +768,7 @@ func (Packet) Data() []byte
 Data returns the datagram payload.
 
 <a name="Packet.From"></a>
-### func \(Packet\) [From](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Packet\) [From](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Packet) From() stdnet.Addr
@@ -777,7 +777,7 @@ func (Packet) From() stdnet.Addr
 From returns the sender's address.
 
 <a name="Packet.Group"></a>
-### func \(Packet\) [Group](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Packet\) [Group](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Packet) Group() string
@@ -786,7 +786,7 @@ func (Packet) Group() string
 Group returns the name of the listener group that received it.
 
 <a name="Packet.ID"></a>
-### func \(Packet\) [ID](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Packet\) [ID](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Packet) ID() uint64
@@ -795,7 +795,7 @@ func (Packet) ID() uint64
 ID returns the monotonic identifier assigned at read time.
 
 <a name="Packet.Reply"></a>
-### func \(Packet\) [Reply](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Packet\) [Reply](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Packet) Reply(b []byte) (n int, err error)
@@ -804,7 +804,7 @@ func (Packet) Reply(b []byte) (n int, err error)
 Reply writes a datagram back to the sender. It exists so the common case needs no reference to the underlying connection.
 
 <a name="Packet.To"></a>
-### func \(Packet\) [To](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(Packet\) [To](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (Packet) To() stdnet.Addr
@@ -813,7 +813,7 @@ func (Packet) To() stdnet.Addr
 To returns the local address the datagram arrived on.
 
 <a name="PacketGroup"></a>
-## type [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 PacketGroup is a set of datagram sockets sharing one handler and chain.
 
@@ -864,7 +864,7 @@ func (*PacketGroup) Use(middlewares ...corenet.Middleware[corenet.PacketHandler]
 Use appends middlewares, outermost first.
 
 <a name="PacketHandler"></a>
-## type [PacketHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [PacketHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 PacketHandler serves one received datagram.
 
@@ -881,14 +881,14 @@ type PacketHandler interface {
 ```
 
 <a name="PacketHandler.ServePacket"></a>
-### func \(PacketHandler\) [ServePacket](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/design_gen.go>)
+### func \(PacketHandler\) [ServePacket](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
 func (PacketHandler) ServePacket(ctx context.Context, p Packet) error
 ```
 
 <a name="PacketHandlerFunc"></a>
-## type [PacketHandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [PacketHandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 PacketHandlerFunc adapts a plain function to PacketHandler.
 
@@ -912,7 +912,7 @@ func (PacketHandlerFunc) ServePacket(ctx context.Context, p Packet) error
 ServePacket implements PacketHandler by calling f.
 
 <a name="PacketMiddleware"></a>
-## type [PacketMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [PacketMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 PacketMiddleware decorates a datagram handler.
 
@@ -927,7 +927,7 @@ type PacketMiddleware[H any] func(next H) H
 ```
 
 <a name="Phase"></a>
-## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Phase is where a server sits in its lifecycle.
 
@@ -951,7 +951,7 @@ func (Phase) String() string
 String renders the phase for logs and status output.
 
 <a name="Server"></a>
-## type [Server](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [Server](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 Server owns a set of listener groups and their lifecycle.
 
@@ -1035,7 +1035,7 @@ func (*Server) State() corenet.StateValue
 State returns a snapshot of the server's lifecycle and listeners.
 
 <a name="State"></a>
-## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/facade_gen.go>)
+## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
 State is a snapshot of the server's lifecycle and listeners.
 

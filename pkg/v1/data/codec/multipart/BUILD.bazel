@@ -6,7 +6,7 @@ go_library(
     name = "multipart",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "multipart.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "multipart_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "multipart_external_test.go",
     ],
     deps = [

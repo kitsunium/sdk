@@ -41,7 +41,6 @@ alias(
 go_test(
     name = "client_test",
     srcs = [
-        "api_gen_test.go",
         "capped_body_internal_test.go",
         "client_alloc_internal_test.go",
         "client_bench_test.go",
@@ -50,6 +49,7 @@ go_test(
         "conjunction_internal_test.go",
         "defaults_internal_test.go",
         "deny_policy_internal_test.go",
+        "gen_api_test.go",
         "guard_internal_test.go",
         "method_policy_internal_test.go",
         "path_equivalence_internal_test.go",

@@ -28,7 +28,7 @@ go_test(
     name = "heap_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "heap_bench_test.go",
         "heap_external_test.go",
         "heap_internal_test.go",

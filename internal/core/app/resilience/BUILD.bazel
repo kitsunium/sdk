@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "resilience",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "resilience.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/resilience",
@@ -36,7 +36,7 @@ filegroup(
 
 go_test(
     name = "resilience_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [
         ":resilience",
         "//internal/kernel/errs",

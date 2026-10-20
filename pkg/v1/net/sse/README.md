@@ -172,7 +172,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.SSEStreamMisconfigu
 Code `0.2.11.26` · reason `SSE_STREAM_MISCONFIGURED` · public "The event stream options are not valid"
 
 <a name="AppendEvent"></a>
-## func [AppendEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [AppendEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func AppendEvent(dst []byte, ev Event) (wire []byte, err error)
@@ -183,7 +183,7 @@ AppendEvent appends ev's wire form to dst and returns the extended slice — the
 It appends nothing when the frame is invalid: the whole frame is validated first, so a partial frame never reaches dst. Appending rather than returning a fresh slice is what lets a caller reuse one buffer for every frame.
 
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -194,7 +194,7 @@ DrainSignal returns the channel closed when the server serving this request begi
 It is what [Stream](#Stream) watches, exposed because an event stream is not the only handler that holds a connection open indefinitely — a long poll does too, and so will anything built on a protocol upgrade. A nil channel blocks forever, so a select that watches it needs no nil check.
 
 <a name="KeepAlive"></a>
-## func [KeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [KeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func KeepAlive(d time.Duration) Option
@@ -205,7 +205,7 @@ KeepAlive sets the interval between keep-alive comments.
 Zero does not mean "never": a stream with keep-alive silently disabled works perfectly on a developer's loopback and dies at one minute behind a real proxy, which is the worst possible place to learn it. Zero is clamped to [DefaultKeepAlive](#DefaultKeepAlive); a negative interval is refused. To disable it, say so with [WithoutKeepAlive](#WithoutKeepAlive).
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func New(w http.ResponseWriter, r *http.Request, opts ...Option) (stream *Stream, err error)
@@ -216,7 +216,7 @@ New starts an event stream on w and returns it.
 It writes the response headers and flushes them immediately, so the client connects at once rather than at the first event. It fails when the response cannot be flushed — checked before anything is written, so the handler is free to answer some other way.
 
 <a name="Retry"></a>
-## func [Retry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [Retry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func Retry(d time.Duration) Option
@@ -227,7 +227,7 @@ Retry sets the reconnection delay the stream advertises in its opening frame.
 It is the server's one chance to control how hard clients come back: a fleet that all reconnect on the browser default of about three seconds is a thundering herd aimed at a server that has just restarted. Zero sends no retry field.
 
 <a name="WithoutKeepAlive"></a>
-## func [WithoutKeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [WithoutKeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func WithoutKeepAlive() Option
@@ -236,7 +236,7 @@ func WithoutKeepAlive() Option
 WithoutKeepAlive disables the keep-alive comment entirely, so that "never" is something a caller writes on purpose rather than something a zero does to them.
 
 <a name="WriteTimeout"></a>
-## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 ```go
 func WriteTimeout(d time.Duration) Option
@@ -247,7 +247,7 @@ WriteTimeout bounds how long one frame's write may take.
 It is per-frame on purpose. A group's WriteTimeout is an absolute deadline for the whole response, which on an endless stream means the stream is cut at that instant; a stream replaces it with this bound, refreshed per frame. Zero is clamped to [DefaultWriteTimeout](#DefaultWriteTimeout), negative is refused.
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 Event is one Server-Sent Events frame. [Event](#Event).Validate reports whether the wire format can carry it; [AppendEvent](#AppendEvent) writes it.
 
@@ -300,7 +300,7 @@ Validate reports whether the frame can be carried by the wire format.
 It is separate from the encoder (internal/service/net/sse.AppendEvent) so a caller can check a frame before committing to send it, and so the encoder can validate everything BEFORE it appends anything — a half-written frame on a stream is unrecoverable, since the peer has already read it.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 Option configures a Stream.
 
@@ -315,7 +315,7 @@ type Option func(*config)
 ```
 
 <a name="Stream"></a>
-## type [Stream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/facade_gen.go>)
+## type [Stream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
 Stream is one open event stream: an HTTP response held open, written one frame at a time and flushed after each. It is safe for concurrent use.
 

@@ -5,11 +5,11 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "i18n",
     srcs = [
-        "codes_gen.go",
         "count_value.go",
-        "design_gen.go",
         "doc.go",
         "form.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "i18n.go",
         "message_value.go",
         "pattern.go",
@@ -36,7 +36,7 @@ go_test(
     name = "i18n_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "i18n_external_test.go",
     ],
     deps = [

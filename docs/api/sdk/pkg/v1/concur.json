@@ -76,7 +76,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/concur/batcher.Batcher[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/batcher.Batcher",
       "doc": "Batcher coalesces added items into batches delivered through its [Sink].\n\n[Batcher].Add appends an item and delivers the batch at once when a cap is\nreached; [Batcher].Flush delivers what is pending; [Batcher].Close stops the\nticker, delivers what is pending with the context it is given, and closes\nthe batcher — idempotently, a second Close returning nil. Each takes a\ncontext and returns the delivery's error, wrapped as\n[BatcherDeliverFailed], or [BatcherClosed] after Close.\n",
-      "file": "batcher/facade_gen.go",
+      "file": "batcher/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -94,7 +94,7 @@
         "public": "Batcher is closed"
       },
       "doc": "BatcherClosed is returned by Add and Flush once Close has run: the\nbatcher accepts no more items, and its ticker, if any, has been joined.\n",
-      "file": "batcher/facade_gen.go",
+      "file": "batcher/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -112,7 +112,7 @@
         "public": "Batcher delivery failed"
       },
       "doc": "BatcherDeliverFailed wraps the error a deliver function returned, so a\ncaller routes on one code while the original cause stays reachable\nthrough errors.Is and errors.As.\n",
-      "file": "batcher/facade_gen.go",
+      "file": "batcher/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -125,7 +125,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/concur/batcher.Config[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/batcher.Config",
       "doc": "Config tunes a [Batcher]: MaxItems and MaxWeight, the caps that deliver\neagerly (non-positive disables each); WeightOf, an item's weight (nil counts\nitems); FlushEvery, the background delivery interval (non-positive starts no\nticker); Clock, the clock.Waiter that ticker runs on (nil is the wall\nclock); and OnError, which observes the ticker path's failures (nil ignores\nthem). The zero Config is usable.\n",
-      "file": "batcher/facade_gen.go",
+      "file": "batcher/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -137,7 +137,7 @@
       "spelled": "func[T any](deliver Sink[T], cfg Config[T]) *Batcher[T]",
       "canonical": "func[T any](deliver github.com/kitsunium/sdk/pkg/v1/concur/batcher.Sink[T], cfg github.com/kitsunium/sdk/pkg/v1/concur/batcher.Config[T]) *github.com/kitsunium/sdk/pkg/v1/concur/batcher.Batcher[T]",
       "doc": "NewBatcher builds a [Batcher] over deliver with cfg. A positive\ncfg.FlushEvery spawns the ticker goroutine, which Close joins.\n",
-      "file": "batcher/facade_gen.go",
+      "file": "batcher/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -150,7 +150,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/concur/batcher.Sink[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/batcher.Sink",
       "doc": "Sink delivers one coalesced batch. A non-nil error fails the batch: it is\nreturned to the caller of Add, Flush or Close that triggered the delivery,\nand handed to [Config].OnError on the ticker path. A Sink is never entered\nconcurrently.\n",
-      "file": "batcher/facade_gen.go",
+      "file": "batcher/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -162,7 +162,7 @@
       "spelled": "func[T any](parent context.Context, limit int, fns []func(ctx context.Context) (value T, err error)) (results []T, err error)",
       "canonical": "func[T any](parent context.Context, limit int, fns []func(ctx context.Context) (value T, err error)) (results []T, err error)",
       "doc": "Collect runs every function in fns concurrently, at most limit at a time\n([New]'s clamp, [Unlimited] for none), and returns their results in\nSUBMISSION order: index i of the result is fns[i]'s value.\n\nOn the first error the remaining functions see a cancelled context and\nCollect returns (nil, err) — never a half-filled slice, whose zero values\nwould read as answers. A panic in any function propagates out of Collect as\na [PanicValue], after every other function has returned.\n\nIt is a function rather than a method because Go's methods take no type\nparameters of their own: a [Group] carrying a result type would force one on\nevery caller who only wants to wait.\n",
-      "file": "group/facade_gen.go",
+      "file": "group/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -175,7 +175,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/concur/group.Group",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/group.Group",
       "doc": "Group runs tasks concurrently under one context and one wait point.\n\n[Group].Go starts a task on a goroutine of its own, blocking while the group\nalready runs its limit of tasks; [Group].Wait blocks until every task has\nreturned, cancels the group's context, and returns the first error — or,\nfor a group from [NewJoined], every error joined — re-raising a task's\npanic as a [PanicValue] if one panicked.\n\nThe zero value is NOT usable: build it with [New] or [NewJoined], which also\nreturn the context the tasks receive.\n",
-      "file": "group/facade_gen.go",
+      "file": "group/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -187,7 +187,7 @@
       "spelled": "func(parent context.Context, limit int) (*Group, context.Context)",
       "canonical": "func(parent context.Context, limit int) (*github.com/kitsunium/sdk/pkg/v1/concur/group.Group, context.Context)",
       "doc": "New returns a [Group] reporting the first error, and the context every task\nsubmitted to it receives.\n\nlimit bounds how many tasks run at once; a non-positive limit is clamped to\n1, and [Unlimited] removes the bound. The returned context is cancelled when\nthe first task fails — that task's error is its context.Cause —, when a\ntask panics, or when [Group].Wait returns, whichever comes first.\n",
-      "file": "group/facade_gen.go",
+      "file": "group/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -199,7 +199,7 @@
       "spelled": "func(parent context.Context, limit int) (*Group, context.Context)",
       "canonical": "func(parent context.Context, limit int) (*github.com/kitsunium/sdk/pkg/v1/concur/group.Group, context.Context)",
       "doc": "NewJoined returns a [Group] whose [Group].Wait reports EVERY task's error,\njoined with errors.Join in the order the tasks were submitted, rather than\nthe first one. Everything else is [New]'s: the limit and its clamp, the\ncontext, the siblings cancelled on the first failure — still the context's\ncontext.Cause — and a panic, which outranks every error.\n\nThe joined error is matchable as each of its parts — errors.Is, errors.As\nand the SDK's errs.HasCode walk Unwrap() []error — and Wait returns nil,\nnot an empty join, when no task failed.\n",
-      "file": "group/facade_gen.go",
+      "file": "group/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -212,7 +212,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/concur/group.PanicValue",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/group.PanicValue",
       "doc": "PanicValue carries a panic raised inside a task across the goroutine\nboundary to whoever waits on the group: Raised is the value the panic\ncarried, verbatim, and Stack the stack of the goroutine that ran the task,\ncaptured at recovery. Its String method renders both, so an uncaught\nre-raise prints the task's stack rather than only the waiter's.\n\nIt is deliberately NOT an error, and carries no error code: a panic is a\nprogramming fault, and a value the caller may ignore is how a broken\ninvariant becomes a silent wrong answer.\n",
-      "file": "group/facade_gen.go",
+      "file": "group/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -269,7 +269,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/concur/recycler.CappedPool[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.CappedPool",
       "doc": "CappedPool is a [Pool] that resets a value on Put, and drops — without\nresetting — a value whose capacity is past its threshold. [CappedPool].Get\nborrows and [CappedPool].Put hands back, as the plain pool's do.\n\nSafe for concurrent use; always used behind the pointer [NewCappedPool]\nreturns.\n",
-      "file": "recycler/facade_gen.go",
+      "file": "recycler/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -281,7 +281,7 @@
       "spelled": "func[T any](newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int) *CappedPool[T]",
       "canonical": "func[T any](newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int) *github.com/kitsunium/sdk/pkg/v1/concur/recycler.CappedPool[T]",
       "doc": "NewCappedPool returns a [CappedPool]: newFn builds a value, resetFn returns\none to its reusable state before it is pooled again, and capOfFn reports the\ncapacity compared with maxCap on each Put. A nil function or a non-positive\nmaxCap panics here — a threshold of zero would drop every value and turn the\npool into an allocator that never recycles.\n",
-      "file": "recycler/facade_gen.go",
+      "file": "recycler/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -293,7 +293,7 @@
       "spelled": "func[T any](newFn func() T) *Pool[T]",
       "canonical": "func[T any](newFn func() T) *github.com/kitsunium/sdk/pkg/v1/concur/recycler.Pool[T]",
       "doc": "NewPool returns a [Pool] whose factory newFn builds a value whenever Get\nfinds the pool empty. A nil newFn panics here, rather than at the first\nempty Get far from this call.\n",
-      "file": "recycler/facade_gen.go",
+      "file": "recycler/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -306,7 +306,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/concur/recycler.Pool[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.Pool",
       "doc": "Pool is a typed object pool over sync.Pool. [Pool].Get borrows a value,\nbuilding one with the factory when the pool is empty, and [Pool].Put hands\none back; a caller must not touch a value after Put. It resets nothing — a\ncaller resets before Put, or uses [CappedPool].\n\nSafe for concurrent use; always used behind the pointer [NewPool] returns.\n",
-      "file": "recycler/facade_gen.go",
+      "file": "recycler/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -319,7 +319,7 @@
       "canonical": "[K comparable, V any] github.com/kitsunium/sdk/internal/kernel/concur/singleflight.Group[K, V]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/singleflight.Group",
       "doc": "Group deduplicates concurrent calls that name the same key. The zero value is\nready to use; a Group must not be copied after first use, and is safe for\nany number of goroutines.\n\n[Group].Do runs fn for a key unless the same key is already in flight, in\nwhich case it waits for that call instead; it returns the value, whether the\nresult came from a call this goroutine did not start (shared), and the\nerror. fn receives the shared call's context, not the caller's — see the\npackage documentation. A caller whose ctx ends while it waits returns\nctx.Err() and leaves the call running; a result already available is\ndelivered even if ctx is also done.\n\n[Group].Forget retires a key so the NEXT Do starts a fresh call — for an\nin-flight call known to answer a question that has since changed; callers\nalready waiting keep waiting and still receive its result.\n\n[Group].InFlight reports how many keys a Do arriving now would join rather\nthan start — a point-in-time reading for a gauge or a test, never for a\ndecision, and not a count of running calls (a forgotten or abandoned call\nmay still run).\n",
-      "file": "singleflight/facade_gen.go",
+      "file": "singleflight/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -332,7 +332,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/concur/singleflight.PanicValue",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/singleflight.PanicValue",
       "doc": "PanicValue carries a panic raised inside a deduplicated call to every caller\nwaiting on it: Raised is the value the panic carried, verbatim, and Stack the\nstack of the goroutine that ran fn, captured at recovery. Its String method\nrenders both, so an uncaught re-raise prints fn's stack rather than only the\nwaiter's.\n\nIt is deliberately NOT an error, and carries no error code: a panic is a\nprogramming fault, not a runtime condition.\n",
-      "file": "singleflight/facade_gen.go",
+      "file": "singleflight/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -344,7 +344,7 @@
       "spelled": "func[T any](initial *T) *Value[T]",
       "canonical": "func[T any](initial *T) *github.com/kitsunium/sdk/pkg/v1/concur/snapshot.Value[T]",
       "doc": "NewValue returns a [Value] holding initial — call-site sugar for a value\nknown up front. A nil initial leaves it empty, as the zero value is.\n",
-      "file": "snapshot/facade_gen.go",
+      "file": "snapshot/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -357,7 +357,7 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/concur/snapshot.Value[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/snapshot.Value",
       "doc": "Value is a copy-on-write container for a *T. The zero value is ready to use\nand holds nil until the first Store.\n\n[Value].Load returns the current pointer without a lock — one atomic load,\nno allocation — and the pointer it returns must be treated as immutable.\n[Value].Store replaces it, [Value].Swap replaces it and returns the previous\none, and [Value].Update runs a function from the current pointer to the\nnext under the writers' lock, so a concurrent writer can never interleave\nwith the read-modify-write. Writers serialise; readers never wait.\n",
-      "file": "snapshot/facade_gen.go",
+      "file": "snapshot/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -369,7 +369,7 @@
       "spelled": "func(interval time.Duration, tick func(), opts ...EveryOption) *LoopDaemon",
       "canonical": "func(interval time.Duration, tick func(), opts ...github.com/kitsunium/sdk/pkg/v1/concur/worker.EveryOption) *github.com/kitsunium/sdk/pkg/v1/concur/worker.LoopDaemon",
       "doc": "Every starts a [LoopDaemon] whose loop calls tick on each interval until\nStop is called, or until the channel given by [WithDone] is closed. The\ndaemon owns the ticker — the wall clock unless [WithClock] names another —\nand stops it when the loop ends, so Stop both ends the ticking and joins\nthe goroutine. A tick due while the previous one still runs is dropped.\n\nA nil tick and a non-positive interval panic here, at the caller.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -382,7 +382,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/concur/worker.EveryOption",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/worker.EveryOption",
       "doc": "EveryOption tunes [Every]: [WithClock] and [WithDone]. Options apply in\norder, so a later one wins, and a nil option is skipped.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -395,7 +395,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/concur/worker.Loop",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/worker.Loop",
       "doc": "Loop is the goroutine body a [LoopDaemon] runs. It receives a stop channel,\nclosed when Stop is called, and MUST return promptly once it is: Stop blocks\nuntil the loop has returned. A Loop MUST NOT panic.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -408,7 +408,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/kernel/concur/worker.LoopDaemon",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/concur/worker.LoopDaemon",
       "doc": "LoopDaemon is a running background goroutine with an idempotent Stop and a\njoin. [LoopDaemon].Stop signals the loop to exit and blocks until it has\nreturned — idempotent, and safe to call from several goroutines.\n[LoopDaemon].Done returns the channel closed once the loop has returned, for\na caller that reacts to the end without joining.\n\nAlways used behind the pointer [Start], [NewLoopDaemon] or [Every] returns:\nit must not be copied.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -420,7 +420,7 @@
       "spelled": "func(loop Loop) *LoopDaemon",
       "canonical": "func(loop github.com/kitsunium/sdk/pkg/v1/concur/worker.Loop) *github.com/kitsunium/sdk/pkg/v1/concur/worker.LoopDaemon",
       "doc": "NewLoopDaemon is [Start] under the New-prefixed name: the same daemon, the\nsame panic on a nil loop.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -432,7 +432,7 @@
       "spelled": "func(loop Loop) *LoopDaemon",
       "canonical": "func(loop github.com/kitsunium/sdk/pkg/v1/concur/worker.Loop) *github.com/kitsunium/sdk/pkg/v1/concur/worker.LoopDaemon",
       "doc": "Start spawns loop in a new goroutine and returns the [LoopDaemon] that\ncontrols it. A nil loop panics here rather than spawning a goroutine that\ndoes nothing.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -444,7 +444,7 @@
       "spelled": "func(w clock.Waiter) EveryOption",
       "canonical": "func(w github.com/kitsunium/sdk/pkg/v1/clock.Waiter) github.com/kitsunium/sdk/pkg/v1/concur/worker.EveryOption",
       "doc": "WithClock makes [Every] tick on w instead of the wall clock — a\n[clock.ManualClock] in a test, advanced past the interval once the ticker is\narmed. A nil w is the wall clock.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     },
@@ -456,7 +456,7 @@
       "spelled": "func(done <-chan struct{}) EveryOption",
       "canonical": "func(done <-chan struct{}) github.com/kitsunium/sdk/pkg/v1/concur/worker.EveryOption",
       "doc": "WithDone ends the loop of [Every] as soon as done is closed, without waiting\nfor Stop, which still joins — returning at once on a loop that has already\nleft. A nil done never fires.\n",
-      "file": "worker/facade_gen.go",
+      "file": "worker/gen_facade.go",
       "layer": "public",
       "family": "concur"
     }

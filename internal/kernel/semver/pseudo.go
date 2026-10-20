@@ -13,7 +13,7 @@ const stampLayout string = "20060102150405"
 // of the stamp "yyyymmddhhmmss-abcdefabcdef".
 const stampLen int = len(stampLayout)
 
-// isPseudoVersion is IsPseudoVersion's body: decl_gen.go writes IsPseudoVersion, from the
+// isPseudoVersion is IsPseudoVersion's body: gen_decls.go writes IsPseudoVersion, from the
 // design, as one call of it.
 func isPseudoVersion(v string) bool {
 	_, ok := pseudoStamp(v)

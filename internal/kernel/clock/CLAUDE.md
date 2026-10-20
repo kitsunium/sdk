@@ -55,13 +55,13 @@ only producer of — splitting them left three files nothing else referenced.
 | File | Holds |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `decl_gen.go` | written by kit gen from the design (ADR 0168): the `Clock`, `Timed`, `Waiter`, `Timer` and `Ticker` contracts, the `ManualClock` struct with every field, `NewManualClock`, `ManualClock.NewTimer` and `ManualClock.Sleep` as one call of their unexported bodies, and `ManualClock`'s assertions against `Clock`, `Waiter` and `Timed` |
+| `gen_decls.go` | written by kit gen from the design (ADR 0168): the `Clock`, `Timed`, `Waiter`, `Timer` and `Ticker` contracts, the `ManualClock` struct with every field, `NewManualClock`, `ManualClock.NewTimer` and `ManualClock.Sleep` as one call of their unexported bodies, and `ManualClock`'s assertions against `Clock`, `Waiter` and `Timed` |
 | `waiter.go` | `requirePositivePeriod` (the shared refusal) |
 | `system.go` | `systemClock` + the `System` singleton, and the `*time.Timer` / `*time.Ticker` adapters |
 | `manual.go` | the bodies `newManualClock`, `newTimer` and `sleep`, and every other `ManualClock` method whole — `Now`, `Since`, `After`, `NewTicker`, `Advance`, `Set`, `Pending` and `BlockUntil` keep their bodies because theirs do not inline (a lock and its `defer`): `ManualClock` is reached through `Clock` and `Timed`, where a wrapper over a body that does not inline would be a call more (ADR 0168) |
 | `manual_wait.go` | `manualWait` + `fireWait` / `drainWait` / `rearmWait`, and the `maxDuration` bound the rearm stays under |
 | `manual_timer.go` / `manual_ticker.go` | the handles `ManualClock` hands out |
-| `clock_compliance.go` | every compile-time interface assertion of an unexported type (`ManualClock`'s are the design's, in `decl_gen.go`) |
+| `clock_compliance.go` | every compile-time interface assertion of an unexported type (`ManualClock`'s are the design's, in `gen_decls.go`) |
 
 ## Why `Clock` was NOT extended
 
@@ -308,6 +308,6 @@ Tests:
 | `synctest_external_test.go` | the two load-bearing claims of §"clock vs `testing/synctest`" |
 | `clock_bench_test.go` | the numbers in `BENCH.md`, including the `Stdlib_NewTimer` control pair |
 | `perf_fixtures_test.go` | race off: the fixtures of the design's budgets on `Clock.Now` and `Clock.Since` — a call through `System` allocates nothing (ADR 0165) |
-| `perf_gen_test.go` | written by kit gen from those budgets, run by the alloc lane |
+| `gen_perf_test.go` | written by kit gen from those budgets, run by the alloc lane |
 
 A longer-form companion lives in `README.md`.

@@ -36,10 +36,10 @@ alias(
 go_test(
     name = "dbsink_test",
     srcs = [
-        "api_gen_test.go",
         "dbsink_bench_test.go",
         "dbsink_config_external_test.go",
         "dbsink_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":dbsink"],
     deps = [

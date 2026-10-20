@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "agree.go",
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/agree",
     visibility = ["//visibility:public"],
@@ -29,7 +29,7 @@ go_test(
     srcs = [
         "agree_bench_test.go",
         "agree_external_test.go",
-        "api_gen_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":agree",

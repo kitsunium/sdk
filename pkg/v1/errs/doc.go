@@ -1,8 +1,8 @@
 // Package errs is the public facade for SDK errors — both introspection
-// (the Of-family accessors and the matchers, re-exported in facade_gen.go,
+// (the Of-family accessors and the matchers, re-exported in gen_facade.go,
 // beside HasAnyCode and HasAnyReason in accessors.go) and construction
 // ([New], [Wrap] and the application Code range in construct.go, the Field
-// helpers re-exported in facade_gen.go).
+// helpers re-exported in gen_facade.go).
 //
 // Consumers receive [error] values from the SDK and query them via the
 // Of-family accessors below, and — since ADR 0019 — mint their own typed
@@ -180,7 +180,7 @@
 //
 // Package errs — construction half of the public error API.
 //
-// facade_gen.go re-exports the read-only introspection surface; construct.go
+// gen_facade.go re-exports the read-only introspection surface; construct.go
 // and the Field helpers re-exported beside it are the *construction*
 // surface, so that an external consumer (any module adopting this SDK, with
 // no internal/ access) can mint typed SDK errors rather than only

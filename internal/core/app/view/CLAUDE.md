@@ -16,9 +16,9 @@ ADR 0160. A code keeps its value when its declaration moves.
 
 **The ports are generated from the design** (ADR 0163): `Factory` and
 `Renderer` are declared, with their doc comments, under `ports:` in
-`design/app/view.yaml`, and `kit gen` writes them into `design_gen.go`. A port
+`design/app/view.yaml`, and `kit gen` writes them into `gen_ports.go`. A port
 or its doc comment changes in the design, then `kit gen`, then `make api` —
-never in `design_gen.go`, whose header digests `make api-check` verifies. They
+never in `gen_ports.go`, whose header digests `make api-check` verifies. They
 moved there from `factory.go` and `view.go`, content moved and never deleted —
 but for the blank line each put between its two methods, which the design does
 not record: `go doc` shows both declarations without it.

@@ -6,7 +6,7 @@ package clock
 // Clock, Waiter and Timed on purpose: Clock is the frozen, downstream-visible
 // half of the port, and losing it silently would be the one break this package
 // is shaped to avoid. ManualClock's three are its design's (implements:),
-// which kit gen writes in decl_gen.go.
+// which kit gen writes in gen_decls.go.
 var (
 	_ Clock  = (*systemClock)(nil)
 	_ Waiter = (*systemClock)(nil)

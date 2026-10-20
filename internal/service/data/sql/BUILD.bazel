@@ -53,8 +53,8 @@ go_test(
     size = "small",
     srcs = [
         "abort_external_test.go",
-        "api_gen_test.go",
         "config_external_test.go",
+        "gen_api_test.go",
         "harness_external_test.go",
         "health_external_test.go",
         "join_external_test.go",

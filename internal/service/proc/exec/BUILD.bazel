@@ -121,8 +121,6 @@ alias(
 go_test(
     name = "exec_test",
     srcs = [
-        "api_gen_1_test.go",
-        "api_gen_2_test.go",
         "attrs_unix_internal_test.go",
         "cgroup_placement_linux_internal_test.go",
         "creds_unix_internal_test.go",
@@ -133,6 +131,8 @@ go_test(
         "exec_unix_internal_test.go",
         "exec_windows_internal_test.go",
         "exec_windows_test.go",
+        "gen_api_1_test.go",
+        "gen_api_2_test.go",
         "handle_unix_internal_test.go",
         "handshake_unix_internal_test.go",
         "limits_unix_internal_test.go",

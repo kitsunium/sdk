@@ -1097,7 +1097,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.VersionUn
 Code `0.2.57.15` · reason `VERSION_UNSUPPORTED` · public "A version this node does not support was met"
 
 <a name="AppendMessage"></a>
-## func [AppendMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [AppendMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func AppendMessage(dst []byte, m *MessageValue) []byte
@@ -1106,7 +1106,7 @@ func AppendMessage(dst []byte, m *MessageValue) []byte
 AppendMessage appends m's frame to dst.
 
 <a name="AppendSnapshotMeta"></a>
-## func [AppendSnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [AppendSnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func AppendSnapshotMeta(dst []byte, m *SnapshotMetaValue) []byte
@@ -1115,7 +1115,7 @@ func AppendSnapshotMeta(dst []byte, m *SnapshotMetaValue) []byte
 AppendSnapshotMeta appends the encoding of m.
 
 <a name="AppendToken"></a>
-## func [AppendToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [AppendToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func AppendToken(dst []byte, t TokenValue) []byte
@@ -1124,7 +1124,7 @@ func AppendToken(dst []byte, t TokenValue) []byte
 AppendToken appends the 41-byte encoding of t.
 
 <a name="Bootstrap"></a>
-## func [Bootstrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Bootstrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Bootstrap(ctx context.Context, cfg *Config, members []MemberValue) error
@@ -1133,7 +1133,7 @@ func Bootstrap(ctx context.Context, cfg *Config, members []MemberValue) error
 Bootstrap founds a cluster on one founding node, with the IDENTICAL member list on every founder. Idempotent and resumable.
 
 <a name="ClearQuarantine"></a>
-## func [ClearQuarantine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ClearQuarantine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error
@@ -1142,7 +1142,7 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error
 ClearQuarantine clears a quarantined or stopped directory by one of its two exits.
 
 <a name="ImportObserved"></a>
-## func [ImportObserved](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ImportObserved](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ImportObserved(d DataDir, p *ImportParams, newCluster ClusterID, members []MemberValue, opt *RestoreOptions) (SnapshotMetaValue, error)
@@ -1151,7 +1151,7 @@ func ImportObserved(d DataDir, p *ImportParams, newCluster ClusterID, members []
 ImportObserved starts a new history from a saved snapshot and the verified tail an observer read after it, offline.
 
 <a name="Init"></a>
-## func [Init](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Init](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Init(d DataDir, cluster ClusterID, slot string) (NodeID, Incarnation, error)
@@ -1160,7 +1160,7 @@ func Init(d DataDir, cluster ClusterID, slot string) (NodeID, Incarnation, error
 Init prepares a joining node offline: a random NodeID and a joining stamp.
 
 <a name="InitLog"></a>
-## func [InitLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [InitLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func InitLog(log LogStore, cluster ClusterID, slot string) (NodeID, Incarnation, error)
@@ -1169,7 +1169,7 @@ func InitLog(log LogStore, cluster ClusterID, slot string) (NodeID, Incarnation,
 InitLog prepares a joining log on any LogStore: a random NodeID and a joining stamp. Init does the same on the shipped data directory.
 
 <a name="Inspect"></a>
-## func [Inspect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Inspect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Inspect(d DataDir) (ReportValue, error)
@@ -1178,7 +1178,7 @@ func Inspect(d DataDir) (ReportValue, error)
 Inspect reads a stopped node's directory without changing it.
 
 <a name="JoinRefusalReason"></a>
-## func [JoinRefusalReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [JoinRefusalReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func JoinRefusalReason(err error) (string, bool)
@@ -1187,7 +1187,7 @@ func JoinRefusalReason(err error) (string, bool)
 JoinRefusalReason reads the reason a refused JOIN carried back to the joiner: what the member's JoinAuthorizer chose to say, sanitized and at most MaxJoinReasonBytes, or the engine's rule. false when there is none.
 
 <a name="Lane"></a>
-## func [Lane](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Lane](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Lane(frame []byte) (FrameLane, error)
@@ -1196,7 +1196,7 @@ func Lane(frame []byte) (FrameLane, error)
 Lane reads the lane of an encoded frame from its frozen header alone.
 
 <a name="Latest"></a>
-## func [Latest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Latest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Latest(s SnapshotStore) (SnapshotHandle, error)
@@ -1205,7 +1205,7 @@ func Latest(s SnapshotStore) (SnapshotHandle, error)
 Latest opens the newest complete snapshot of a store.
 
 <a name="LeaderHint"></a>
-## func [LeaderHint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [LeaderHint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func LeaderHint(err error) (NodeID, bool)
@@ -1214,7 +1214,7 @@ func LeaderHint(err error) (NodeID, bool)
 LeaderHint reads the known leader from a NOT\_LEADER (R7-10).
 
 <a name="MemorySPKI"></a>
-## func [MemorySPKI](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [MemorySPKI](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func MemorySPKI(id NodeID) [32]byte
@@ -1223,7 +1223,7 @@ func MemorySPKI(id NodeID) [32]byte
 MemorySPKI is the key the memory transport authenticates a node with.
 
 <a name="NewDataDir"></a>
-## func [NewDataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewDataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewDataDir(dir string) (DataDir, error)
@@ -1232,7 +1232,7 @@ func NewDataDir(dir string) (DataDir, error)
 NewDataDir takes the directory lock first, then recovers the log.
 
 <a name="NewDataDirWith"></a>
-## func [NewDataDirWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewDataDirWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error)
@@ -1241,7 +1241,7 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error)
 NewDataDirWith is OpenDataDir with options.
 
 <a name="NewMemoryLog"></a>
-## func [NewMemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewMemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewMemoryLog() *MemoryLog
@@ -1250,7 +1250,7 @@ func NewMemoryLog() *MemoryLog
 NewMemoryLog returns the in-memory LogStore double.
 
 <a name="NewMemoryNetwork"></a>
-## func [NewMemoryNetwork](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewMemoryNetwork](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewMemoryNetwork() *MemoryNetwork
@@ -1259,7 +1259,7 @@ func NewMemoryNetwork() *MemoryNetwork
 NewMemoryNetwork returns an in-memory network of transports.
 
 <a name="NewMemorySnapshots"></a>
-## func [NewMemorySnapshots](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewMemorySnapshots](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewMemorySnapshots() *MemorySnapshots
@@ -1268,7 +1268,7 @@ func NewMemorySnapshots() *MemorySnapshots
 NewMemorySnapshots returns the in-memory SnapshotStore double.
 
 <a name="NewMemoryTransport"></a>
-## func [NewMemoryTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewMemoryTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewMemoryTransport(n *MemoryNetwork, id NodeID) *MemoryTransport
@@ -1277,7 +1277,7 @@ func NewMemoryTransport(n *MemoryNetwork, id NodeID) *MemoryTransport
 NewMemoryTransport returns the end of the network n that node id sends and receives through, the same one on every call for that id.
 
 <a name="NewNode"></a>
-## func [NewNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewNode(cfg Config) (*Node, error)
@@ -1286,7 +1286,7 @@ func NewNode(cfg Config) (*Node, error)
 NewNode opens a node over what Init and Bootstrap prepared. It never bootstraps.
 
 <a name="NewPEMIdentity"></a>
-## func [NewPEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewPEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewPEMIdentity(certFile string, keyFile string, caFile string) (*PEMIdentity, error)
@@ -1295,7 +1295,7 @@ func NewPEMIdentity(certFile string, keyFile string, caFile string) (*PEMIdentit
 NewPEMIdentity reads a node identity from PEM files; its Roots method is the CA pool to pass as TransportConfig.Roots.
 
 <a name="NewTCPTransport"></a>
-## func [NewTCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewTCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewTCPTransport(cfg *TransportConfig) (*TCPTransport, error)
@@ -1304,7 +1304,7 @@ func NewTCPTransport(cfg *TransportConfig) (*TCPTransport, error)
 NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
 
 <a name="NewTCPTransportFromPEM"></a>
-## func [NewTCPTransportFromPEM](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [NewTCPTransportFromPEM](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg *TransportConfig) (*TCPTransport, error)
@@ -1313,7 +1313,7 @@ func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg 
 NewTCPTransportFromPEM builds it from a certificate, a key and the consensus CA, as PEM files reloaded in place on renewal.
 
 <a name="OpenSnapshot"></a>
-## func [OpenSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [OpenSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func OpenSnapshot(r io.Reader, opt *RestoreOptions) (io.Reader, error)
@@ -1322,7 +1322,7 @@ func OpenSnapshot(r io.Reader, opt *RestoreOptions) (io.Reader, error)
 OpenSnapshot reads a saved snapshot's stream without a node, checked to its digest.
 
 <a name="ParseMessage"></a>
-## func [ParseMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ParseMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ParseMessage(frame []byte, m *MessageValue) error
@@ -1331,7 +1331,7 @@ func ParseMessage(frame []byte, m *MessageValue) error
 ParseMessage decodes a frame: FRAME\_INVALID, VERSION\_UNSUPPORTED.
 
 <a name="ParseSnapshotMeta"></a>
-## func [ParseSnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ParseSnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ParseSnapshotMeta(b []byte, m *SnapshotMetaValue) error
@@ -1340,7 +1340,7 @@ func ParseSnapshotMeta(b []byte, m *SnapshotMetaValue) error
 ParseSnapshotMeta decodes a SnapshotMeta.
 
 <a name="ParseToken"></a>
-## func [ParseToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ParseToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ParseToken(b []byte) (TokenValue, error)
@@ -1349,7 +1349,7 @@ func ParseToken(b []byte) (TokenValue, error)
 ParseToken decodes a token.
 
 <a name="ProposeAs"></a>
-## func [ProposeAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ProposeAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (TokenValue, R, error)
@@ -1358,7 +1358,7 @@ func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (TokenValu
 ProposeAs types the Apply result. A result of another dynamic type is RESULT\_TYPE\_MISMATCH carrying the committed token: the entry IS committed.
 
 <a name="ReceiptMessage"></a>
-## func [ReceiptMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [ReceiptMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func ReceiptMessage(old ClusterID, next ClusterID, voter NodeID) []byte
@@ -1367,7 +1367,7 @@ func ReceiptMessage(old ClusterID, next ClusterID, voter NodeID) []byte
 ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 
 <a name="Recover"></a>
-## func [Recover](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Recover](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
@@ -1376,7 +1376,7 @@ func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *Recove
 Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster.
 
 <a name="Redraw"></a>
-## func [Redraw](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [Redraw](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func Redraw(d DataDir) (NodeID, error)
@@ -1385,7 +1385,7 @@ func Redraw(d DataDir) (NodeID, error)
 Redraw draws a new id on an empty joining directory.
 
 <a name="RedrawLog"></a>
-## func [RedrawLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [RedrawLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func RedrawLog(log LogStore) (NodeID, error)
@@ -1394,7 +1394,7 @@ func RedrawLog(log LogStore) (NodeID, error)
 RedrawLog draws a new id on an empty joining log.
 
 <a name="RestoreSnapshot"></a>
-## func [RestoreSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [RestoreSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []MemberValue, opt *RestoreOptions) (SnapshotMetaValue, error)
@@ -1403,7 +1403,7 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Mem
 RestoreSnapshot starts a new history from a saved snapshot, offline.
 
 <a name="SAN"></a>
-## func [SAN](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [SAN](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func SAN(cluster ClusterID, slot string) *url.URL
@@ -1412,7 +1412,7 @@ func SAN(cluster ClusterID, slot string) *url.URL
 SAN returns the canonical URI SAN a node certificate must carry.
 
 <a name="SPKIOf"></a>
-## func [SPKIOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [SPKIOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func SPKIOf(c *x509.Certificate) [32]byte
@@ -1421,7 +1421,7 @@ func SPKIOf(c *x509.Certificate) [32]byte
 SPKIOf returns a certificate's pin: the SHA-256 of its public key info.
 
 <a name="TimingDefaults"></a>
-## func [TimingDefaults](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [TimingDefaults](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func TimingDefaults() TimingContractSpec
@@ -1430,7 +1430,7 @@ func TimingDefaults() TimingContractSpec
 TimingDefaults are the default timings for the three-site RTT matrix.
 
 <a name="TokenOf"></a>
-## func [TokenOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## func [TokenOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
 func TokenOf(err error) (TokenValue, bool)
@@ -1439,7 +1439,7 @@ func TokenOf(err error) (TokenValue, bool)
 TokenOf reads the committed token an error carries (R7-10).
 
 <a name="AlarmID"></a>
-## type [AlarmID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [AlarmID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1454,7 +1454,7 @@ type AlarmID uint64
 ```
 
 <a name="AuthenticatedPeerValue"></a>
-## type [AuthenticatedPeerValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [AuthenticatedPeerValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1478,7 +1478,7 @@ type AuthenticatedPeerValue struct {
 ```
 
 <a name="BatchingStateMachine"></a>
-## type [BatchingStateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [BatchingStateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1497,7 +1497,7 @@ type BatchingStateMachine interface {
 ```
 
 <a name="BatchingStateMachine.ApplyBatch"></a>
-### func \(BatchingStateMachine\) [ApplyBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(BatchingStateMachine\) [ApplyBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (BatchingStateMachine) ApplyBatch(es []EntryValue, results []any)
@@ -1506,7 +1506,7 @@ func (BatchingStateMachine) ApplyBatch(es []EntryValue, results []any)
 ApplyBatch applies es in order and writes each result into results.
 
 <a name="ClusterID"></a>
-## type [ClusterID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [ClusterID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1539,7 +1539,7 @@ func (ClusterID) String() string
 String renders the cluster id in lowercase hex, the form the certificate's URI SAN carries.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1621,7 +1621,7 @@ func (*Config) MemoryBudget(peers int) int64
 MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14).
 
 <a name="DataDir"></a>
-## type [DataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [DataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1672,7 +1672,7 @@ func (DataDir) Snapshots() coreconsensus.SnapshotStore
 Snapshots returns the directory's SnapshotStore.
 
 <a name="DataDirOptions"></a>
-## type [DataDirOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [DataDirOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1690,7 +1690,7 @@ type DataDirOptions struct {
 ```
 
 <a name="Durability"></a>
-## type [Durability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Durability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1705,7 +1705,7 @@ type Durability uint8
 ```
 
 <a name="DurableStateMachine"></a>
-## type [DurableStateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [DurableStateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1725,7 +1725,7 @@ type DurableStateMachine interface {
 ```
 
 <a name="DurableStateMachine.AppliedPosition"></a>
-### func \(DurableStateMachine\) [AppliedPosition](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(DurableStateMachine\) [AppliedPosition](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (DurableStateMachine) AppliedPosition() (LogIdentityValue, PositionValue, error)
@@ -1734,7 +1734,7 @@ func (DurableStateMachine) AppliedPosition() (LogIdentityValue, PositionValue, e
 AppliedPosition returns the log identity and the position of the last entry whose effects are durable.
 
 <a name="EntryKind"></a>
-## type [EntryKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [EntryKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1758,7 +1758,7 @@ func (EntryKind) Known() bool
 Known reports whether the kind is one protocol version 1 defines.
 
 <a name="EntryValue"></a>
-## type [EntryValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [EntryValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1792,7 +1792,7 @@ type EntryValue struct {
 ```
 
 <a name="FencedAttestationValue"></a>
-## type [FencedAttestationValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [FencedAttestationValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1815,7 +1815,7 @@ type FencedAttestationValue struct {
 ```
 
 <a name="FrameLane"></a>
-## type [FrameLane](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [FrameLane](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1830,7 +1830,7 @@ type FrameLane uint8
 ```
 
 <a name="GroupID"></a>
-## type [GroupID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [GroupID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1845,7 +1845,7 @@ type GroupID uint64
 ```
 
 <a name="HardState"></a>
-## type [HardState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [HardState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1867,7 +1867,7 @@ type HardState struct {
 ```
 
 <a name="HealthFlags"></a>
-## type [HealthFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [HealthFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1891,7 +1891,7 @@ func (HealthFlags) Has(x HealthFlags) bool
 Has reports whether every answer of x is set.
 
 <a name="HealthValue"></a>
-## type [HealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [HealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1935,7 +1935,7 @@ type HealthValue struct {
 ```
 
 <a name="ImportParams"></a>
-## type [ImportParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [ImportParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1957,7 +1957,7 @@ type ImportParams struct {
 ```
 
 <a name="Incarnation"></a>
-## type [Incarnation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Incarnation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -1990,7 +1990,7 @@ func (Incarnation) String() string
 String renders the incarnation in lowercase hex.
 
 <a name="InstallAcceptValue"></a>
-## type [InstallAcceptValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [InstallAcceptValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2016,7 +2016,7 @@ type InstallAcceptValue struct {
 ```
 
 <a name="InstallOfferValue"></a>
-## type [InstallOfferValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [InstallOfferValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2038,7 +2038,7 @@ type InstallOfferValue struct {
 ```
 
 <a name="InstallParams"></a>
-## type [InstallParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [InstallParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2064,7 +2064,7 @@ type InstallParams struct {
 ```
 
 <a name="JoinAuthorizer"></a>
-## type [JoinAuthorizer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [JoinAuthorizer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2082,7 +2082,7 @@ type JoinAuthorizer interface {
 ```
 
 <a name="JoinAuthorizer.Authorize"></a>
-### func \(JoinAuthorizer\) [Authorize](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(JoinAuthorizer\) [Authorize](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (JoinAuthorizer) Authorize(ctx context.Context, r JoinRequestValue) (Operator, error)
@@ -2091,7 +2091,7 @@ func (JoinAuthorizer) Authorize(ctx context.Context, r JoinRequestValue) (Operat
 Authorize accepts or refuses the request.
 
 <a name="JoinConfig"></a>
-## type [JoinConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [JoinConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2118,7 +2118,7 @@ type JoinConfig struct {
 ```
 
 <a name="JoinReasonBinder"></a>
-## type [JoinReasonBinder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [JoinReasonBinder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 JoinReasonBinder is the sibling of a transport that carries a refused JOIN's reason back to the joiner.
 
@@ -2137,7 +2137,7 @@ type JoinReasonBinder interface {
 ```
 
 <a name="JoinReasonBinder.BindJoinReason"></a>
-### func \(JoinReasonBinder\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(JoinReasonBinder\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (JoinReasonBinder) BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code, string))
@@ -2146,7 +2146,7 @@ func (JoinReasonBinder) BindJoinReason(group GroupID, join func(ctx context.Cont
 BindJoinReason registers the group's JOIN callback that also returns the refusal's reason, empty for none.
 
 <a name="JoinRequestValue"></a>
-## type [JoinRequestValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [JoinRequestValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2174,7 +2174,7 @@ type JoinRequestValue struct {
 ```
 
 <a name="Joiner"></a>
-## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2193,7 +2193,7 @@ type Joiner interface {
 ```
 
 <a name="Joiner.Join"></a>
-### func \(Joiner\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Joiner\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Joiner) Join(ctx context.Context, cfg JoinConfig) (PositionValue, error)
@@ -2202,7 +2202,7 @@ func (Joiner) Join(ctx context.Context, cfg JoinConfig) (PositionValue, error)
 Join sends the JOIN and returns the position its AddLearner was appended at.
 
 <a name="LeadershipWatcher"></a>
-## type [LeadershipWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [LeadershipWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2221,7 +2221,7 @@ type LeadershipWatcher interface {
 ```
 
 <a name="LeadershipWatcher.Watch"></a>
-### func \(LeadershipWatcher\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LeadershipWatcher\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LeadershipWatcher) Watch(ctx context.Context) <-chan StatusValue
@@ -2230,7 +2230,7 @@ func (LeadershipWatcher) Watch(ctx context.Context) <-chan StatusValue
 Watch returns its OWN channel, of capacity one, holding the latest status; it is unsubscribed and closed when ctx ends or the node closes.
 
 <a name="LogIdentityValue"></a>
-## type [LogIdentityValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [LogIdentityValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2267,7 +2267,7 @@ func (LogIdentityValue) Same(o LogIdentityValue) bool
 Same reports whether two identities name the same history (cluster and epoch), whatever lineage they record.
 
 <a name="LogReader"></a>
-## type [LogReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [LogReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2291,7 +2291,7 @@ type LogReader interface {
 ```
 
 <a name="LogReader.Bounds"></a>
-### func \(LogReader\) [Bounds](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogReader\) [Bounds](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogReader) Bounds() (first uint64, last uint64)
@@ -2300,7 +2300,7 @@ func (LogReader) Bounds() (first uint64, last uint64)
 Bounds of an empty log after a snapshot at s are (s+1, s).
 
 <a name="LogReader.Entries"></a>
-### func \(LogReader\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogReader\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogReader) Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
@@ -2309,7 +2309,7 @@ func (LogReader) Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) (
 Entries returns entries in \[lo, hi), at most maxBytes, and always at least one entry when lo \< hi, even above maxBytes. lo below first is COMPACTED.
 
 <a name="LogReader.Term"></a>
-### func \(LogReader\) [Term](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogReader\) [Term](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogReader) Term(index uint64) (uint64, error)
@@ -2318,7 +2318,7 @@ func (LogReader) Term(index uint64) (uint64, error)
 Term answers for first-1 too, from the term kept at compaction.
 
 <a name="LogStore"></a>
-## type [LogStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [LogStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2353,7 +2353,7 @@ type LogStore interface {
 ```
 
 <a name="LogStore.Append"></a>
-### func \(LogStore\) [Append](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [Append](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) Append(entries []EntryValue, hs *HardState) error
@@ -2362,7 +2362,7 @@ func (LogStore) Append(entries []EntryValue, hs *HardState) error
 Append buffers entries and, when hs is not nil, a hard state, in ONE record batch.
 
 <a name="LogStore.Close"></a>
-### func \(LogStore\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) Close() error
@@ -2371,7 +2371,7 @@ func (LogStore) Close() error
 Close releases the store.
 
 <a name="LogStore.CompactPrefix"></a>
-### func \(LogStore\) [CompactPrefix](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [CompactPrefix](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) CompactPrefix(through uint64) error
@@ -2380,7 +2380,7 @@ func (LogStore) CompactPrefix(through uint64) error
 CompactPrefix drops what a snapshot covers, through index through.
 
 <a name="LogStore.HardState"></a>
-### func \(LogStore\) [HardState](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [HardState](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) HardState() (HardState, error)
@@ -2389,7 +2389,7 @@ func (LogStore) HardState() (HardState, error)
 HardState returns the last hard state appended.
 
 <a name="LogStore.Stamp"></a>
-### func \(LogStore\) [Stamp](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [Stamp](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) Stamp() (StampValue, error)
@@ -2398,7 +2398,7 @@ func (LogStore) Stamp() (StampValue, error)
 Stamp returns the directory's stamp.
 
 <a name="LogStore.Sync"></a>
-### func \(LogStore\) [Sync](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [Sync](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) Sync() error
@@ -2407,7 +2407,7 @@ func (LogStore) Sync() error
 Sync makes everything appended so far durable.
 
 <a name="LogStore.TruncateSuffix"></a>
-### func \(LogStore\) [TruncateSuffix](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [TruncateSuffix](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) TruncateSuffix(from uint64) error
@@ -2416,7 +2416,7 @@ func (LogStore) TruncateSuffix(from uint64) error
 TruncateSuffix writes ONE durable truncate record removing every entry from index from on, and nothing else.
 
 <a name="LogStore.WriteStamp"></a>
-### func \(LogStore\) [WriteStamp](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(LogStore\) [WriteStamp](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (LogStore) WriteStamp(StampValue) error
@@ -2425,7 +2425,7 @@ func (LogStore) WriteStamp(StampValue) error
 WriteStamp writes the stamp, durable on return.
 
 <a name="MemberValue"></a>
-## type [MemberValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MemberValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2461,7 +2461,7 @@ type MemberValue struct {
 ```
 
 <a name="MembershipValue"></a>
-## type [MembershipValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MembershipValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2519,7 +2519,7 @@ func (MembershipValue) Voters() []NodeID
 Voters returns the ids of the voters, in membership order.
 
 <a name="MemoryLog"></a>
-## type [MemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2642,7 +2642,7 @@ func (*MemoryLog) WriteStamp(s coreconsensus.StampValue) error
 WriteStamp implements LogStore.
 
 <a name="MemoryNetwork"></a>
-## type [MemoryNetwork](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MemoryNetwork](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2675,7 +2675,7 @@ func (*MemoryNetwork) Isolate(id coreconsensus.NodeID, cut bool)
 Isolate cuts, or restores, every link of id in both directions.
 
 <a name="MemorySnapshots"></a>
-## type [MemorySnapshots](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MemorySnapshots](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2726,7 +2726,7 @@ func (*MemorySnapshots) Remove(id string) error
 Remove implements SnapshotStore; refused while a handle is open.
 
 <a name="MemoryTransport"></a>
-## type [MemoryTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MemoryTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2804,7 +2804,7 @@ func (*MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 Stream implements Transport: offer, accept, then the stream from the accepted offset.
 
 <a name="MessageKind"></a>
-## type [MessageKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MessageKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2837,7 +2837,7 @@ func (MessageKind) Lane() FrameLane
 Lane returns the connection the kind belongs on.
 
 <a name="MessageValue"></a>
-## type [MessageValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [MessageValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -2893,7 +2893,7 @@ type MessageValue struct {
 ```
 
 <a name="Node"></a>
-## type [Node](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Node](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3097,7 +3097,7 @@ func (*Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue
 Watch implements LeadershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
 
 <a name="NodeID"></a>
-## type [NodeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [NodeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3121,7 +3121,7 @@ func (NodeID) String() string
 String renders the id in decimal, the form an operator types back.
 
 <a name="Operator"></a>
-## type [Operator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Operator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3145,7 +3145,7 @@ func (Operator) Valid() bool
 Valid reports whether the operator satisfies the format rules.
 
 <a name="PEMIdentity"></a>
-## type [PEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [PEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3191,7 +3191,7 @@ func (*PEMIdentity) Roots() *x509.CertPool
 Roots returns the trusted CA pool the identity was read with, the union of every CA file seen so far, to pass as TransportConfig.Roots.
 
 <a name="PeerFlags"></a>
-## type [PeerFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [PeerFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3215,7 +3215,7 @@ func (PeerFlags) Has(x PeerFlags) bool
 Has reports whether every fact of x is set.
 
 <a name="PeerHealthValue"></a>
-## type [PeerHealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [PeerHealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3245,7 +3245,7 @@ type PeerHealthValue struct {
 ```
 
 <a name="PositionValue"></a>
-## type [PositionValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [PositionValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3265,7 +3265,7 @@ type PositionValue struct {
 ```
 
 <a name="PreconditionSpec"></a>
-## type [PreconditionSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [PreconditionSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3288,7 +3288,7 @@ type PreconditionSpec struct {
 ```
 
 <a name="QuarantineExit"></a>
-## type [QuarantineExit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [QuarantineExit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3303,7 +3303,7 @@ type QuarantineExit uint8
 ```
 
 <a name="ReadMode"></a>
-## type [ReadMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [ReadMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3318,7 +3318,7 @@ type ReadMode uint8
 ```
 
 <a name="RecoverOptions"></a>
-## type [RecoverOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [RecoverOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3342,7 +3342,7 @@ type RecoverOptions struct {
 ```
 
 <a name="Replicated"></a>
-## type [Replicated](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Replicated](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3371,7 +3371,7 @@ type Replicated interface {
 ```
 
 <a name="Replicated.Barrier"></a>
-### func \(Replicated\) [Barrier](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Replicated\) [Barrier](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
@@ -3380,7 +3380,7 @@ func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
 Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index.
 
 <a name="Replicated.Propose"></a>
-### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Replicated) Propose(ctx context.Context, data []byte) (TokenValue, any, error)
@@ -3389,7 +3389,7 @@ func (Replicated) Propose(ctx context.Context, data []byte) (TokenValue, any, er
 Propose replicates data and returns, once the entry is applied locally, its lineage-scoped token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit, and the caller must read the state before deciding.
 
 <a name="Replicated.Status"></a>
-### func \(Replicated\) [Status](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Replicated\) [Status](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Replicated) Status() StatusValue
@@ -3398,7 +3398,7 @@ func (Replicated) Status() StatusValue
 Status returns the node's view after its last turn.
 
 <a name="Replicated.WaitApplied"></a>
-### func \(Replicated\) [WaitApplied](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Replicated\) [WaitApplied](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Replicated) WaitApplied(ctx context.Context, t TokenValue) error
@@ -3407,7 +3407,7 @@ func (Replicated) WaitApplied(ctx context.Context, t TokenValue) error
 WaitApplied returns once the local node has applied t. A token of another lineage is LINEAGE\_MISMATCH.
 
 <a name="ReportValue"></a>
-## type [ReportValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [ReportValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3430,7 +3430,7 @@ type ReportValue struct {
 ```
 
 <a name="RestoreOptions"></a>
-## type [RestoreOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [RestoreOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3458,7 +3458,7 @@ type RestoreOptions struct {
 ```
 
 <a name="Role"></a>
-## type [Role](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Role](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3482,7 +3482,7 @@ func (Role) String() string
 String names the role.
 
 <a name="Snapshot"></a>
-## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3502,7 +3502,7 @@ type Snapshot interface {
 ```
 
 <a name="Snapshot.Release"></a>
-### func \(Snapshot\) [Release](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Snapshot\) [Release](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Snapshot) Release()
@@ -3511,7 +3511,7 @@ func (Snapshot) Release()
 Release frees the view.
 
 <a name="Snapshot.WriteTo"></a>
-### func \(Snapshot\) [WriteTo](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Snapshot\) [WriteTo](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Snapshot) WriteTo(w io.Writer) (int64, error)
@@ -3520,7 +3520,7 @@ func (Snapshot) WriteTo(w io.Writer) (int64, error)
 WriteTo writes the view's state.
 
 <a name="SnapshotHandle"></a>
-## type [SnapshotHandle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [SnapshotHandle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3541,7 +3541,7 @@ type SnapshotHandle interface {
 ```
 
 <a name="SnapshotHandle.Close"></a>
-### func \(SnapshotHandle\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotHandle\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotHandle) Close() error
@@ -3550,7 +3550,7 @@ func (SnapshotHandle) Close() error
 Close unpins it.
 
 <a name="SnapshotHandle.Meta"></a>
-### func \(SnapshotHandle\) [Meta](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotHandle\) [Meta](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotHandle) Meta() SnapshotMetaValue
@@ -3559,7 +3559,7 @@ func (SnapshotHandle) Meta() SnapshotMetaValue
 Meta describes the snapshot.
 
 <a name="SnapshotMetaValue"></a>
-## type [SnapshotMetaValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [SnapshotMetaValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3608,7 +3608,7 @@ type SnapshotMetaValue struct {
 ```
 
 <a name="SnapshotSink"></a>
-## type [SnapshotSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [SnapshotSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3630,7 +3630,7 @@ type SnapshotSink interface {
 ```
 
 <a name="SnapshotSink.Abort"></a>
-### func \(SnapshotSink\) [Abort](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotSink\) [Abort](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotSink) Abort() error
@@ -3639,7 +3639,7 @@ func (SnapshotSink) Abort() error
 Abort drops the spool.
 
 <a name="SnapshotSink.Commit"></a>
-### func \(SnapshotSink\) [Commit](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotSink\) [Commit](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotSink) Commit(final SnapshotMetaValue) error
@@ -3648,7 +3648,7 @@ func (SnapshotSink) Commit(final SnapshotMetaValue) error
 Commit publishes the snapshot; final carries the SHA-256 the engine computed over the DECODED stream.
 
 <a name="SnapshotStore"></a>
-## type [SnapshotStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [SnapshotStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3673,7 +3673,7 @@ type SnapshotStore interface {
 ```
 
 <a name="SnapshotStore.Create"></a>
-### func \(SnapshotStore\) [Create](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotStore\) [Create](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotStore) Create(id string, meta SnapshotMetaValue) (sink SnapshotSink, spooled int64, err error)
@@ -3682,7 +3682,7 @@ func (SnapshotStore) Create(id string, meta SnapshotMetaValue) (sink SnapshotSin
 Create opens the spool of id. When a spool of that id exists, it is returned with the ENCODED offset durably spooled so far.
 
 <a name="SnapshotStore.List"></a>
-### func \(SnapshotStore\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotStore\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotStore) List() ([]SnapshotMetaValue, error)
@@ -3691,7 +3691,7 @@ func (SnapshotStore) List() ([]SnapshotMetaValue, error)
 List returns the complete snapshots, newest first.
 
 <a name="SnapshotStore.Open"></a>
-### func \(SnapshotStore\) [Open](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotStore\) [Open](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotStore) Open(id string) (SnapshotHandle, error)
@@ -3700,7 +3700,7 @@ func (SnapshotStore) Open(id string) (SnapshotHandle, error)
 Open pins a snapshot until the handle is closed.
 
 <a name="SnapshotStore.Remove"></a>
-### func \(SnapshotStore\) [Remove](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(SnapshotStore\) [Remove](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (SnapshotStore) Remove(id string) error
@@ -3709,7 +3709,7 @@ func (SnapshotStore) Remove(id string) error
 Remove deletes a snapshot; refused while a handle is open.
 
 <a name="StampState"></a>
-## type [StampState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [StampState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3724,7 +3724,7 @@ type StampState uint8
 ```
 
 <a name="StampValue"></a>
-## type [StampValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [StampValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3753,7 +3753,7 @@ type StampValue struct {
 ```
 
 <a name="StateMachine"></a>
-## type [StateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [StateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3778,7 +3778,7 @@ type StateMachine interface {
 ```
 
 <a name="StateMachine.Apply"></a>
-### func \(StateMachine\) [Apply](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(StateMachine\) [Apply](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (StateMachine) Apply(e EntryValue) any
@@ -3787,7 +3787,7 @@ func (StateMachine) Apply(e EntryValue) any
 Apply applies one committed command and returns its result, delivered to the Propose that created it on the node that created it.
 
 <a name="StateMachine.Restore"></a>
-### func \(StateMachine\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(StateMachine\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (StateMachine) Restore(r io.Reader, meta SnapshotMetaValue) error
@@ -3796,7 +3796,7 @@ func (StateMachine) Restore(r io.Reader, meta SnapshotMetaValue) error
 Restore replaces the state with a snapshot's. It is serialised with Apply.
 
 <a name="StateMachine.Snapshot"></a>
-### func \(StateMachine\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(StateMachine\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (StateMachine) Snapshot() (Snapshot, error)
@@ -3805,7 +3805,7 @@ func (StateMachine) Snapshot() (Snapshot, error)
 Snapshot captures a point-in-time view of the state, cheaply: it is called on the apply goroutine.
 
 <a name="StatusValue"></a>
-## type [StatusValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [StatusValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3850,7 +3850,7 @@ func (*StatusValue) Precondition() PreconditionSpec
 Precondition returns the precondition an operation clearing the current alarm, or replacing the current contract, would carry.
 
 <a name="StopReasonValue"></a>
-## type [StopReasonValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [StopReasonValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -3880,7 +3880,7 @@ func (StopReasonValue) ExitCode() int
 ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage failure whose marker could not be written (ADR 0152 D4).
 
 <a name="TCPTransport"></a>
-## type [TCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [TCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -4030,7 +4030,7 @@ func (*TCPTransport) Unreachable(f func(coreconsensus.NodeID))
 Unreachable implements UnreachableReporter.
 
 <a name="TimingContractSpec"></a>
-## type [TimingContractSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [TimingContractSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -4058,7 +4058,7 @@ type TimingContractSpec struct {
 ```
 
 <a name="TokenValue"></a>
-## type [TokenValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [TokenValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -4091,7 +4091,7 @@ func (TokenValue) Position() PositionValue
 Position returns the token's position, without its lineage.
 
 <a name="Transport"></a>
-## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -4121,7 +4121,7 @@ type Transport interface {
 ```
 
 <a name="Transport.Bind"></a>
-### func \(Transport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Transport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Transport) Bind(group GroupID, deliver func(from AuthenticatedPeerValue, frame []byte), offer func(from AuthenticatedPeerValue, o InstallOfferValue) InstallAcceptValue, install func(InstallParams) error, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code)) error
@@ -4130,7 +4130,7 @@ func (Transport) Bind(group GroupID, deliver func(from AuthenticatedPeerValue, f
 Bind registers the group's callbacks. deliver gets the frame and the peer TLS authenticated, valid until deliver returns; offer is answered on the event loop; join is answered off it, under a deadline.
 
 <a name="Transport.Send"></a>
-### func \(Transport\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Transport\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Transport) Send(to NodeID, frame []byte)
@@ -4139,7 +4139,7 @@ func (Transport) Send(to NodeID, frame []byte)
 Send hands over an encoded frame. It never blocks and may drop; the transport owns frame after the call.
 
 <a name="Transport.SetMembership"></a>
-### func \(Transport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Transport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Transport) SetMembership(group GroupID, admitted []MemberValue)
@@ -4148,7 +4148,7 @@ func (Transport) SetMembership(group GroupID, admitted []MemberValue)
 SetMembership pushes the group's admitted members; the transport computes the union over its groups.
 
 <a name="Transport.Stream"></a>
-### func \(Transport\) [Stream](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(Transport\) [Stream](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (Transport) Stream(ctx context.Context, to NodeID, offer InstallOfferValue, open func(offset int64) (io.ReadCloser, error)) error
@@ -4157,7 +4157,7 @@ func (Transport) Stream(ctx context.Context, to NodeID, offer InstallOfferValue,
 Stream sends a snapshot from the offset the receiver accepted; open returns a reader at an encoded offset on a chunk boundary, which Stream closes.
 
 <a name="TransportConfig"></a>
-## type [TransportConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [TransportConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -4201,7 +4201,7 @@ type TransportConfig struct {
 ```
 
 <a name="UnreachableReporter"></a>
-## type [UnreachableReporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [UnreachableReporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
@@ -4219,7 +4219,7 @@ type UnreachableReporter interface {
 ```
 
 <a name="UnreachableReporter.Unreachable"></a>
-### func \(UnreachableReporter\) [Unreachable](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
+### func \(UnreachableReporter\) [Unreachable](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
 
 ```go
 func (UnreachableReporter) Unreachable(func(NodeID))
@@ -4228,7 +4228,7 @@ func (UnreachableReporter) Unreachable(func(NodeID))
 Unreachable registers the callback.
 
 <a name="VersionsValue"></a>
-## type [VersionsValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+## type [VersionsValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 

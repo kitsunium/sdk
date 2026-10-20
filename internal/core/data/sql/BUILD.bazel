@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "sql",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "sql.go",
         "sql_dialect.go",
         "sql_migration.go",
@@ -34,7 +34,7 @@ go_test(
     name = "sql_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "service_range_external_test.go",
         "sql_external_test.go",
     ],

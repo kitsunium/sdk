@@ -136,7 +136,7 @@ Unsupported is a type encoding/json refuses to encode; a value holding one is re
 Initialised with `github.com/kitsunium/sdk/internal/service/data/codec/jsonshape.Unsupported`.
 
 <a name="For"></a>
-## func [For](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go>)
+## func [For](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
 
 ```go
 func For[T any]() *Shape
@@ -145,7 +145,7 @@ func For[T any]() *Shape
 For describes the values of T on the wire: Of(reflect.TypeFor\[T]()).
 
 <a name="Of"></a>
-## func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go>)
+## func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
 
 ```go
 func Of(t reflect.Type) *Shape
@@ -154,7 +154,7 @@ func Of(t reflect.Type) *Shape
 Of describes the values of t on the wire. A nil t is Any. It never fails, and every call returns a new tree the caller may keep and change.
 
 <a name="Field"></a>
-## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go>)
+## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
 
 Field is one member of an Object, and the Go field behind it.
 
@@ -193,7 +193,7 @@ type Field struct {
 ```
 
 <a name="Kind"></a>
-## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go>)
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
 
 Kind is the JSON kind a value takes on the wire; its zero value is Any. It encodes as its lower-case name.
 
@@ -226,7 +226,7 @@ func (Kind) String() string
 String returns the kind's lower-case name: "object", "integer", "any".
 
 <a name="Shape"></a>
-## type [Shape](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/facade_gen.go>)
+## type [Shape](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
 
 Shape describes the values of one Go type on the wire.
 

@@ -18,7 +18,7 @@ the build it came from.
   (`SIGTERM`/`SIGKILL`/`SIGINT`/`SIGHUP`/`SIGQUIT`) and the most-used resource
   sentinels, so callers drive `Stop`/`SignalGroup` and build `Spec.Rlimits`
   without importing `internal/core/proc` (which they cannot — it is internal).
-- **Stdio re-exports** (`facade_gen.go` since ADR 0166; `stdio.go`, which held them, is gone, and the package comment is `doc.go`'s since ADR 0167): `StdioMode` and `StdioInherit` /
+- **Stdio re-exports** (`gen_facade.go` since ADR 0166; `stdio.go`, which held them, is gone, and the package comment is `doc.go`'s since ADR 0167): `StdioMode` and `StdioInherit` /
   `StdioNull` / `StdioCapture`, so a consumer sets `Spec.Stdio` — and captures
   a child's output into any `io.Writer` — with public names only.
   `TestCaptureAndBareNamesThroughTheFacade` is that consumer. It writes the
@@ -109,4 +109,4 @@ after Windows gained its backend; the first Windows run of the suite found it
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`gen_facade.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/proc.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `gen_facade.go`: the hand-written files keep the declarations of their own, and `doc.go` — kit's too (ADR 0167) — the package comment. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `gen_facade.go` edited by hand.

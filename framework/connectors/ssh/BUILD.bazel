@@ -11,10 +11,10 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "ssh",
     srcs = [
-        "codes_gen.go",
         "discover.go",
         "doc.go",
         "enroll.go",
+        "gen_codes.go",
         "key.go",
         "key_unix.go",
         "key_windows.go",
@@ -39,11 +39,11 @@ alias(
 go_test(
     name = "ssh_test",
     srcs = [
-        "api_gen_test.go",
         "cache_external_test.go",
         "enroll_external_test.go",
         "enroll_internal_test.go",
         "enroll_unix_external_test.go",
+        "gen_api_test.go",
         "grant_external_test.go",
         "identity_external_test.go",
         "key_external_test.go",

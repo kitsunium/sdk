@@ -192,7 +192,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/id.UnknownScheme`.
 Code `0.2.7.1` · reason `UNKNOWN_SCHEME` · public "No identifier generator is registered under that scheme"
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func Available() []Scheme
@@ -201,7 +201,7 @@ func Available() []Scheme
 Available returns the sorted list of registered Schemes.
 
 <a name="FormatTypeID"></a>
-## func [FormatTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [FormatTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func FormatTypeID(prefix string, uuid string) (typeID string, err error)
@@ -228,7 +228,7 @@ func NanoID() (newID string, err error)
 NanoID returns a fresh 21-character NanoID over the URL-safe alphabet. The characters are drawn by rejection sampling, so every symbol is equally likely; 21 of them carry 126 bits, slightly more than a UUIDv4.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func New(scheme Scheme) (newID string, err error)
@@ -237,7 +237,7 @@ func New(scheme Scheme) (newID string, err error)
 New generates a fresh identifier using the generator registered under scheme.
 
 <a name="NewNanoID"></a>
-## func [NewNanoID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [NewNanoID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func NewNanoID(size int) (g Generator, err error)
@@ -246,7 +246,7 @@ func NewNanoID(size int) (g Generator, err error)
 NewNanoID returns a NanoID Generator producing size characters, and refuses a non-positive size rather than return one that mints empty strings. Not added to the global registry — the registered NanoID singleton is the 21-character default.
 
 <a name="NewSnowflake"></a>
-## func [NewSnowflake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [NewSnowflake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func NewSnowflake(node int64) Generator
@@ -255,7 +255,7 @@ func NewSnowflake(node int64) Generator
 NewSnowflake returns a snowflake Generator bound to an explicit node id (reduced into the 10-bit node space). Not added to the global registry.
 
 <a name="NewTypeID"></a>
-## func [NewTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [NewTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func NewTypeID(prefix string) (g Generator, err error)
@@ -264,7 +264,7 @@ func NewTypeID(prefix string) (g Generator, err error)
 NewTypeID returns a TypeID Generator stamping prefix on every identifier — "user\_01h2xcejqtf2nbrexx3vqjhp41". prefix must be 1 to 63 lowercase ASCII letters, with '\_' allowed only between two letters; anything else is refused here rather than at every call. Not added to the global registry, because no prefix would be a defensible default (see TypeIDScheme).
 
 <a name="ParseKSUID"></a>
-## func [ParseKSUID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [ParseKSUID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func ParseKSUID(ksuid string) (issued time.Time, payload [16]byte, err error)
@@ -273,7 +273,7 @@ func ParseKSUID(ksuid string) (issued time.Time, payload [16]byte, err error)
 ParseKSUID decodes a canonical 27-character KSUID, returning the instant it was issued (second resolution, UTC) and its 16-byte random payload.
 
 <a name="ParseTypeID"></a>
-## func [ParseTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## func [ParseTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 ```go
 func ParseTypeID(typeID string) (prefix string, uuid string, err error)
@@ -318,7 +318,7 @@ func UUIDv7() (newID string, err error)
 UUIDv7 returns a fresh time-ordered UUIDv7 (k-sortable by creation time).
 
 <a name="Generator"></a>
-## type [Generator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## type [Generator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 Generator is the public alias for the identifier-generator contract.
 
@@ -336,21 +336,21 @@ type Generator interface {
 ```
 
 <a name="Generator.New"></a>
-### func \(Generator\) [New](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/id/design_gen.go>)
+### func \(Generator\) [New](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/id/gen_ports.go>)
 
 ```go
 func (Generator) New() (newID string, err error)
 ```
 
 <a name="Generator.Scheme"></a>
-### func \(Generator\) [Scheme](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/id/design_gen.go>)
+### func \(Generator\) [Scheme](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/id/gen_ports.go>)
 
 ```go
 func (Generator) Scheme() Scheme
 ```
 
 <a name="Scheme"></a>
-## type [Scheme](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/facade_gen.go>)
+## type [Scheme](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/gen_facade.go>)
 
 Scheme is the public alias for the identifier-scheme key.
 

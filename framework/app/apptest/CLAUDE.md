@@ -13,7 +13,7 @@ restart reading everything back (ADR 0175, ported from kitsunium/platform
 | `apptest.go` | `NewDisk`: a data directory of the test's own, with the secrets kit keeps beside it, and the `app.AppOption` that runs an app there (`app.DataDir`, which wins over an earlier `app.InMemory()`); it skips where `vfs.NewOS` answers `UnsupportedPlatform`. `Disk.Holding`: the files that keep one of the words in clear, sorted, with `.secrets` skipped |
 | `doc.go` | the package comment, kept by `design/framework/app.yaml` (`docs: design`) |
 | `apptest_external_test.go` | a desk product run through the facade only: sealed on disk, a public field in clear, read back after a restart, and `Holding` in order |
-| `api_gen_test.go` | the pins kit writes from the design |
+| `gen_api_test.go` | the pins kit writes from the design |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`) |
 
 ## Rules

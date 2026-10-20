@@ -186,7 +186,7 @@ func NewDialer(cfg Config) (Dialer, error)
 NewDialer returns the engine behind the Dialer port for the private socket at cfg.Path. The configuration is checked here, before anything is touched, and copied: editing cfg's slices afterwards changes nothing.
 
 <a name="RuntimeDir"></a>
-## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 ```go
 func RuntimeDir(app string) string
@@ -204,7 +204,7 @@ func RuntimeDirOr(app string, fallback string) string
 RuntimeDirOr is RuntimeDir with fallback in place of \<tmp>/\<app>-\<uid> (ADR 0182). It creates nothing.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 Config is where a private socket lives and who, besides its own account, may use it — the engine's configuration, shared by both ends.
 
@@ -239,7 +239,7 @@ type Config struct {
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 Conn is a connection with its peer's identity.
 
@@ -258,7 +258,7 @@ type Conn struct {
 ```
 
 <a name="Dialer"></a>
-## type [Dialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## type [Dialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 Dialer is the connecting end of a private socket: it reaches the listener its configuration names, and refuses one it cannot trust before a byte is sent.
 
@@ -277,7 +277,7 @@ type Dialer interface {
 ```
 
 <a name="Dialer.Dial"></a>
-### func \(Dialer\) [Dial](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/design_gen.go>)
+### func \(Dialer\) [Dial](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
 
 ```go
 func (Dialer) Dial(ctx context.Context) (*Conn, error)
@@ -286,7 +286,7 @@ func (Dialer) Dial(ctx context.Context) (*Conn, error)
 Dial connects within ctx. Peer names the listener where the kernel does; a listener of an account that is not admitted is refused.
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 Listener is the accepting end of a private socket: it hands out the connections of admitted peers only, and closes and counts the others.
 
@@ -317,7 +317,7 @@ type Listener interface {
 ```
 
 <a name="Listener.Accept"></a>
-### func \(Listener\) [Accept](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/design_gen.go>)
+### func \(Listener\) [Accept](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
 
 ```go
 func (Listener) Accept() (*Conn, error)
@@ -326,7 +326,7 @@ func (Listener) Accept() (*Conn, error)
 Accept returns the next connection of an admitted peer. A peer the kernel names and the configuration does not admit is closed at once, counted by Refused, and never returned. After Close it returns the CLOSED sentinel.
 
 <a name="Listener.Addr"></a>
-### func \(Listener\) [Addr](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/design_gen.go>)
+### func \(Listener\) [Addr](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
 
 ```go
 func (Listener) Addr() net.Addr
@@ -335,7 +335,7 @@ func (Listener) Addr() net.Addr
 Addr is the endpoint's address.
 
 <a name="Listener.Close"></a>
-### func \(Listener\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/design_gen.go>)
+### func \(Listener\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
 
 ```go
 func (Listener) Close() error
@@ -344,7 +344,7 @@ func (Listener) Close() error
 Close stops accepting and releases the endpoint.
 
 <a name="Listener.Path"></a>
-### func \(Listener\) [Path](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/design_gen.go>)
+### func \(Listener\) [Path](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
 
 ```go
 func (Listener) Path() string
@@ -353,7 +353,7 @@ func (Listener) Path() string
 Path is the endpoint's configured path — the socket file, or the path a Windows pipe's name is derived from.
 
 <a name="Listener.Refused"></a>
-### func \(Listener\) [Refused](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/design_gen.go>)
+### func \(Listener\) [Refused](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
 
 ```go
 func (Listener) Refused() int64
@@ -362,7 +362,7 @@ func (Listener) Refused() int64
 Refused is how many connections Accept closed because their peer was not admitted.
 
 <a name="Peer"></a>
-## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 Peer is who is at the other end of a connection, as the kernel says.
 

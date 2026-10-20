@@ -11,9 +11,9 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "transform",
     srcs = [
-        "codes_gen.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
         "s2.go",
         "transform.go",
         "zstd.go",
@@ -37,8 +37,8 @@ alias(
 go_test(
     name = "transform_test",
     srcs = [
-        "api_gen_test.go",
         "bomb_external_test.go",
+        "gen_api_test.go",
         "transform_bench_test.go",
         "transform_external_test.go",
         "transform_internal_test.go",

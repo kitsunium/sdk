@@ -6,7 +6,7 @@ go_library(
     name = "profiling",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "profiling.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
@@ -28,7 +28,7 @@ alias(
 go_test(
     name = "profiling_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "profiling_external_test.go",
     ],
     deps = [

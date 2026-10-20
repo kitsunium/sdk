@@ -109,7 +109,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/crypto.Key",
       "owner": "go:github.com/kitsunium/sdk/internal/core/crypto.Key",
       "doc": "Key is an opaque, redacting 256-bit symmetric key. Build one with NewKey; its\nString output is always \"<redacted>\".\n",
-      "file": "facade_gen.go",
+      "file": "gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -123,7 +123,7 @@
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/core/crypto.KeyLen",
       "doc": "KeyLen is the required symmetric key length in bytes (256-bit).\n",
-      "file": "facade_gen.go",
+      "file": "gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -135,7 +135,7 @@
       "spelled": "func(raw []byte) (key Key, err error)",
       "canonical": "func(raw []byte) (key github.com/kitsunium/sdk/pkg/v1/crypto.Key, err error)",
       "doc": "NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong\nlength returns InvalidKey; the bytes are copied defensively.\n",
-      "file": "facade_gen.go",
+      "file": "gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -147,7 +147,7 @@
       "spelled": "func(k Key, box []byte, aad []byte) (plaintext []byte, err error)",
       "canonical": "func(k github.com/kitsunium/sdk/pkg/v1/crypto.Key, box []byte, aad []byte) (plaintext []byte, err error)",
       "doc": "Open decrypts a box produced by Seal/SealAs under k, verifying aad, and\nreturns the plaintext. The algorithm is read from the box — the caller never\nnames it. Any failure returns the single non-oracle DecryptionFailed.\n",
-      "file": "facade_gen.go",
+      "file": "gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -207,7 +207,7 @@
       "spelled": "func(passphrase []byte, envelope string) (dek Key, err error)",
       "canonical": "func(passphrase []byte, envelope string) (dek github.com/kitsunium/sdk/pkg/v1/crypto.Key, err error)",
       "doc": "UnwrapKey recovers the data key sealed in envelope under passphrase. A\nstructurally invalid envelope returns InvalidKeyEnvelope; a wrong passphrase\nreturns the non-oracle DecryptionFailed.\n",
-      "file": "facade_gen.go",
+      "file": "gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -219,7 +219,7 @@
       "spelled": "func(passphrase []byte, dek Key) (envelope string, err error)",
       "canonical": "func(passphrase []byte, dek github.com/kitsunium/sdk/pkg/v1/crypto.Key) (envelope string, err error)",
       "doc": "WrapKey seals the data key dek at rest under passphrase, returning the frozen\n\"$kenv$\" envelope string. The KEK is stretched from passphrase with\nPBKDF2-SHA256 and the dek is sealed under AES-256-GCM; the envelope header is\nbound as AAD so tampering is detected on UnwrapKey.\n",
-      "file": "facade_gen.go",
+      "file": "gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -269,7 +269,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/crypto.Key",
       "owner": "go:github.com/kitsunium/sdk/internal/core/crypto.Key",
       "doc": "Key is an opaque, redacting 256-bit symmetric key — the same key type the AEAD\nsurface uses. SharedKey returns one; its String output is \"<redacted>\".\n",
-      "file": "agree/facade_gen.go",
+      "file": "agree/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -283,7 +283,7 @@
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/core/crypto.KeyLen",
       "doc": "KeyLen is the required symmetric key length in bytes (256-bit) — the length of\nthe Key SharedKey returns and that [NewKey] enforces.\n",
-      "file": "agree/facade_gen.go",
+      "file": "agree/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -295,7 +295,7 @@
       "spelled": "func(raw []byte) (key Key, err error)",
       "canonical": "func(raw []byte) (key github.com/kitsunium/sdk/pkg/v1/crypto/agree.Key, err error)",
       "doc": "NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong\nlength returns InvalidKey; the bytes are copied defensively. Use it to\nround-trip a SharedKey-shaped value without importing an unrelated facade.\n",
-      "file": "agree/facade_gen.go",
+      "file": "agree/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -358,7 +358,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash.DigestWriter",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash.DigestWriter",
       "doc": "DigestWriter tees writes into both a destination io.Writer and a running hash,\nexposing the digest of everything written so far. See [NewDigestWriter].\n",
-      "file": "hash/facade_gen.go",
+      "file": "hash/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -483,7 +483,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash.VerifyingReader",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash.VerifyingReader",
       "doc": "VerifyingReader wraps a source reader and verifies its digest against an\nexpected value on the final (EOF) read. See [NewVerifyingReader].\n",
-      "file": "hash/facade_gen.go",
+      "file": "hash/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -521,7 +521,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/crypto.Key",
       "owner": "go:github.com/kitsunium/sdk/internal/core/crypto.Key",
       "doc": "Key is an opaque, redacting 256-bit symmetric key — the master a KeyTree\nderives from and the type DeriveKey returns. Build one with [NewKey].\n",
-      "file": "kdf/facade_gen.go",
+      "file": "kdf/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -535,7 +535,7 @@
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/core/crypto.KeyLen",
       "doc": "KeyLen is the required symmetric key length in bytes (256-bit) — the length\n[NewKey] enforces.\n",
-      "file": "kdf/facade_gen.go",
+      "file": "kdf/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -548,7 +548,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree.KeyTree",
       "owner": "go:github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree.KeyTree",
       "doc": "KeyTree is the path-addressed hierarchical key-derivation node, re-exported\nfrom the service layer. Build one with NewKeyTree; Child descends a path and\nDeriveKey yields a 32-byte key at the current node.\n",
-      "file": "kdf/facade_gen.go",
+      "file": "kdf/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -560,7 +560,7 @@
       "spelled": "func(raw []byte) (key Key, err error)",
       "canonical": "func(raw []byte) (key github.com/kitsunium/sdk/pkg/v1/crypto/kdf.Key, err error)",
       "doc": "NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong\nlength returns InvalidKey; the bytes are copied defensively. Use it to build\nthe master a KeyTree derives from without importing an unrelated facade.\n",
-      "file": "kdf/facade_gen.go",
+      "file": "kdf/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -622,7 +622,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/crypto.Key",
       "owner": "go:github.com/kitsunium/sdk/internal/core/crypto.Key",
       "doc": "Key is an opaque, redacting 256-bit symmetric key — the same key type used by\nthe AEAD surface. Build one with [NewKey]; its String output is \"<redacted>\".\n",
-      "file": "mac/facade_gen.go",
+      "file": "mac/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -636,7 +636,7 @@
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/core/crypto.KeyLen",
       "doc": "KeyLen is the required symmetric key length in bytes (256-bit) — the length\n[NewKey] enforces.\n",
-      "file": "mac/facade_gen.go",
+      "file": "mac/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -648,7 +648,7 @@
       "spelled": "func(raw []byte) (key Key, err error)",
       "canonical": "func(raw []byte) (key github.com/kitsunium/sdk/pkg/v1/crypto/mac.Key, err error)",
       "doc": "NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong\nlength returns InvalidKey; the bytes are copied defensively.\n",
-      "file": "mac/facade_gen.go",
+      "file": "mac/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -708,7 +708,7 @@
       "spelled": "func(password []byte) bool",
       "canonical": "func(password []byte) bool",
       "doc": "IsCommon reports whether password is one of the ten thousand most common\npasswords, compared case-insensitively — PASSWORD as password. The empty\npassword is not: refusing it is a length rule's job.\n",
-      "file": "password/facade_gen.go",
+      "file": "password/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -720,7 +720,7 @@
       "spelled": "func(phc string) bool",
       "canonical": "func(phc string) bool",
       "doc": "NeedsRehash reports whether the stored PHC hash was produced with cost\nparameters weaker than its scheme's current policy — call it after a\nsuccessful Verify to transparently upgrade the stored hash.\n",
-      "file": "password/facade_gen.go",
+      "file": "password/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },
@@ -745,7 +745,7 @@
       "spelled": "func(password []byte, phc string) (ok bool, err error)",
       "canonical": "func(password []byte, phc string) (ok bool, err error)",
       "doc": "Verify reports whether password matches the stored PHC hash, comparing in\nconstant time. The scheme is read from phc. A malformed phc or unregistered\nscheme returns an error; a genuine mismatch is (false, nil).\n",
-      "file": "password/facade_gen.go",
+      "file": "password/gen_facade.go",
       "layer": "public",
       "family": "crypto"
     },

@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "level",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "level.go",
         "level_compliance.go",
         "parse.go",
@@ -28,7 +28,7 @@ go_test(
     name = "level_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "level_external_test.go",
         "parse_external_test.go",
         "var_external_test.go",

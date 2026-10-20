@@ -6,10 +6,10 @@ go_library(
     name = "s3",
     srcs = [
         "client.go",
-        "codes_gen.go",
         "cred_adapter.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
         "s3.go",
         "s3sink.go",
     ],
@@ -36,10 +36,10 @@ alias(
 go_test(
     name = "s3_test",
     srcs = [
-        "api_gen_test.go",
         "client_internal_test.go",
         "codes_external_test.go",
         "cred_adapter_internal_test.go",
+        "gen_api_test.go",
         "s3_external_test.go",
         "s3_internal_test.go",
         "s3sink_internal_test.go",

@@ -672,7 +672,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.UnknownEx
 Code `0.2.20.3` · reason `UNKNOWN_EXPORTER` · public "No trace exporter is registered under that name"
 
 <a name="AlwaysSample"></a>
-## func [AlwaysSample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [AlwaysSample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func AlwaysSample(params SamplingParams) bool
@@ -681,7 +681,7 @@ func AlwaysSample(params SamplingParams) bool
 AlwaysSample keeps every root trace.
 
 <a name="AvailableExporters"></a>
-## func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func AvailableExporters() []ExporterName
@@ -690,7 +690,7 @@ func AvailableExporters() []ExporterName
 AvailableExporters returns the sorted list of registered names. The OTLP/HTTP emitter never appears in it.
 
 <a name="Bool"></a>
-## func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Bool(key string, value bool) Attr
@@ -699,7 +699,7 @@ func Bool(key string, value bool) Attr
 Bool returns a bool-valued attribute.
 
 <a name="ClientMiddleware"></a>
-## func [ClientMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ClientMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ClientMiddleware(tracer Tracer) corenet.Middleware[http.RoundTripper]
@@ -708,7 +708,7 @@ func ClientMiddleware(tracer Tracer) corenet.Middleware[http.RoundTripper]
 ClientMiddleware returns a middleware tracing every outbound request and INJECTING the traceparent into it. It decorates the RoundTripper, so no call site can skip it, and it clones the request rather than mutating one the caller still holds.
 
 <a name="ContextWithSpanContext"></a>
-## func [ContextWithSpanContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ContextWithSpanContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ContextWithSpanContext(parent context.Context, spanContext SpanContext) context.Context
@@ -717,7 +717,7 @@ func ContextWithSpanContext(parent context.Context, spanContext SpanContext) con
 ContextWithSpanContext returns a copy of parent carrying spanContext. An invalid context is still stored: it is how "this scope deliberately has no trace" is expressed, and it shadows any outer one.
 
 <a name="EncodeOTLPJSON"></a>
-## func [EncodeOTLPJSON](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [EncodeOTLPJSON](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func EncodeOTLPJSON(spans Spans) (doc []byte, err error)
@@ -726,7 +726,7 @@ func EncodeOTLPJSON(spans Spans) (doc []byte, err error)
 EncodeOTLPJSON renders spans as ONE OTLP/JSON ExportTraceServiceRequest — exactly the bytes that go in the body of a POST to /v1/traces. It does no I/O, so an encoding question never becomes a network question.
 
 <a name="Export"></a>
-## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Export(name ExporterName, spans Spans) error
@@ -735,7 +735,7 @@ func Export(name ExporterName, spans Spans) error
 Export ships spans through the SpanExporter registered as name.
 
 <a name="Extract"></a>
-## func [Extract](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Extract](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Extract(carrier Carrier) SpanContext
@@ -744,7 +744,7 @@ func Extract(carrier Carrier) SpanContext
 Extract reads a span context out of carrier, returning the invalid zero value when there is nothing usable. It returns no error on purpose — see the package documentation.
 
 <a name="Float64"></a>
-## func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Float64(key string, value float64) Attr
@@ -753,7 +753,7 @@ func Float64(key string, value float64) Attr
 Float64 returns a double attribute.
 
 <a name="FormatTraceParent"></a>
-## func [FormatTraceParent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [FormatTraceParent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func FormatTraceParent(context SpanContext) (header string, ok bool)
@@ -762,7 +762,7 @@ func FormatTraceParent(context SpanContext) (header string, ok bool)
 FormatTraceParent renders a span context as a version-00 traceparent, reporting ok=false when the context names no joinable span — an all-zero identifier is a header every conforming receiver must ignore, so there is nothing to write. Undefined flag bits are masked here, which is where this SDK acts as a producer.
 
 <a name="Inject"></a>
-## func [Inject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Inject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Inject(context SpanContext, carrier Carrier)
@@ -771,7 +771,7 @@ func Inject(context SpanContext, carrier Carrier)
 Inject writes context into carrier as a traceparent, plus a tracestate when the vendor list is non-empty. An invalid context writes NOTHING — not an empty header, not a zero-filled one.
 
 <a name="Int64"></a>
-## func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Int64(key string, value int64) Attr
@@ -780,7 +780,7 @@ func Int64(key string, value int64) Attr
 Int64 returns a signed-integer attribute.
 
 <a name="LookupExporter"></a>
-## func [LookupExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [LookupExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func LookupExporter(name ExporterName) (e SpanExporter, ok bool)
@@ -789,7 +789,7 @@ func LookupExporter(name ExporterName) (e SpanExporter, ok bool)
 LookupExporter returns the SpanExporter registered under name.
 
 <a name="NeverSample"></a>
-## func [NeverSample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NeverSample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NeverSample(params SamplingParams) bool
@@ -798,7 +798,7 @@ func NeverSample(params SamplingParams) bool
 NeverSample drops every root trace. It exists so "off" has a NAME a reviewer can grep for, rather than a rate of zero that is indistinguishable from a field nobody set.
 
 <a name="NewOTLPHTTPExporter"></a>
-## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error)
@@ -807,7 +807,7 @@ func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanEx
 NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP collector. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/app/resilience](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/resilience).
 
 <a name="NewOTLPJSONExporter"></a>
-## func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NewOTLPJSONExporter(name ExporterName, dst io.Writer) SpanExporter
@@ -816,7 +816,7 @@ func NewOTLPJSONExporter(name ExporterName, dst io.Writer) SpanExporter
 NewOTLPJSONExporter returns a SpanExporter writing each batch to dst as one newline-terminated OTLP/JSON document. It is not registered — bind it yourself.
 
 <a name="NewRecorder"></a>
-## func [NewRecorder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NewRecorder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NewRecorder(cfg RecorderConfig) *Recorder
@@ -825,7 +825,7 @@ func NewRecorder(cfg RecorderConfig) *Recorder
 NewRecorder builds the in-memory span destination. Its Sink is what a TracerConfig takes, and its Collect DRAINS — a Recorder has exactly one reader.
 
 <a name="NewSpanID"></a>
-## func [NewSpanID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NewSpanID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NewSpanID() (id SpanID, err error)
@@ -834,7 +834,7 @@ func NewSpanID() (id SpanID, err error)
 NewSpanID draws a fresh random span identifier.
 
 <a name="NewTraceID"></a>
-## func [NewTraceID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NewTraceID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NewTraceID() (id TraceID, err error)
@@ -843,7 +843,7 @@ func NewTraceID() (id TraceID, err error)
 NewTraceID draws a fresh random trace identifier.
 
 <a name="NewTracer"></a>
-## func [NewTracer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [NewTracer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func NewTracer(cfg TracerConfig) *SDKTracer
@@ -854,7 +854,7 @@ NewTracer builds a Tracer from cfg, applying every clamp once. It cannot fail: e
 It returns the concrete [SDKTracer](#SDKTracer) rather than the [Tracer](#Tracer) port, so a caller keeps Resource and Scope, and anything the concrete type grows later, without the port having to grow (ADR 0039).
 
 <a name="OTLPRetryable"></a>
-## func [OTLPRetryable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [OTLPRetryable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func OTLPRetryable(err error) bool
@@ -863,7 +863,7 @@ func OTLPRetryable(err error) bool
 OTLPRetryable reports whether err is an OTLP/HTTP failure the specification says may be replayed. Its signature is exactly resilience.RetryConfig.Retryable's.
 
 <a name="ParentBased"></a>
-## func [ParentBased](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ParentBased](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ParentBased(root Sampler) Sampler
@@ -872,7 +872,7 @@ func ParentBased(root Sampler) Sampler
 ParentBased returns a Sampler that honours a valid parent's decision and consults root only at the start of a trace. It is what almost every deployment wants — see the package documentation on why re-deciding produces a trace with holes in it. A nil root clamps to AlwaysSample.
 
 <a name="ParseSpanID"></a>
-## func [ParseSpanID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ParseSpanID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ParseSpanID(text string) (id SpanID, err error)
@@ -881,7 +881,7 @@ func ParseSpanID(text string) (id SpanID, err error)
 ParseSpanID reads 16 lowercase hex digits, refusing an all-zero result.
 
 <a name="ParseTraceID"></a>
-## func [ParseTraceID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ParseTraceID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ParseTraceID(text string) (id TraceID, err error)
@@ -890,7 +890,7 @@ func ParseTraceID(text string) (id TraceID, err error)
 ParseTraceID reads 32 lowercase hex digits, refusing an all-zero result.
 
 <a name="ParseTraceParent"></a>
-## func [ParseTraceParent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ParseTraceParent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ParseTraceParent(header string) (context SpanContext, err error)
@@ -899,7 +899,7 @@ func ParseTraceParent(header string) (context SpanContext, err error)
 ParseTraceParent reads a traceparent header value, with a typed error. It is the diagnostic form of Extract: use it when you are debugging a header, not when you are serving a request.
 
 <a name="ParseTraceState"></a>
-## func [ParseTraceState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ParseTraceState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ParseTraceState(header string) (state TraceState, err error)
@@ -908,7 +908,7 @@ func ParseTraceState(header string) (state TraceState, err error)
 ParseTraceState reads a tracestate header value. It refuses the whole header rather than salvaging the members it understood: a half-parsed list forwarded to the next hop is a list this process invented.
 
 <a name="Ratio"></a>
-## func [Ratio](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [Ratio](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func Ratio(fraction float64) (sampler Sampler, err error)
@@ -919,7 +919,7 @@ Ratio returns a Sampler keeping a deterministic fraction of root traces, decided
 It REFUSES exactly 0, and that refusal is the point. A float64 left unset, a JSON document missing the key and a YAML \`rate:\` with nothing after it all produce 0.0 — so a rate of zero means both "sample nothing" and "nobody configured this", and nothing in the type can tell them apart. The failure is silent: no error, no log, and no telemetry, where the absence of telemetry IS the symptom. Say NeverSample for none and AlwaysSample (or Ratio(1)) for all.
 
 <a name="RecordError"></a>
-## func [RecordError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [RecordError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func RecordError(span Span, err error)
@@ -930,7 +930,7 @@ RecordError records err on span as the conventional \`exception\` event and mark
 It is a helper rather than a Span method because what an error's type is, and whether recording one should also set the status, are judgements about the caller's error model — and a port method would freeze this SDK's answer into every downstream implementation (ADR 0039).
 
 <a name="RegisterExporter"></a>
-## func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func RegisterExporter(e SpanExporter) SpanExporter
@@ -939,7 +939,7 @@ func RegisterExporter(e SpanExporter) SpanExporter
 RegisterExporter inserts e under e.Name(). It panics on a nil exporter or a distinct exporter claiming a taken name.
 
 <a name="ServerMiddleware"></a>
-## func [ServerMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [ServerMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func ServerMiddleware(tracer Tracer) corenet.Middleware[http.Handler]
@@ -948,7 +948,7 @@ func ServerMiddleware(tracer Tracer) corenet.Middleware[http.Handler]
 ServerMiddleware returns a middleware tracing every inbound request: it extracts the parent context from the headers, starts a SERVER span named by the request method, and records the status. A malformed traceparent starts a new trace and never fails the request.
 
 <a name="SpanContextFromContext"></a>
-## func [SpanContextFromContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [SpanContextFromContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func SpanContextFromContext(ctx context.Context) SpanContext
@@ -957,7 +957,7 @@ func SpanContextFromContext(ctx context.Context) SpanContext
 SpanContextFromContext returns the span context carried by ctx, or the invalid zero value when there is none.
 
 <a name="String"></a>
-## func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
 func String(key string, value string) Attr
@@ -966,7 +966,7 @@ func String(key string, value string) Attr
 String returns a string-valued attribute.
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Attr is one typed dimension. It is the SAME type as [github.com/kitsunium/sdk/pkg/v1/observe/metrics.Attr](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/observe/metrics#Attr), deliberately: an attribute is OTel's common.proto, shared by every signal, so a value built for a metric is accepted by a span and the reverse.
 
@@ -1052,7 +1052,7 @@ func (Attr) Str() string
 Str returns the string value, and the empty string for every other kind.
 
 <a name="AttrKind"></a>
-## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 AttrKind discriminates an Attr's value type.
 
@@ -1067,7 +1067,7 @@ type AttrKind uint8
 ```
 
 <a name="Carrier"></a>
-## type [Carrier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Carrier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Carrier is the two-method surface a header set presents for propagation. It is exactly http.Header's Get/Set pair, so http.Header satisfies it with no adapter.
 
@@ -1085,21 +1085,21 @@ type Carrier interface {
 ```
 
 <a name="Carrier.Get"></a>
-### func \(Carrier\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Carrier\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Carrier) Get(key string) string
 ```
 
 <a name="Carrier.Set"></a>
-### func \(Carrier\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Carrier\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Carrier) Set(key string, value string)
 ```
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Event is a timestamped point inside a span.
 
@@ -1131,7 +1131,7 @@ func (Event) Normalized() EventValue
 Normalized returns the event a span actually records: attributes sorted, validated and owned, so the caller's slice cannot be mutated afterwards through the span.
 
 <a name="ExporterName"></a>
-## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ExporterName is the typed key a SpanExporter registers under.
 
@@ -1155,7 +1155,7 @@ func (ExporterName) String() string
 String returns the raw name.
 
 <a name="Kind"></a>
-## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Kind says how a span relates to its neighbours.
 
@@ -1190,7 +1190,7 @@ func (Kind) String() string
 String renders the kind as its OpenTelemetry name, for a text rendering and for a test failure that has to be readable. It is never what goes on the wire: OTLP/JSON carries the integer.
 
 <a name="Link"></a>
-## type [Link](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Link](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Link points at a causally related span in another trace.
 
@@ -1229,7 +1229,7 @@ func (Link) Normalized() LinkValue
 Normalized returns the link a span actually records: attributes sorted, validated and owned.
 
 <a name="OTLPHTTPConfig"></a>
-## type [OTLPHTTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [OTLPHTTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 OTLPHTTPConfig configures the OTLP/HTTP exporter.
 
@@ -1250,7 +1250,7 @@ type OTLPHTTPConfig struct {
 ```
 
 <a name="Recorder"></a>
-## type [Recorder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Recorder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Recorder accumulates finished spans in memory and hands them out in batches. It is the in-tree SpanSink.
 
@@ -1325,7 +1325,7 @@ Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig.
 It is a method returning a bound method value rather than the Recorder implementing an interface, because SpanSink is a FUNC port — which is the point of a func port: there is no interface for a caller to satisfy, so there is nothing for a future version to widen (ADR 0041).
 
 <a name="RecorderConfig"></a>
-## type [RecorderConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [RecorderConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 RecorderConfig configures a Recorder.
 
@@ -1353,7 +1353,7 @@ type RecorderConfig struct {
 ```
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Resource identifies the producer of the telemetry. The same type a MeterConfig takes, so a process cannot carry two Resources that disagree about service.name — which is the key a backend correlates a trace with a metric on.
 
@@ -1372,7 +1372,7 @@ type Resource struct {
 ```
 
 <a name="SDKTracer"></a>
-## type [SDKTracer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SDKTracer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SDKTracer is the concrete [Tracer](#Tracer) that [NewTracer](#NewTracer) returns: the port's Start, plus Resource and Scope, which read back what it stamps on every span it starts. The port keeps the name Tracer; this is the SDK's implementation of it, in OpenTelemetry's sense of API and SDK. Name it to keep a tracer in a field, or to pass one to a function of your own.
 
@@ -1425,7 +1425,7 @@ An empty name panics with InvalidSpanName: it is a literal at the call site, so 
 Minting cannot fail, so Start has no error to report or degrade from: the ids come from crypto/rand.Read, which since Go 1.24 never returns an error — a failing source crashes the program instead.
 
 <a name="Sampler"></a>
-## type [Sampler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Sampler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Sampler decides whether a ROOT trace is recorded. A func port, so it cannot grow a method at all.
 
@@ -1440,7 +1440,7 @@ type Sampler func(params SamplingParams) bool
 ```
 
 <a name="SamplingParams"></a>
-## type [SamplingParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SamplingParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SamplingParams is everything a Sampler sees.
 
@@ -1471,7 +1471,7 @@ type SamplingParams struct {
 ```
 
 <a name="Scope"></a>
-## type [Scope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Scope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Scope identifies the instrumentation that started the spans.
 
@@ -1494,7 +1494,7 @@ type Scope struct {
 ```
 
 <a name="Span"></a>
-## type [Span](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Span](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Span is one live, recording span. FROZEN at five methods (ADR 0039).
 
@@ -1520,7 +1520,7 @@ type Span interface {
 ```
 
 <a name="Span.AddEvent"></a>
-### func \(Span\) [AddEvent](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Span\) [AddEvent](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Span) AddEvent(name string, attrs ...coreotel.AttrValue)
@@ -1529,7 +1529,7 @@ func (Span) AddEvent(name string, attrs ...coreotel.AttrValue)
 AddEvent records a timestamped point inside the span.
 
 <a name="Span.End"></a>
-### func \(Span\) [End](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Span\) [End](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Span) End()
@@ -1538,7 +1538,7 @@ func (Span) End()
 End closes the span and hands it to the Tracer's SpanSink.
 
 <a name="Span.SetAttrs"></a>
-### func \(Span\) [SetAttrs](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Span\) [SetAttrs](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Span) SetAttrs(attrs ...coreotel.AttrValue)
@@ -1547,7 +1547,7 @@ func (Span) SetAttrs(attrs ...coreotel.AttrValue)
 SetAttrs adds or replaces typed dimensions on the span.
 
 <a name="Span.SetStatus"></a>
-### func \(Span\) [SetStatus](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Span\) [SetStatus](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Span) SetStatus(code StatusCode, message string)
@@ -1556,7 +1556,7 @@ func (Span) SetStatus(code StatusCode, message string)
 SetStatus records the operation's outcome.
 
 <a name="Span.SpanContext"></a>
-### func \(Span\) [SpanContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Span\) [SpanContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Span) SpanContext() SpanContextValue
@@ -1565,7 +1565,7 @@ func (Span) SpanContext() SpanContextValue
 SpanContext returns the span's identity — what Inject propagates.
 
 <a name="SpanContext"></a>
-## type [SpanContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SpanContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SpanContext is the immutable identity of a span — what travels in a traceparent and what a child inherits.
 
@@ -1624,7 +1624,7 @@ func (SpanContext) WithState(state StateValue) SpanContextValue
 WithState returns a copy of c carrying state. It exists so a caller who mutates the vendor list does not have to rebuild the identity around it.
 
 <a name="SpanData"></a>
-## type [SpanData](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SpanData](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SpanData is one FINISHED span — what a SpanSink receives and an exporter ships. The live one is [Span](#Span).
 
@@ -1682,7 +1682,7 @@ func (SpanData) IsRoot() bool
 IsRoot reports whether the span has no parent.
 
 <a name="SpanExporter"></a>
-## type [SpanExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SpanExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SpanExporter ships a batch of finished spans to a backend.
 
@@ -1700,21 +1700,21 @@ type SpanExporter interface {
 ```
 
 <a name="SpanExporter.Export"></a>
-### func \(SpanExporter\) [Export](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(SpanExporter\) [Export](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (SpanExporter) Export(spans SpansValue) error
 ```
 
 <a name="SpanExporter.Name"></a>
-### func \(SpanExporter\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(SpanExporter\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (SpanExporter) Name() ExporterName
 ```
 
 <a name="SpanID"></a>
-## type [SpanID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SpanID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SpanID identifies one span: eight octets, rendered as 16 lowercase hex digits. The all-zero value is invalid, and is also how "no parent" is spelled.
 
@@ -1747,7 +1747,7 @@ func (SpanID) String() string
 String renders the identifier as 16 lowercase hex digits.
 
 <a name="SpanParams"></a>
-## type [SpanParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SpanParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SpanParams are the facts a span is born with. The zero value is an INTERNAL span starting now.
 
@@ -1777,7 +1777,7 @@ type SpanParams struct {
 ```
 
 <a name="SpanSink"></a>
-## type [SpanSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [SpanSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 SpanSink receives every sampled span at End. A func port, for the same reason.
 
@@ -1792,7 +1792,7 @@ type SpanSink func(span SpanValue)
 ```
 
 <a name="Spans"></a>
-## type [Spans](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Spans](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Spans is a batch of finished spans plus the Resource and Scope that describe all of them.
 
@@ -1826,7 +1826,7 @@ func (Spans) IsEmpty() bool
 IsEmpty reports whether the payload carries no span. An exporter uses it to skip a POST that would carry nothing.
 
 <a name="Status"></a>
-## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Status is a span's recorded outcome.
 
@@ -1867,7 +1867,7 @@ func (Status) Resolved() StatusValue
 Resolved returns the status a span actually carries: an undeclared code clamps to StatusUnset, and a Message survives only on StatusError.
 
 <a name="StatusCode"></a>
-## type [StatusCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [StatusCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 StatusCode is a span's verdict: unset, ok or error.
 
@@ -1891,7 +1891,7 @@ func (StatusCode) String() string
 String renders the code as its OpenTelemetry name, for text output and readable test failures. The wire carries the integer.
 
 <a name="TraceFlags"></a>
-## type [TraceFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [TraceFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 TraceFlags is the traceparent flag byte. Only bit 0, sampled, is defined.
 
@@ -1935,7 +1935,7 @@ func (TraceFlags) WithSampled(sampled bool) TraceFlags
 WithSampled returns f with the sampled bit set to sampled, leaving every other bit as it was.
 
 <a name="TraceID"></a>
-## type [TraceID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [TraceID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 TraceID identifies one trace: sixteen octets, rendered as 32 lowercase hex digits. The all-zero value is invalid.
 
@@ -1968,7 +1968,7 @@ func (TraceID) String() string
 String renders the identifier as 32 lowercase hex digits — the spelling both traceparent and OTLP/JSON use. OTLP/JSON is the one place the protobuf-JSON mapping is overridden: "the traceId and spanId byte arrays are represented as case-insensitive hex-encoded strings; they are not base64-encoded".
 
 <a name="TraceState"></a>
-## type [TraceState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [TraceState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 TraceState is the parsed tracestate header: an ordered vendor list, leftmost first. Immutable.
 
@@ -2034,7 +2034,7 @@ String renders the list as a tracestate header value: \`key=value\` members join
 The OWS the grammar allows is not reproduced. It is optional, it carries no meaning, and omitting it makes the header a deterministic function of the list — which is what lets a test compare bytes rather than re-parse.
 
 <a name="Tracer"></a>
-## type [Tracer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [Tracer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 Tracer starts spans. FROZEN at one method (ADR 0039).
 
@@ -2051,14 +2051,14 @@ type Tracer interface {
 ```
 
 <a name="Tracer.Start"></a>
-### func \(Tracer\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/design_gen.go>)
+### func \(Tracer\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
 
 ```go
 func (Tracer) Start(ctx context.Context, name string, params SpanParams) (child context.Context, span Span)
 ```
 
 <a name="TracerConfig"></a>
-## type [TracerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/facade_gen.go>)
+## type [TracerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 TracerConfig configures a Tracer. Every field has a resolved meaning when left unset.
 

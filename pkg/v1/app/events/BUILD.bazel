@@ -6,7 +6,7 @@ go_library(
     name = "events",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/events",
     visibility = ["//visibility:public"],
@@ -26,8 +26,8 @@ go_test(
     name = "events_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "events_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":events",

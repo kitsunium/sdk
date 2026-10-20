@@ -46,7 +46,7 @@ mechanism lives here, the capacity thresholds stay with the consumers
 ```sh
 bazel test --config=race //internal/kernel/concur/recycler:recycler_test
 # the zero-alloc contracts (design/sdk.yaml budgets, ADR 0165) run race off —
-# perf_gen_test.go over perf_fixtures_test.go, in kit's section of the alloc
+# gen_perf_test.go over perf_fixtures_test.go, in kit's section of the alloc
 # lane (`make test-alloc`, tools/alloc-lane-targets.txt):
 bazel test --config=alloc //internal/kernel/concur/recycler:recycler_test
 ```

@@ -805,7 +805,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.WriteUnco
 Code `0.3.80.15` · reason `WRITE_UNCONFIRMED` · public "The document was stored, but its durability could not be confirmed"
 
 <a name="Index"></a>
-## func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 ```go
 func Index[T any](name string, keys func(T) []string) IndexSpec[T]
@@ -814,7 +814,7 @@ func Index[T any](name string, keys func(T) []string) IndexSpec[T]
 Index declares an index where a document may have several keys and a key several documents. Empty keys are not indexed.
 
 <a name="Open"></a>
-## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 ```go
 func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)
@@ -823,7 +823,7 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)
 Open builds a store from cfg with the secondary indexes given: in memory without a filesystem, otherwise loaded from it — the snapshot, the overlay replayed on top, the indexes rebuilt. It creates the directories the store lives in, 0700, and writes its files 0600.
 
 <a name="OpenSQL"></a>
-## func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 ```go
 func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error)
@@ -832,7 +832,7 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 OpenSQL builds a store over SQL from cfg with the secondary indexes given, declared as for [Open](#Open). It sends no statement: its tables are [SQLMigration](#SQLMigration)'s, run by the caller's Migrator before the store is used.
 
 <a name="SQLMigration"></a>
-## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 ```go
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -841,7 +841,7 @@ func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migrat
 SQLMigration returns the migration that creates the two tables a SQL store named table keeps on dialect, numbered version for the caller's own version table. Its Down drops both, and every document in them. Every statement does nothing when its table exists, so a run MySQL's implicit commit stopped halfway completes when it runs again.
 
 <a name="SQLVersionsMigration"></a>
-## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 ```go
 func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -850,7 +850,7 @@ func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sq
 SQLVersionsMigration returns the migration that creates the table a SQL store named table keeps its versions in on dialect, numbered version for the caller's own version table, beside [SQLMigration](#SQLMigration)'s. A store opened with [SQLConfig](#SQLConfig).Versions needs it. Its Down drops the table, and every version in it: run it to turn versions off for good.
 
 <a name="Unique"></a>
-## func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 ```go
 func Unique[T any](name string, key func(T) string) IndexSpec[T]
@@ -859,7 +859,7 @@ func Unique[T any](name string, key func(T) string) IndexSpec[T]
 Unique declares a unique index over the one key key returns. An empty key is not indexed, so any number of documents may have none.
 
 <a name="Announcer"></a>
-## type [Announcer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Announcer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Announcer is the public alias for the pair of hooks both engines answer exactly as they are: OnWrite and OnDelete.
 
@@ -883,7 +883,7 @@ type Announcer interface {
 ```
 
 <a name="Announcer.OnDelete"></a>
-### func \(Announcer\) [OnDelete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Announcer\) [OnDelete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Announcer) OnDelete(fn func(key string)) (remove func())
@@ -892,7 +892,7 @@ func (Announcer) OnDelete(fn func(key string)) (remove func())
 OnDelete registers fn to be told the key of every document Delete or Trash removed, on the same terms as OnWrite.
 
 <a name="Announcer.OnWrite"></a>
-### func \(Announcer\) [OnWrite](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Announcer\) [OnWrite](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Announcer) OnWrite(fn func(key string)) (remove func())
@@ -901,7 +901,7 @@ func (Announcer) OnWrite(fn func(key string)) (remove func())
 OnWrite registers fn to be told the key of every document Put, Insert, Replace, Update or Restore stored, and returns the function that removes the registration. A nil fn registers nothing. A panic in fn reaches the writer after its write stood.
 
 <a name="Collection"></a>
-## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Collection is the public alias for the port of a store whose calls take no context, which [Store](#Store) implements: Get, List, Filter, Entries, Lookup and Find; Put, Insert, Replace, Update and Delete; OnWrite and OnDelete. It is what a caller depends on to stand a double in for a [Store](#Store); Stats, Fold and Close are the engine's own.
 
@@ -929,7 +929,7 @@ type Collection[T any] interface {
 ```
 
 <a name="Collection.Delete"></a>
-### func \(Collection\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Delete(key string) error
@@ -938,7 +938,7 @@ func (Collection) Delete(key string) error
 Delete removes the document stored under key, or returns DOCUMENT\_NOT\_FOUND. Its versions go with it.
 
 <a name="Collection.Entries"></a>
-### func \(Collection\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Entries(limit int) ([]EntryValue, error)
@@ -947,7 +947,7 @@ func (Collection) Entries(limit int) ([]EntryValue, error)
 Entries returns up to limit stored documents as JSON, in key order — every one when limit is not positive — each a copy the caller owns.
 
 <a name="Collection.Filter"></a>
-### func \(Collection\) [Filter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Filter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Filter(keep func(T) bool) ([]T, error)
@@ -956,7 +956,7 @@ func (Collection) Filter(keep func(T) bool) ([]T, error)
 Filter returns the documents keep accepts, in key order. It decodes every document; an index is the way not to.
 
 <a name="Collection.Find"></a>
-### func \(Collection\) [Find](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Find](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Find(index string, key string) ([]T, error)
@@ -965,7 +965,7 @@ func (Collection) Find(index string, key string) ([]T, error)
 Find returns the documents filed under key in the index named index, in store-key order. It reads any index, unique or not, and no document is an empty slice, not an error.
 
 <a name="Collection.Get"></a>
-### func \(Collection\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Get(key string) (T, error)
@@ -974,7 +974,7 @@ func (Collection) Get(key string) (T, error)
 Get returns the document stored under key, or DOCUMENT\_NOT\_FOUND.
 
 <a name="Collection.Insert"></a>
-### func \(Collection\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Insert(v T) error
@@ -983,7 +983,7 @@ func (Collection) Insert(v T) error
 Insert stores v, which must be new: DOCUMENT\_EXISTS when its key is taken.
 
 <a name="Collection.List"></a>
-### func \(Collection\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) List() ([]T, error)
@@ -992,7 +992,7 @@ func (Collection) List() ([]T, error)
 List returns every document, in key order.
 
 <a name="Collection.Lookup"></a>
-### func \(Collection\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Lookup(index string, key string) (T, error)
@@ -1001,7 +1001,7 @@ func (Collection) Lookup(index string, key string) (T, error)
 Lookup returns the document holding key in the unique index named index: DOCUMENT\_NOT\_FOUND when none does, INDEX\_UNKNOWN for an index the store never declared, INDEX\_NOT\_UNIQUE for one that may file several.
 
 <a name="Collection.Put"></a>
-### func \(Collection\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Put(v T) error
@@ -1010,7 +1010,7 @@ func (Collection) Put(v T) error
 Put stores v under its key, creating it or replacing whatever was there.
 
 <a name="Collection.Replace"></a>
-### func \(Collection\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Replace(v T) error
@@ -1019,7 +1019,7 @@ func (Collection) Replace(v T) error
 Replace stores v over the document already under its key: DOCUMENT\_NOT\_FOUND when there is none, so a document deleted meanwhile is never brought back.
 
 <a name="Collection.Update"></a>
-### func \(Collection\) [Update](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Collection\) [Update](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Collection) Update(key string, fn func(*T) error) (T, error)
@@ -1028,7 +1028,7 @@ func (Collection) Update(key string, fn func(*T) error) (T, error)
 Update applies fn to a copy of the document stored under key and stores the result, atomically with respect to every other write, and returns it. An error from fn is returned as it is and changes nothing, and so does a result whose key is not key (DOCUMENT\_KEY\_CHANGED). fn may read the store and must not write to it.
 
 <a name="CollectionContext"></a>
-## type [CollectionContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [CollectionContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 CollectionContext is the public alias for [Collection](#Collection) with a context on every call, which [SQLStore](#SQLStore) implements; Count and Reindex are the engine's own.
 
@@ -1056,7 +1056,7 @@ type CollectionContext[T any] interface {
 ```
 
 <a name="CollectionContext.Delete"></a>
-### func \(CollectionContext\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Delete(ctx context.Context, key string) error
@@ -1065,7 +1065,7 @@ func (CollectionContext) Delete(ctx context.Context, key string) error
 Delete is Collection.Delete under ctx.
 
 <a name="CollectionContext.Entries"></a>
-### func \(CollectionContext\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Entries(ctx context.Context, limit int) ([]EntryValue, error)
@@ -1074,7 +1074,7 @@ func (CollectionContext) Entries(ctx context.Context, limit int) ([]EntryValue, 
 Entries is Collection.Entries under ctx.
 
 <a name="CollectionContext.Filter"></a>
-### func \(CollectionContext\) [Filter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Filter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Filter(ctx context.Context, keep func(T) bool) ([]T, error)
@@ -1083,7 +1083,7 @@ func (CollectionContext) Filter(ctx context.Context, keep func(T) bool) ([]T, er
 Filter is Collection.Filter under ctx.
 
 <a name="CollectionContext.Find"></a>
-### func \(CollectionContext\) [Find](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Find](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Find(ctx context.Context, index string, key string) ([]T, error)
@@ -1092,7 +1092,7 @@ func (CollectionContext) Find(ctx context.Context, index string, key string) ([]
 Find is Collection.Find under ctx.
 
 <a name="CollectionContext.Get"></a>
-### func \(CollectionContext\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Get(ctx context.Context, key string) (T, error)
@@ -1101,7 +1101,7 @@ func (CollectionContext) Get(ctx context.Context, key string) (T, error)
 Get is Collection.Get under ctx.
 
 <a name="CollectionContext.Insert"></a>
-### func \(CollectionContext\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Insert(ctx context.Context, v T) error
@@ -1110,7 +1110,7 @@ func (CollectionContext) Insert(ctx context.Context, v T) error
 Insert is Collection.Insert under ctx.
 
 <a name="CollectionContext.List"></a>
-### func \(CollectionContext\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) List(ctx context.Context) ([]T, error)
@@ -1119,7 +1119,7 @@ func (CollectionContext) List(ctx context.Context) ([]T, error)
 List is Collection.List under ctx.
 
 <a name="CollectionContext.Lookup"></a>
-### func \(CollectionContext\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Lookup](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Lookup(ctx context.Context, index string, key string) (T, error)
@@ -1128,7 +1128,7 @@ func (CollectionContext) Lookup(ctx context.Context, index string, key string) (
 Lookup is Collection.Lookup under ctx.
 
 <a name="CollectionContext.Put"></a>
-### func \(CollectionContext\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Put(ctx context.Context, v T) error
@@ -1137,7 +1137,7 @@ func (CollectionContext) Put(ctx context.Context, v T) error
 Put is Collection.Put under ctx.
 
 <a name="CollectionContext.Replace"></a>
-### func \(CollectionContext\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Replace(ctx context.Context, v T) error
@@ -1146,7 +1146,7 @@ func (CollectionContext) Replace(ctx context.Context, v T) error
 Replace is Collection.Replace under ctx.
 
 <a name="CollectionContext.Update"></a>
-### func \(CollectionContext\) [Update](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(CollectionContext\) [Update](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (CollectionContext) Update(ctx context.Context, key string, fn func(*T) error) (T, error)
@@ -1155,7 +1155,7 @@ func (CollectionContext) Update(ctx context.Context, key string, fn func(*T) err
 Update is Collection.Update under ctx: fn runs inside the write's transaction, and must not write the document it updates.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Config is the public alias for a store's configuration: Key (required), FS and Path (both, or neither for a memory store), FoldAt, and Versions with its Clock and Held.
 
@@ -1210,7 +1210,7 @@ type Config[T any] struct {
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Entry is the public alias for one stored document as JSON, with its key.
 
@@ -1230,7 +1230,7 @@ type Entry struct {
 ```
 
 <a name="IndexSpec"></a>
-## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 IndexSpec is the public alias for one secondary index's declaration, built by [Unique](#Unique) or [Index](#Index) and given to [Open](#Open).
 
@@ -1253,7 +1253,7 @@ type IndexSpec[T any] struct {
 ```
 
 <a name="KeyLister"></a>
-## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 KeyLister is the public alias for the sibling of [Collection](#Collection) that lists the documents' keys alone, in key order and without a context, which [Store](#Store) implements: Keys.
 
@@ -1276,7 +1276,7 @@ type KeyLister interface {
 ```
 
 <a name="KeyLister.Keys"></a>
-### func \(KeyLister\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(KeyLister\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (KeyLister) Keys(after string) iter.Seq2[string, error]
@@ -1285,7 +1285,7 @@ func (KeyLister) Keys(after string) iter.Seq2[string, error]
 Keys yields the key of every document the store holds that sorts after after — every key when after is empty — in key order, byte order as Go compares strings, and no document. Stopping early is allowed, and after is where a later call resumes. A failure is yielded once, with an empty key, and ends the listing; a closed store yields STORE\_CLOSED.
 
 <a name="KeyListerContext"></a>
-## type [KeyListerContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [KeyListerContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 KeyListerContext is the public alias for [KeyLister](#KeyLister) with a context on every call, which [SQLStore](#SQLStore) implements.
 
@@ -1305,7 +1305,7 @@ type KeyListerContext interface {
 ```
 
 <a name="KeyListerContext.Keys"></a>
-### func \(KeyListerContext\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(KeyListerContext\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (KeyListerContext) Keys(ctx context.Context, after string) iter.Seq2[string, error]
@@ -1314,7 +1314,7 @@ func (KeyListerContext) Keys(ctx context.Context, after string) iter.Seq2[string
 Keys is KeyLister.Keys under ctx: each step that reads runs on the transaction ctx carries for the store's database, and on the pool otherwise.
 
 <a name="SQLConfig"></a>
-## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 SQLConfig is the public alias for a SQL store's configuration: Key, Transactor, Dialect and Table (required), IndexKey, and Versions with its Clock and Held.
 
@@ -1376,7 +1376,7 @@ type SQLConfig[T any] struct {
 ```
 
 <a name="SQLStore"></a>
-## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
@@ -1658,7 +1658,7 @@ func (*SQLStore) Versions(ctx context.Context, key string) (versions []coredocst
 Versions returns the versions the store keeps of the document stored under key, newest first: the current one — the document as it is now — then the former ones, read in one statement on the transaction ctx carries; a document in the trash answers the versions it kept, the trashed document first, in a second one. DocumentNotFound when no document is stored or trashed under key, VersionsNotKept when the store keeps no versions.
 
 <a name="Stamp"></a>
-## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Stamp is the public alias for what a Stamped write says about the version it makes: the Meta the version records, or InPlace — no version.
 
@@ -1684,7 +1684,7 @@ type Stamp struct {
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Stats is the public alias for what a store says about itself: documents, pending overlay entries, folds, the last automatic fold's failure, and what its versions weigh.
 
@@ -1715,7 +1715,7 @@ type Stats struct {
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
@@ -2004,7 +2004,7 @@ func (*Store) Versions(key string) ([]coredocstore.VersionValue, error)
 Versions returns the versions the store keeps of the document stored under key, newest first: the current one — the document as it is now — then the former ones; a document in the trash answers the versions it kept, the trashed document first. It returns DocumentNotFound when no document is stored or trashed under key, and VersionsNotKept when the store keeps no versions.
 
 <a name="Tombstone"></a>
-## type [Tombstone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Tombstone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Tombstone is the public alias for a document in the trash, as Tombstones lists it: its Key, and the instant At it was trashed.
 
@@ -2025,7 +2025,7 @@ type Tombstone struct {
 ```
 
 <a name="Trashable"></a>
-## type [Trashable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Trashable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Trashable is the public alias for the sibling of [Collection](#Collection) that keeps a document's trash without a context, which [Store](#Store) implements: Trash, Restore, Purge and Tombstones.
 
@@ -2062,7 +2062,7 @@ type Trashable interface {
 ```
 
 <a name="Trashable.Purge"></a>
-### func \(Trashable\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Trashable\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Trashable) Purge(key string) error
@@ -2071,7 +2071,7 @@ func (Trashable) Purge(key string) error
 Purge empties the trash of the document trashed under key: the trashed document and every version it kept go, and a document written later under the key starts again at version 1. It calls no hook — the document already left every read — and asks no hold, as Delete does not. DOCUMENT\_NOT\_TRASHED when no document is trashed under key.
 
 <a name="Trashable.Restore"></a>
-### func \(Trashable\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Trashable\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Trashable) Restore(key string) error
@@ -2080,7 +2080,7 @@ func (Trashable) Restore(key string) error
 Restore brings the document trashed under key back, exactly as it was — the same JSON, the same current version — and files it again. It calls OnWrite. DOCUMENT\_NOT\_TRASHED when no document is trashed under key, UNIQUE\_KEY\_TAKEN when another document took one of its unique keys meanwhile, which then stays in the trash.
 
 <a name="Trashable.Tombstones"></a>
-### func \(Trashable\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Trashable\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Trashable) Tombstones() ([]TombstoneValue, error)
@@ -2089,7 +2089,7 @@ func (Trashable) Tombstones() ([]TombstoneValue, error)
 Tombstones returns every document in the trash, in key order: its key and when it was trashed, for a caller that empties the trash after a while.
 
 <a name="Trashable.Trash"></a>
-### func \(Trashable\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Trashable\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Trashable) Trash(key string) error
@@ -2098,7 +2098,7 @@ func (Trashable) Trash(key string) error
 Trash moves the document stored under key to the trash: it is gone from every read and its index keys are freed, while its versions are kept and the trash records the instant. It calls OnDelete. DOCUMENT\_NOT\_FOUND when no document is stored under key.
 
 <a name="TrashableContext"></a>
-## type [TrashableContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [TrashableContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 TrashableContext is the public alias for [Trashable](#Trashable) with a context on every call, which [SQLStore](#SQLStore) implements.
 
@@ -2122,7 +2122,7 @@ type TrashableContext interface {
 ```
 
 <a name="TrashableContext.Purge"></a>
-### func \(TrashableContext\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(TrashableContext\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (TrashableContext) Purge(ctx context.Context, key string) error
@@ -2131,7 +2131,7 @@ func (TrashableContext) Purge(ctx context.Context, key string) error
 Purge is Trashable.Purge under ctx.
 
 <a name="TrashableContext.Restore"></a>
-### func \(TrashableContext\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(TrashableContext\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (TrashableContext) Restore(ctx context.Context, key string) error
@@ -2140,7 +2140,7 @@ func (TrashableContext) Restore(ctx context.Context, key string) error
 Restore is Trashable.Restore under ctx.
 
 <a name="TrashableContext.Tombstones"></a>
-### func \(TrashableContext\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(TrashableContext\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (TrashableContext) Tombstones(ctx context.Context) ([]TombstoneValue, error)
@@ -2149,7 +2149,7 @@ func (TrashableContext) Tombstones(ctx context.Context) ([]TombstoneValue, error
 Tombstones is Trashable.Tombstones under ctx.
 
 <a name="TrashableContext.Trash"></a>
-### func \(TrashableContext\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(TrashableContext\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (TrashableContext) Trash(ctx context.Context, key string) error
@@ -2158,7 +2158,7 @@ func (TrashableContext) Trash(ctx context.Context, key string) error
 Trash is Trashable.Trash under ctx.
 
 <a name="Version"></a>
-## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Version is the public alias for one version of a document: its Number from 1, the instant At the write that made it ran, the Meta that write carried, and the document as JSON.
 
@@ -2192,7 +2192,7 @@ type Version struct {
 ```
 
 <a name="VersionWeigher"></a>
-## type [VersionWeigher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [VersionWeigher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 VersionWeigher is the public alias for the sibling of [Collection](#Collection) that reports what a store's versions weigh without a context, which [Store](#Store) implements: VersionWeight.
 
@@ -2212,7 +2212,7 @@ type VersionWeigher interface {
 ```
 
 <a name="VersionWeigher.VersionWeight"></a>
-### func \(VersionWeigher\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionWeigher\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionWeigher) VersionWeight() (VersionWeightValue, error)
@@ -2221,7 +2221,7 @@ func (VersionWeigher) VersionWeight() (VersionWeightValue, error)
 VersionWeight reports what the store keeps beyond its documents: how many former versions, how many documents in the trash, and the bytes of the JSON they hold. A closed store answers STORE\_CLOSED.
 
 <a name="VersionWeigherContext"></a>
-## type [VersionWeigherContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [VersionWeigherContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 VersionWeigherContext is the public alias for [VersionWeigher](#VersionWeigher) with a context on every call, which [SQLStore](#SQLStore) implements.
 
@@ -2241,7 +2241,7 @@ type VersionWeigherContext interface {
 ```
 
 <a name="VersionWeigherContext.VersionWeight"></a>
-### func \(VersionWeigherContext\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionWeigherContext\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionWeigherContext) VersionWeight(ctx context.Context) (VersionWeightValue, error)
@@ -2250,7 +2250,7 @@ func (VersionWeigherContext) VersionWeight(ctx context.Context) (VersionWeightVa
 VersionWeight is VersionWeigher.VersionWeight under ctx, read in one statement on the transaction ctx carries for the store's database, and on the pool otherwise.
 
 <a name="VersionWeight"></a>
-## type [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 VersionWeight is the public alias for what a store's versions weigh, as VersionWeight reports it: its Former versions, its Trashed documents, and the Bytes of the JSON they hold.
 
@@ -2275,7 +2275,7 @@ type VersionWeight struct {
 ```
 
 <a name="VersionWriter"></a>
-## type [VersionWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [VersionWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 VersionWriter is the public alias for the sibling of [Collection](#Collection) that writes a document with its versions — numbers, instants, metadata — and its trash as they are given, which [Store](#Store) implements: PutDocument. A copy from one engine to another needs it.
 
@@ -2313,7 +2313,7 @@ type VersionWriter interface {
 ```
 
 <a name="VersionWriter.PutDocument"></a>
-### func \(VersionWriter\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionWriter\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionWriter) PutDocument(key string, versions []VersionValue, trashedAt time.Time) error
@@ -2324,7 +2324,7 @@ PutDocument writes the document key with versions, newest first as [Versioned](#
 Nothing may be under key: a document, a trashed one, or versions — DOCUMENT\_EXISTS otherwise. VERSIONS\_INVALID, its "problem" field naming which, refuses no version, a number 0, numbers that do not strictly decrease, an unknown instant on a version other than 1, a version that is not JSON, and a current document whose own key is not key; DOCUMENT\_UNDECODABLE one the store's type does not decode, and UNIQUE\_KEY\_TAKEN a stored document whose unique key another holds. It asks Held nothing and prunes nothing: the versions are written as given, and the next write prunes as every write does. A refusal writes nothing.
 
 <a name="VersionWriterContext"></a>
-## type [VersionWriterContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [VersionWriterContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 VersionWriterContext is the public alias for [VersionWriter](#VersionWriter) with a context on every call, which [SQLStore](#SQLStore) implements.
 
@@ -2345,7 +2345,7 @@ type VersionWriterContext interface {
 ```
 
 <a name="VersionWriterContext.PutDocument"></a>
-### func \(VersionWriterContext\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionWriterContext\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionWriterContext) PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
@@ -2354,7 +2354,7 @@ func (VersionWriterContext) PutDocument(ctx context.Context, key string, version
 PutDocument is VersionWriter.PutDocument under ctx, in one transaction — a savepoint of the one ctx carries for the store's database — so the document, its index rows and its versions exist if and only if that transaction commits; OnWrite is told once it has.
 
 <a name="Versioned"></a>
-## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 Versioned is the public alias for the sibling of [Collection](#Collection) that reads and writes a document's versions without a context, which [Store](#Store) implements: the four Stamped writes, Versions, Version and RewriteVersions.
 
@@ -2377,7 +2377,7 @@ type Versioned[T any] interface {
 ```
 
 <a name="Versioned.InsertStamped"></a>
-### func \(Versioned\) [InsertStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [InsertStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) InsertStamped(v T, stamp StampValue) error
@@ -2386,7 +2386,7 @@ func (Versioned) InsertStamped(v T, stamp StampValue) error
 InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says — or, under the key of a document in the trash, a write over that document.
 
 <a name="Versioned.PutStamped"></a>
-### func \(Versioned\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) PutStamped(v T, stamp StampValue) error
@@ -2395,7 +2395,7 @@ func (Versioned) PutStamped(v T, stamp StampValue) error
 PutStamped is Put, with what the write says about the version it makes.
 
 <a name="Versioned.ReplaceStamped"></a>
-### func \(Versioned\) [ReplaceStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [ReplaceStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) ReplaceStamped(v T, stamp StampValue) error
@@ -2404,7 +2404,7 @@ func (Versioned) ReplaceStamped(v T, stamp StampValue) error
 ReplaceStamped is Replace, with what the write says about the version it makes.
 
 <a name="Versioned.RewriteVersions"></a>
-### func \(Versioned\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) RewriteVersions(key string, fn func(former []VersionValue) ([]VersionValue, error)) error
@@ -2413,7 +2413,7 @@ func (Versioned) RewriteVersions(key string, fn func(former []VersionValue) ([]V
 RewriteVersions rewrites the former versions of the document stored under key in one durable write: fn receives copies of them, newest first, and returns those to keep, in the same order. It may drop a version and change what one holds and what its writer said, and nothing else — VERSIONS\_REWRITE\_REFUSED otherwise. An error from fn is returned as it is and changes nothing. It calls no hook: the document did not change.
 
 <a name="Versioned.UpdateStamped"></a>
-### func \(Versioned\) [UpdateStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [UpdateStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) UpdateStamped(key string, stamp StampValue, fn func(*T) error) (T, error)
@@ -2422,7 +2422,7 @@ func (Versioned) UpdateStamped(key string, stamp StampValue, fn func(*T) error) 
 UpdateStamped is Update, with what the write says about the version it makes.
 
 <a name="Versioned.Version"></a>
-### func \(Versioned\) [Version](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [Version](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) Version(key string, number uint64) (VersionValue, error)
@@ -2431,7 +2431,7 @@ func (Versioned) Version(key string, number uint64) (VersionValue, error)
 Version returns the version numbered number of the document stored under key: VERSION\_NOT\_FOUND when the document keeps none of that number — never made, or pruned.
 
 <a name="Versioned.Versions"></a>
-### func \(Versioned\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(Versioned\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (Versioned) Versions(key string) ([]VersionValue, error)
@@ -2440,7 +2440,7 @@ func (Versioned) Versions(key string) ([]VersionValue, error)
 Versions returns the versions kept of the document stored under key, newest first: the current one — the document as it is now — then the former ones. A document in the trash answers the versions it kept, the trashed document first. DOCUMENT\_NOT\_FOUND when no document is stored or trashed under key.
 
 <a name="VersionedContext"></a>
-## type [VersionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+## type [VersionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
 VersionedContext is the public alias for [Versioned](#Versioned) with a context on every call, which [SQLStore](#SQLStore) implements beside [CollectionContext](#CollectionContext).
 
@@ -2463,7 +2463,7 @@ type VersionedContext[T any] interface {
 ```
 
 <a name="VersionedContext.InsertStamped"></a>
-### func \(VersionedContext\) [InsertStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [InsertStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) InsertStamped(ctx context.Context, v T, stamp StampValue) error
@@ -2472,7 +2472,7 @@ func (VersionedContext) InsertStamped(ctx context.Context, v T, stamp StampValue
 InsertStamped is Versioned.InsertStamped under ctx.
 
 <a name="VersionedContext.PutStamped"></a>
-### func \(VersionedContext\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) PutStamped(ctx context.Context, v T, stamp StampValue) error
@@ -2481,7 +2481,7 @@ func (VersionedContext) PutStamped(ctx context.Context, v T, stamp StampValue) e
 PutStamped is Versioned.PutStamped under ctx.
 
 <a name="VersionedContext.ReplaceStamped"></a>
-### func \(VersionedContext\) [ReplaceStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [ReplaceStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) ReplaceStamped(ctx context.Context, v T, stamp StampValue) error
@@ -2490,7 +2490,7 @@ func (VersionedContext) ReplaceStamped(ctx context.Context, v T, stamp StampValu
 ReplaceStamped is Versioned.ReplaceStamped under ctx.
 
 <a name="VersionedContext.RewriteVersions"></a>
-### func \(VersionedContext\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) RewriteVersions(ctx context.Context, key string, fn func(former []VersionValue) ([]VersionValue, error)) error
@@ -2499,7 +2499,7 @@ func (VersionedContext) RewriteVersions(ctx context.Context, key string, fn func
 RewriteVersions is Versioned.RewriteVersions under ctx.
 
 <a name="VersionedContext.UpdateStamped"></a>
-### func \(VersionedContext\) [UpdateStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [UpdateStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) UpdateStamped(ctx context.Context, key string, stamp StampValue, fn func(*T) error) (T, error)
@@ -2508,7 +2508,7 @@ func (VersionedContext) UpdateStamped(ctx context.Context, key string, stamp Sta
 UpdateStamped is Versioned.UpdateStamped under ctx.
 
 <a name="VersionedContext.Version"></a>
-### func \(VersionedContext\) [Version](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [Version](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) Version(ctx context.Context, key string, number uint64) (VersionValue, error)
@@ -2517,7 +2517,7 @@ func (VersionedContext) Version(ctx context.Context, key string, number uint64) 
 Version is Versioned.Version under ctx.
 
 <a name="VersionedContext.Versions"></a>
-### func \(VersionedContext\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+### func \(VersionedContext\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
 
 ```go
 func (VersionedContext) Versions(ctx context.Context, key string) ([]VersionValue, error)

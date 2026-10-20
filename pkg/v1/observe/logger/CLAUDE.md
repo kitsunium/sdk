@@ -10,7 +10,7 @@ Stable v1 public API for SDK logging. Everything consumer code needs — `Logger
 ```
 doc.go         — the package comment; kit writes it from design/observe/logger.yaml
                  (ADR 0167)
-facade_gen.go  — kit's (ADR 0166), from design/observe/logger.yaml's facade:: every
+gen_facade.go  — kit's (ADR 0166), from design/observe/logger.yaml's facade:: every
                  alias, re-export and forwarder the files below name, and what
                  builder.go, caller.go, kind.go, levelvar.go and memory.go held before
                  their package comments joined their neighbours' — Builder alias,
@@ -38,9 +38,9 @@ writer_entry.go — WriterEntryConfig DTO (Name + raw Options map)
 tracecontext.go — TraceContext / TraceContextSource aliases + TraceContextFromContext,
                  the ONLY bridge between the logging and tracing domains (ADR 0062)
 version.go     — Version var (ldflags injection point), FrameworkVersion()
-codes_gen.go   — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecInvalid
+gen_codes.go   — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecInvalid
                  / CodeTopologyInvalid (range 1.1.0.*)
-codes_gen.go   — WriterRequired / SinkConfigRequired / WriterSpecInvalid /
+gen_codes.go   — WriterRequired / SinkConfigRequired / WriterSpecInvalid /
                  TopologyInvalid sentinels (errs.Define)
 encoder.go     — NewTextEncoder / NewJSONEncoder (one JSON object per line, groups
                  flattened to dotted keys)
@@ -52,7 +52,7 @@ USES.md        — the interactive use-case tabs a Go doc comment cannot render
 *_test.go      — *_external_test.go suites, fromconfig / witherror internal suites,
                  the two `!race` *_integration_test.go differential allocation gates
                  (fanout, tracecontext), and the design contracts (ADR 0165):
-                 perf_fixtures_test.go, hand-written, and perf_gen_test.go, kit's —
+                 perf_fixtures_test.go, hand-written, and gen_perf_test.go, kit's —
                  Build's floor of one allocation an emit and an extraction that
                  allocates nothing — all run by the alloc lane
 ```
@@ -163,7 +163,7 @@ ADR 0039 never came into play.
 - **Version stamping.** `Version` is the single injection point for the SDK.
   - Raw go build: `go build -ldflags "-X github.com/kitsunium/sdk/pkg/v1/observe/logger.Version=v0.1.0" ./...`
   - Under Bazel: `--stamp` + `x_defs` + `tools/workspace_status.sh` (which prints `STABLE_VERSION`). Both pipelines write into the same `Version` symbol.
-- **Hot path.** `Build(lg, lv).Str(...).Int(...).Send(ctx, msg)` runs through a `sync.Pool`-backed builder owned by `svclogger`; steady-state per-call cost is **one** heap allocation per emit once the pool is warm — the pool recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every `Send`, so one slice escapes. `Build` trades the variadic-slice allocation for the handler's clone; prefer it for ergonomics, NOT as an allocation-free guarantee. `LogAttrs` is the slice-overload that avoids the variadic-slice allocation in `Logger.Log(... Attr)`. Numbers in `BENCH.md`; the contract is the design's (`allocsMin: 1` on `Build`, ADR 0165), held by `TestPerfAllocsBuildSend` — kit gen's `perf_gen_test.go` over the `BuildSend` fixture of `perf_fixtures_test.go`, both `//go:build !race`, so it runs only in the race-off alloc lane (root `CLAUDE.md` rule 12). That guard measures **depth** — one sink — and says nothing about **width**, which is how a fan-out that heap-allocated once per record went unnoticed: `Multi` opened a per-`Write` error slate sized `len(branches)`, and a capacity that is not a constant escapes the compiler's implicit stack budget at three branches, so a third destination silently cost an extra allocation on every healthy emit. `TestFanoutWidthAddsNoAllocation` in `fanout_integration_test.go` now pins the other half, differentially against the width-1 baseline rather than against a hardcoded count. Callers MUST NOT use a `Builder` after `Send` — it returns to the recycler.
+- **Hot path.** `Build(lg, lv).Str(...).Int(...).Send(ctx, msg)` runs through a `sync.Pool`-backed builder owned by `svclogger`; steady-state per-call cost is **one** heap allocation per emit once the pool is warm — the pool recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every `Send`, so one slice escapes. `Build` trades the variadic-slice allocation for the handler's clone; prefer it for ergonomics, NOT as an allocation-free guarantee. `LogAttrs` is the slice-overload that avoids the variadic-slice allocation in `Logger.Log(... Attr)`. Numbers in `BENCH.md`; the contract is the design's (`allocsMin: 1` on `Build`, ADR 0165), held by `TestPerfAllocsBuildSend` — kit gen's `gen_perf_test.go` over the `BuildSend` fixture of `perf_fixtures_test.go`, both `//go:build !race`, so it runs only in the race-off alloc lane (root `CLAUDE.md` rule 12). That guard measures **depth** — one sink — and says nothing about **width**, which is how a fan-out that heap-allocated once per record went unnoticed: `Multi` opened a per-`Write` error slate sized `len(branches)`, and a capacity that is not a constant escapes the compiler's implicit stack budget at three branches, so a third destination silently cost an extra allocation on every healthy emit. `TestFanoutWidthAddsNoAllocation` in `fanout_integration_test.go` now pins the other half, differentially against the width-1 baseline rather than against a hardcoded count. Callers MUST NOT use a `Builder` after `Send` — it returns to the recycler.
 - **A NewMulti Logger owns its writers and releases them on Close** (ADR 0095).
   `NewMulti` opens every writer through the registry, so the caller never holds
   a `Sink` it could close; the Logger was the only thing referring to them and
@@ -207,7 +207,7 @@ ADR 0039 never came into play.
 
 ## Generated
 
-`facade_gen.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/logger.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `facade_gen.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `facade_gen.go` edited by hand.
+`gen_facade.go` is kit's (ADR 0166): every alias, re-exported constant and variable, and forwarder of this package is declared in the `facade:` of `design/observe/logger.yaml`, doc comments included, and kit writes it. Where this file names another file as holding one of them, read `gen_facade.go`: `doc.go` holds the package comment, which kit writes from the design (ADR 0167), and the hand-written files the declarations of their own. Change a re-export, or its doc comment, in the design and run `kit gen` (then `make api` and `make docs-readme`); `make api-check` fails on a `gen_facade.go` edited by hand.
 
 ## Verification
 

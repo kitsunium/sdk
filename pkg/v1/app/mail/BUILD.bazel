@@ -6,7 +6,7 @@ go_library(
     name = "mail",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "mail.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/mail",
@@ -27,7 +27,7 @@ go_test(
     name = "mail_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "mail_external_test.go",
     ],
     deps = [

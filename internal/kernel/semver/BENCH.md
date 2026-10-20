@@ -44,7 +44,7 @@ PseudoVersionTime       146.1n ± 21%                  135.0n     0       0
 ```
 
 Nothing allocates. That is a property, not an observation: each function's
-design budget (`allocs: 0`, ADR 0165) is the `perf_gen_test.go` kit gen writes,
+design budget (`allocs: 0`, ADR 0165) is the `gen_perf_test.go` kit gen writes,
 run in the race-off alloc lane, and `perf_fixtures_test.go`'s doc comment
 records the mutation it catches — `strings.Split` in place of the
 in-place identifier walk passes every functional test and costs 1 000

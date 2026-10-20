@@ -91,7 +91,7 @@ MemorySourceUnconstrained reports that no control group governing this process d
 Initialised with `github.com/kitsunium/sdk/internal/core/proc.MemorySourceUnconstrained`.
 
 <a name="Apply"></a>
-## func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/facade_gen.go>)
+## func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
 
 ```go
 func Apply() Limit
@@ -102,7 +102,7 @@ Apply derives the Go soft memory limit from the tightest control-group cap gover
 It stands aside — leaving the runtime default in place — when GOMEMLIMIT is already set, when no cgroup declares a cap, and when the derived limit is too small to be useful. Those three are told apart by Limit.Source.
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/facade_gen.go>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
 
 Limit is an immutable record of one derivation: the allowance read, the limit derived, and the source that decided it. It aliases the core proc type.
 
@@ -135,7 +135,7 @@ func (Limit) Applied() bool
 Applied reports whether the derivation installed a limit. It is true for exactly one source, and it is the predicate a caller wants rather than a comparison against Limit — a zero Limit and "no limit applied" are the same state today, and tying call sites to that coincidence would be fragile.
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/facade_gen.go>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
 
 Source names what decided the soft memory limit. It aliases the core proc type.
 

@@ -42,7 +42,7 @@ alias(
 go_test(
     name = "mailengine_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "mailengine_internal_test.go",
     ],
     embed = [":mailengine"],

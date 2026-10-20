@@ -6,7 +6,7 @@
 #   - scripts/pre-commit/check-alloc-lane-coverage.sh → the drift guard
 # and written in part by a fourth: kit gen keeps the section between
 # `# BEGIN kit gen` and `# END kit gen` at the end, naming every package whose
-# design budgets name a fixture — its perf_gen_test.go is race off too (ADR
+# design budgets name a fixture — its gen_perf_test.go is race off too (ADR
 # 0165). The lines above it are hand-written, and kit leaves them byte for
 # byte; kit gen -check fails on a hand edit inside the section.
 #
@@ -158,7 +158,7 @@
 //framework/telemetry:telemetry_test
 
 # BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
-# whose perf_gen_test.go runs race off here alone. DO NOT EDIT to the line
+# whose gen_perf_test.go runs race off here alone. DO NOT EDIT to the line
 # below: kit gen writes it from the design.
 //internal/core/data/codec/scratch:scratch_test
 //internal/kernel/clock:clock_test

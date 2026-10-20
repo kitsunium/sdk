@@ -89,7 +89,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch.No
 Code `0.3.90.1` · reason `NOT_JSON` · public "A document to compare is not a JSON value"
 
 <a name="Diff"></a>
-## func [Diff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/facade_gen.go>)
+## func [Diff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/gen_facade.go>)
 
 ```go
 func Diff(from []byte, to []byte) ([]Edit, error)
@@ -98,7 +98,7 @@ func Diff(from []byte, to []byte) ([]Edit, error)
 Diff returns the operations that turn the JSON document from into the JSON document to, in the order they apply — an empty slice when the two are the same value — or NotJSON.
 
 <a name="Edit"></a>
-## type [Edit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/facade_gen.go>)
+## type [Edit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/gen_facade.go>)
 
 Edit is one operation of a diff: its Op, its Path, the Value it writes (add, replace) and the Old value it replaces or removes (replace, remove).
 
@@ -124,7 +124,7 @@ type Edit struct {
 ```
 
 <a name="Op"></a>
-## type [Op](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/facade_gen.go>)
+## type [Op](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonpatch/gen_facade.go>)
 
 Op is what an operation does, as RFC 6902 names it.
 

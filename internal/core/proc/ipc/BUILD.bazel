@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "ipc",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "ipc.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/proc/ipc",
@@ -30,7 +30,7 @@ alias(
 go_test(
     name = "ipc_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "ipc_external_test.go",
     ],
     deps = [

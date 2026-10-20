@@ -1,7 +1,7 @@
 //go:build !race
 
 // The fixtures of ring's performance contracts (design/sdk.yaml, budgets):
-// each sets one call up and returns it, and the perf_gen_test.go kit gen
+// each sets one call up and returns it, and the gen_perf_test.go kit gen
 // writes beside this file counts its allocations against its budget.
 //
 // They were the ring half of the kernel's zero-allocation gate

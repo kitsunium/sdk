@@ -183,7 +183,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/multipart.Va
 Code `0.3.41.3` · reason `VALUE_INVALID` · public "multipart codec rejected the value shape"
 
 <a name="ContentType"></a>
-## func [ContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/facade_gen.go>)
+## func [ContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/gen_facade.go>)
 
 ```go
 func ContentType(body []byte) (value string, err error)
@@ -192,7 +192,7 @@ func ContentType(body []byte) (value string, err error)
 ContentType returns the Content-Type header value — "multipart/form-data; boundary=…", quoted when the boundary needs it — for a body Marshal wrote, read off its first delimiter line. A body with no recoverable delimiter is refused with CodeBoundaryInvalid.
 
 <a name="Form"></a>
-## type [Form](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/facade_gen.go>)
+## type [Form](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/gen_facade.go>)
 
 Form is the native value of the multipart/form-data Format: a whole body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*Form to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered.
 
@@ -212,7 +212,7 @@ type Form struct {
 ```
 
 <a name="Part"></a>
-## type [Part](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/facade_gen.go>)
+## type [Part](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/gen_facade.go>)
 
 Part is one section of a [Form](#Form): a named field, optionally a filename and a media type, and the bytes. Name is required, and a CR, an LF or a NUL in Name, FileName or ContentType is refused, never escaped. Decoding keeps a filename's last path element only.
 

@@ -56,9 +56,9 @@ go_test(
     srcs = [
         "alloc_external_test.go",
         "allocwindow_test.go",
-        "api_gen_test.go",
         "exporter_otlphttp_external_test.go",
         "exporter_otlpjson_external_test.go",
+        "gen_api_test.go",
         "http_middleware_external_test.go",
         "http_server_bench_test.go",
         "propagation_bench_test.go",

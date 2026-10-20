@@ -8,7 +8,7 @@ go_library(
         "accessors.go",
         "construct.go",
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/errs",
     visibility = ["//visibility:public"],
@@ -27,9 +27,9 @@ go_test(
     srcs = [
         "accessors_bench_test.go",
         "accessors_external_test.go",
-        "api_gen_test.go",
         "construct_external_test.go",
         "facade_bench_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":errs",

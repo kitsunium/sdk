@@ -108,7 +108,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.StaticMisconfigured
 Code `0.2.11.34` · reason `STATIC_MISCONFIGURED` · public "The static file handler configuration is not valid"
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/gen_facade.go>)
 
 ```go
 func New(fsys fs.FS, cfg Config) (*Handler, error)
@@ -117,7 +117,7 @@ func New(fsys fs.FS, cfg Config) (*Handler, error)
 New returns a Handler serving fsys as cfg says, or Misconfigured. It reads nothing from fsys. To serve a sub-directory, hand it the result of fs.Sub; to keep a link inside the tree from leading out of it, hand it an os.Root's FS rather than os.DirFS — the handler confines the names it is asked for, not what the tree's own entries point at.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/gen_facade.go>)
 
 Config says how a tree is served; its zero value is a working, strict configuration.
 
@@ -154,7 +154,7 @@ type Config struct {
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/facade_gen.go>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/static/gen_facade.go>)
 
 Handler serves one file tree; it is an http.Handler, safe for concurrent use. The zero Handler has no tree and answers every request 500.
 

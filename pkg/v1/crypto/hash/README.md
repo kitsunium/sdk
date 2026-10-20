@@ -142,7 +142,7 @@ type Algorithm string
 ```
 
 <a name="DigestWriter"></a>
-## type [DigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/hash/facade_gen.go>)
+## type [DigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/hash/gen_facade.go>)
 
 DigestWriter tees writes into both a destination io.Writer and a running hash, exposing the digest of everything written so far. See [NewDigestWriter](#NewDigestWriter).
 
@@ -184,7 +184,7 @@ func (*DigestWriter) Write(p []byte) (n int, err error)
 Write forwards p to the underlying writer and folds the same bytes into the running hash, returning the count the destination accepted.
 
 <a name="VerifyingReader"></a>
-## type [VerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/hash/facade_gen.go>)
+## type [VerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/hash/gen_facade.go>)
 
 VerifyingReader wraps a source reader and verifies its digest against an expected value on the final (EOF) read. See [NewVerifyingReader](#NewVerifyingReader).
 

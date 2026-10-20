@@ -48,7 +48,7 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
 | `slogbridge.go` | `NewHandler` / `New` |
 | `handler.go` | the `slog.Handler` implementation (`Enabled` / `Handle` / `WithAttrs` / `WithGroup`) |
 | `convert.go` | `toLevel`, `qualifyKey` / `qualifyGroup`, `appendAttr` / `appendGroup`, `convert` |
-| `codes_gen.go` | `CodeLoggerRequired` (range `1.1.1.*`) + the `LoggerRequired` sentinel — written by kit gen from `design/observe/logger.yaml` (ADR 0164) |
+| `gen_codes.go` | `CodeLoggerRequired` (range `1.1.1.*`) + the `LoggerRequired` sentinel — written by kit gen from `design/observe/logger.yaml` (ADR 0164) |
 
 `README.md` is written by `tools/genindex` from the committed `docs/api`
 (`make docs-readme`, ADR 0167).

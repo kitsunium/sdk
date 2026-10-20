@@ -241,7 +241,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/strictjson.V
 Code `0.3.72.5` · reason `VALUE_MISMATCHED` · public "The JSON document has a value of the wrong type or out of range"
 
 <a name="Decode"></a>
-## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/facade_gen.go>)
+## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/gen_facade.go>)
 
 ```go
 func Decode(r io.Reader, v any, maxBytes int64) error
@@ -250,7 +250,7 @@ func Decode(r io.Reader, v any, maxBytes int64) error
 Decode reads exactly one JSON value from r into v, a non-nil pointer, reading at most maxBytes bytes of it — the bound plus the one byte that proves it was exceeded, never more. On a refusal v may be partly written.
 
 <a name="PointerOf"></a>
-## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/facade_gen.go>)
+## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/gen_facade.go>)
 
 ```go
 func PointerOf(err error) (pointer string, ok bool)

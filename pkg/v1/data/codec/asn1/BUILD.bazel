@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "asn1.go",
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/asn1",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "asn1_test",
     srcs = [
-        "api_gen_test.go",
         "asn1_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":asn1",

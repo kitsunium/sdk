@@ -6,7 +6,7 @@ go_library(
     name = "trace",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/observe/trace",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "trace_test",
     srcs = [
-        "api_gen_test.go",
         "facade_bench_test.go",
+        "gen_api_test.go",
         "trace_bench_test.go",
         "trace_external_test.go",
     ],

@@ -14,9 +14,9 @@ go_library(
         "clickhouse.go",
         "clickhousesink.go",
         "client.go",
-        "codes_gen.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
     visibility = ["//visibility:public"],
@@ -38,13 +38,13 @@ alias(
 go_test(
     name = "clickhouse_test",
     srcs = [
-        "api_gen_test.go",
         "clickhouse_external_test.go",
         "clickhouse_internal_test.go",
         "clickhousesink_internal_test.go",
         "client_internal_test.go",
         "errors_external_test.go",
         "errors_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":clickhouse"],
     deps = [

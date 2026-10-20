@@ -50,7 +50,7 @@ A nil factory, a nil reset or capacity function, and a non-positive cap panic at
   - [func \(\*Pool\) Put\(v T\)](<#Pool.Put>)
 
 <a name="NewCappedPool"></a>
-## func [NewCappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go>)
+## func [NewCappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/gen_facade.go>)
 
 ```go
 func NewCappedPool[T any](newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int) *CappedPool[T]
@@ -90,7 +90,7 @@ reset 5 bytes
 </details>
 
 <a name="NewPool"></a>
-## func [NewPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go>)
+## func [NewPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/gen_facade.go>)
 
 ```go
 func NewPool[T any](newFn func() T) *Pool[T]
@@ -99,7 +99,7 @@ func NewPool[T any](newFn func() T) *Pool[T]
 NewPool returns a [Pool](#Pool) whose factory newFn builds a value whenever Get finds the pool empty. A nil newFn panics here, rather than at the first empty Get far from this call.
 
 <a name="CappedPool"></a>
-## type [CappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go>)
+## type [CappedPool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/gen_facade.go>)
 
 CappedPool is a [Pool](#Pool) that resets a value on Put, and drops — without resetting — a value whose capacity is past its threshold. [CappedPool](#CappedPool).Get borrows and [CappedPool](#CappedPool).Put hands back, as the plain pool's do.
 
@@ -134,7 +134,7 @@ func (*CappedPool) Put(v T)
 Put returns v for reuse unless its capacity exceeds maxCap, in which case v is orphaned (discard-before-reset: never reset, never repooled). Otherwise v is reset then repooled. Callers MUST NOT touch v after Put returns.
 
 <a name="Pool"></a>
-## type [Pool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/facade_gen.go>)
+## type [Pool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/recycler/gen_facade.go>)
 
 Pool is a typed object pool over sync.Pool. [Pool](#Pool).Get borrows a value, building one with the factory when the pool is empty, and [Pool](#Pool).Put hands one back; a caller must not touch a value after Put. It resets nothing — a caller resets before Put, or uses [CappedPool](#CappedPool).
 

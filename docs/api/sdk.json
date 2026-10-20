@@ -4237,7 +4237,7 @@
         "value": "0.4.4.1"
       },
       "doc": "CodeRolledBack is the code of the error a case returns from a transaction's\nfunction to roll it back — the suite's own, in the framework's range: layer\n4, PP 4 this package (ADR 0147 §3). A store never returns it; the case that\nreturned it expects app.Transact to hand it back.\n",
-      "file": "framework/app/storetest/codes_gen.go",
+      "file": "framework/app/storetest/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5801,7 +5801,7 @@
         "value": "0.4.2.16"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5816,7 +5816,7 @@
         "value": "0.4.2.18"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5831,7 +5831,7 @@
         "value": "0.4.2.17"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5846,7 +5846,7 @@
         "value": "0.4.2.59"
       },
       "doc": "CodeCLIFailed marks the span of a CLI command that exited non-zero.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5861,7 +5861,7 @@
         "value": "0.4.2.56"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5876,7 +5876,7 @@
         "value": "0.4.2.46"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5891,7 +5891,7 @@
         "value": "0.4.2.44"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5906,7 +5906,7 @@
         "value": "0.4.2.45"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5921,7 +5921,7 @@
         "value": "0.4.2.43"
       },
       "doc": "Commands and queries.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5936,7 +5936,7 @@
         "value": "0.4.2.79"
       },
       "doc": "CodeDataCopy refuses a data copy (ADR 0178 C7): a database the product\ndoes not declare or cannot open, data kept in memory, a product that\nanswers on its address, a table of the database that already holds a\nrow; or reports a copy done whose file queues could not be moved aside.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5951,7 +5951,7 @@
         "value": "0.4.2.80"
       },
       "doc": "CodeDataCopyDiverged reports a data copy whose fingerprints differ on\nboth sides of a table, or whose records do not open through the framework once\ncopied: the copy's transaction is rolled back, and the first key that\ndiffers is named.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5966,7 +5966,7 @@
         "value": "0.4.2.34"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5981,7 +5981,7 @@
         "value": "0.4.2.32"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -5996,7 +5996,7 @@
         "value": "0.4.2.31"
       },
       "doc": "Databases, ADR 0004.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6011,7 +6011,7 @@
         "value": "0.4.2.33"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6026,7 +6026,7 @@
         "value": "0.4.2.76"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6041,7 +6041,7 @@
         "value": "0.4.2.10"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6056,7 +6056,7 @@
         "value": "0.4.2.39"
       },
       "doc": "History (ADR 0007).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6071,7 +6071,7 @@
         "value": "0.4.2.50"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6086,7 +6086,7 @@
         "value": "0.4.2.41"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6101,7 +6101,7 @@
         "value": "0.4.2.40"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6116,7 +6116,7 @@
         "value": "0.4.2.49"
       },
       "doc": "The framework's own signals and refusals, typed since the move into the\nSDK (rule 2: no fmt.Errorf, no errors.New in production code).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6131,7 +6131,7 @@
         "value": "0.4.2.54"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6146,7 +6146,7 @@
         "value": "0.4.2.25"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6161,7 +6161,7 @@
         "value": "0.4.2.24"
       },
       "doc": "Loops.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6176,7 +6176,7 @@
         "value": "0.4.2.26"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6191,7 +6191,7 @@
         "value": "0.4.2.19"
       },
       "doc": "Mailers.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6206,7 +6206,7 @@
         "value": "0.4.2.20"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6221,7 +6221,7 @@
         "value": "0.4.2.23"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6236,7 +6236,7 @@
         "value": "0.4.2.21"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6251,7 +6251,7 @@
         "value": "0.4.2.22"
       },
       "doc": "Deprecated: the framework no longer returns it. The outbox is the SDK's mail\nspool, which dead-letters a record that does not decode itself\n(MessageUndecodable, in pkg/v1/app/mail/spool).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6266,7 +6266,7 @@
         "value": "0.4.2.55"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6281,7 +6281,7 @@
         "value": "0.4.2.84"
       },
       "doc": "CodeMigrationIrreversible refuses the Down of a migration declared\nirreversible with [Irreversible] (ADR 0179 step 10): what it changed\nis undone by a new forward migration, never by migrate down.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6296,7 +6296,7 @@
         "value": "0.4.2.11"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6311,7 +6311,7 @@
         "value": "0.4.2.51"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6326,7 +6326,7 @@
         "value": "0.4.2.53"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6341,7 +6341,7 @@
         "value": "0.4.2.42"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6356,7 +6356,7 @@
         "value": "0.4.2.52"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6371,7 +6371,7 @@
         "value": "0.4.2.38"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6386,7 +6386,7 @@
         "value": "0.4.2.36"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6401,7 +6401,7 @@
         "value": "0.4.2.37"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6416,7 +6416,7 @@
         "value": "0.4.2.35"
       },
       "doc": "Privacy (ADR 0006).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6431,7 +6431,7 @@
         "value": "0.4.2.48"
       },
       "doc": "CodeProfileRead reports a profile of the process that could not be written\nor read back. It is in the framework's 0.4.2.* range.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6446,7 +6446,7 @@
         "value": "0.4.2.8"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6461,7 +6461,7 @@
         "value": "0.4.2.77"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6476,7 +6476,7 @@
         "value": "0.4.2.87"
       },
       "doc": "CodeRenameFailed refuses a start whose move of a name at rest to its\npresent name did not complete (ADR 0180 step 5): a directory the\nsystem would not rename, a statement the database did not run. What\nwas not moved stays under its former name, readable as it was, and\nthe next start resumes the move.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6491,7 +6491,7 @@
         "value": "0.4.2.86"
       },
       "doc": "CodeRenameTarget refuses a start that meets what a former release\nkept under the tool's name — a table, the privacy service's\ndirectory, the dev data directory — while its present name is taken\ntoo (ADR 0180 step 5): the framework never replaces one with the\nother, so nothing is moved and both are named. What rests under the\nformer name stays as it was, readable by the release that wrote it.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6506,7 +6506,7 @@
         "value": "0.4.2.85"
       },
       "doc": "CodeRenamed refuses a start that meets a runtime name the framework\nno longer reads (ADR 0180 §3, Q12): an operator's variable still\nnamed KIT_<NAME> where the framework reads <PRODUCT>_<NAME>, a\nstruct field still tagged kit:\"…\" where it reads app:\"…\". Ignored,\nthe first would start the product on a default — an empty data\ndirectory —, the second would store a personal field in clear. The\nrefusal is a [DiagnosticsError] naming every old name met and the\nname that replaces it, all at once; it carries this code, which\nerrs.HasCode reads through it. The refusal holds for two minors,\nthen the old names are forgotten.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6521,7 +6521,7 @@
         "value": "0.4.2.72"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6536,7 +6536,7 @@
         "value": "0.4.2.73"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6551,7 +6551,7 @@
         "value": "0.4.2.57"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6566,7 +6566,7 @@
         "value": "0.4.2.69"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6581,7 +6581,7 @@
         "value": "0.4.2.67"
       },
       "doc": "Revisions (ADR 0007 §3).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6596,7 +6596,7 @@
         "value": "0.4.2.68"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6611,7 +6611,7 @@
         "value": "0.4.2.60"
       },
       "doc": "CodeScopeUnknown reports a scope whose value could not be read at the\nstart: no current user, no executable path, no configuration directory.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6626,7 +6626,7 @@
         "value": "0.4.2.70"
       },
       "doc": "The signals the framework ends one of its own steps with and catches itself — a\ncaller never receives one —, typed when the SDK made rule 2 a gate\n(make guard), where they had been stdlib errors.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6641,7 +6641,7 @@
         "value": "0.4.2.61"
       },
       "doc": "Sealing at rest (ADR 0006, step 3).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6656,7 +6656,7 @@
         "value": "0.4.2.71"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6671,7 +6671,7 @@
         "value": "0.4.2.63"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6686,7 +6686,7 @@
         "value": "0.4.2.64"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6701,7 +6701,7 @@
         "value": "0.4.2.65"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6716,7 +6716,7 @@
         "value": "0.4.2.62"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6731,7 +6731,7 @@
         "value": "0.4.2.28"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6746,7 +6746,7 @@
         "value": "0.4.2.29"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6761,7 +6761,7 @@
         "value": "0.4.2.30"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6776,7 +6776,7 @@
         "value": "0.4.2.27"
       },
       "doc": "Secrets.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6791,7 +6791,7 @@
         "value": "0.4.2.58"
       },
       "doc": "CodeSingletonHeld reports a start refused because another process of the\napp holds its singleton lock.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6806,7 +6806,7 @@
         "value": "0.4.2.1"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6821,7 +6821,7 @@
         "value": "0.4.2.2"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6836,7 +6836,7 @@
         "value": "0.4.2.5"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6851,7 +6851,7 @@
         "value": "0.4.2.4"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6866,7 +6866,7 @@
         "value": "0.4.2.3"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6881,7 +6881,7 @@
         "value": "0.4.2.83"
       },
       "doc": "CodeSubsystemMissing refuses a start whose declarations need a\nsubsystem the program does not import (ADR 0179 §6): a store or a\ndatabase without framework/app/store, a server without\nframework/app/server. The refusal is a [DiagnosticsError] naming\nevery such declaration and the package to import, all at once; it\ncarries this code, which errs.HasCode reads through it.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6896,7 +6896,7 @@
         "value": "0.4.2.6"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6911,7 +6911,7 @@
         "value": "0.4.2.7"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6926,7 +6926,7 @@
         "value": "0.4.2.75"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6941,7 +6941,7 @@
         "value": "0.4.2.66"
       },
       "doc": "A transaction wrote a store another database keeps than the one it\nbelongs to — the data directory counting as one: refused, Invalid.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6956,7 +6956,7 @@
         "value": "0.4.2.78"
       },
       "doc": "The trash (kitsunium/sdk ADR 0178 C4).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6971,7 +6971,7 @@
         "value": "0.4.2.82"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -6986,7 +6986,7 @@
         "value": "0.4.2.9"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7001,7 +7001,7 @@
         "value": "0.4.2.47"
       },
       "doc": "Watches (ADR 0008).\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7016,7 +7016,7 @@
         "value": "0.4.2.81"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7031,7 +7031,7 @@
         "value": "0.4.2.14"
       },
       "doc": "An OnEnter hook changed the state its entity was entering, or the\nentity's key: the transition is refused.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7046,7 +7046,7 @@
         "value": "0.4.2.13"
       },
       "doc": "A workflow hook panicked: an OnEnter hook fails its transition with it,\nan OnTransition hook is reported and the transition stands.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7061,7 +7061,7 @@
         "value": "0.4.2.12"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7076,7 +7076,7 @@
         "value": "0.4.2.74"
       },
       "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -7091,7 +7091,7 @@
         "value": "0.4.2.15"
       },
       "doc": "An OnEnter hook fired its own workflow: refused, where it would wait\nfor itself.\n",
-      "file": "framework/internal/app/codes_gen.go",
+      "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15758,7 +15758,7 @@
         "value": "0.2.35.8"
       },
       "doc": "CodeAmbiguousLicence identifies more than one entitlement identity on one\nmachine, which no automatic choice can resolve safely.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15773,7 +15773,7 @@
         "value": "0.2.35.11"
       },
       "doc": "CodeCINotEntitled identifies a CI account the roster does not cover.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15788,7 +15788,7 @@
         "value": "0.2.35.10"
       },
       "doc": "CodeCIUnknownKey identifies a CI token signed by a key the issuer does not\npublish.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15803,7 +15803,7 @@
         "value": "0.2.35.9"
       },
       "doc": "CodeCIUnverifiable identifies a CI run whose provenance could not be proven.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15818,7 +15818,7 @@
         "value": "0.2.35.13"
       },
       "doc": "CodeClockRegressed identifies a machine whose clock is behind the last signed\ndocument it verified — the anti-rollback ratchet.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15833,7 +15833,7 @@
         "value": "0.2.35.6"
       },
       "doc": "CodeKeyMismatch identifies a local key that does not match the fingerprint\nthe roster publishes for this subject.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15848,7 +15848,7 @@
         "value": "0.2.35.5"
       },
       "doc": "CodeLicenceExpired identifies a subject whose own validity window has closed.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15863,7 +15863,7 @@
         "value": "0.2.35.1"
       },
       "doc": "CodeNoLicence identifies a machine with no entitlement key at all.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15878,7 +15878,7 @@
         "value": "0.2.35.12"
       },
       "doc": "CodeNoPossession identifies a holder who could not prove possession of the\nprivate half of the published key.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15893,7 +15893,7 @@
         "value": "0.2.35.15"
       },
       "doc": "CodeProductInvalid identifies a ProductValue whose origin list could not\nsurvive the day it is needed — see ProductValue.Validate.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15908,7 +15908,7 @@
         "value": "0.2.35.4"
       },
       "doc": "CodeRevoked identifies a subject absent from a roster that was itself valid.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15923,7 +15923,7 @@
         "value": "0.2.35.3"
       },
       "doc": "CodeRosterStale identifies a roster that verified but whose validity window\nhas closed.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15938,7 +15938,7 @@
         "value": "0.2.35.7"
       },
       "doc": "CodeRosterUnreachable identifies a fetch that could not decide either way.\nIt reports \"cannot decide\", never \"no\" — the distinction is the whole point.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15953,7 +15953,7 @@
         "value": "0.2.35.2"
       },
       "doc": "CodeRosterUnsigned identifies a roster carrying no valid vendor signature.\nIt is the spoofing signal: a substituted endpoint cannot produce one.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15968,7 +15968,7 @@
         "value": "0.2.35.14"
       },
       "doc": "CodeUpdateRequired identifies a build below the floor the roster mandates.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -15984,7 +15984,7 @@
         "public": "more than one entitlement identity is present on this machine"
       },
       "doc": "ErrAmbiguousLicense reports that the key directory holds more than one\nusable licence identity, so which one this machine presents cannot be\ndecided here. It is deliberately distinct from ErrNoLicense: the\nmachine is enrolled, possibly several times over, and the fix is to\nremove the identities that do not belong rather than to enrol.\n\nGuessing was the previous behaviour — the lexicographically first UUID\nwon — which let a stray .pub decide which licence got verified, which\none a rotation overwrote, and which one `license status` reported.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16000,7 +16000,7 @@
         "public": "this CI account is not covered by an entitlement"
       },
       "doc": "ErrCINotEntitled reports that the CI run authenticated, but the account\nit belongs to is not one the roster covers. The token is genuine; the\nlicence simply does not extend to it.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16016,7 +16016,7 @@
         "public": "the CI token is signed by a key the issuer does not publish"
       },
       "doc": "ErrCIUnknownKey reports that the token names a signing key the fetched\nkey set does not publish — a key rotated out from under a token still in\nflight, or a forgery. Distinct from ErrCIUnverifiable because the two\nsend an operator to different places: this one says the issuer's key set\nand the token disagree, which is the issuer's side of the exchange.\n\nIt used to promise a remedy the client applies itself — \"refresh the key\nset once, since GitHub rotates keys, then refuse if it still does not\nappear\". No implementation does that and none is expected to: the\nverifier holds no key-set cache, so it already fetches the published set\nfresh on every verification and a rotation is picked up by the next one.\nA second fetch inside one verification would re-read a URL it read\nseconds earlier, which cannot make an endpoint publish a kid it does not\npublish. See the service's publishedJWKS for the argument in full; a\nsentinel must not advertise a mechanism nobody implements.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16032,7 +16032,7 @@
         "public": "this run could not be proven to be a CI run"
       },
       "doc": "ErrCIUnverifiable reports that a claim of running inside CI could not\nbe authenticated: no token, a malformed one, a bad signature, or one\nminted for someone else. It never means \"not in CI\" — it means the\nclaim was not provable, and the caller falls back to the ordinary\ndevice path rather than granting a free seat.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16048,7 +16048,7 @@
         "public": "this machine's clock is behind the last signed document it verified"
       },
       "doc": "ErrClockRegressed reports that this machine's clock reads EARLIER than\nthe newest vendor-signed instant it has ever authenticated.\n\nIt is the one statement about time this package can make without the\nnetwork, and it is worth making because the alternative is to believe a\nclock the holder controls. A roster is signed evidence that time was at\nleast its IssuedAt; a clock that has since moved backwards past that\npoint is either broken or being moved, and both are the holder's to fix.\n\nWhat it does NOT catch is a FROZEN clock: parked exactly on the mark,\nnothing local can tell that time has passed. Nor does it survive\ndeletion — the mark lives on a disk its holder owns. It bounds the\ncareless case and the casual one, which is this package's whole remit.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16064,7 +16064,7 @@
         "public": "the local key does not match the published fingerprint"
       },
       "doc": "ErrKeyMismatch reports that the local key does not match the\nfingerprint the roster records for this UUID, which is what a copied\n.pub file looks like: the public half is published, so possession of\nit proves nothing.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16080,7 +16080,7 @@
         "public": "this entitlement has expired"
       },
       "doc": "ErrLicenseExpired reports that the subject's own validity window has\nclosed, even though the roster itself is fresh and still lists them.\nDistinct from ErrRosterStale (the whole roster's signing freshness)\nand from ErrRevoked (removed from the roster entirely): renewal, not\nrotation or re-enrolment, is what resolves this one.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16096,7 +16096,7 @@
         "public": "no entitlement key was found on this machine"
       },
       "doc": "ErrNoLicense reports that no licence key was found on this machine.\nThe caller has never enrolled, or the key was removed.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16112,7 +16112,7 @@
         "public": "possession of the private key could not be proven"
       },
       "doc": "ErrNoPossession reports that the private half could not be exercised,\nso holding the public key was never turned into proof of ownership.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16128,7 +16128,7 @@
         "public": "this entitlement has been revoked"
       },
       "doc": "ErrRevoked reports that the licence UUID is absent from a roster that\nwas itself valid — the subject was removed upstream.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16144,7 +16144,7 @@
         "public": "the roster has expired"
       },
       "doc": "ErrRosterStale reports that the roster verified but no longer\nauthorises anything. It bounds how long a revoked client keeps working\noffline, and how long a hostile endpoint can replay a genuine roster.\n\nThose are the same bound, and cache.go is what finally made the first\nhalf of that sentence describe something: an offline client re-reads\nthe last bundle it authenticated and is refused HERE the moment that\nbundle's window closes — at most RosterLifetime after it was signed,\nwhoever is replaying it and from wherever.\n\nTWO conditions reach it, and the second is the other half of that\nreplay bound rather than a separate situation. A window that has\nCLOSED is the absolute one. A roster SUPERSEDED by a newer signed\ndecision this machine has already accepted is the relative one: its\nown window may be wide open, and it is still the replay of a statement\nthe vendor has since replaced. Only the `condition` field says which,\nbecause the resolving action does not differ — publish, or fetch, a\ncurrent roster.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16160,7 +16160,7 @@
         "public": "the roster could not be reached"
       },
       "doc": "ErrRosterUnreachable reports that no origin could be reached AND no\nusable bundle was cached, so no authorization decision could be made at\nall. It is deliberately distinct from a refusal: the caller knows\nnothing, rather than knowing the answer is no.\n\nIt names the NETWORK even when the cache is what failed last. The cache\nis a fallback nobody configured and most operators have never heard of;\npointing them at it would send them to fix the wrong thing, when what\nhappened is that every publication point was unreachable.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16176,7 +16176,7 @@
         "public": "the roster is not signed by the expected vendor"
       },
       "doc": "ErrRosterUnsigned reports that the roster carried no valid vendor\nsignature. This is the spoofing signal: a substituted endpoint cannot\nproduce one.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16192,7 +16192,7 @@
         "public": "a newer version is required"
       },
       "doc": "ErrUpdateRequired reports that the roster demands a newer binary than\nthis one. It is NOT a licence failure — the subject is perfectly\nentitled — so it carries its own sentinel and its own exit code: the\nresolving action is an upgrade, and telling somebody their licence is\nbroken when it is not would send them to the wrong place entirely.\n",
-      "file": "framework/internal/core/entitlement/codes_gen.go",
+      "file": "framework/internal/core/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16455,7 +16455,7 @@
         "value": "0.2.36.1"
       },
       "doc": "CodePolicyInvalid identifies a gate policy that could not be used as written\n— an unset update action, a recovery command that is gated, or no exemption\nat all. Every one of them is a construction fault, reported at start-up\nrather than at the first refused invocation.\n",
-      "file": "framework/internal/core/gate/codes_gen.go",
+      "file": "framework/internal/core/gate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16749,7 +16749,7 @@
         "value": "0.2.33.2"
       },
       "doc": "CodeCommandFailed identifies a version-control command that exited non-zero.\nThe stderr tail travels in Private, never in Public.\n",
-      "file": "framework/internal/core/git/codes_gen.go",
+      "file": "framework/internal/core/git/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16764,7 +16764,7 @@
         "value": "0.2.33.3"
       },
       "doc": "CodePathAbsent identifies a path that does not exist at the requested commit,\nwhich is distinct from a path that exists and is empty.\n",
-      "file": "framework/internal/core/git/codes_gen.go",
+      "file": "framework/internal/core/git/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16779,7 +16779,7 @@
         "value": "0.2.33.1"
       },
       "doc": "CodeRepositoryUnresolved identifies a path that is not inside a repository the\nimplementation can read, or a repository probe that failed outright.\n",
-      "file": "framework/internal/core/git/codes_gen.go",
+      "file": "framework/internal/core/git/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16795,7 +16795,7 @@
         "public": "the version-control command failed"
       },
       "doc": "CommandFailed is returned when a version-control command exits non-zero.\nThe command line and its stderr are attached as Private: they can name\nbranches, paths and remotes, none of which belongs on a wire-safe surface.\n",
-      "file": "framework/internal/core/git/codes_gen.go",
+      "file": "framework/internal/core/git/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16846,7 +16846,7 @@
         "public": "the path does not exist at that commit"
       },
       "doc": "PathAbsent is returned when a path does not exist at the requested commit.\nIt is deliberately distinct from a successful read of an empty file: a\ncaller reconstructing history has to tell \"deleted\" from \"emptied\".\n",
-      "file": "framework/internal/core/git/codes_gen.go",
+      "file": "framework/internal/core/git/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16862,7 +16862,7 @@
         "public": "the path is not inside a readable repository"
       },
       "doc": "RepositoryUnresolved is returned when a path is not inside a readable\nrepository, or when the probe that would have told us failed.\n",
-      "file": "framework/internal/core/git/codes_gen.go",
+      "file": "framework/internal/core/git/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16933,7 +16933,7 @@
         "public": "the release metadata is larger than this build accepts"
       },
       "doc": "APIBodyTooLarge is returned when a release-metadata response exceeds its\ncap.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16949,7 +16949,7 @@
         "public": "the release archive is larger than this build accepts"
       },
       "doc": "ArchiveTooLarge is returned when a release archive exceeds the size cap.\nThe cap exists because the bytes are buffered in memory before anything\nhas vouched for them.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16965,7 +16965,7 @@
         "public": "the release archive does not contain the expected binary"
       },
       "doc": "BinaryNotInArchive is returned when a verified archive does not contain\nthe expected binary. The archive is authentic; it is simply not what was\nexpected, which is a packaging fault rather than an attack.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -16981,7 +16981,7 @@
         "public": "no such release candidate"
       },
       "doc": "CandidateNotFound is returned when a requested release candidate does not\nexist.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17025,7 +17025,7 @@
         "public": "the release archive does not match its checksum"
       },
       "doc": "ChecksumMismatch is returned when the archive's digest does not match its\nauthenticated manifest entry.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17041,7 +17041,7 @@
         "public": "the release has no checksum for this platform"
       },
       "doc": "ChecksumMissing is returned when the authenticated manifest has no entry\nfor the archive being installed.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17056,7 +17056,7 @@
         "value": "0.2.34.7"
       },
       "doc": "CodeAPIBodyTooLarge identifies a release-metadata response exceeding its cap.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17071,7 +17071,7 @@
         "value": "0.2.34.6"
       },
       "doc": "CodeArchiveTooLarge identifies a release archive exceeding the size cap.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17086,7 +17086,7 @@
         "value": "0.2.34.16"
       },
       "doc": "CodeBinaryNotInArchive identifies a verified archive that does not contain the\nexpected binary.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17101,7 +17101,7 @@
         "value": "0.2.34.12"
       },
       "doc": "CodeCandidateNotFound identifies a requested release candidate that does not\nexist.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17116,7 +17116,7 @@
         "value": "0.2.34.5"
       },
       "doc": "CodeChecksumMismatch identifies an archive whose digest did not match its\nauthenticated manifest entry.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17131,7 +17131,7 @@
         "value": "0.2.34.4"
       },
       "doc": "CodeChecksumMissing identifies an archive with no entry in the authenticated\nchecksum manifest.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17146,7 +17146,7 @@
         "value": "0.2.34.11"
       },
       "doc": "CodeDevBuild identifies a version check on a build with no release version to\ncompare against.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17161,7 +17161,7 @@
         "value": "0.2.34.10"
       },
       "doc": "CodeDownloadFailed identifies a download that did not complete.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17176,7 +17176,7 @@
         "value": "0.2.34.14"
       },
       "doc": "CodeDraftRelease identifies a draft release, which has no downloadable asset.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17191,7 +17191,7 @@
         "value": "0.2.34.18"
       },
       "doc": "CodeElevationNotAuthorised identifies a replacement needing privilege the\noperator did not opt into.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17206,7 +17206,7 @@
         "value": "0.2.34.8"
       },
       "doc": "CodeInsecureRedirect identifies a redirect leaving HTTPS, or exceeding the\nhop bound.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17221,7 +17221,7 @@
         "value": "0.2.34.15"
       },
       "doc": "CodeInvalidTag identifies a tag that is not a valid semantic version.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17236,7 +17236,7 @@
         "value": "0.2.34.1"
       },
       "doc": "CodeNoVendorKey identifies an install attempted by a build that carries no\nvendor key, so nothing could have authenticated the release.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17251,7 +17251,7 @@
         "value": "0.2.34.13"
       },
       "doc": "CodeNotPrerelease identifies a tag requested as a candidate that the host\nreports as a stable release.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17266,7 +17266,7 @@
         "value": "0.2.34.3"
       },
       "doc": "CodeSignatureInvalid identifies a checksum manifest whose signature did not\nverify against the vendor key.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17281,7 +17281,7 @@
         "value": "0.2.34.2"
       },
       "doc": "CodeSignatureMissing identifies a release whose detached signature over the\nchecksum manifest could not be fetched.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17296,7 +17296,7 @@
         "value": "0.2.34.9"
       },
       "doc": "CodeUnexpectedStatus identifies a release host answering with a status the\nupdate path does not accept.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17311,7 +17311,7 @@
         "value": "0.2.34.17"
       },
       "doc": "CodeUnknownArchive identifies an asset whose container format is not handled.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17350,7 +17350,7 @@
         "public": "this build has no version to compare against a release"
       },
       "doc": "DevBuild is returned when a version check runs on a build with no release\nversion to compare against.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17366,7 +17366,7 @@
         "public": "the release could not be downloaded"
       },
       "doc": "DownloadFailed is returned when a download does not complete.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17382,7 +17382,7 @@
         "public": "that release is still a draft"
       },
       "doc": "DraftRelease is returned for a draft release, which has no downloadable\nasset.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17398,7 +17398,7 @@
         "public": "replacing this binary needs privilege that was not authorised"
       },
       "doc": "ElevationNotAuthorised is returned when replacing the binary needs\nprivilege the operator did not opt into. Escalating without being asked is\nthe one thing an updater must never do quietly.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17520,7 +17520,7 @@
         "public": "the release host redirected somewhere this build will not follow"
       },
       "doc": "InsecureRedirect is returned when a redirect leaves HTTPS or exceeds the\nhop bound. Following it would hand the archive fetch to a plaintext hop.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17536,7 +17536,7 @@
         "public": "that is not a valid version tag"
       },
       "doc": "InvalidTag is returned for a tag that is not a valid semantic version.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17552,7 +17552,7 @@
         "public": "this build cannot verify a release and will not install one"
       },
       "doc": "NoVendorKey is returned when the running build carries no vendor key. It\nis a REFUSAL, not a degradation: without a key nothing could have\nauthenticated the release, so there is no weaker check to fall back to.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17568,7 +17568,7 @@
         "public": "that tag is a stable release, not a candidate"
       },
       "doc": "NotPrerelease is returned when a tag requested as a candidate is reported\nas a stable release.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17584,7 +17584,7 @@
         "public": "the release signature did not verify"
       },
       "doc": "SignatureInvalid is returned when the checksum manifest's signature does\nnot verify against the vendor key.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17600,7 +17600,7 @@
         "public": "the release is not signed"
       },
       "doc": "SignatureMissing is returned when the detached signature over the checksum\nmanifest could not be fetched.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17616,7 +17616,7 @@
         "public": "the release host answered unexpectedly"
       },
       "doc": "UnexpectedStatus is returned when the release host answers with a status\nthe update path does not accept.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17632,7 +17632,7 @@
         "public": "the release archive format is not supported"
       },
       "doc": "UnknownArchive is returned for an asset whose container format is not\nhandled.\n",
-      "file": "framework/internal/core/selfupdate/codes_gen.go",
+      "file": "framework/internal/core/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17815,7 +17815,7 @@
         "public": "the offline entitlement cache could not be written"
       },
       "doc": "CacheUnwritable is returned when the offline bundle cannot be replaced.\n\nIt is deliberately NOT a refusal, and nothing upstream treats it as\none: the verification that produced these bytes has already succeeded,\nand a cache nobody can write costs the offline fallback and nothing\nelse. rememberRoster logs it and carries on, which is the whole of its\nreachability — pinned by\nTest_rememberRoster_keepsWhatItCanAndSurvivesWhatItCannot.\n",
-      "file": "framework/internal/service/entitlement/codes_gen.go",
+      "file": "framework/internal/service/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -17830,7 +17830,7 @@
         "value": "0.3.67.1"
       },
       "doc": "CodeCacheUnwritable identifies an offline cache that could not be replaced.\n\nIt is never a refusal. The verification that produced the bundle already\nsucceeded, and what is lost is the next start-up's ability to answer without\nthe network — which is why rememberRoster logs it and carries on rather than\nreturning it. The code exists so that line has something to name, and so the\nstep that failed (mkdir, create, write, close, rename) travels as a field\ninstead of as prose.\n",
-      "file": "framework/internal/service/entitlement/codes_gen.go",
+      "file": "framework/internal/service/entitlement/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18563,7 +18563,7 @@
         "public": "the release archive could not be read"
       },
       "doc": "ArchiveUnreadable is returned when the release archive cannot be\nbuffered or unpacked.\n\nEverything under this sentinel happens AFTER the archive's signature\nand digest have both been verified, which is what makes it a packaging\nor transfer fault rather than a supply-chain one. Saying so matters:\nthe documented response to an authenticity refusal is \"do not install\nthis by any means\", and that is the wrong advice for a gzip stream that\nwas truncated on the way in.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18591,7 +18591,7 @@
         "public": "a release candidate is installed by naming its tag, and no tag was named"
       },
       "doc": "CandidateTagRequired is returned by DownloadCandidate for an empty tag.\n\nThere is deliberately no \"latest candidate\" to fall back to. A\nprerelease channel has no ordering an updater may assume — rc.2 can be\npublished after rc.3 is withdrawn — so resolving the empty tag would\nmean this package choosing which unreleased build to install over the\nrunning binary.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18618,7 +18618,7 @@
         "value": "0.3.66.3"
       },
       "doc": "CodeArchiveUnreadable identifies a release archive that could not be\nbuffered or unpacked.\n\nIt is deliberately NOT the domain's ChecksumMismatch: by the time anything\nhere runs the archive has already been authenticated and its digest matched,\nso a container that will not open is a packaging or transfer fault and never\na supply-chain signal. Reporting it as one would tell an operator not to\ninstall a release that is provably the vendor's.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18633,7 +18633,7 @@
         "value": "0.3.66.1"
       },
       "doc": "CodeCandidateTagRequired identifies a candidate install asked for without\nnaming which candidate.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18648,7 +18648,7 @@
         "value": "0.3.66.7"
       },
       "doc": "CodeElevationFailed identifies an escalation the operator DID authorise and\nthat the system refused anyway.\n\nIt is not the domain's ElevationNotAuthorised, and the difference is the\nwhole remedy: that one is fixed by setting one environment variable, this one\nis not fixed by setting anything.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18663,7 +18663,7 @@
         "value": "0.3.66.4"
       },
       "doc": "CodeExecutablePathUnresolved identifies an update that cannot name the file\nit would replace.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18678,7 +18678,7 @@
         "value": "0.3.66.8"
       },
       "doc": "CodeProbeFailed identifies a replacement whose new binary did not answer the\nprobe the product declared (ADR 0150). The fields say whether the previous\nbinary, kept as <binary>.prev, was put back.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18693,7 +18693,7 @@
         "value": "0.3.66.2"
       },
       "doc": "CodeReleaseMetadataUnreadable identifies a release-API answer that arrived\nwhole and did not decode as release metadata.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18708,7 +18708,7 @@
         "value": "0.3.66.6"
       },
       "doc": "CodeReplacementFailed identifies a rename over the running executable that\ndid not land.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18723,7 +18723,7 @@
         "value": "0.3.66.5"
       },
       "doc": "CodeStagingFailed identifies a replacement that failed BEFORE the rename, so\nthe running binary was never touched.\n\nThe boundary between this and [CodeReplacementFailed] is the only thing an\noperator needs from these two, and it is the rename: everything under this\ncode leaves the installed binary byte-for-byte as it was.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18751,7 +18751,7 @@
         "public": "the elevated replacement was authorised and the system refused it"
       },
       "doc": "ElevationFailed is returned when an escalation the operator DID\nauthorise is refused by the system.\n\nIt is deliberately not ElevationNotAuthorised, and the gap between them\nis the remedy: that one is repaired by exporting one variable, and this\none is not repaired by exporting anything. Merging them would send\nsomebody who already set the variable to set it again.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18767,7 +18767,7 @@
         "public": "the path of the running binary could not be resolved, so nothing was replaced"
       },
       "doc": "ExecutablePathUnresolved is returned when the process cannot work out\nwhich file on disk it is running from.\n\nNothing is attempted after it. An updater that guesses its own path\nwrites a downloaded binary somewhere nobody asked for.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18829,7 +18829,7 @@
         "public": "the new binary did not answer its probe and was not kept"
       },
       "doc": "ProbeFailed is returned when the replacement landed and the new binary\ndid not answer the product's probe in time. The previous binary is put\nback from <binary>.prev when it was kept; rolled_back says whether it\nwas.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18845,7 +18845,7 @@
         "public": "the release host's answer could not be read as release metadata"
       },
       "doc": "ReleaseMetadataUnreadable is returned when the release API answers\nwithin its size cap and the body does not decode as release metadata.\n\nIt is separate from the download sentinels on purpose: the bytes\narrived, so no retry policy keyed on a transport failure applies, and\nthe thing to look at is what the host actually sent.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -18861,7 +18861,7 @@
         "public": "the running binary could not be replaced"
       },
       "doc": "ReplacementFailed is returned when the rename of the staged file over\nthe running executable does not land.\n\nThe rename is atomic, so this means the old binary is still in place —\nbut unlike StagingFailed it is the step that would have changed it, and\nthe remedy is about the install directory rather than about disk space.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -19125,7 +19125,7 @@
         "public": "the update could not be staged, and the running binary was left untouched"
       },
       "doc": "StagingFailed is returned when the replacement fails BEFORE the rename.\n\nThe installed binary is byte-for-byte as it was, and the partial\nstaging file has been removed. That is the whole content of this\nsentinel, and it is why it is not merged with ReplacementFailed: the\ntwo differ in exactly the fact an operator needs, which is whether the\nbinary they are about to run is the old one or something in between.\n",
-      "file": "framework/internal/service/selfupdate/codes_gen.go",
+      "file": "framework/internal/service/selfupdate/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -24855,7 +24855,7 @@
         "value": "0.4.1.1"
       },
       "doc": "CodeInvalidID identifies an ID the grammar of [IDPattern] does not match.\n",
-      "file": "framework/model/internal/core/codes_gen.go",
+      "file": "framework/model/internal/core/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -27288,7 +27288,7 @@
         "public": "The node identifier is not valid"
       },
       "doc": "InvalidID is returned by [ParseID] for a string the ID grammar does not\nmatch. Its \"part\" field names what failed — the kind, the service name, the\nnode name —, never the input.\n",
-      "file": "framework/model/internal/core/codes_gen.go",
+      "file": "framework/model/internal/core/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -33957,7 +33957,7 @@
         "value": "0.4.3.1"
       },
       "doc": "CodeMisconfigured identifies an exporter configuration that cannot be\nhonoured: no socket path, a buffer outside its bounds, an ID outside the\ngrammar in the node table.\n",
-      "file": "framework/telemetry/codes_gen.go",
+      "file": "framework/telemetry/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -33972,7 +33972,7 @@
         "value": "0.4.3.2"
       },
       "doc": "CodeRunning identifies a Start on an exporter already started.\n",
-      "file": "framework/telemetry/codes_gen.go",
+      "file": "framework/telemetry/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -34327,7 +34327,7 @@
         "public": "The telemetry exporter is misconfigured"
       },
       "doc": "Misconfigured refuses an exporter that cannot be built as asked; the\nrule field says which rule failed.\n",
-      "file": "framework/telemetry/codes_gen.go",
+      "file": "framework/telemetry/gen_codes.go",
       "layer": "framework"
     },
     {
@@ -34744,7 +34744,7 @@
         "public": "The telemetry exporter is already running"
       },
       "doc": "Running refuses a second Start.\n",
-      "file": "framework/telemetry/codes_gen.go",
+      "file": "framework/telemetry/gen_codes.go",
       "layer": "framework"
     }
   ]

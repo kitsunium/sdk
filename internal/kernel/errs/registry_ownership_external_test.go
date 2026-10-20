@@ -23,7 +23,7 @@ const layerZeroOwner string = "internal/kernel/errs"
 
 // codeRangeOwners is the authoritative MM.LL.PP -> owning package table for the
 // ADR 0005 registry invariant "each package owns a PP slot". It is kit's since
-// ADR 0164: codes_gen_test.go, written from the `codes.ranges` block of
+// ADR 0164: gen_ranges_test.go, written from the `codes.ranges` block of
 // design/sdk.yaml.
 //
 // It stays INDEPENDENT of the constants it audits. Deriving it from the tree

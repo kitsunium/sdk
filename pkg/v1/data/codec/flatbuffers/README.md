@@ -115,7 +115,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers.
 Code `0.3.23.3` · reason `FLATBUFFERS_TRUNCATED` · public "FlatBuffers buffer is truncated"
 
 <a name="BytesAcceptor"></a>
-## type [BytesAcceptor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/facade_gen.go>)
+## type [BytesAcceptor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/gen_facade.go>)
 
 BytesAcceptor is what an Unmarshal target may implement to receive the buffer. The slice is the caller's input, passed by reference: an implementation that keeps it copies it.
 
@@ -139,7 +139,7 @@ func (BytesAcceptor) SetBytes(data []byte)
 ```
 
 <a name="BytesProvider"></a>
-## type [BytesProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/facade_gen.go>)
+## type [BytesProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/gen_facade.go>)
 
 BytesProvider is what a Marshal argument may implement to hand the codec its already-encoded FlatBuffer: the bytes are read, never copied, for the length of the call.
 

@@ -79,7 +79,7 @@ func parseFlags(args []string) (*cliOptions, error) {
 	fs.BoolVar(&o.checkLinks, "check-doclinks", false, "emit no index; fail on every same-package doc link under the directories given as arguments that names no declared symbol (ADR 0138)")
 	fs.BoolVar(&o.writeAPI, "write-api", false, "emit no index; write docs/api/<module>.json for every module of the workspace under -repo-root, read from the code on every cell")
 	fs.BoolVar(&o.checkAPI, "check-api", false, "emit no index; regenerate docs/api in memory and fail on any byte that differs from what is committed")
-	fs.BoolVar(&o.markers, "markers", false, "with -check-api: compare, on every cell, the code's (id, kind, canonical signature) set with the markers of api_gen*_test.go pin files")
+	fs.BoolVar(&o.markers, "markers", false, "with -check-api: compare, on every cell, the code's (id, kind, canonical signature) set with the markers of gen_api*_test.go pin files")
 	fs.BoolVar(&o.digests, "digests", false, "with -check-api: check every generated file's header digests against the design files' bytes")
 	fs.BoolVar(&o.writeErrorCodes, "write-error-codes", false, "emit no index; write docs/error-codes.yaml from the committed docs/api: every errs.Code constant a package declares")
 	fs.BoolVar(&o.checkErrorCodes, "check-error-codes", false, "emit no index; fail when docs/error-codes.yaml is not what -write-error-codes writes from the committed docs/api")

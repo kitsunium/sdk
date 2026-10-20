@@ -5,10 +5,10 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "telemetry",
     srcs = [
-        "codes_gen.go",
         "doc.go",
         "exporter.go",
         "exporter_compliance.go",
+        "gen_codes.go",
         "telemetry.go",
         "telemetry_interface.go",
     ],
@@ -30,7 +30,7 @@ alias(
 go_test(
     name = "telemetry_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "telemetry_alloc_test.go",
         "telemetry_bench_test.go",
         "telemetry_external_test.go",

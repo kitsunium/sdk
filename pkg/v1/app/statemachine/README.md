@@ -716,7 +716,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/statemachine.WaitAb
 Code `0.3.88.20` · reason `WAIT_ABANDONED` · public "The request ended while the entity was busy"
 
 <a name="Define"></a>
-## func [Define](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## func [Define](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 ```go
 func Define[E any, S comparable](state func(*E) *S) *Definition[E, S]
@@ -725,7 +725,7 @@ func Define[E any, S comparable](state func(*E) *S) *Definition[E, S]
 Define starts the declaration of a machine over entities of type E. state returns a pointer to the entity's state field.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 ```go
 func New[E any, S comparable](ctx context.Context, def *Definition[E, S], cfg *Config[E, S]) (*Machine[E, S], error)
@@ -734,7 +734,7 @@ func New[E any, S comparable](ctx context.Context, def *Definition[E, S], cfg *C
 New checks def and cfg and opens a machine over cfg.Store: it reads the journal and every entity once, reconciles them and schedules what is due. Every problem of the declaration is returned at once, joined.
 
 <a name="ParseTrigger"></a>
-## func [ParseTrigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## func [ParseTrigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 ```go
 func ParseTrigger(name string) (Trigger, error)
@@ -743,7 +743,7 @@ func ParseTrigger(name string) (Trigger, error)
 ParseTrigger reads a trigger's name — "start", "event", "delay", "deadline" or "guard" — as Trigger.String writes it.
 
 <a name="Change"></a>
-## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Change is a stored transition, as an OnTransition hook receives it.
 
@@ -777,7 +777,7 @@ type Change[E any, S comparable] struct {
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Config parameterises New. Only Store is required.
 
@@ -839,7 +839,7 @@ type Config[E any, S comparable] struct {
 ```
 
 <a name="Definition"></a>
-## type [Definition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Definition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Definition declares a machine: its states, transitions and hooks.
 
@@ -964,7 +964,7 @@ func (*Definition) When(event string, from S, to S, guard func(E) bool) *Machine
 When declares a guard transition: an entity in state from moves to state to as soon as guard holds. The guard sees the entity only and is asked each time the entity is written, never on a clock.
 
 <a name="Firing"></a>
-## type [Firing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Firing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Firing is a transition the machine's own loop is about to fire, as Config.Observe is told it.
 
@@ -990,7 +990,7 @@ type Firing[S comparable] struct {
 ```
 
 <a name="Journal"></a>
-## type [Journal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Journal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Journal is the port the machine keeps its records in, beside your store. It is frozen at three methods.
 
@@ -1009,7 +1009,7 @@ type Journal[S comparable] interface {
 ```
 
 <a name="Journal.Delete"></a>
-### func \(Journal\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Journal\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Journal) Delete(ctx context.Context, keys ...string) error
@@ -1018,7 +1018,7 @@ func (Journal) Delete(ctx context.Context, keys ...string) error
 Delete forgets the records of keys; a key it does not hold is not an error.
 
 <a name="Journal.Load"></a>
-### func \(Journal\) [Load](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Journal\) [Load](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Journal) Load(ctx context.Context) (records []RecordValue[S], err error)
@@ -1027,7 +1027,7 @@ func (Journal) Load(ctx context.Context) (records []RecordValue[S], err error)
 Load returns every record the journal holds. The engine calls it once, when a machine opens.
 
 <a name="Journal.Save"></a>
-### func \(Journal\) [Save](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Journal\) [Save](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Journal) Save(ctx context.Context, records ...RecordValue[S]) error
@@ -1036,7 +1036,7 @@ func (Journal) Save(ctx context.Context, records ...RecordValue[S]) error
 Save stores each record, replacing any record of the same key.
 
 <a name="LoopEvent"></a>
-## type [LoopEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [LoopEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 LoopEvent is what Config.OnLoop is told about Run.
 
@@ -1069,7 +1069,7 @@ type LoopEvent struct {
 ```
 
 <a name="LoopEventKind"></a>
-## type [LoopEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [LoopEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 LoopEventKind says what a LoopEvent reports.
 
@@ -1093,7 +1093,7 @@ func (LoopEventKind) String() string
 String returns "run-started", "run-ended" or "waiting"; "" outside the set.
 
 <a name="Machine"></a>
-## type [Machine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Machine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Machine runs a Definition over a Store. It is safe for concurrent use.
 
@@ -1201,7 +1201,7 @@ Step makes one pass over what is due now: every entity written since the last pa
 It is for a caller that drives the machine itself instead of Run — a test, another scheduler. It returns \[corestm.LoopRunning] when Run or another Step is going.
 
 <a name="Record"></a>
-## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Record is what the machine keeps about one entity: its state, since when, and its latest transitions.
 
@@ -1225,7 +1225,7 @@ type Record[S comparable] struct {
 ```
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Step is one transition in a Record's history.
 
@@ -1255,7 +1255,7 @@ type Step[S comparable] struct {
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Store is the port your entities are read and written through. It is frozen at five methods.
 
@@ -1276,7 +1276,7 @@ type Store[E any] interface {
 ```
 
 <a name="Store.All"></a>
-### func \(Store\) [All](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Store\) [All](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Store) All(ctx context.Context) iter.Seq2[E, error]
@@ -1285,7 +1285,7 @@ func (Store) All(ctx context.Context) iter.Seq2[E, error]
 All yields every entity, then stops; an error ends the sequence. The engine ranges over it once, when a machine opens, to reconcile its journal and build its agenda.
 
 <a name="Store.Get"></a>
-### func \(Store\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Store\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Store) Get(ctx context.Context, key string) (entity E, found bool, err error)
@@ -1294,7 +1294,7 @@ func (Store) Get(ctx context.Context, key string) (entity E, found bool, err err
 Get returns the entity stored under key, and found == false — with a nil error — when there is none.
 
 <a name="Store.Insert"></a>
-### func \(Store\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Store\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Store) Insert(ctx context.Context, entity E) (inserted bool, err error)
@@ -1303,7 +1303,7 @@ func (Store) Insert(ctx context.Context, entity E) (inserted bool, err error)
 Insert stores entity under a key no entity holds. When one does, it stores nothing and reports inserted == false with a nil error.
 
 <a name="Store.Key"></a>
-### func \(Store\) [Key](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Store\) [Key](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Store) Key(entity E) (key string)
@@ -1312,7 +1312,7 @@ func (Store) Key(entity E) (key string)
 Key returns the key entity is stored under. It must be a pure function of the entity: the engine locks, records and schedules by it, and a transition never changes it.
 
 <a name="Store.Replace"></a>
-### func \(Store\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/design_gen.go>)
+### func \(Store\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/statemachine/gen_ports.go>)
 
 ```go
 func (Store) Replace(ctx context.Context, entity E) (replaced bool, err error)
@@ -1321,7 +1321,7 @@ func (Store) Replace(ctx context.Context, entity E) (replaced bool, err error)
 Replace stores entity over the entity holding its key. When none does — it was deleted while a transition ran — it stores nothing and reports replaced == false with a nil error: a transition never brings back an entity somebody deleted.
 
 <a name="Transition"></a>
-## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Transition is a declared transition, as Definition.Transitions reads it back.
 
@@ -1347,7 +1347,7 @@ type Transition[S comparable] struct {
 ```
 
 <a name="Trigger"></a>
-## type [Trigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Trigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Trigger says what fired a transition: a start, an event, a delay, a deadline or a guard.
 
@@ -1371,7 +1371,7 @@ func (Trigger) String() string
 String returns the trigger's name — "start", "event", "delay", "deadline" or "guard" — or "" for a value outside the set, which is how a caller tells a trigger from one that is not.
 
 <a name="Wake"></a>
-## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/facade_gen.go>)
+## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/statemachine/gen_facade.go>)
 
 Wake says why a run of the loop started.
 

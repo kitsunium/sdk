@@ -80,11 +80,11 @@ alias(
 go_test(
     name = "app_test",
     srcs = [
-        "api_gen_test.go",
         "facade_external_test.go",
         "facade_generics_external_test.go",
         "facade_sync_external_test.go",
         "fresh_process_bench_test.go",
+        "gen_api_test.go",
         "initgraph_external_test.go",
         "notrace_external_test.go",
     ],

@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "health",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "health.go",
         "health_check.go",
         "health_check_liveness.go",
@@ -36,7 +36,7 @@ alias(
 go_test(
     name = "health_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "health_external_test.go",
     ],
     deps = [

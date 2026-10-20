@@ -197,7 +197,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/events.UnknownListe
 Code `0.2.22.3` · reason `UNKNOWN_LISTENER` · public "No listener is registered under that name for this event"
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 ```go
 func New() Bus
@@ -206,7 +206,7 @@ func New() Bus
 New returns an empty in-process event bus. It cannot fail and takes no configuration: every knob considered was a contract rather than a setting, and a bus whose semantics vary by construction cannot be read at the call site.
 
 <a name="Off"></a>
-## func [Off](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## func [Off](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 ```go
 func Off[E any](bus Bus, name string) error
@@ -215,7 +215,7 @@ func Off[E any](bus Bus, name string) error
 Off removes the listener registered under name for the event type E. A name that is not registered is [UnknownListener](#UnknownListener), never a silent success.
 
 <a name="On"></a>
-## func [On](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## func [On](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 ```go
 func On[E any](bus Bus, handler Handler[E]) error
@@ -228,7 +228,7 @@ It is a function rather than a method because Go methods cannot take type parame
 E must be a concrete type; an interface is refused with [InvalidEventType](#InvalidEventType).
 
 <a name="Bus"></a>
-## type [Bus](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [Bus](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 Bus is the public alias for the in-process dispatch contract.
 
@@ -268,7 +268,7 @@ type Bus interface {
 ```
 
 <a name="Bus.Publish"></a>
-### func \(Bus\) [Publish](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/events/design_gen.go>)
+### func \(Bus\) [Publish](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/events/gen_ports.go>)
 
 ```go
 func (Bus) Publish(ctx context.Context, event any) (DispatchValue, error)
@@ -281,7 +281,7 @@ A bus with no listener for this type is LEGITIMATE (ADR 0031): publishing is a n
 The error aggregates what the listeners returned, with errors.Join. A [Halt](#Halt) is NOT part of it: stopping the dispatch is a decision, not a failure, and it is reported through \[DispatchValue.Halted].
 
 <a name="Bus.Subscribe"></a>
-### func \(Bus\) [Subscribe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/events/design_gen.go>)
+### func \(Bus\) [Subscribe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/events/gen_ports.go>)
 
 ```go
 func (Bus) Subscribe(eventType EventType, sub SubscriptionValue) error
@@ -290,7 +290,7 @@ func (Bus) Subscribe(eventType EventType, sub SubscriptionValue) error
 Subscribe registers sub against eventType. It is refused on a subscription that could never run — empty name, nil Listener ([InvalidSubscription](#InvalidSubscription)) — on a name already registered for that type ([DuplicateListener](#DuplicateListener)), and on a nil or interface eventType, which Publish could never match ([InvalidEventType](#InvalidEventType)).
 
 <a name="Bus.Unsubscribe"></a>
-### func \(Bus\) [Unsubscribe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/events/design_gen.go>)
+### func \(Bus\) [Unsubscribe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/events/gen_ports.go>)
 
 ```go
 func (Bus) Unsubscribe(eventType EventType, name string) error
@@ -299,7 +299,7 @@ func (Bus) Unsubscribe(eventType EventType, name string) error
 Unsubscribe removes the listener registered under name for eventType. A name that is not registered is [UnknownListener](#UnknownListener) rather than a silent success: "I removed it" and "there was nothing to remove" are different answers, and only one of them means the caller's mental model is right.
 
 <a name="Dispatch"></a>
-## type [Dispatch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [Dispatch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 Dispatch is the public alias for the report one Publish returns.
 
@@ -334,7 +334,7 @@ type Dispatch struct {
 ```
 
 <a name="EventType"></a>
-## type [EventType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [EventType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 EventType is the public alias for the concrete Go type a subscription is keyed on. It is reflect.Type; [On](#On) and [Off](#Off) derive it for you.
 
@@ -345,7 +345,7 @@ type EventType = corev.EventType
 EventType is an alias of `reflect.Type`.
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 Handler is the public alias for one TYPED listener's registration.
 
@@ -375,7 +375,7 @@ type Handler[E any] struct {
 ```
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 Listener is the public alias for the ERASED reaction the bus dispatches. Most code never names it — [On](#On) builds one from a typed function.
 
@@ -390,7 +390,7 @@ type Listener func(ctx context.Context, event any) error
 ```
 
 <a name="Priority"></a>
-## type [Priority](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [Priority](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 Priority is the public alias for a listener's position in the dispatch order. Lower runs first.
 
@@ -405,7 +405,7 @@ type Priority int
 ```
 
 <a name="Subscription"></a>
-## type [Subscription](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/facade_gen.go>)
+## type [Subscription](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/events/gen_facade.go>)
 
 Subscription is the public alias for one ERASED registration. Prefer [Handler](#Handler) with [On](#On); this is the shape a caller who has already erased the type themselves registers.
 

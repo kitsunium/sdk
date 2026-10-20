@@ -61,7 +61,7 @@ A nil loop, a nil tick and a non-positive interval panic at the call that passed
   - [func \(\*LoopDaemon\) Stop\(\)](<#LoopDaemon.Stop>)
 
 <a name="Every"></a>
-## func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## func [Every](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 ```go
 func Every(interval time.Duration, tick func(), opts ...EveryOption) *LoopDaemon
@@ -98,7 +98,7 @@ d.Stop()
 </details>
 
 <a name="NewLoopDaemon"></a>
-## func [NewLoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## func [NewLoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 ```go
 func NewLoopDaemon(loop Loop) *LoopDaemon
@@ -107,7 +107,7 @@ func NewLoopDaemon(loop Loop) *LoopDaemon
 NewLoopDaemon is [Start](#Start) under the New-prefixed name: the same daemon, the same panic on a nil loop.
 
 <a name="Start"></a>
-## func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 ```go
 func Start(loop Loop) *LoopDaemon
@@ -116,7 +116,7 @@ func Start(loop Loop) *LoopDaemon
 Start spawns loop in a new goroutine and returns the [LoopDaemon](#LoopDaemon) that controls it. A nil loop panics here rather than spawning a goroutine that does nothing.
 
 <a name="WithClock"></a>
-## func [WithClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## func [WithClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 ```go
 func WithClock(w clock.Waiter) EveryOption
@@ -125,7 +125,7 @@ func WithClock(w clock.Waiter) EveryOption
 WithClock makes [Every](#Every) tick on w instead of the wall clock — a \[clock.ManualClock] in a test, advanced past the interval once the ticker is armed. A nil w is the wall clock.
 
 <a name="WithDone"></a>
-## func [WithDone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## func [WithDone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 ```go
 func WithDone(done <-chan struct{}) EveryOption
@@ -134,7 +134,7 @@ func WithDone(done <-chan struct{}) EveryOption
 WithDone ends the loop of [Every](#Every) as soon as done is closed, without waiting for Stop, which still joins — returning at once on a loop that has already left. A nil done never fires.
 
 <a name="EveryOption"></a>
-## type [EveryOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## type [EveryOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 EveryOption tunes [Every](#Every): [WithClock](#WithClock) and [WithDone](#WithDone). Options apply in order, so a later one wins, and a nil option is skipped.
 
@@ -149,7 +149,7 @@ type EveryOption func(everyConfig) everyConfig
 ```
 
 <a name="Loop"></a>
-## type [Loop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## type [Loop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 Loop is the goroutine body a [LoopDaemon](#LoopDaemon) runs. It receives a stop channel, closed when Stop is called, and MUST return promptly once it is: Stop blocks until the loop has returned. A Loop MUST NOT panic.
 
@@ -164,7 +164,7 @@ type Loop func(stop <-chan struct{})
 ```
 
 <a name="LoopDaemon"></a>
-## type [LoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/facade_gen.go>)
+## type [LoopDaemon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/worker/gen_facade.go>)
 
 LoopDaemon is a running background goroutine with an idempotent Stop and a join. [LoopDaemon](#LoopDaemon).Stop signals the loop to exit and blocks until it has returned — idempotent, and safe to call from several goroutines. [LoopDaemon](#LoopDaemon).Done returns the channel closed once the loop has returned, for a caller that reacts to the end without joining.
 

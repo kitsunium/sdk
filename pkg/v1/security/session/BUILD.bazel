@@ -6,7 +6,7 @@ go_library(
     name = "session",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/security/session",
     visibility = ["//visibility:public"],
@@ -28,7 +28,7 @@ go_test(
     name = "session_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "session_bench_test.go",
         "session_external_test.go",
     ],

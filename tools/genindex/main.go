@@ -25,7 +25,7 @@
 // it writes nothing: it regenerates the documents in memory and fails on any
 // byte that differs from docs/api (`make api-check`, in `make lint-check`);
 // -markers adds the comparison of every cell's symbols with the pin markers of
-// api_gen*_test.go files, -digests the check of every generated file's header
+// gen_api*_test.go files, -digests the check of every generated file's header
 // digests against the design files' bytes.
 //
 // Every mode is the standard library alone (tools/CLAUDE.md), so it adds no

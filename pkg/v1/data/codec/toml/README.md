@@ -104,7 +104,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.Unmarsh
 Code `0.3.5.2` · reason `UNMARSHAL_FAILED` · public "TOML decoding failed"
 
 <a name="LocalDate"></a>
-## type [LocalDate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/facade_gen.go>)
+## type [LocalDate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/gen_facade.go>)
 
 LocalDate is a calendar day in no time zone: what a TOML local date such as 1979-05-27 decodes to in an untyped target. It writes and reads itself as YYYY-MM-DD, through String, MarshalText and UnmarshalText, and AsTime places it at midnight in a zone.
 
@@ -162,7 +162,7 @@ func (*LocalDate) UnmarshalText(text []byte) error
 UnmarshalText reads a day written YYYY-MM-DD, refusing a day the month does not have.
 
 <a name="LocalDateTime"></a>
-## type [LocalDateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/facade_gen.go>)
+## type [LocalDateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/gen_facade.go>)
 
 LocalDateTime is a date and a time of day in no time zone: what a TOML local date-time such as 1979-05-27T07:32:00 decodes to in an untyped target. AsTime places it in a zone.
 
@@ -216,7 +216,7 @@ func (*LocalDateTime) UnmarshalText(text []byte) error
 UnmarshalText reads a date-time written YYYY-MM-DDTHH:MM:SS with an optional fraction; a space or a t may stand for the T.
 
 <a name="LocalTime"></a>
-## type [LocalTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/facade_gen.go>)
+## type [LocalTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/gen_facade.go>)
 
 LocalTime is a time of day in no time zone: what a TOML local time such as 07:32:00.999 decodes to in an untyped target. Precision is the number of fractional digits the document wrote, which String writes back.
 

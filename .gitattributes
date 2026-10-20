@@ -5,10 +5,10 @@
 # names it with the sha256 of its bytes, and `tools/genindex -check-api
 # -digests` hashes them again (tools/genindex/CLAUDE.md).
 design/** text eol=lf
-# The files kit generates: the pins of every designed symbol and the ports.
-# Their headers carry the sha256 of their own body.
-**/api_gen*_test.go text eol=lf
-**/design_gen*.go text eol=lf
+# The files kit generates, every one named gen_* (kit's ADR 0014): the pins,
+# the ports, the codes, the facade, the declarations. Their headers carry the
+# sha256 of their own body.
+**/gen_*.go text eol=lf
 # docs/api is written by `make api` and compared byte for byte by
 # `make api-check`.
 docs/api/** text eol=lf

@@ -5,9 +5,9 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "vfs",
     srcs = [
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "path.go",
         "perm.go",
         "vfs.go",
@@ -33,7 +33,7 @@ go_test(
     name = "vfs_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "path_bench_test.go",
         "service_range_external_test.go",
         "vfs_external_test.go",

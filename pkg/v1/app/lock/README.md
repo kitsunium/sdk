@@ -200,7 +200,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/lock.LockPathRedire
 Code `0.3.51.4` · reason `LOCK_PATH_REDIRECTED` · public "The lock path is a link rather than a file"
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -220,7 +220,7 @@ defer stop()
 stop does NOT release the lease: the lifetime of a lock must not depend on the lifetime of a convenience.
 
 <a name="NewFileLocker"></a>
-## func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -235,7 +235,7 @@ The third refusal is one rule with two vocabularies, because the two platforms a
 Creating an entry at a free name is NOT that right, on either platform: it is what the sticky bit permits, and what Windows spells as "may add a file" without "may delete a child". What it costs is a lock file planted before any holder exists, which is a denial of service rather than a lost exclusion.
 
 <a name="NewMemory"></a>
-## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (locker Locker, err error)
@@ -246,7 +246,7 @@ NewMemory returns a [Locker](#Locker) whose leases live in this process and DO e
 cfg.TTL must be positive; a zero or negative TTL is refused here rather than defaulted, because the two natural readings of zero are opposites and either choice would be silently wrong for half of its callers (ADR 0031).
 
 <a name="Deadliner"></a>
-## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 Deadliner is the sibling implemented by a [Lease](#Lease) that CAN expire — i.e. one that can be taken from you while you are still running.
 
@@ -268,7 +268,7 @@ type Deadliner interface {
 ```
 
 <a name="Deadliner.Deadline"></a>
-### func \(Deadliner\) [Deadline](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/design_gen.go>)
+### func \(Deadliner\) [Deadline](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/gen_ports.go>)
 
 ```go
 func (Deadliner) Deadline() time.Time
@@ -277,7 +277,7 @@ func (Deadliner) Deadline() time.Time
 Deadline returns the instant at which this lease stops being held unless it is renewed first. It moves forward on every successful [Lease.Extend](#Lease.Extend).
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 FileConfig parameterises [NewFileLocker](#NewFileLocker). Dir must be set; Poll defaults.
 
@@ -308,7 +308,7 @@ type FileConfig struct {
 ```
 
 <a name="KeepaliveConfig"></a>
-## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 KeepaliveConfig parameterises [Keepalive](#Keepalive). Every must be positive and should be comfortably shorter than the lease TTL — a third of it leaves room for two consecutive failed renewals.
 
@@ -340,7 +340,7 @@ type KeepaliveConfig struct {
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 Lease is a held lock: Fence, Extend, Release. FROZEN at three, for the same reason [Locker](#Locker) is frozen at two.
 
@@ -389,7 +389,7 @@ type Lease interface {
 ```
 
 <a name="Lease.Extend"></a>
-### func \(Lease\) [Extend](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/design_gen.go>)
+### func \(Lease\) [Extend](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/gen_ports.go>)
 
 ```go
 func (Lease) Extend(ctx context.Context) error
@@ -402,7 +402,7 @@ It returns [LockNotHeld](#LockNotHeld) when this holder no longer owns the lock 
 On an implementation whose leases cannot expire, Extend re-asserts ownership and succeeds; it is never a silent no-op that hides a lost lock, because there is no way for such a lock to be lost while held.
 
 <a name="Lease.Fence"></a>
-### func \(Lease\) [Fence](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/design_gen.go>)
+### func \(Lease\) [Fence](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/gen_ports.go>)
 
 ```go
 func (Lease) Fence() uint64
@@ -415,7 +415,7 @@ It is the only mechanism in this domain that survives a stalled holder, and it o
 Fence never returns 0 for a live lease. Zero is the "no acquisition" value, so a caller that forgets to plumb the token through cannot have it silently compare equal to a legitimate one.
 
 <a name="Lease.Release"></a>
-### func \(Lease\) [Release](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/design_gen.go>)
+### func \(Lease\) [Release](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/gen_ports.go>)
 
 ```go
 func (Lease) Release(ctx context.Context) error
@@ -426,7 +426,7 @@ Release gives the lock up. It releases ONLY a lock this holder still holds: a le
 Releasing a lease this holder already released is not an error — the caller's intent is satisfied — so \`defer lease.Release(ctx)\` next to an explicit release is safe.
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 Locker hands out named, exclusive leases: Acquire and TryAcquire.
 
@@ -459,7 +459,7 @@ type Locker interface {
 ```
 
 <a name="Locker.Acquire"></a>
-### func \(Locker\) [Acquire](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/design_gen.go>)
+### func \(Locker\) [Acquire](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/gen_ports.go>)
 
 ```go
 func (Locker) Acquire(ctx context.Context, name string) (Lease, error)
@@ -470,7 +470,7 @@ Acquire blocks until the named lock is held by this caller or ctx ends. On succe
 A cancelled or expired ctx returns the context's own error, not an SDK sentinel: the caller supplied the deadline and already knows what it means. An empty name is refused with [LockNameRejected](#LockNameRejected).
 
 <a name="Locker.TryAcquire"></a>
-### func \(Locker\) [TryAcquire](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/design_gen.go>)
+### func \(Locker\) [TryAcquire](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lock/gen_ports.go>)
 
 ```go
 func (Locker) TryAcquire(ctx context.Context, name string) (Lease, bool, error)
@@ -481,7 +481,7 @@ TryAcquire attempts the acquisition once and never waits for another holder. It 
 "Held elsewhere" is NOT an error: a caller that offered to give up immediately has had its offer accepted, and nothing went wrong. An error return means the backend could not answer the question at all.
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/facade_gen.go>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lock/gen_facade.go>)
 
 MemoryConfig parameterises [NewMemory](#NewMemory). TTL must be positive.
 

@@ -6,7 +6,7 @@ go_library(
     name = "mac",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "mac.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/mac",
@@ -26,7 +26,7 @@ alias(
 go_test(
     name = "mac_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "mac_bench_test.go",
         "mac_external_test.go",
     ],

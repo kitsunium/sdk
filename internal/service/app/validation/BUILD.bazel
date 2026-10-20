@@ -53,10 +53,10 @@ go_test(
     name = "validation_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "compose_external_test.go",
         "constraints_external_test.go",
         "equivalence_external_test.go",
+        "gen_api_test.go",
         "json_reach_external_test.go",
         "refusals_external_test.go",
         "struct_external_test.go",

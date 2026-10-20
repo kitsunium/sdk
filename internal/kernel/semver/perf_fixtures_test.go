@@ -3,7 +3,7 @@
 // The fixtures of semver's performance contracts (design/sdk.yaml,
 // budgets) — the allocation claim the package doc states: every reading is
 // a substring of its input, found in one pass, so nothing here allocates.
-// Each fixture sets one call up and returns it, and the perf_gen_test.go
+// Each fixture sets one call up and returns it, and the gen_perf_test.go
 // kit gen writes beside this file counts its allocations against its
 // budget: the total over 30 000 calls after as many warm-up calls.
 //
