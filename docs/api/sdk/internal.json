@@ -62412,18 +62412,6 @@
       "family": "proc"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/proc/ipc.RuntimeDirOr",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/internal/service/proc/ipc",
-      "name": "RuntimeDirOr",
-      "spelled": "func(app string, fallback string) string",
-      "canonical": "func(app string, fallback string) string",
-      "doc": "RuntimeDirOr is RuntimeDir with fallback in place of <tmp>/<app>-<uid>:\n$RUNTIME_DIRECTORY, then $XDG_RUNTIME_DIR/<app>, then %LOCALAPPDATA%\\<app>\non Windows, else fallback, returned as given. A caller that keeps state\nin a directory of its own names a directory there, and its sockets never\nland in a tree any account can create first (ADR 0182). It creates\nnothing; Listen does, at 0700, and refuses a fallback that is not\nabsolute or not private.\n",
-      "file": "service/proc/ipc/ipc.go",
-      "layer": "service",
-      "family": "proc"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/service/proc/memlimit.Apply",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/proc/memlimit",
