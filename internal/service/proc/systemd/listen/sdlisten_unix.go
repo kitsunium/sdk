@@ -41,17 +41,20 @@ func dropErr(err error) {
 	//: the error concerns a best-effort cleanup step — nothing to do.
 }
 
-// clearCloexec clears FD_CLOEXEC on fd via fcntl(F_SETFD, 0) so the inherited
-// socket survives a subsequent re-exec (e.g. a zero-downtime self-restart). A
-// fcntl failure is non-fatal: the fd is still usable for the immediate service,
-// just not guaranteed across a re-exec.
-func clearCloexec(fd int) {
-	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0)
-	//: a fcntl failure leaves the fd usable now, just not across a re-exec.
-	if errno != 0 {
-		//: non-fatal — the socket still works for the immediate service.
-		return
-	}
+// setCloexec sets FD_CLOEXEC on an inherited activation socket, as
+// sd_listen_fds(3) does.
+//
+// The socket arrives without it — the activator cleared it so exec could pass
+// it — and an inherited descriptor left that way is inherited again by every
+// process this one spawns: a helper started under a lowered identity would
+// hold the service's listening socket (:443, say) and could accept on it. The
+// previous behaviour CLEARED the flag "so a re-exec keeps the socket"; a
+// re-exec that wants it passes it explicitly, through Prepare or ExtraFiles,
+// both of which dup it for the child.
+func setCloexec(fd int) {
+	//: fcntl(F_SETFD, FD_CLOEXEC) on every unix; nothing to report on failure,
+	//: as for the flag sd_listen_fds sets.
+	syscall.CloseOnExec(fd)
 }
 
 // wrapListen wraps an fd/socket cause onto the central ListenFailed sentinel.
@@ -139,6 +142,9 @@ func splitNames(n int) []string {
 // Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,
 // gated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a
 // grandchild does not re-inherit it. An empty/foreign activation set yields nil.
+// Each socket has FD_CLOEXEC set, as sd_listen_fds(3) sets it, so no process
+// this one spawns inherits a listening socket; handing one on to a re-exec is
+// explicit, through Prepare or the Spec's ExtraFiles.
 func Files(unsetEnv bool) (files []*os.File, err error) {
 	//: optionally clear the activation env after reading it.
 	if unsetEnv {
@@ -158,13 +164,13 @@ func Files(unsetEnv bool) (files []*os.File, err error) {
 	}
 	names := splitNames(n)
 	out := make([]*os.File, 0, n)
-	//: wrap each inherited fd as a named *os.File, clearing CLOEXEC so a later
-	//: re-exec keeps the socket.
+	//: wrap each inherited fd as a named *os.File, close-on-exec so no child
+	//: this process spawns inherits a listening socket it was not handed.
 	for i := range n {
 		fd := listenFdStart + i
-		//: clear FD_CLOEXEC so the socket survives a subsequent re-exec (e.g. a
-		//: zero-downtime self-restart); syscall.CloseOnExec would SET it instead.
-		clearCloexec(fd)
+		//: set FD_CLOEXEC as sd_listen_fds does; a re-exec that wants the socket
+		//: is handed it explicitly (Prepare / ExtraFiles dup it).
+		setCloexec(fd)
 		//: os.NewFile adopts the inherited descriptor under its protocol name.
 		out = append(out, os.NewFile(uintptr(fd), names[i]))
 	}

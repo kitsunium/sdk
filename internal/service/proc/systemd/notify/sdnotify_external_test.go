@@ -2,6 +2,8 @@
 package notify_test
 
 import (
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -20,12 +22,25 @@ import (
 func TestWatchdogInterval(t *testing.T) {
 	//: not parallel — every case sets $WATCHDOG_USEC.
 	type tc struct {
-		name   string
-		usec   string
+		name string
+		usec string
+		// pid is $WATCHDOG_PID, "" for unset.
+		pid    string
 		want   time.Duration
 		wantOK bool
 	}
+	self := os.Getpid()
 	tests := []tc{
+		//: issue #451: $WATCHDOG_PID addresses the timeout to one process, as
+		//: sd_watchdog_enabled(3) reads it — a child inheriting the environment
+		//: is not watched.
+		{name: "addressed to this process", usec: "10000000", pid: strconv.Itoa(self), want: 10 * time.Second, wantOK: true},
+		{name: "addressed to another process", usec: "10000000", pid: strconv.Itoa(self + 1)},
+		{name: "a malformed addressee", usec: "10000000", pid: "me"},
+		//: issue #451: a count past a Duration's range wrapped to -1µs with ok
+		//: true, and the documented ticker on d/2 panicked.
+		{name: "MaxInt64 microseconds", usec: "9223372036854775807"},
+		{name: "past int64", usec: "18446744073709551615"},
 		{name: "ten seconds", usec: "10000000", want: 10 * time.Second, wantOK: true},
 		{name: "one second", usec: "1000000", want: time.Second, wantOK: true},
 		{name: "a sub-second interval", usec: "500000", want: 500 * time.Millisecond, wantOK: true},
@@ -38,12 +53,14 @@ func TestWatchdogInterval(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		t.Setenv("WATCHDOG_USEC", c.usec)
+		t.Setenv("WATCHDOG_PID", c.pid)
 
 		got, ok := svcnotify.WatchdogInterval()
 		if ok != c.wantOK {
 			t.Fatalf("WatchdogInterval() ok = %v, want %v", ok, c.wantOK)
 		}
-		if ok && got != c.want {
+		//: ok promises an interval a ticker accepts.
+		if ok && (got != c.want || got <= 0) {
 			t.Errorf("WatchdogInterval() = %v, want %v", got, c.want)
 		}
 		//: a disabled watchdog reports zero, so a caller that ignored ok sleeps

@@ -160,7 +160,7 @@ Watchdog sends a watchdog keep-alive ping (WATCHDOG=1).
 func WatchdogInterval() (d time.Duration, ok bool)
 ```
 
-WatchdogInterval reports the watchdog ping interval the supervisor configured via $WATCHDOG\_USEC; ok is false when the variable is unset or malformed.
+WatchdogInterval reports the watchdog ping interval the supervisor configured via $WATCHDOG\_USEC; ok is false when the variable is unset, malformed or out of a time.Duration's range, or when $WATCHDOG\_PID names another process. When ok is true, d is positive.
 
 <a name="Listener"></a>
 ## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)

@@ -30,6 +30,13 @@ constants:
         value: "\"WATCHDOG_USEC\""
     name: envWatchdogUsec
   - doc: |-
+      envWatchdogPID is the environment variable naming the one process the
+      watchdog timeout is meant for; a child inheriting the environment is not it.
+    items:
+      - name: envWatchdogPID
+        value: "\"WATCHDOG_PID\""
+    name: envWatchdogPID
+  - doc: |-
       exitDataErr mirrors EX_DATAERR (sysexits.h): a received datagram was malformed.
       It matches the InvalidNotification sentinel's exit code in core/proc.
     items:
@@ -67,6 +74,15 @@ constants:
         type: int
         value: "64"
     name: int64Bits
+  - doc: |-
+      maxWatchdogUsec is the largest $WATCHDOG_USEC a time.Duration can hold: past
+      it, usec * time.Microsecond wraps, and 9223372036854775807 read as -1µs with
+      ok true — a ticker built on half of it panics.
+    items:
+      - name: maxWatchdogUsec
+        type: int64
+        value: math.MaxInt64 / int64(time.Microsecond)
+    name: maxWatchdogUsec
 files:
   - decls: []
     name: doc.go
@@ -101,17 +117,20 @@ files:
   - decls:
       - envNotifySocket
       - envWatchdogUsec
+      - envWatchdogPID
       - exitDataErr
       - exitOSErr
       - exitNoPerm
       - decimalBase
       - int64Bits
+      - maxWatchdogUsec
       - wrapInvalid
       - resolveAddr
       - encodePayload
       - parsePayload
       - mainPIDFromState
       - watchdogInterval
+      - watchdogIsOurs
       - WatchdogInterval
     name: sdnotify.go
 functions:
@@ -232,12 +251,21 @@ functions:
     params: state map[string]string
     results: pid int, err error
   - doc: |-
-      watchdogInterval parses a $WATCHDOG_USEC value (microseconds) into a duration.
-      ok is false when raw is empty or not a positive base-10 integer, mirroring
-      sd_watchdog_enabled's "watchdog disabled" result.
+      watchdogInterval parses a $WATCHDOG_USEC value (microseconds) into a duration,
+      for the process whose PID is self, given the $WATCHDOG_PID value pidRaw.
+      ok is false when raw is empty, not a positive base-10 integer, or larger than
+      a time.Duration holds, and when pidRaw is set and does not name self —
+      mirroring sd_watchdog_enabled's "watchdog disabled" result.
     name: watchdogInterval
-    params: raw string
+    params: raw, pidRaw string, self int
     results: d time.Duration, ok bool
+  - doc: |-
+      watchdogIsOurs reports whether a $WATCHDOG_PID value addresses the process
+      self. An unset variable addresses whoever reads $WATCHDOG_USEC, as in
+      sd_watchdog_enabled(3); a value that is not a PID addresses nobody.
+    name: watchdogIsOurs
+    params: pidRaw string, self int
+    results: bool
   - name: WatchdogInterval
     results: d time.Duration, ok bool
 imports:
@@ -246,6 +274,7 @@ imports:
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   filepath: path/filepath
+  math: math
   net: net
   os: os
   strconv: strconv

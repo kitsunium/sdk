@@ -73,9 +73,19 @@ process that already exists.
 - **Topology.** `Setpgid` makes the child a process-group leader (its pid is the
   pgid), so `SignalGroup`/`Stop` reach forked grandchildren. `Setsid` starts a
   new session detached from the controlling tty.
-- **Credentials.** User/Group/Groups accept names or numeric ids. A numeric uid
-  with no passwd entry is honoured (gid 0); a name that does not resolve is
-  `UnknownUser`/`UnknownGroup`.
+- **Credentials.** User/Group/Groups accept names or numeric ids; a name that
+  does not resolve is `UnknownUser`/`UnknownGroup`. A `syscall.Credential` has
+  no unset id, so `applyUserGroup` writes the parent's uid and gid first and
+  replaces only what the Spec names: an empty User is the parent's uid, an
+  empty Group the user's primary gid — or the parent's gid when no User is set
+  (#450; a Group-only or Groups-only Spec used to ask the kernel for uid 0). A
+  numeric uid with no passwd entry is honoured only beside an explicit Group:
+  alone it is `UnknownUser` (`why` "a numeric uid with no passwd entry needs an
+  explicit Group"), never the gid 0 it used to resolve to, which left the child
+  in root's group after the uid drop. Supplementary groups are still set (an
+  empty `Groups` clears them), so a non-root supervisor asking for any
+  credential change meets `setgroups(2)`'s `EPERM` — the kernel's refusal,
+  not an identity it did not ask for.
 
 ## Stop: group-aware SIGTERM → SIGKILL escalation
 

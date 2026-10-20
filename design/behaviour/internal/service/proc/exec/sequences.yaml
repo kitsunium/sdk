@@ -185,10 +185,14 @@ sequences:
       - id: resolveGroup
         kind: internal
     steps:
+      - set: out.Uid
+        value: uint32(os.Getuid())
+      - set: out.Gid
+        value: uint32(os.Getgid())
       - opt:
           do:
             - bind: uid, gid, uErr
-              eval: resolveUser(spec.User)
+              eval: resolveUser(spec.User, spec.Group != "")
               to: resolveUser
             - opt:
                 do:
@@ -232,6 +236,12 @@ sequences:
               to: user
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - return: |-
+                            0, 0, wrapUnknownUser(lookErr, errs.String("user", name),
+                            					errs.String("why", "a numeric uid with no passwd entry needs an explicit Group"))
+                      when: "!groupGiven"
                   - return: uint32(n), 0, nil
                 when: lookErr != nil
             - return: parseUserIDs(usr)

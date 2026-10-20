@@ -1539,7 +1539,7 @@
       "name": "Files",
       "spelled": "func(unsetEnv bool) (files []*os.File, err error)",
       "canonical": "func(unsetEnv bool) (files []*os.File, err error)",
-      "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\nhonouring LISTEN_PID. When unsetEnv is true the activation environment is\ncleared so a grandchild does not re-inherit it. An empty or foreign activation\nset yields nil with no error; off Unix it returns UnsupportedPlatform.\n",
+      "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\nhonouring LISTEN_PID. When unsetEnv is true the activation environment is\ncleared so a grandchild does not re-inherit it. An empty or foreign activation\nset yields nil with no error; off Unix it returns UnsupportedPlatform. Each\nsocket is close-on-exec, as sd_listen_fds(3) leaves it: a spawned child\ninherits one only when it is passed explicitly, through Prepare or ExtraFiles.\n",
       "file": "systemd/listen/gen_facade.go",
       "layer": "public",
       "family": "proc"
@@ -1722,7 +1722,7 @@
       "name": "WatchdogInterval",
       "spelled": "func() (d time.Duration, ok bool)",
       "canonical": "func() (d time.Duration, ok bool)",
-      "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC; ok is false when the variable is unset or malformed.\n",
+      "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC; ok is false when the variable is unset, malformed or out\nof a time.Duration's range, or when $WATCHDOG_PID names another process.\nWhen ok is true, d is positive.\n",
       "file": "systemd/notify/gen_facade.go",
       "layer": "public",
       "family": "proc"

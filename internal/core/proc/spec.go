@@ -34,8 +34,12 @@ type Spec struct {
 	Env []string
 
 	// User is the name or numeric uid to setuid to; empty leaves the parent's.
+	// The child takes the user's primary gid unless Group names one. A numeric
+	// uid with no passwd entry has no primary gid, so it needs an explicit
+	// Group: alone it fails with UnknownUser, never falling back to gid 0.
 	User string
-	// Group is the name or numeric gid to setgid to; empty leaves the parent's.
+	// Group is the name or numeric gid to setgid to. Empty leaves the user's
+	// primary gid when User is set, and the parent's when it is not.
 	Group string
 	// Groups are supplementary group names or gids (systemd SupplementaryGroups=).
 	Groups []string

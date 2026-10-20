@@ -179,40 +179,64 @@ func Test_encodePayload(t *testing.T) {
 	}
 }
 
-// Test_watchdogInterval verifies $WATCHDOG_USEC microsecond parsing.
+// Test_watchdogInterval verifies $WATCHDOG_USEC microsecond parsing, and that
+// $WATCHDOG_PID addresses the timeout to one process (issue #451): a child that
+// inherited the environment is not watched, and a count past what a
+// time.Duration holds — which wrapped to -1µs with ok true — disables the
+// watchdog rather than handing a ticker a non-positive interval.
 func Test_watchdogInterval(t *testing.T) {
 	t.Parallel()
-	//: each case maps a raw WATCHDOG_USEC value to a duration and ok flag.
+	//: self stands in for this process's PID.
+	const self = 4242
+	//: each case maps a raw WATCHDOG_USEC and WATCHDOG_PID to a duration and ok flag.
 	type watchdogCase struct {
 		name    string
 		raw     string
+		pid     string
 		wantDur time.Duration
 		wantOK  bool
 	}
 	cases := []watchdogCase{
 		//: a positive integer scales microseconds to a Duration.
 		{name: "valid", raw: "30000000", wantDur: 30 * time.Second, wantOK: true},
+		//: the smallest positive count is one microsecond.
+		{name: "one microsecond", raw: "1", wantDur: time.Microsecond, wantOK: true},
 		//: an unset value disables the watchdog.
 		{name: "unset", raw: "", wantOK: false},
 		//: a non-integer value disables the watchdog.
 		{name: "garbage", raw: "abc", wantOK: false},
 		//: a zero value disables the watchdog.
 		{name: "zero", raw: "0", wantOK: false},
+		//: a negative value disables the watchdog.
+		{name: "negative", raw: "-5", wantOK: false},
+		//: the largest count a Duration holds is admitted, exactly.
+		{name: "the largest representable", raw: strconv.FormatInt(maxWatchdogUsec, 10), wantDur: time.Duration(maxWatchdogUsec) * time.Microsecond, wantOK: true},
+		//: one past it wrapped before; it disables the watchdog now.
+		{name: "one past the largest representable", raw: strconv.FormatInt(maxWatchdogUsec+1, 10), wantOK: false},
+		{name: "MaxInt64 microseconds", raw: "9223372036854775807", wantOK: false},
+		//: systemd's USEC_INFINITY does not even parse as an int64.
+		{name: "past int64", raw: "18446744073709551615", wantOK: false},
+		//: WATCHDOG_PID naming this process keeps the timeout.
+		{name: "addressed to this process", raw: "30000000", pid: "4242", wantDur: 30 * time.Second, wantOK: true},
+		//: WATCHDOG_PID naming another process — the parent — disables it.
+		{name: "addressed to another process", raw: "30000000", pid: "1", wantOK: false},
+		//: a malformed WATCHDOG_PID addresses nobody.
+		{name: "a malformed PID", raw: "30000000", pid: "self", wantOK: false},
 	}
 	//: runCase exercises one watchdogInterval expectation.
 	runCase := func(t *testing.T, tc watchdogCase) {
 		t.Helper()
-		//: parse the raw microsecond value.
-		d, ok := watchdogInterval(tc.raw)
+		//: parse the raw microsecond value for the process self.
+		d, ok := watchdogInterval(tc.raw, tc.pid, self)
 		//: the ok flag must match.
 		if ok != tc.wantOK {
 			//: report the wrong ok state.
-			t.Fatalf("watchdogInterval(%q) ok = %v, want %v", tc.raw, ok, tc.wantOK)
+			t.Fatalf("watchdogInterval(%q, %q) ok = %v, want %v", tc.raw, tc.pid, ok, tc.wantOK)
 		}
-		//: when ok, the duration must match.
-		if ok && d != tc.wantDur {
+		//: when ok, the duration must match and be positive.
+		if ok && (d != tc.wantDur || d <= 0) {
 			//: report the wrong duration.
-			t.Fatalf("watchdogInterval(%q) = %v, want %v", tc.raw, d, tc.wantDur)
+			t.Fatalf("watchdogInterval(%q, %q) = %v, want %v", tc.raw, tc.pid, d, tc.wantDur)
 		}
 	}
 	//: drive every case as a parallel subtest.

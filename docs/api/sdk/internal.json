@@ -36425,12 +36425,12 @@
         {
           "name": "User",
           "type": "string",
-          "doc": "User is the name or numeric uid to setuid to; empty leaves the parent's.\n"
+          "doc": "User is the name or numeric uid to setuid to; empty leaves the parent's.\nThe child takes the user's primary gid unless Group names one. A numeric\nuid with no passwd entry has no primary gid, so it needs an explicit\nGroup: alone it fails with UnknownUser, never falling back to gid 0.\n"
         },
         {
           "name": "Group",
           "type": "string",
-          "doc": "Group is the name or numeric gid to setgid to; empty leaves the parent's.\n"
+          "doc": "Group is the name or numeric gid to setgid to. Empty leaves the user's\nprimary gid when User is set, and the parent's when it is not.\n"
         },
         {
           "name": "Groups",
@@ -62945,7 +62945,7 @@
       "name": "Files",
       "spelled": "func(unsetEnv bool) (files []*os.File, err error)",
       "canonical": "func(unsetEnv bool) (files []*os.File, err error)",
-      "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\ngated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a\ngrandchild does not re-inherit it. An empty/foreign activation set yields nil.\n",
+      "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\ngated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a\ngrandchild does not re-inherit it. An empty/foreign activation set yields nil.\nEach socket has FD_CLOEXEC set, as sd_listen_fds(3) sets it, so no process\nthis one spawns inherits a listening socket; handing one on to a re-exec is\nexplicit, through Prepare or the Spec's ExtraFiles.\n",
       "file": "service/proc/systemd/listen/sdlisten_unix.go",
       "layer": "service",
       "family": "proc",
@@ -63265,7 +63265,7 @@
       "name": "WatchdogInterval",
       "spelled": "func() (d time.Duration, ok bool)",
       "canonical": "func() (d time.Duration, ok bool)",
-      "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC. ok is false when the variable is unset or malformed,\nmatching sd_watchdog_enabled's \"watchdog disabled\" result. It is portable: it\nreads only the environment and never touches a socket.\n",
+      "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC. ok is false — sd_watchdog_enabled's \"watchdog disabled\"\nresult — when the variable is unset, malformed, not positive, or larger than\na time.Duration holds, and when $WATCHDOG_PID is set and does not name this\nprocess: a child that inherited its parent's environment is not the process\nthe supervisor watches. When ok is true, d is positive. It is portable: it\nreads only the environment and never touches a socket.\n",
       "file": "service/proc/systemd/notify/sdnotify.go",
       "layer": "service",
       "family": "proc"

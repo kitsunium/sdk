@@ -635,15 +635,32 @@ sequences:
       - opt:
           do:
             - return: 0, false
-          when: raw == ""
+          when: raw == "" || !watchdogIsOurs(pidRaw, self)
       - bind: usec, err
         eval: strconv.ParseInt(raw, decimalBase, int64Bits)
         to: strconv
       - opt:
           do:
             - return: 0, false
-          when: err != nil || usec <= 0
+          when: err != nil || usec <= 0 || usec > maxWatchdogUsec
       - return: time.Duration(usec) * time.Microsecond, true
+  - of: watchdogIsOurs
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchdogIsOurs
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: pidRaw == ""
+      - bind: pid, err
+        eval: strconv.Atoi(pidRaw)
+        to: strconv
+      - return: err == nil && pid == self
   - of: WatchdogInterval
     participants:
       - id: caller
@@ -653,5 +670,5 @@ sequences:
       - id: watchdogInterval
         kind: internal
     steps:
-      - return: watchdogInterval(os.Getenv(envWatchdogUsec))
+      - return: watchdogInterval(os.Getenv(envWatchdogUsec), os.Getenv(envWatchdogPID), os.Getpid())
         to: watchdogInterval

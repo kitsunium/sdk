@@ -60,7 +60,7 @@ Socket activation relies on Unix file-descriptor inheritance. Off Unix every fun
 func Files(unsetEnv bool) (files []*os.File, err error)
 ```
 
-Files returns the inherited listening sockets (fd 3..3+LISTEN\_FDS) as \*os.File, honouring LISTEN\_PID. When unsetEnv is true the activation environment is cleared so a grandchild does not re-inherit it. An empty or foreign activation set yields nil with no error; off Unix it returns UnsupportedPlatform.
+Files returns the inherited listening sockets (fd 3..3+LISTEN\_FDS) as \*os.File, honouring LISTEN\_PID. When unsetEnv is true the activation environment is cleared so a grandchild does not re-inherit it. An empty or foreign activation set yields nil with no error; off Unix it returns UnsupportedPlatform. Each socket is close-on-exec, as sd\_listen\_fds(3) leaves it: a spawned child inherits one only when it is passed explicitly, through Prepare or ExtraFiles.
 
 <a name="Listeners"></a>
 ## func [Listeners](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/listen/gen_facade.go>)
@@ -121,8 +121,12 @@ type Spec struct {
 	// implicit inheritance, so a spawned service starts from a known state.
 	Env         []string
 	// User is the name or numeric uid to setuid to; empty leaves the parent's.
+	// The child takes the user's primary gid unless Group names one. A numeric
+	// uid with no passwd entry has no primary gid, so it needs an explicit
+	// Group: alone it fails with UnknownUser, never falling back to gid 0.
 	User        string
-	// Group is the name or numeric gid to setgid to; empty leaves the parent's.
+	// Group is the name or numeric gid to setgid to. Empty leaves the user's
+	// primary gid when User is set, and the parent's when it is not.
 	Group       string
 	// Groups are supplementary group names or gids (systemd SupplementaryGroups=).
 	Groups      []string

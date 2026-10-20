@@ -3,6 +3,7 @@
 package exec
 
 import (
+	"os"
 	"os/user"
 	"strconv"
 	"syscall"
@@ -53,10 +54,20 @@ func resolveCredential(spec coreproc.Spec) (cred *syscall.Credential, err error)
 
 // applyUserGroup resolves spec.User and spec.Group into out's Uid/Gid, with an
 // explicit Group overriding the login gid derived from the user.
+//
+// A syscall.Credential has no "unset" uid or gid: whatever the struct carries
+// is what the child is switched to. So the parent's own ids are written first —
+// the Spec's "empty leaves the parent's" — and only what the Spec names
+// replaces them. Before, a Spec naming only a Group (or only Groups) left
+// Uid at its zero value and asked the kernel for uid 0: refused for an
+// unprivileged supervisor, and an escalation's shape for any other.
 func applyUserGroup(spec coreproc.Spec, out *syscall.Credential) error {
+	//: an empty User and an empty Group leave the parent's ids.
+	out.Uid = uint32(os.Getuid())
+	out.Gid = uint32(os.Getgid())
 	//: a User directive sets the target uid and a default gid we may override.
 	if spec.User != "" {
-		uid, gid, uErr := resolveUser(spec.User)
+		uid, gid, uErr := resolveUser(spec.User, spec.Group != "")
 		//: an unresolvable user is a typed UNKNOWN_USER, not a silent fallback.
 		if uErr != nil {
 			//: propagate the already-typed resolution error verbatim.
@@ -81,13 +92,24 @@ func applyUserGroup(spec coreproc.Spec, out *syscall.Credential) error {
 
 // resolveUser maps a user name or numeric uid to its uid and primary gid,
 // surfacing UnknownUser when neither lookup succeeds.
-func resolveUser(name string) (uid, gid uint32, err error) {
+//
+// A numeric uid with no passwd entry has no primary gid to take, so it is
+// honoured only when groupGiven — the Spec names the Group that replaces it —
+// and refused otherwise. It used to resolve with gid 0: the child dropped to
+// the unknown uid and kept root's group.
+func resolveUser(name string, groupGiven bool) (uid, gid uint32, err error) {
 	//: a numeric token bypasses NSS and is taken as a literal uid.
 	if n, convErr := strconv.ParseUint(name, idBase, idBits); convErr == nil {
 		usr, lookErr := user.LookupId(name)
-		//: an unknown numeric uid still resolves to itself with a zero gid.
+		//: an unknown numeric uid resolves to itself only beside an explicit Group.
 		if lookErr != nil {
-			//: numeric uid with no passwd entry: honour the number, gid stays 0.
+			//: no primary gid to inherit, and gid 0 must never be implied.
+			if !groupGiven {
+				//: refuse rather than keep root's group behind the uid drop.
+				return 0, 0, wrapUnknownUser(lookErr, errs.String("user", name),
+					errs.String("why", "a numeric uid with no passwd entry needs an explicit Group"))
+			}
+			//: the Spec's Group replaces the gid, so none is taken here.
 			return uint32(n), 0, nil
 		}
 		//: a numeric uid that does resolve carries a real primary gid.

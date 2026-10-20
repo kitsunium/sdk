@@ -490,14 +490,26 @@ functions:
   - doc: |-
       applyUserGroup resolves spec.User and spec.Group into out's Uid/Gid, with an
       explicit Group overriding the login gid derived from the user.
+
+      A syscall.Credential has no "unset" uid or gid: whatever the struct carries
+      is what the child is switched to. So the parent's own ids are written first —
+      the Spec's "empty leaves the parent's" — and only what the Spec names
+      replaces them. Before, a Spec naming only a Group (or only Groups) left
+      Uid at its zero value and asked the kernel for uid 0: refused for an
+      unprivileged supervisor, and an escalation's shape for any other.
     name: applyUserGroup
     params: spec coreproc.Spec, out *syscall.Credential
     results: error
   - doc: |-
       resolveUser maps a user name or numeric uid to its uid and primary gid,
       surfacing UnknownUser when neither lookup succeeds.
+
+      A numeric uid with no passwd entry has no primary gid to take, so it is
+      honoured only when groupGiven — the Spec names the Group that replaces it —
+      and refused otherwise. It used to resolve with gid 0: the child dropped to
+      the unknown uid and kept root's group.
     name: resolveUser
-    params: name string
+    params: name string, groupGiven bool
     results: uid, gid uint32, err error
   - doc: parseUserIDs extracts the numeric uid and gid from a resolved *user.User.
     name: parseUserIDs

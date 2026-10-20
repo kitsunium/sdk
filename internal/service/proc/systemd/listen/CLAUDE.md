@@ -25,7 +25,7 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
 ## Behaviour
 
 - **Service side.** `Files(unsetEnv)` returns fds `3..3+LISTEN_FDS` as named
-  `*os.File` (CLOEXEC cleared); `Listeners` wraps the stream sockets as
+  `*os.File` (`FD_CLOEXEC` set); `Listeners` wraps the stream sockets as
   `net.Listener` (closing each `*os.File` after `net.FileListener` dups it);
   `WithNames` groups by `LISTEN_FDNAMES` (duplicate names allowed). All honour
   `LISTEN_PID`: an absent value is accepted (trusted parent), a present value must
@@ -36,8 +36,16 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
   protocol fixes them there); any `ExtraFiles` the caller already set shift to
   after them. It sets `LISTEN_FDS` + `LISTEN_FDNAMES` in `child.Env`, in
   sorted-name order so the fd↔name pairing is deterministic, and omits
-  `LISTEN_PID` (unknowable pre-fork). `Files` clears `FD_CLOEXEC` on each
-  recovered fd (via `fcntl(F_SETFD, 0)`) so the socket survives a re-exec.
+  `LISTEN_PID` (unknowable pre-fork).
+- **Close-on-exec (#449).** `Files` SETS `FD_CLOEXEC` on each recovered fd
+  (`syscall.CloseOnExec`), as `sd_listen_fds(3)` does. It used to clear it "so
+  the socket survives a re-exec" — and then every process the service spawned,
+  a helper under a lowered identity included, inherited the listening socket
+  and could `accept()` on it. A re-exec that wants the socket is handed it
+  explicitly: `Prepare` and `Spec.ExtraFiles` dup it into the child whatever
+  the flag. `TestFiles_closeOnExec` re-execs the test binary as an activated
+  service that spawns two probes — one handed nothing, which must not hold the
+  socket, one handed it through `ExtraFiles`, which must.
 
 ## Platform
 

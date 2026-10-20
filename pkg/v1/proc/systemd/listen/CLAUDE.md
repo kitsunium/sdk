@@ -30,6 +30,12 @@ so a caller writes `listen.Listeners(true)`. The package comment is in
   from a trusted parent while still validating a present one (the systemd case): a
   set-but-mismatched `LISTEN_PID` yields no fds.
 
+- **Recovered sockets are close-on-exec (#449, a behaviour change).** `Files`
+  sets `FD_CLOEXEC` on each, as `sd_listen_fds(3)` does, so a child the
+  service spawns never inherits a listening socket by accident. It used to
+  clear the flag; a service that relied on a re-exec inheriting the socket
+  implicitly now hands it on explicitly, with `Prepare` or `Spec.ExtraFiles`.
+
 ## Do / Do-not
 
 - **Do** pass `unsetEnv: true` to `Listeners`/`Files` so a grandchild does not
