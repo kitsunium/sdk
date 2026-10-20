@@ -25,7 +25,7 @@ sentinels — this package returns them and declares none.
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `ipc.go` | `Config` (the engine's, ADR 0074), `Listener` over an `acceptor` — the engine behind `coreipc.Listener` —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir` and `RuntimeDirOr` (the same chain ending on the caller's directory instead of `<tmp>/<app>-<uid>`, ADR 0182), `admit`, `closeBestEffort` |
 | `ipc_compliance.go` | the compile-time proof that `*Listener` satisfies `coreipc.Listener` and `*Dialer` satisfies `coreipc.Dialer` — a method renamed or retyped on either engine fails the build here, not in a caller holding the port |
-| `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
+| `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
 | `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused) |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
@@ -102,6 +102,19 @@ The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   answers belongs to a live process and is refused (`IN_USE`), one that does
   not is a leftover and is removed — only when it is a socket this account
   owns. A regular file there is never touched.
+- **Only "refused" means dead (#452).** `nobodyListens` admits two dial
+  failures as a leftover: `ECONNREFUSED` and `ENOENT` (the file gone between
+  the `Lstat` and the dial). Every other failure is `IN_USE`, its cause in a
+  field: a live owner whose accept queue is full answers `EAGAIN` on Linux,
+  and a busy one may let the one-second dial expire — reading either as dead
+  removed a running server's socket and bound over it, and its clients
+  reached the impostor. The BSDs and macOS answer a full backlog with
+  `ECONNREFUSED` itself, which a dead socket gives too, so there a busy owner
+  still looks dead; `TestABusyLiveSocketIsNeverTakenOver` runs on Linux and
+  says so elsewhere.
+- **`$RUNTIME_DIRECTORY` is a list (#455).** Several `RuntimeDirectory=` make
+  systemd join their paths with `:` (systemd.exec(5)); `RuntimeDirOr` takes
+  the first entry, and an empty or relative first entry passes the chain on.
 
 ## The socket directory's rule, beside the other four
 
