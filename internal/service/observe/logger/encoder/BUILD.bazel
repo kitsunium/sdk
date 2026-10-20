@@ -38,6 +38,7 @@ go_test(
         "gen_api_test.go",
         "json_external_test.go",
         "json_internal_test.go",
+        "terminal_external_test.go",
         "text_external_test.go",
         "text_internal_test.go",
         "timestamp_bench_test.go",

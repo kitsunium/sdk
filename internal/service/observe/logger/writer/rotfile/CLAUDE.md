@@ -45,6 +45,21 @@ and this package's wording, byte for byte.
   construction **and** the rotation reopen, so a symlink planted at `Path`
   after a rename is refused on the next write — not only at first `New`.
   Pre-condition: the parent directory must not be attacker-writable.
+- **The `.1.gz` archive is never opened by its name (CWE-59, #463).**
+  `gzipActive` writes it to a fresh sibling `os.CreateTemp` makes in the log's
+  directory — a random name, `O_CREATE|O_EXCL`, `0600`, which no planted link
+  can stand in for — and renames it onto `Path.1.gz`. A rename replaces the
+  entry there and never follows it, so a link planted at `Path.1.gz` in the
+  window after `shiftExisting` moved the previous one away is replaced, not
+  truncated and written through; and a failed or interrupted compression
+  leaves no partial `Path.1.gz` (the temporary sibling is removed,
+  `writeArchive`, `removeLeftover` — a file it cannot remove is named in the
+  error's `leftover` field). `Test_rotatingSink_gzipActive_replacesAPlantedLink`
+  plants a live and a dangling link and runs on every platform that can create
+  one (Windows skips, naming why, where the account cannot). The source of the
+  compression is still read by name (`compressInto`'s `os.Open`): a link
+  planted at `Path` between the close and that read would be compressed into
+  the 0600 archive — the attacker-writable-directory pre-condition covers it.
 - **The two refusals are not redundant.** `RefuseSymlink` is a *check*, so it
   has a window after it; `O_NOFOLLOW` in `openFlags` is what makes the *kernel*
   refuse inside that window. `O_NOFOLLOW` governs the **final component only** —
@@ -108,6 +123,16 @@ done here, and named rather than implied.
 - **Crash window:** the rename is **not** followed by a directory `fsync`, so a
   crash between rename and reopen can leave `Path` missing until the next write.
   Accepted for logs — dir-fsync on every rotation is not paid for.
+- **A refused reopen never kills the sink (#463).** When the reopen after a
+  rotation fails — a link planted at `Path`, `EMFILE`, `ENOSPC` —
+  `reopenAfterFailure` drops the closed descriptor (`s.f == nil`) instead of
+  keeping it with `size == 0`, which no threshold ever rotated away again:
+  every later write failed `ROT_FILE_WRITE_FAILED` forever, even once the cause
+  was gone. Now `Write` and `rotate` reopen through `ensureOpen` first, failing
+  `ROT_FILE_OPEN_FAILED` while the cause stands and writing again as soon as it
+  is gone; `Flush` and `Close` have nothing to do without a descriptor
+  (`syncOpen`, `closeOpen`). `Test_rotatingSink_aFailedReopenNeverKillsTheSink`
+  holds it with a directory and with a link at `Path`.
 
 ### Interval rotation (`RotateEvery`, opt-in)
 

@@ -106,37 +106,33 @@ sequences:
         kind: actor
       - id: (*rotatingSink).gzipActive
         kind: self
+      - id: writeArchive
+        kind: internal
       - id: os
         kind: stdlib
+      - id: removeLeftover
+        kind: internal
       - id: wrapRotate
         kind: internal
-      - id: compressInto
-        kind: internal
     steps:
-      - bind: dst, derr
-        eval: os.OpenFile(s.cfg.Path+".1.gz", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, defaultFilePerm)
-        to: os
+      - bind: final
+        eval: s.cfg.Path + ".1.gz"
+      - bind: tmpName, werr
+        eval: writeArchive(filepath.Dir(s.cfg.Path), filepath.Base(final)+".tmp-*", s.cfg.Path)
+        to: writeArchive
       - opt:
           do:
-            - return: "wrapRotate(derr, \"service/observe/logger/writer/rotfile.gzipActive: creating .gz sibling\")"
-              to: wrapRotate
-          when: derr != nil
-      - defer: |-
-          func() {
-          		//: capture the close error only when the body itself succeeded.
-          		if cerr := dst.Close(); cerr != nil && err == nil {
-          			//: a close failure means the .gz may be truncated — surface it.
-          			err = wrapRotate(cerr, "service/observe/logger/writer/rotfile.gzipActive: closing .gz sibling")
-          		}
-          	}()
+            - return: werr
+          when: werr != nil
       - opt:
           do:
-            - return: cerr
+            - return: "removeLeftover(tmpName, wrapRotate(rerr, \"service/observe/logger/writer/rotfile.gzipActive: publishing .gz sibling\"))"
+              to: removeLeftover
           init:
-            bind: cerr
-            eval: compressInto(dst, s.cfg.Path)
-            to: compressInto
-          when: cerr != nil
+            bind: rerr
+            eval: os.Rename(tmpName, final)
+            to: os
+          when: rerr != nil
       - opt:
           do:
             - return: "wrapRotate(rerr, \"service/observe/logger/writer/rotfile.gzipActive: removing uncompressed original\")"
@@ -147,6 +143,68 @@ sequences:
             to: os
           when: rerr != nil && !os.IsNotExist(rerr)
       - return: nil
+  - of: writeArchive
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeArchive
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: compressInto
+        kind: internal
+      - id: tmp.Name
+        kind: value
+    steps:
+      - bind: tmp, terr
+        eval: os.CreateTemp(dir, pattern)
+        to: os
+      - opt:
+          do:
+            - return: "\"\", wrapRotate(terr, \"service/observe/logger/writer/rotfile.gzipActive: creating .gz sibling\")"
+          when: terr != nil
+      - defer: |-
+          func() {
+          		//: the close error matters only when the body itself succeeded.
+          		if cerr := tmp.Close(); cerr != nil && err == nil {
+          			//: a close failure means the archive may be truncated.
+          			err = wrapRotate(cerr, "service/observe/logger/writer/rotfile.gzipActive: closing .gz sibling")
+          		}
+          		//: a failed archive is never handed to the caller.
+          		if err != nil {
+          			name, err = "", removeLeftover(tmp.Name(), err)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: "\"\", cerr"
+          init:
+            bind: cerr
+            eval: compressInto(tmp, srcPath)
+            to: compressInto
+          when: cerr != nil
+      - return: tmp.Name(), nil
+        to: tmp.Name
+  - of: removeLeftover
+    participants:
+      - id: caller
+        kind: actor
+      - id: removeLeftover
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: rerr
+        eval: os.Remove(name)
+        to: os
+      - opt:
+          do:
+            - return: cause
+          when: rerr == nil || os.IsNotExist(rerr)
+      - return: errs.Wrap(cause, errs.WrapParams{}, errs.String("leftover", name), errs.String("leftover_error", rerr.Error()))
+        to: errs
   - of: compressInto
     participants:
       - id: caller
@@ -587,6 +645,8 @@ sequences:
         kind: actor
       - id: (*rotatingSink).rotate
         kind: self
+      - id: s.ensureOpen
+        kind: internal
       - id: s.f.Close
         kind: value
       - id: wrapRotate
@@ -600,6 +660,14 @@ sequences:
       - id: s.pruneByAge
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: oerr
+          init:
+            bind: oerr
+            eval: s.ensureOpen()
+            to: s.ensureOpen
+          when: oerr != nil
       - opt:
           do:
             - return: "wrapRotate(cerr, \"service/observe/logger/writer/rotfile.rotate: closing active file\")"
@@ -640,6 +708,29 @@ sequences:
         kind: actor
       - id: (*rotatingSink).reopenAfterFailure
         kind: self
+      - id: s.ensureOpen
+        kind: internal
+    steps:
+      - set: s.f
+        value: nil
+      - set: s.size
+        value: "0"
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: oerr
+            eval: s.ensureOpen()
+            to: s.ensureOpen
+          when: oerr != nil
+  - of: (*rotatingSink).ensureOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).ensureOpen
+        kind: self
+      - id: errs
+        kind: package
       - id: openHardened
         kind: internal
       - id: f.Stat
@@ -647,14 +738,27 @@ sequences:
       - id: fi.Size
         kind: value
     steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.f != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(os.ErrClosed, errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file write failed",
+                			Private: "service/observe/logger/writer/rotfile.ensureOpen: the sink is closed",
+                		})
+              to: errs
+          when: s.closed
       - bind: f, oerr
         eval: openHardened(s.cfg.Path)
         to: openHardened
       - opt:
           do:
-            - set: s.size
-              value: "0"
-            - return: ""
+            - return: oerr
           when: oerr != nil
       - set: s.f
         value: f
@@ -670,6 +774,7 @@ sequences:
             eval: f.Stat()
             to: f.Stat
           when: serr == nil
+      - return: nil
   - of: (*rotatingSink).shiftBackups
     participants:
       - id: caller
@@ -834,6 +939,8 @@ sequences:
         kind: actor
       - id: (*rotatingSink).Write
         kind: self
+      - id: s.ensureOpen
+        kind: internal
       - id: s.maybeRotate
         kind: internal
       - id: s.f.Write
@@ -862,6 +969,14 @@ sequences:
                   - eval: s.cfg.OnError(terr)
                 when: s.cfg.OnError != nil
           when: s.tickErr != nil
+      - opt:
+          do:
+            - return: 0, oerr
+          init:
+            bind: oerr
+            eval: s.ensureOpen()
+            to: s.ensureOpen
+          when: oerr != nil
       - opt:
           do:
             - return: 0, rerr
@@ -897,8 +1012,8 @@ sequences:
         kind: package
       - id: s.mu.Lock
         kind: value
-      - id: s.f.Sync
-        kind: value
+      - id: s.syncOpen
+        kind: internal
       - id: s.mu.Unlock
         kind: value
     steps:
@@ -916,8 +1031,8 @@ sequences:
       - eval: s.mu.Lock()
         to: s.mu.Lock
       - bind: serr
-        eval: s.f.Sync()
-        to: s.f.Sync
+        eval: s.syncOpen()
+        to: s.syncOpen
       - eval: s.mu.Unlock()
         to: s.mu.Unlock
       - opt:
@@ -942,8 +1057,8 @@ sequences:
         kind: value
       - id: s.mu.Lock
         kind: value
-      - id: s.f.Close
-        kind: value
+      - id: s.closeOpen
+        kind: internal
       - id: s.mu.Unlock
         kind: value
       - id: errs
@@ -956,9 +1071,11 @@ sequences:
           when: s.daemon != nil
       - eval: s.mu.Lock()
         to: s.mu.Lock
+      - set: s.closed
+        value: "true"
       - bind: cerr
-        eval: s.f.Close()
-        to: s.f.Close
+        eval: s.closeOpen()
+        to: s.closeOpen
       - eval: s.mu.Unlock()
         to: s.mu.Unlock
       - opt:
@@ -973,6 +1090,36 @@ sequences:
               to: errs
           when: cerr != nil
       - return: nil
+  - of: (*rotatingSink).syncOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).syncOpen
+        kind: self
+      - id: s.f.Sync
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.f == nil
+      - return: s.f.Sync()
+        to: s.f.Sync
+  - of: (*rotatingSink).closeOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).closeOpen
+        kind: self
+      - id: s.f.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.f == nil
+      - return: s.f.Close()
+        to: s.f.Close
   - of: (*rotFileFactory).Name
     steps:
       - return: "\"rotfile\""

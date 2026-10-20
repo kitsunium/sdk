@@ -1192,12 +1192,16 @@ packages:
         out:
           - type: Encoder
       - doc: |-
-          AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
-          with a single space so the content can never inject a new frame in a
-          line-framed downstream sink. Other control characters are preserved to
-          keep the rendering faithful; only framing-sensitive bytes are stripped.
-          It scrubs every attacker-influenceable textual field — the Message, group
-          names, and attribute keys — not just the Message (V110).
+          AppendSanitized copies text onto dst replacing every C0 control byte
+          (0x00-0x1F, '\n', '\r' and NUL among them), DEL (0x7F), every C1 control
+          (U+0080-U+009F, NEL among them) and the two Unicode separators U+2028 and
+          U+2029 with a single space each, so the content can neither inject a new
+          frame in a line-framed downstream sink nor drive the terminal a console sink
+          writes to — ESC [2K ESC [G erases a line and returns to its start, the
+          effect of the CR the scrub removes (CWE-117, CWE-150). Every other byte,
+          printable UTF-8 and invalid UTF-8 alike, is copied unchanged. It scrubs
+          every attacker-influenceable textual field — the Message, group names, and
+          attribute keys — not just the Message (V110).
 
           It is exported for one caller outside this package: the legacy
           service/observe/logger.TextHandler, which renders the same line shape without going

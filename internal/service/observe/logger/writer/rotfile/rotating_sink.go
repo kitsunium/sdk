@@ -64,6 +64,9 @@ type rotatingSink struct {
 	// Write surfaces it exactly once (genuine propagation, never discarded);
 	// guarded by mu.
 	tickErr error
+	// closed is set by Close, so a sink that held no descriptor — its last
+	// reopen failed — never reopens one after it was closed; guarded by mu.
+	closed bool
 }
 
 // openHardened opens path with 0600 through the hardened open both file sinks
@@ -161,6 +164,11 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 			s.cfg.OnError(terr)
 		}
 	}
+	//: a sink whose last reopen failed opens Path again first (#463).
+	if oerr := s.ensureOpen(); oerr != nil {
+		//: still refused — RotFileOpenFailed, the record not written.
+		return 0, oerr
+	}
 	//: rotate before the write when adding p would exceed the cap.
 	if rerr := s.maybeRotate(int64(len(p))); rerr != nil {
 		//: a rotation failure is fatal to this write — surface it.
@@ -201,7 +209,7 @@ func (s *rotatingSink) Flush(ctx context.Context) error {
 	}
 	//: serialise the sync against in-flight writes via the same mutex.
 	s.mu.Lock()
-	serr := s.f.Sync()
+	serr := s.syncOpen()
 	s.mu.Unlock()
 	//: wrap any sync error with the WriteFailed sentinel semantics.
 	if serr != nil {
@@ -230,7 +238,8 @@ func (s *rotatingSink) Close() error {
 	}
 	//: serialise the close against in-flight writes via the same mutex.
 	s.mu.Lock()
-	cerr := s.f.Close()
+	s.closed = true
+	cerr := s.closeOpen()
 	s.mu.Unlock()
 	//: wrap any close error with the WriteFailed sentinel semantics.
 	if cerr != nil {
@@ -244,4 +253,28 @@ func (s *rotatingSink) Close() error {
 	}
 	//: happy path — nothing to report.
 	return nil
+}
+
+// syncOpen syncs the active descriptor; a sink whose last reopen failed holds
+// none, and there is nothing it wrote to sync. The caller holds s.mu.
+func (s *rotatingSink) syncOpen() error {
+	//: no descriptor since a failed reopen: nothing unsynced.
+	if s.f == nil {
+		//: nothing to sync.
+		return nil
+	}
+	//: the active file's fsync.
+	return s.f.Sync()
+}
+
+// closeOpen closes the active descriptor; a sink whose last reopen failed
+// holds none, and closing it releases nothing. The caller holds s.mu.
+func (s *rotatingSink) closeOpen() error {
+	//: no descriptor since a failed reopen: nothing to release.
+	if s.f == nil {
+		//: closed already.
+		return nil
+	}
+	//: the active file's close.
+	return s.f.Close()
 }

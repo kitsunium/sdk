@@ -4,32 +4,73 @@ import (
 	"strconv"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
+// sanitizedByRunes is AppendSanitized's contract written the slow way, by
+// decoding runes: a C0 control, DEL, a C1 control, U+2028 or U+2029 becomes
+// one space, and every other rune — and every byte that is not valid UTF-8 —
+// is copied. It is independent of the byte tests the scrub makes.
+func sanitizedByRunes(dst []byte, in string) []byte {
+	for i := 0; i < len(in); {
+		r, size := utf8.DecodeRuneInString(in[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			dst = append(dst, in[i])
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f, r == 0x2028, r == 0x2029:
+			dst = append(dst, ' ')
+		default:
+			dst = append(dst, in[i:i+size]...)
+		}
+		i += size
+	}
+	return dst
+}
+
 // Test_AppendSanitizedRunsMatchBytewise holds the run-copying scrub to the
-// byte-at-a-time form it replaced, for every byte value at every position a
-// run boundary can fall on.
+// rune-decoding form of its contract, for every byte value at every position
+// a run boundary can fall on, and for every truncated or neighbouring
+// sequence of the multi-byte runes it scrubs (#464).
 func Test_AppendSanitizedRunsMatchBytewise(t *testing.T) {
 	t.Parallel()
+	pieces := make([]string, 0, 256+256+256+4)
 	for b := range 256 {
-		c := string([]byte{byte(b)})
+		pieces = append(pieces, string([]byte{byte(b)}))
+		//: every C2 xx: the C1 controls and the runes just above them.
+		pieces = append(pieces, string([]byte{0xc2, byte(b)}))
+		//: every E2 80 xx: U+2028, U+2029 and their neighbours.
+		pieces = append(pieces, string([]byte{0xe2, 0x80, byte(b)}))
+	}
+	//: truncated sequences, and the same last byte under another second byte.
+	pieces = append(pieces, "\xc2", "\xe2", "\xe2\x80", "\xe2\x81\xa8")
+	for _, c := range pieces {
 		for _, in := range []string{c, c + "tail", "head" + c, "head" + c + "tail", c + c, "a" + c + "\n" + c + "z"} {
-			want := []byte("pre")
-			for i := range len(in) {
-				switch in[i] {
-				case '\n', '\r', 0:
-					want = append(want, ' ')
-				default:
-					want = append(want, in[i])
-				}
-			}
+			want := sanitizedByRunes([]byte("pre"), in)
 			if got := AppendSanitized([]byte("pre"), in); string(got) != string(want) {
 				t.Fatalf("AppendSanitized(%q) = %q, want %q", in, got, want)
 			}
+		}
+	}
+}
+
+// Test_AppendSanitizedEveryRune holds the scrub to its contract for every
+// code point, alone and inside text.
+func Test_AppendSanitizedEveryRune(t *testing.T) {
+	t.Parallel()
+	buf, want := make([]byte, 0, 32), make([]byte, 0, 32)
+	for r := rune(0); r <= utf8.MaxRune; r++ {
+		if !utf8.ValidRune(r) {
+			continue
+		}
+		in := "x" + string(r) + "y"
+		buf = AppendSanitized(buf[:0], in)
+		want = sanitizedByRunes(want[:0], in)
+		if string(buf) != string(want) {
+			t.Fatalf("AppendSanitized(%U) = %q, want %q", r, buf, want)
 		}
 	}
 }

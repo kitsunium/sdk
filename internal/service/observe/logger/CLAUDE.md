@@ -38,7 +38,9 @@ Logger ── Handler (genericHandler / TextHandler)
   `trace_id`/`span_id` landed on the forged one. All four write sites (message,
   group name, key with and without a group) now call `encoder.AppendSanitized`,
   the encoder's own scrub, exported for this caller rather than copied — one
-  function cannot drift from itself — and it costs nothing: `Default()`'s path
+  function cannot drift from itself, and since #464 it also turns ESC and every
+  other C0 control, DEL, the C1 controls, U+2028 and U+2029 into a space here
+  too — and it costs nothing: `Default()`'s path
   stays at **0 mallocs per emit**. `TestTextHandler_FramesEveryByteAsTheEncoderDoes`
   sweeps all 256 byte values through each of the four positions and requires the
   handler's line to be byte-identical to the encoder's.

@@ -395,6 +395,94 @@ sequences:
         value: append(dst, '=')
       - return: tc.AppendSpanIDHex(dst)
         to: tc.AppendSpanIDHex
+  - of: AppendSanitized
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendSanitized
+        kind: self
+      - id: appendScrubbed
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: appendScrubbed(dst, text)
+                    to: appendScrubbed
+                when: text[i]-sanitizeFloor >= printableSpan
+          key: i
+          range: len(text)
+      - return: append(dst, text...)
+  - of: appendScrubbed
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendScrubbed
+        kind: self
+      - id: scrubWidth
+        kind: internal
+    steps:
+      - bind: start
+        eval: "0"
+      - loop:
+          do:
+            - bind: b
+              eval: text[i]
+            - opt:
+                do:
+                  - continue: true
+                when: b-sanitizeFloor < printableSpan || i < start
+            - bind: width
+              eval: "0"
+            - opt:
+                do:
+                  - set: width
+                    to: scrubWidth
+                    value: scrubWidth(text, i)
+                when: b < continuationFloor || b == utf8C1Lead || b == utf8SeparatorLead
+            - opt:
+                do:
+                  - continue: true
+                when: width == 0
+            - set: dst
+              value: append(dst, text[start:i]...)
+            - set: dst
+              value: append(dst, ' ')
+            - set: start
+              value: i + width
+          key: i
+          range: len(text)
+      - return: append(dst, text[start:]...)
+  - of: scrubWidth
+    steps:
+      - bind: b
+        eval: text[i]
+      - opt:
+          do:
+            - return: asciiControlWidth
+          when: b < sanitizeFloor || b == sanitizeDEL
+      - opt:
+          do:
+            - return: c1ControlWidth
+          when: isC1Control(text, i)
+      - opt:
+          do:
+            - return: separatorWidth
+          when: isUnicodeSeparator(text, i)
+      - return: "0"
+  - of: isC1Control
+    steps:
+      - return: |-
+          text[i] == utf8C1Lead && i+1 < len(text) &&
+          		text[i+1] >= continuationFloor && text[i+1] <= utf8C1Last
+  - of: isUnicodeSeparator
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: text[i] != utf8SeparatorLead || i+2 >= len(text) || text[i+1] != utf8SeparatorMid
+      - return: text[i+2] == utf8LineSeparatorLast || text[i+2] == utf8ParagraphSeparatorLast
   - of: appendAttrWithGroups
     participants:
       - id: caller

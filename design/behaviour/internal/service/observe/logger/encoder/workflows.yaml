@@ -1,27 +1,6 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
-  - of: AppendSanitized
-    steps:
-      - bind: start
-        eval: "0"
-      - loop:
-          do:
-            - bind: b
-              eval: text[i]
-            - opt:
-                do:
-                  - continue: true
-                when: b != '\n' && b != '\r' && b != 0
-            - set: dst
-              value: append(dst, text[start:i]...)
-            - set: dst
-              value: append(dst, ' ')
-            - set: start
-              value: i + 1
-          key: i
-          range: len(text)
-      - return: append(dst, text[start:]...)
   - of: quoteSafe
     steps:
       - loop:
