@@ -61,6 +61,20 @@ constants:
         type: int
         value: "15"
     name: codeMaxLen
+  - doc: |-
+      octetMaxDigits is the decimal width of the largest octet, 255 — and so the
+      width Padded fills every octet to.
+    items:
+      - name: octetMaxDigits
+        type: int
+        value: "3"
+    name: octetMaxDigits
+  - doc: codeDotCount is the number of '.' separators between a Code's four octets.
+    items:
+      - name: codeDotCount
+        type: int
+        value: "3"
+    name: codeDotCount
   - grouped: true
     items:
       - comment: "0.0.0.1"
@@ -327,6 +341,9 @@ files:
       - MaskByMajor
       - padThreshold10
       - padThreshold100
+      - codeMaxLen
+      - octetMaxDigits
+      - codeDotCount
       - Code
       - Major
       - Pack
@@ -336,7 +353,6 @@ files:
       - Code.Serial
       - Code.String
       - Code.Padded
-      - codeMaxLen
       - appendCode
       - codeLen
       - octetLen
@@ -419,11 +435,11 @@ files:
       - parseFailure
     name: parse.go
   - decls:
+      - prefixMatcherOpen
+      - prefixMatcherMask
       - PrefixMatcher
       - NewPrefixMatcher
       - (*PrefixMatcher).String
-      - prefixMatcherOpen
-      - prefixMatcherMask
       - (*PrefixMatcher).Error
       - (*PrefixMatcher).Prefix
       - (*PrefixMatcher).Mask

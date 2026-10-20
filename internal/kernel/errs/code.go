@@ -29,6 +29,17 @@ const padThreshold10 uint8 = 10
 // leading zero ("0XX"). Named to avoid a bare magic literal.
 const padThreshold100 uint8 = 100
 
+// codeMaxLen is the longest rendering of a Code in either form:
+// "255.255.255.255" and "MMM.LLL.PPP.SSS" are both fifteen bytes.
+const codeMaxLen int = 15
+
+// octetMaxDigits is the decimal width of the largest octet, 255 — and so the
+// width Padded fills every octet to.
+const octetMaxDigits int = 3
+
+// codeDotCount is the number of '.' separators between a Code's four octets.
+const codeDotCount int = 3
+
 // Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
 // See ADR 0005 for the registry.
 type Code uint32
@@ -101,10 +112,6 @@ func (c Code) Padded() string {
 	return string(appendPadded3(dst, uint8(c.Serial())))
 }
 
-// codeMaxLen is the longest rendering of a Code in either form:
-// "255.255.255.255" and "MMM.LLL.PPP.SSS" are both fifteen bytes.
-const codeMaxLen int = 15
-
 // appendCode appends the canonical dotted form of c — the bytes String
 // returns — onto dst, so a renderer that composes a larger string (Error,
 // PrefixMatcher.String) writes the code in place instead of allocating it.
@@ -124,7 +131,7 @@ func appendCode(dst []byte, c Code) []byte {
 func codeLen(c Code) int {
 	//: three dots plus the width of each octet.
 	return octetLen(uint8(c.Major())) + octetLen(uint8(c.Layer())) +
-		octetLen(uint8(c.Package())) + octetLen(uint8(c.Serial())) + 3
+		octetLen(uint8(c.Package())) + octetLen(uint8(c.Serial())) + codeDotCount
 }
 
 // octetLen returns the number of decimal digits of an unpadded octet.
@@ -141,8 +148,8 @@ func octetLen(octet uint8) int {
 		return 2
 	//: 100-255.
 	default:
-		//: three digits.
-		return 3
+		//: three digits — the padded width, which every octet fits.
+		return octetMaxDigits
 	}
 }
 

@@ -1,5 +1,11 @@
 package errs
 
+// prefixMatcherOpen opens PrefixMatcher.String's rendering.
+const prefixMatcherOpen string = "PrefixMatcher{prefix="
+
+// prefixMatcherMask separates the prefix from the mask in PrefixMatcher.String.
+const prefixMatcherMask string = ", mask="
+
 // PrefixMatcher is a NON-ERROR sentinel used ONLY as a target for errors.Is.
 // Callers build it via NewPrefixMatcher and pass it to errors.Is; the
 // matching logic lives on (*Error).Is (see error.go, added in W4).
@@ -31,12 +37,6 @@ func (p *PrefixMatcher) String() string {
 	//: the caller's copy.
 	return string(append(dst, '}'))
 }
-
-// prefixMatcherOpen opens PrefixMatcher.String's rendering.
-const prefixMatcherOpen string = "PrefixMatcher{prefix="
-
-// prefixMatcherMask separates the prefix from the mask in PrefixMatcher.String.
-const prefixMatcherMask string = ", mask="
 
 // Error implements the `error` interface so PrefixMatcher is usable as a
 // target for `errors.Is`. Returning an error-looking string is the ONLY

@@ -205,7 +205,7 @@ sequences:
     steps:
       - return: |-
           octetLen(uint8(c.Major())) + octetLen(uint8(c.Layer())) +
-          		octetLen(uint8(c.Package())) + octetLen(uint8(c.Serial())) + 3
+          		octetLen(uint8(c.Package())) + octetLen(uint8(c.Serial())) + codeDotCount
   - of: octetLen
     steps:
       - switch:
@@ -218,7 +218,7 @@ sequences:
                 - return: "2"
             - default: true
               do:
-                - return: "3"
+                - return: octetMaxDigits
   - of: itoaDecimal
     participants:
       - id: caller
@@ -1044,7 +1044,7 @@ sequences:
                 do:
                   - return: |-
                       newValidationError(CodeInvalidCode, "INVALID_CODE",
-                      				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code.String()))
+                      				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code))
                     to: newValidationError
                 init:
                   bind: _, allowed
