@@ -140,6 +140,9 @@ func TestAppendEventRefusals(t *testing.T) {
 	tests := []tc{
 		{name: "a newline in the id", event: corenet.SSEEventValue{ID: "4\n2", Data: "x"}},
 		{name: "a carriage return in the id", event: corenet.SSEEventValue{ID: "4\r2", Data: "x"}},
+		//: issue #456: the client discards an id carrying U+0000 and keeps its
+		//: previous resume token, so the frame would resume from the wrong place.
+		{name: "U+0000 in the id", event: corenet.SSEEventValue{ID: "cursor-\x0042", Data: "x"}},
 		{name: "a newline in the event name", event: corenet.SSEEventValue{Name: "ti\nck", Data: "x"}},
 		{name: "a carriage return in the event name", event: corenet.SSEEventValue{Name: "ti\rck", Data: "x"}},
 		{name: "a negative retry", event: corenet.SSEEventValue{Data: "x", Retry: corenet.DurationValue(-time.Second)}},

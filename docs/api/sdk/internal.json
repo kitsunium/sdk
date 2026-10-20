@@ -26187,7 +26187,7 @@
           "name": "ID",
           "type": "string",
           "tag": "json:\"id\"",
-          "doc": "ID is the frame's \"id\" field. A client stores the last non-empty id it\nsaw and sends it back as Last-Event-ID when it reconnects, so this is the\nresume token — and it is the CALLER's to mint, because only the caller\nknows what it means. Empty emits no id field, which leaves the client's\nstored id untouched; that is the format's own behaviour, not an omission.\n"
+          "doc": "ID is the frame's \"id\" field. A client stores the last non-empty id it\nsaw and sends it back as Last-Event-ID when it reconnects, so this is the\nresume token — and it is the CALLER's to mint, because only the caller\nknows what it means. Empty emits no id field, which leaves the client's\nstored id untouched; that is the format's own behaviour, not an omission.\nAn id carrying U+0000 is refused with SSEFieldInvalid, as one carrying a\nline terminator is: a client ignores such an id field (WHATWG HTML,\n\"process the field\"), so its stored resume token would silently stay the\nprevious one.\n"
         },
         {
           "name": "Name",
@@ -57515,7 +57515,7 @@
       "name": "ReadTimeout",
       "spelled": "func(d time.Duration) GroupOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "ReadTimeout bounds one read from the peer.\n",
+      "doc": "ReadTimeout bounds one read from the peer. On an HTTP group it bounds each\nread of a request body, refreshed per read, the header phase unless\nReadHeaderTimeout is set, and the wait for the next request unless\nIdleTimeout is.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"

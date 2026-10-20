@@ -34,6 +34,10 @@ type SSEEventValue struct {
 	// resume token — and it is the CALLER's to mint, because only the caller
 	// knows what it means. Empty emits no id field, which leaves the client's
 	// stored id untouched; that is the format's own behaviour, not an omission.
+	// An id carrying U+0000 is refused with SSEFieldInvalid, as one carrying a
+	// line terminator is: a client ignores such an id field (WHATWG HTML,
+	// "process the field"), so its stored resume token would silently stay the
+	// previous one.
 	ID string `json:"id"`
 	// Name is the frame's "event" field — the event type the client dispatches
 	// under. Empty means the default type, "message".
@@ -73,6 +77,16 @@ func (e SSEEventValue) Validate() error {
 	if err := validateSSELine("id", e.ID); err != nil {
 		//: the error already names the offending field.
 		return err
+	}
+	//: a client IGNORES an id field whose value contains U+0000 (WHATWG HTML,
+	//: "process the field"), so the frame would arrive while the resume token
+	//: silently stayed the previous one — a wrong place to resume from, which
+	//: is what the type refuses to deliver.
+	if e.ID != "" && strings.IndexByte(e.ID, 0) >= 0 {
+		//: refuse rather than send an id the client discards.
+		return errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+			errs.String("field", "id"),
+			errs.String("why", "the value carries U+0000, which a client ignores the whole id for"))
 	}
 	//: the same rule, for the event type.
 	if err := validateSSELine("event", e.Name); err != nil {

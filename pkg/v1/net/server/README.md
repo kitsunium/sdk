@@ -443,7 +443,7 @@ func ReadTimeout(d time.Duration) GroupOption
 
 ReadTimeout bounds one read from the peer.
 
-It is refreshed per read, not installed once when the connection is accepted: a deadline set at accept time would be a budget for the connection's whole life, which a peer trickling one byte at a time stays comfortably inside. On a group serving an http.Handler the same value becomes net/http's own ReadTimeout — and its ReadHeaderTimeout too, unless [ReadHeaderTimeout](#ReadHeaderTimeout) sets the header phase apart — so it is refreshed per request there.
+It is refreshed per read, not installed once when the connection is accepted: a deadline set at accept time would be a budget for the connection's whole life, which a peer trickling one byte at a time stays comfortably inside. On a group serving an http.Handler it bounds three things: each read of a request body, refreshed before every read — never net/http's own ReadTimeout, which budgets the whole request and would cut off a peer whose every read is inside the bound —, the header phase, unless [ReadHeaderTimeout](#ReadHeaderTimeout) sets it apart, and the wait for the next request when no [IdleTimeout](#IdleTimeout) is set. The time a handler spends between two reads is its own, and the deadline is cleared once the body has ended.
 
 <a name="Shards"></a>
 ## func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

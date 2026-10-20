@@ -33,7 +33,8 @@ Public façade: `pkg/v1/net/server`.
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
-| `http_bounds.go` | `httpBounds` — the header phase's own deadline and the header size cap, kept out of `core/net`'s protocol-neutral `Timeouts`/`Limits`; each unset value keeps the adapter's earlier behaviour (the read timeout for the header phase, net/http's 1 MiB cap) |
+| `http_bounds.go` | `httpBounds` — the header phase's own deadline and the header size cap, kept out of `core/net`'s protocol-neutral `Timeouts`/`Limits`; each unset value keeps the adapter's earlier behaviour (the read timeout for the header phase, net/http's 1 MiB cap); `idleOrRead`, the wait between requests |
+| `http_read_deadline.go` | `perReadBody` / `deadlineBody` — the read bound applied per read of a request body, cleared at its end (#454) |
 | `conn_waiter.go` | `connWaiter` — the completion channel and the hijack flag one `ServeConn` blocks on |
 | `http_listener.go` | the channel-fed bridge listener |
 | `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
@@ -136,6 +137,24 @@ listener whose `Accept` pops from a channel our accept loop fills. The cost is
 one hand-off per **connection**, not per request —
 `TestHTTPAdapterKeepsAliveAcrossRequests` pins that three keep-alive requests
 count as one accept.
+
+**The read bound is per read of the body, not `http.Server.ReadTimeout` (#454).**
+`ReadTimeout` used to become `http.Server.ReadTimeout`, a budget for the WHOLE
+request: a peer sending a 20-byte body two bytes every 100 ms under a 500 ms
+bound was cut off after the eighth byte, against `TimeoutsValue`'s "every
+field is a PER-OPERATION bound". The adapter now leaves `http.Server.ReadTimeout`
+at zero and wraps the handler (`http_read_deadline.go`, `perReadBody`): each
+request body is a `deadlineBody` that sets the read deadline through
+`http.ResponseController` (the connection's on HTTP/1, the stream's on HTTP/2)
+before every read, and CLEARS it once the body has ended — at EOF net/http
+starts a background read watching for the peer going away, and a deadline
+left from the last body read would expire under it and cancel the request's
+context while the handler still works. The header phase keeps
+`ReadHeaderTimeout` (falling back to the read budget), and `IdleTimeout` falls
+back to the read budget (`idleOrRead`), the fallback net/http applied itself
+while `ReadTimeout` was set. Time a handler spends between reads is its own.
+`TestReadTimeoutBoundsEachReadOfAnHTTPBody` pins the slow body, a stall, and a
+handler slower than the bound between and after its reads.
 
 Two things about it were got wrong first and are worth keeping wrong-proof:
 

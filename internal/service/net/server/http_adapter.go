@@ -216,21 +216,25 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		return
 	}
 	bridge := newChanListener(raw.LocalAddr())
+	read := a.timeouts.Read.Duration()
 	srv := &http.Server{
-		Handler:   a.handler,
+		//: the read bound is applied per read of the body (perReadBody), not
+		//: as http.Server.ReadTimeout: that one budgets the WHOLE request, and
+		//: cut off a peer whose every read was inside the bound (#454).
+		Handler:   perReadBody(a.handler, read),
 		ConnState: a.onConnState,
-		//: net/http applies these per request, refreshing on every one, which
-		//: is what the group's options promise. Left at zero — as they were —
-		//: net/http bounds nothing at all, so a single slow reader could hold a
-		//: request open for as long as it liked on an otherwise bounded group.
-		ReadTimeout:  a.timeouts.Read.Duration(),
+		//: net/http applies the write bound per response. Left at zero — as it
+		//: was — net/http bounds nothing at all.
 		WriteTimeout: a.timeouts.Write.Duration(),
-		IdleTimeout:  a.timeouts.Idle.Duration(),
+		//: a connection waiting for its next request is bounded by the idle
+		//: budget; with none, net/http fell back to ReadTimeout, and the read
+		//: budget keeps that place now that ReadTimeout is no longer set.
+		IdleTimeout: idleOrRead(a.timeouts.Idle.Duration(), read),
 		//: the header phase is the one a slowloris stalls, and net/http only
 		//: bounds it separately; its own option wins, and falling back to the
 		//: read budget means a group that set only that one is still defended
 		//: without having to know the phase exists.
-		ReadHeaderTimeout: a.bounds.headerTimeout(a.timeouts.Read.Duration()),
+		ReadHeaderTimeout: a.bounds.headerTimeout(read),
 		//: zero is net/http's own default (1 MiB); a caller's cap replaces it.
 		MaxHeaderBytes: a.bounds.headerBytes(),
 		//: every request on this listener derives from a context carrying the

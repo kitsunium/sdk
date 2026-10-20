@@ -23,6 +23,7 @@ go_library(
         "http_adapter.go",
         "http_bounds.go",
         "http_listener.go",
+        "http_read_deadline.go",
         "kernel_len_linux.go",
         "lifecycle.go",
         "linux_compliance.go",

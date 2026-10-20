@@ -1726,6 +1726,10 @@ packages:
                 resume token — and it is the CALLER's to mint, because only the caller
                 knows what it means. Empty emits no id field, which leaves the client's
                 stored id untouched; that is the format's own behaviour, not an omission.
+                An id carrying U+0000 is refused with SSEFieldInvalid, as one carrying a
+                line terminator is: a client ignores such an id field (WHATWG HTML,
+                "process the field"), so its stored resume token would silently stay the
+                previous one.
               name: ID
               tag: json:"id"
               type: string
@@ -2252,7 +2256,11 @@ packages:
         name: TLS
         out:
           - type: GroupOption
-      - doc: ReadTimeout bounds one read from the peer.
+      - doc: |-
+          ReadTimeout bounds one read from the peer. On an HTTP group it bounds each
+          read of a request body, refreshed per read, the header phase unless
+          ReadHeaderTimeout is set, and the wait for the next request unless
+          IdleTimeout is.
         in:
           - name: d
             type: time.Duration
@@ -4433,9 +4441,13 @@ packages:
             It is refreshed per read, not installed once when the connection is accepted:
             a deadline set at accept time would be a budget for the connection's whole
             life, which a peer trickling one byte at a time stays comfortably inside. On
-            a group serving an http.Handler the same value becomes net/http's own
-            ReadTimeout — and its ReadHeaderTimeout too, unless [ReadHeaderTimeout] sets
-            the header phase apart — so it is refreshed per request there.
+            a group serving an http.Handler it bounds three things: each read
+            of a request body, refreshed before every read — never net/http's own
+            ReadTimeout, which budgets the whole request and would cut off a peer whose
+            every read is inside the bound —, the header phase, unless
+            [ReadHeaderTimeout] sets it apart, and the wait for the next request when
+            no [IdleTimeout] is set. The time a handler spends between two reads is its
+            own, and the deadline is cleared once the body has ended.
           forward: svcserver.ReadTimeout
           in:
             - name: d
