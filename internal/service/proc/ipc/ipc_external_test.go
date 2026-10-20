@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -300,5 +301,21 @@ func TestRuntimeDirPrefersTheServiceManagers(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
 	if got := ipc.RuntimeDir("statusline"); got != "/run/user/1000/statusline" {
 		t.Errorf("RuntimeDir = %q", got)
+	}
+}
+
+func TestRuntimeDirOrEndsOnTheCallersDirectory(t *testing.T) {
+	t.Setenv("RUNTIME_DIRECTORY", "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	if got := ipc.RuntimeDirOr("statusline", "/home/u/.local/state/statusline/run"); got != "/home/u/.local/state/statusline/run" {
+		t.Errorf("RuntimeDirOr = %q, want the caller's fallback", got)
+	}
+	if got := ipc.RuntimeDir("statusline"); got != filepath.Join(os.TempDir(), "statusline-"+strconv.Itoa(os.Geteuid())) {
+		t.Errorf("RuntimeDir = %q, want <tmp>/<app>-<uid>", got)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	if got := ipc.RuntimeDirOr("statusline", "/elsewhere"); got != "/run/user/1000/statusline" {
+		t.Errorf("RuntimeDirOr = %q, want $XDG_RUNTIME_DIR/<app> before the fallback", got)
 	}
 }
