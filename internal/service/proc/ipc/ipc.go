@@ -204,7 +204,7 @@ func RuntimeDir(app string) string {
 // $RUNTIME_DIRECTORY, then $XDG_RUNTIME_DIR/<app>, then %LOCALAPPDATA%\<app>
 // on Windows, else fallback, returned as given. A caller that keeps state
 // in a directory of its own names a directory there, and its sockets never
-// land in a tree any account can create first (ADR 0181). It creates
+// land in a tree any account can create first (ADR 0182). It creates
 // nothing; Listen does, at 0700, and refuses a fallback that is not
 // absolute or not private.
 func RuntimeDirOr(app, fallback string) string {
