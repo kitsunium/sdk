@@ -30,9 +30,9 @@ jobs:
     # `bazel` and `post-commit` are the only required checks on main (the
     # branch protection names `bazel`, the ruleset `post-commit` — measured
     # with `gh api`). shell-gates (ci-gates-check and three BATS suites) and
-    # lint-ktn (ktn-linter) are siblings; on their own their failures block
-    # nothing. So this job waits for both and fails at once when either did
-    # not succeed — the gates they run are as blocking as the ones below
+    # lint-ktn (ktn-linter) and models (the behaviour models) are siblings; on
+    # their own their failures block nothing. So this job waits for all three
+    # and fails at once when any did not succeed — the gates they run are as blocking as the ones below
     # (#236).
     #
     # `needs:` alone would be worse than nothing: a job skipped because a job
@@ -46,13 +46,14 @@ jobs:
     # exports ACTIONS_ID_TOKEN_REQUEST_URL to every process, and the
     # entitlement suites `make test-framework` runs here read exactly that
     # variable to decide they are on CI (#300's first run).
-    needs: [shell-gates, lint-ktn]
+    needs: [shell-gates, lint-ktn, models]
     if: ${{ !cancelled() }}
     steps:
-      - name: shell-gates and lint-ktn succeeded
+      - name: shell-gates, lint-ktn and models succeeded
         env:
           SHELL_GATES_RESULT: ${{ needs.shell-gates.result }}
           LINT_KTN_RESULT: ${{ needs.lint-ktn.result }}
+          MODELS_RESULT: ${{ needs.models.result }}
         run: |
           failed=0
           if [ "$SHELL_GATES_RESULT" != success ]; then
@@ -61,6 +62,10 @@ jobs:
           fi
           if [ "$LINT_KTN_RESULT" != success ]; then
             echo "::error::the lint-ktn job concluded '$LINT_KTN_RESULT'; ktn-linter blocks the merge through this required job"
+            failed=1
+          fi
+          if [ "$MODELS_RESULT" != success ]; then
+            echo "::error::the models job concluded '$MODELS_RESULT'; a behaviour model that is not the code's blocks the merge through this required job"
             failed=1
           fi
           exit "$failed"
@@ -600,11 +605,15 @@ jobs:
   # a model of design/behaviour that is missing, is not what the current code
   # derives, or is left over — a body changed without `make models`. kit lives
   # in kitsunium/studio, which is private: installing it needs the repository
-  # secret KIT_READ_TOKEN (read access to kitsunium/studio). Without it — a
-  # fork's or Dependabot's pull request, or a repository where the secret is
-  # not set — the job warns and passes, the models NOT checked. A step a
-  # missing secret can skip is not a gate, so this job is advisory: no
-  # required job needs it (scripts/ci-gates-check.sh's ADVISORY).
+  # secret KIT_READ_TOKEN (read access to kitsunium/studio). The `bazel` job
+  # needs this one and checks its result, so a stale model blocks the merge.
+  #
+  # The one skip is forced by GitHub, as for lint-ktn: a pull request from a
+  # fork, and a Dependabot one, receive no repository secret. Those two warn
+  # and pass, the models NOT checked; the maintainer's push that lands them is
+  # checked. Every other run that finds no secret FAILS, because the secret
+  # missing anywhere else means it was removed, and a gate that skips itself
+  # quietly is not a gate.
   models:
     name: models — design/behaviour is what the code derives
     runs-on: ubuntu-latest
@@ -626,6 +635,9 @@ jobs:
         id: kit
         env:
           KIT_READ_TOKEN: ${{ secrets.KIT_READ_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
           . scripts/kit-pinned.sh
@@ -635,9 +647,13 @@ jobs:
             exit 1
           fi
           if [ -z "$KIT_READ_TOKEN" ]; then
-            echo "::warning::KIT_READ_TOKEN is not set: kitsunium/studio is private, kit $version cannot be installed, the behaviour models were NOT checked"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            if [ "$EVENT" = pull_request ] && { [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ] || [ "$ACTOR" = 'dependabot[bot]' ]; }; then
+              echo "::warning title=models gate did not run::this is a pull request from a fork (${HEAD_REPO}) or from Dependabot, and GitHub gives such a run no repository secret, so kit $version cannot be installed from the private kitsunium/studio. The maintainer's push that lands it is checked."
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error title=models has no KIT_READ_TOKEN::this run is neither a fork nor a Dependabot pull request, yet the repository secret KIT_READ_TOKEN is empty — kitsunium/studio is private, kit $version cannot be installed. Refusing to skip the gate."
+            exit 1
           fi
           git config --global url."https://x-access-token:${KIT_READ_TOKEN}@github.com/kitsunium/".insteadOf "https://github.com/kitsunium/"
           go install "github.com/kitsunium/studio/cmd/kit@$version"
