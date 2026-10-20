@@ -43,7 +43,7 @@ Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
 nothing.
 
-Job `bazel` on `ubuntu-latest`, timeout 120 min, `needs: [shell-gates, lint-ktn]` with `if: ${{ !cancelled() }}`, and the workflow's `contents: read` only. Its first step fails unless `needs.shell-gates.result` and `needs.lint-ktn.result` are both `success`: neither is a required check, and `needs:` alone would make a failure SKIP `bazel`, which GitHub counts as a passing required check — so this is how their gates block a merge (#236). `scripts/ci-gates-check.sh` asserts all three pieces, for each. Steps in order:
+Job `bazel` on `ubuntu-latest`, timeout 120 min, `needs: [shell-gates, lint-ktn, models]` with `if: ${{ !cancelled() }}`, and the workflow's `contents: read` only. Its first step fails unless `needs.shell-gates.result`, `needs.lint-ktn.result` and `needs.models.result` are all `success`: none is a required check, and `needs:` alone would make a failure SKIP `bazel`, which GitHub counts as a passing required check — so this is how their gates block a merge (#236). `scripts/ci-gates-check.sh` asserts all three pieces, for each. Steps in order:
 
 1. `bazel-contrib/setup-bazel@…` — caches `bazelisk`, disk cache keyed on `.bazelrc`+`.bazelversion`+`MODULE.bazel`+all `go.mod`/`go.sum`, plus the repository cache. `setup-go` reads the root module's `go.mod` and caches on every `go.sum` — the root, `internal` and the families require nothing outside the repository, so theirs are empty (ADR 0171).
 2. **Drift check** — `bazel mod tidy && bazel run //:gazelle`, then `git diff --exit-code` AND a check for untracked `BUILD.bazel`/`go.mod`/`go.sum`. Catches both modifications and new files (post-audit finding #11).
@@ -201,11 +201,14 @@ is private, through the repository secret `KIT_READ_TOKEN`. It then runs
 `make models-check`: the pinned kit's `kit design derive -check`, which fails
 on a model of `design/behaviour` that is missing, is not what the current code
 derives, or is left over — a body changed without `make models`
-(kitsunium/studio ADR 0013). Without the secret (a fork's or Dependabot's pull
-request, or the secret not set) the job warns and passes, the models NOT
-checked. A step a missing secret can skip is not a gate, so no required job
-needs it: `models-check` is in `scripts/ci-gates-check.sh`'s GATES and
-ADVISORY, reported, never blocking.
+(kitsunium/studio ADR 0013). The job BLOCKS: `bazel` needs it and checks
+`needs.models.result`, so a stale model fails the required check, and
+`models-check` is in `scripts/ci-gates-check.sh`'s GATES, not in ADVISORY.
+Without the secret the job fails, like `lint-ktn` without its id-token, with
+one exception GitHub forces: a pull request from a fork or from Dependabot
+receives no repository secret, so there the job warns and passes, the models
+NOT checked, and the maintainer's push that lands it is checked. Any other run
+with an empty `KIT_READ_TOKEN` means the secret was removed, and fails.
 
 ## Test matrix (rule 12)
 
