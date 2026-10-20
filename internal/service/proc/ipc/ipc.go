@@ -197,6 +197,17 @@ func Dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 // %LOCALAPPDATA%\<app> on Windows, else <tmp>/<app>-<uid>. It creates
 // nothing; Listen does, at 0700.
 func RuntimeDir(app string) string {
+	return RuntimeDirOr(app, filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Geteuid())))
+}
+
+// RuntimeDirOr is RuntimeDir with fallback in place of <tmp>/<app>-<uid>:
+// $RUNTIME_DIRECTORY, then $XDG_RUNTIME_DIR/<app>, then %LOCALAPPDATA%\<app>
+// on Windows, else fallback, returned as given. A caller that keeps state
+// in a directory of its own names a directory there, and its sockets never
+// land in a tree any account can create first (ADR 0181). It creates
+// nothing; Listen does, at 0700, and refuses a fallback that is not
+// absolute or not private.
+func RuntimeDirOr(app, fallback string) string {
 	if d := os.Getenv("RUNTIME_DIRECTORY"); d != "" && filepath.IsAbs(d) {
 		return d
 	}
@@ -208,7 +219,7 @@ func RuntimeDir(app string) string {
 			return filepath.Join(d, app)
 		}
 	}
-	return filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Geteuid()))
+	return fallback
 }
 
 // closeBestEffort closes a connection this package refuses or no longer
