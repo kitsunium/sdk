@@ -216,6 +216,7 @@ files:
   - decls:
       - httpBounds
       - httpBounds.headerTimeout
+      - idleOrRead
       - httpBounds.headerBytes
     name: http_bounds.go
   - decls:
@@ -226,6 +227,14 @@ files:
       - (*chanListener).Addr
       - (*chanListener).offer
     name: http_listener.go
+  - decls:
+      - perReadBody
+      - readDeadlineHandler
+      - readDeadlineHandler.ServeHTTP
+      - deadlineBody
+      - (*deadlineBody).Read
+      - (*deadlineBody).Close
+    name: http_read_deadline.go
   - decls:
       - setKernelLen
     name: kernel_len_linux.go
@@ -527,10 +536,37 @@ functions:
     name: rawSocket
     params: c corenet.Conn
     results: stdnet.Conn
+  - doc: |-
+      idleOrRead resolves http.Server.IdleTimeout: the idle budget when it was
+      set, the read budget otherwise — the fallback net/http applied itself while
+      the adapter still set ReadTimeout.
+    name: idleOrRead
+    params: idle, read time.Duration
+    results: time.Duration
   - doc: newChanListener builds a bridge listener for the given address.
     name: newChanListener
     params: addr stdnet.Addr
     results: "*chanListener"
+  - doc: |-
+      perReadBody gives every request body a deadline per read: the group's
+      ReadTimeout, refreshed before each read, as the stream path's own conn
+      refreshes it.
+
+      http.Server.ReadTimeout — which the adapter used to set from the same
+      option — is a budget for the WHOLE request, headers and body together: a
+      peer sending a 20-byte body two bytes every 100 ms, every read well inside
+      a 500 ms bound, was cut off after the eighth byte (#454), against the
+      TimeoutsValue contract ("every field is a PER-OPERATION bound, refreshed
+      each time"). The header phase keeps its own bound, http.Server's
+      ReadHeaderTimeout, which falls back to the read budget; the body is bounded
+      here, read by read; and the time a handler spends between two reads is its
+      own, as it is on a stream connection.
+
+      A zero read budget leaves the body unbounded, as before, and installs
+      nothing.
+    name: perReadBody
+    params: next http.Handler, read time.Duration
+    results: http.Handler
   - doc: |-
       setKernelLen assigns n to a kernel length field.
 
@@ -1362,6 +1398,47 @@ types:
         recv: l *chanListener
         results: bool
     name: chanListener
+  - doc: readDeadlineHandler installs a deadlineBody on each request with a body.
+    fields:
+      - doc: next is the application's handler.
+        name: next
+        type: http.Handler
+      - doc: read is the bound of one read of the body.
+        name: read
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: ServeHTTP implements http.Handler.
+        name: ServeHTTP
+        params: w http.ResponseWriter, r *http.Request
+        recv: h readDeadlineHandler
+    name: readDeadlineHandler
+  - doc: deadlineBody bounds each read of a request body on its own.
+    fields:
+      - doc: inner is net/http's body.
+        name: inner
+        type: io.ReadCloser
+      - doc: rc sets the connection's (or, on HTTP/2, the stream's) read deadline.
+        name: rc
+        type: "*http.ResponseController"
+      - doc: read is the bound of one read.
+        name: read
+        type: time.Duration
+      - doc: ended records that the body returned its last read.
+        name: ended
+        type: bool
+    kind: struct
+    methods:
+      - doc: Read implements io.Reader.
+        name: Read
+        params: p []byte
+        recv: b *deadlineBody
+        results: n int, err error
+      - doc: Close implements io.Closer.
+        name: Close
+        recv: b *deadlineBody
+        results: error
+    name: deadlineBody
   - doc: boundListener pairs a live listener with the group that owns it.
     fields:
       - doc: group is the owning group's name.

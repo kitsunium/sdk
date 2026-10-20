@@ -27,7 +27,7 @@ in the dimension that motivated the domain, whatever else it gained.
 | `State`, `ListenerState`, `Phase`, `Phase*` | lifecycle reporting — and the counters, `AcceptBackoffs` among them: the waits a failing Accept took (ADR 0130) |
 | `Listen`, `Adopt` | where a group listens: an address it binds, or a socket a supervisor passed (`LISTEN_FDNAMES`) — a missing one is `SocketAdoptFailed`, never a silent bind |
 | `TLS` | TLS, or mutual TLS when the identity requires a client certificate |
-| `ReadTimeout`, `WriteTimeout`, `IdleTimeout` | per-operation bounds, refreshed per read/write (per request on an HTTP group) |
+| `ReadTimeout`, `WriteTimeout`, `IdleTimeout` | per-operation bounds, refreshed per read/write; on an HTTP group `ReadTimeout` bounds each read of a request body (#454 — it used to be net/http's whole-request `ReadTimeout`), `WriteTimeout` each response |
 | `HandshakeTimeout` | the TLS negotiation; unset falls back to a domain default, never to unbounded |
 | `ReadHeaderTimeout` | HTTP groups only: the header phase's own bound; unset keeps `ReadTimeout` there, as before |
 | `MaxHeaderBytes` | HTTP groups only: the header size cap, answered 431; unset keeps net/http's 1 MiB default |

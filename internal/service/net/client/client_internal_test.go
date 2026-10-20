@@ -288,10 +288,13 @@ func Test_redirectLimiter(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		limiter := redirectLimiter(c.limit)
+		limiter := redirectLimiter(c.limit, nil, nil)
 		via := make([]*http.Request, c.hops)
+		for i := range via {
+			via[i] = mustRequest(t, "https://h/v1/x")
+		}
 
-		err := limiter(nil, via)
+		err := limiter(mustRequest(t, "https://h/v1/y"), via)
 
 		if c.wantErr {
 			if !errs.HasCode(err, corenet.CodeTooManyRedirects) {
@@ -317,6 +320,121 @@ func Test_redirectLimiter(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+// mustRequest builds a GET for target or fails the test.
+func mustRequest(t *testing.T, target string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatalf("building the request: %v", err)
+	}
+	return req
+}
+
+// Test_redirectLimiter_keepsTheOrigin pins issue #448 at the hop: a redirect
+// that changes the scheme, the host or the port is refused unless the caller
+// opened its origin, and one the caller opened is stripped of every configured
+// default — whatever the hop's own headers carry beside them stays.
+func Test_redirectLimiter_keepsTheOrigin(t *testing.T) {
+	t.Parallel()
+	opened, err := url.Parse("https://cdn.example")
+	if err != nil {
+		t.Fatalf("parsing the opened origin: %v", err)
+	}
+	defaults := map[string]string{"X-Api-Key": "s3cr3t", "Accept": "application/json"}
+	type tc struct {
+		name string
+		// first is the URL the chain started on, next the hop's.
+		first, next string
+		// wantDenied reports whether the hop must be refused.
+		wantDenied bool
+		// wantKey is the X-Api-Key the admitted hop must still carry.
+		wantKey string
+	}
+	tests := []tc{
+		{name: "the same origin", first: "https://api.example/a", next: "https://api.example/b", wantKey: "s3cr3t"},
+		{name: "the same origin, its default port spelled out", first: "https://api.example/a", next: "https://API.example:443/b", wantKey: "s3cr3t"},
+		{name: "https to http on the same host", first: "https://api.example/a", next: "http://api.example/a", wantDenied: true},
+		{name: "another port", first: "https://api.example/a", next: "https://api.example:8443/a", wantDenied: true},
+		{name: "another host", first: "https://api.example/a", next: "https://169.254.169.254/a", wantDenied: true},
+		{name: "an opened origin", first: "https://api.example/a", next: "https://cdn.example/a"},
+		//: http to the opened host is another origin, not the opened one.
+		{name: "the opened host over http", first: "https://api.example/a", next: "http://cdn.example/a", wantDenied: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		limiter := redirectLimiter(3, []*url.URL{opened}, defaults)
+		req := mustRequest(t, c.next)
+		//: net/http copies the first request's headers onto the hop before asking.
+		req.Header.Set("X-Api-Key", "s3cr3t")
+		req.Header.Set("Accept", "text/plain")
+
+		err := limiter(req, []*http.Request{mustRequest(t, c.first)})
+
+		if c.wantDenied {
+			if !errs.HasCode(err, corenet.CodeRequestDenied) {
+				t.Fatalf("the limiter = %v, want REQUEST_DENIED", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("the limiter = %v, want nil", err)
+		}
+		if got := req.Header.Get("X-Api-Key"); got != c.wantKey {
+			t.Errorf("X-Api-Key = %q, want %q", got, c.wantKey)
+		}
+		//: a value that is not the default's was the caller's, and stays.
+		if got := req.Header.Get("Accept"); got != "text/plain" {
+			t.Errorf("Accept = %q, want the caller's text/plain", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_sameOrigin pins the comparison the redirect check and applyHeaders both
+// rest on: the scheme and the host without case, and a port left out read as
+// the scheme's default.
+func Test_sameOrigin(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		a, b string
+		want bool
+	}
+	tests := []tc{
+		{a: "https://h", b: "https://h/p", want: true},
+		{a: "https://h", b: "HTTPS://H", want: true},
+		{a: "https://h", b: "https://h:443", want: true},
+		{a: "http://h", b: "http://h:80", want: true},
+		{a: "http://[::1]", b: "http://[::1]:80", want: true},
+		{a: "https://h", b: "http://h"},
+		{a: "https://h", b: "https://h:80"},
+		{a: "http://h", b: "http://h:443"},
+		{a: "https://h", b: "https://g"},
+		{a: "https://h:8443", b: "https://h:9443"},
+		{a: "http://[::1]:80", b: "http://[::2]:80"},
+	}
+	for _, c := range tests {
+		t.Run(c.a+" "+c.b, func(t *testing.T) {
+			t.Parallel()
+			a, aerr := url.Parse(c.a)
+			b, berr := url.Parse(c.b)
+			if aerr != nil || berr != nil {
+				t.Fatalf("parsing: %v %v", aerr, berr)
+			}
+			if got := sameOrigin(a, b); got != c.want {
+				t.Errorf("sameOrigin(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+			}
+			if got := sameOrigin(b, a); got != c.want {
+				t.Errorf("sameOrigin(%q, %q) = %v, want %v — it must be symmetric", c.b, c.a, got, c.want)
+			}
 		})
 	}
 }

@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 	"io"
+	"math"
 	"testing"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -135,6 +136,48 @@ func Test_cappedBody_Read(t *testing.T) {
 		//: the observer learns the size, which is the whole reason it fires here.
 		if reported != int64(c.size) {
 			t.Errorf("the observer was told %d bytes, want %d", reported, c.size)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_cappedBody_Read_saturates pins issue #453: the probe byte is added to
+// the remaining budget, and at the largest ceilings that sum overflowed — the
+// budget wrapped negative and p[:remaining] panicked. The cases sit at the edge
+// of the arithmetic: the largest ceiling with nothing read, the largest with
+// some read, and the one just below it, where the probe still fits.
+func Test_cappedBody_Read_saturates(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		limit int64
+		read  int64
+	}
+	tests := []tc{
+		{name: "the largest ceiling, nothing read", limit: math.MaxInt64},
+		{name: "the largest ceiling, some read", limit: math.MaxInt64, read: 5},
+		{name: "one below the largest ceiling", limit: math.MaxInt64 - 1},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		body := &cappedBody{inner: &splitReader{data: []byte("hello")}, limit: c.limit, read: c.read}
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Read panicked under a ceiling of %d: %v", c.limit, r)
+			}
+		}()
+
+		got, err := io.ReadAll(body)
+		if err != nil {
+			t.Fatalf("ReadAll = %v, want nil", err)
+		}
+		if string(got) != "hello" {
+			t.Errorf("read %q, want %q", got, "hello")
 		}
 	}
 	for _, c := range tests {

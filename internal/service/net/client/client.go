@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -56,6 +57,13 @@ func New(cfg corenet.ClientConfig, id corenet.IdentityValue, policy corenet.Poli
 		//: surface INVALID_ADDRESS from the parser.
 		return nil, berr
 	}
+	origins, oerr := parseOrigins(full.RedirectOrigins)
+	//: an opening that cannot be read must not be read as a wider one.
+	if oerr != nil {
+		//: surface INVALID_ADDRESS from the origin parser.
+		return nil, oerr
+	}
+	headers := canonicalHeaders(full.DefaultHeaders)
 	//: every request goes through the guard; there is no unguarded path.
 	guarded := &guard{
 		next:     newTransport(full, id),
@@ -68,11 +76,94 @@ func New(cfg corenet.ClientConfig, id corenet.IdentityValue, policy corenet.Poli
 		http: &http.Client{
 			Transport:     guarded,
 			Timeout:       full.TotalTimeout.Duration(),
-			CheckRedirect: redirectLimiter(full.MaxRedirects),
+			CheckRedirect: redirectLimiter(full.MaxRedirects, origins, headers),
 		},
 		base:    base,
-		headers: canonicalHeaders(full.DefaultHeaders),
+		headers: headers,
 	}, nil
+}
+
+// parseOrigins reads RedirectOrigins into the origins a redirect may reach.
+//
+// Each entry must be a bare http or https origin. Anything else — a path, a
+// query, credentials, another scheme — is refused rather than reduced to its
+// origin: a caller who wrote "https://cdn/assets" may believe the path narrows
+// the opening, and it would not.
+func parseOrigins(raw []string) (origins []*url.URL, err error) {
+	//: the default opens nothing, and builds nothing.
+	if len(raw) == 0 {
+		//: every cross-origin hop is refused.
+		return nil, nil
+	}
+	origins = make([]*url.URL, 0, len(raw))
+	//: every entry is judged; one bad entry fails the whole configuration.
+	for _, entry := range raw {
+		parsed, perr := url.Parse(entry)
+		//: only scheme://host[:port], optionally with a lone trailing slash.
+		if perr != nil || !bareOrigin(parsed) {
+			//: refuse at construction rather than on the first redirect.
+			return nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+				errs.String("why", "a redirect origin must be a bare http or https origin"))
+		}
+		origins = append(origins, parsed)
+	}
+	//: every entry names exactly one origin.
+	return origins, nil
+}
+
+// bareOrigin reports whether u is an http or https origin and nothing more: a
+// host, an optional port, at most a lone trailing slash, and no credentials,
+// query or fragment.
+func bareOrigin(u *url.URL) bool {
+	//: the scheme and the host are what an origin is made of.
+	if !webScheme(u.Scheme) || u.Host == "" {
+		//: not an origin this client can be redirected to.
+		return false
+	}
+	//: anything beyond the origin would read as a narrowing it is not.
+	extra := u.User != nil || u.Opaque != "" || (u.Path != "" && u.Path != "/") ||
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != ""
+	//: bare only when nothing follows the authority.
+	return !extra
+}
+
+// webScheme reports whether scheme is http or https, in any case.
+func webScheme(scheme string) bool {
+	//: the comparison folds case, as RFC 3986 says a scheme does.
+	return strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")
+}
+
+// sameOrigin reports whether a and b name one origin: the scheme, the host and
+// the port, the scheme and the host compared without case, and a port left
+// out read as the scheme's default.
+//
+// It compares substrings of the two URLs and allocates nothing, which is what
+// lets applyHeaders run it on every request.
+func sameOrigin(a, b *url.URL) bool {
+	//: a scheme change — https to http included — is a different origin, and
+	//: DNS names compare without case.
+	if !strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		//: the schemes or the hosts differ.
+		return false
+	}
+	//: "https://h" and "https://h:443" are one origin.
+	return portOf(a) == portOf(b)
+}
+
+// portOf returns u's port, or its scheme's default when it names none.
+func portOf(u *url.URL) string {
+	//: an explicit port is taken as written.
+	if port := u.Port(); port != "" {
+		//: the URL names its port.
+		return port
+	}
+	//: https is the only other scheme this client sends.
+	if strings.EqualFold(u.Scheme, "https") {
+		//: the default port of https.
+		return "443"
+	}
+	//: the default port of http.
+	return "80"
 }
 
 // canonicalHeaders rewrites the configured default names into the canonical
@@ -231,7 +322,17 @@ func bodyError(err error) error {
 //
 // The keys were canonicalised by canonicalHeaders at construction, which is
 // what keeps Get and Set on their non-allocating fast path here.
+//
+// The defaults belong to the base's origin: a request Do is handed for another
+// origin is sent without them, since an API key configured for one peer is not
+// a header to show any other.
 func (c *Client) applyHeaders(req *http.Request) {
+	//: no defaults leaves nothing to judge; with no base the request's own
+	//: origin is the one the defaults serve, and another origin receives none.
+	if len(c.headers) == 0 || (c.base != nil && (req.URL == nil || !sameOrigin(req.URL, c.base))) {
+		//: the request goes as the caller built it.
+		return
+	}
 	//: a caller-set header always wins over a configured default.
 	for key, value := range c.headers {
 		//: only fill what the caller left unset.
@@ -311,21 +412,87 @@ func newTransport(cfg corenet.ClientConfig, id corenet.IdentityValue) *http.Tran
 	}
 }
 
-// redirectLimiter caps the redirect chain.
+// redirectLimiter caps the redirect chain and keeps it on its origin.
 //
 // Every hop still re-enters the transport, so the policy authorises each one
-// individually: a 302 cannot walk the client out of its allowed surface.
-func redirectLimiter(maxRedirects int) func(*http.Request, []*http.Request) error {
+// individually. That is not enough on its own: the built-in policies judge the
+// method and the path, so a 302 that keeps the path and swaps the origin —
+// another host, the metadata address, https turned into http — passed every one
+// of them, and net/http copies the first request's headers onto each hop,
+// stripping only Authorization, WWW-Authenticate and Cookie. A hop to an origin
+// other than the first request's is therefore refused unless origins names it,
+// and one that origins admits is sent without the configured defaults.
+//
+// Each hop's headers are a fresh copy of the first request's, so a chain that
+// leaves the origin and comes back to it carries the defaults again on the hop
+// that returns — the origin they were configured for.
+func redirectLimiter(maxRedirects int, origins []*url.URL, defaults map[string]string) func(*http.Request, []*http.Request) error {
 	//: the closure captures the cap so http.Client can consult it per hop.
-	return func(_ *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
 		//: the chain is capped; each hop was already policy-checked.
 		if len(via) >= maxRedirects {
 			//: refuse to follow any further.
 			return errs.Wrap(corenet.TooManyRedirects, errs.WrapParams{},
 				errs.Int("limit", maxRedirects))
 		}
-		//: within budget, so the hop is allowed to proceed.
+		//: http.Client always hands the chain so far — a call without one has no
+		//: origin to compare — and a hop on the chain's own origin is what the
+		//: defaults were configured for.
+		if !leavesOrigin(req, via) {
+			//: within budget and on the origin, so the hop proceeds.
+			return nil
+		}
+		//: another origin is followed only where the caller opened it.
+		if !admitsOrigin(origins, req.URL) {
+			//: the URL is not echoed: it names the peer the redirect pointed at.
+			return errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+				errs.String("why", "the redirect leaves the origin"))
+		}
+		//: an admitted origin still receives none of the defaults.
+		stripDefaults(req.Header, defaults)
+		//: within budget, on an origin the caller named.
 		return nil
+	}
+}
+
+// leavesOrigin reports whether the hop req goes to an origin other than the
+// one the chain via started on. A hop with no chain or no URL leaves nothing.
+func leavesOrigin(req *http.Request, via []*http.Request) bool {
+	//: nothing to compare is not a departure.
+	if req == nil || req.URL == nil || len(via) == 0 || via[0].URL == nil {
+		//: no origin on one side or the other.
+		return false
+	}
+	//: the first request names the origin the chain belongs to.
+	return !sameOrigin(req.URL, via[0].URL)
+}
+
+// admitsOrigin reports whether u's origin is one of origins.
+func admitsOrigin(origins []*url.URL, u *url.URL) bool {
+	//: a short list the caller wrote; a scan is all it needs.
+	for _, origin := range origins {
+		//: one match admits the hop.
+		if sameOrigin(origin, u) {
+			//: the caller named this origin.
+			return true
+		}
+	}
+	//: nothing names it, so the default — closed — holds.
+	return false
+}
+
+// stripDefaults removes from header every configured default it still carries.
+//
+// A header whose value differs from the default was set by the caller, who
+// built the request and chose it; one that equals it is removed whoever set it,
+// since the two cannot be told apart and the default must not leave its origin.
+func stripDefaults(header http.Header, defaults map[string]string) {
+	//: the names were canonicalised in New, so Get and Del stay on their fast path.
+	for name, value := range defaults {
+		//: only the configured value is the default's to remove.
+		if header.Get(name) == value {
+			header.Del(name)
+		}
 	}
 }
 

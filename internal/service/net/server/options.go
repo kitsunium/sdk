@@ -41,7 +41,10 @@ func TLS(id corenet.IdentityValue) GroupOption {
 	}
 }
 
-// ReadTimeout bounds one read from the peer.
+// ReadTimeout bounds one read from the peer. On an HTTP group it bounds each
+// read of a request body, refreshed per read, the header phase unless
+// ReadHeaderTimeout is set, and the wait for the next request unless
+// IdleTimeout is.
 func ReadTimeout(d time.Duration) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {

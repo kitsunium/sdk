@@ -37,7 +37,12 @@ sequences:
             - return: 0, c.tooLarge()
           when: c.read > c.limit
       - bind: remaining
-        eval: c.limit - c.read + 1
+        eval: c.limit - c.read
+      - opt:
+          do:
+            - op: ++
+              set: remaining
+          when: remaining < math.MaxInt64
       - opt:
           do:
             - set: p
@@ -111,6 +116,10 @@ sequences:
         kind: internal
       - id: parseBase
         kind: internal
+      - id: parseOrigins
+        kind: internal
+      - id: canonicalHeaders
+        kind: internal
     steps:
       - opt:
           do:
@@ -128,6 +137,16 @@ sequences:
           do:
             - return: nil, berr
           when: berr != nil
+      - bind: origins, oerr
+        eval: parseOrigins(full.RedirectOrigins)
+        to: parseOrigins
+      - opt:
+          do:
+            - return: nil, oerr
+          when: oerr != nil
+      - bind: headers
+        eval: canonicalHeaders(full.DefaultHeaders)
+        to: canonicalHeaders
       - bind: guarded
         eval: |-
           &guard{
@@ -141,11 +160,86 @@ sequences:
           		http: &http.Client{
           			Transport:     guarded,
           			Timeout:       full.TotalTimeout.Duration(),
-          			CheckRedirect: redirectLimiter(full.MaxRedirects),
+          			CheckRedirect: redirectLimiter(full.MaxRedirects, origins, headers),
           		},
           		base:    base,
-          		headers: canonicalHeaders(full.DefaultHeaders),
+          		headers: headers,
           	}, nil
+  - of: parseOrigins
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseOrigins
+        kind: self
+      - id: url
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(raw) == 0
+      - set: origins
+        value: make([]*url.URL, 0, len(raw))
+      - loop:
+          do:
+            - bind: parsed, perr
+              eval: url.Parse(entry)
+              to: url
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                      				errs.String("why", "a redirect origin must be a bare http or https origin"))
+                when: perr != nil || !bareOrigin(parsed)
+            - set: origins
+              value: append(origins, parsed)
+          key: _
+          range: raw
+          value: entry
+      - return: origins, nil
+  - of: bareOrigin
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!webScheme(u.Scheme) || u.Host == \"\""
+      - bind: extra
+        eval: |-
+          u.User != nil || u.Opaque != "" || (u.Path != "" && u.Path != "/") ||
+          		u.RawQuery != "" || u.ForceQuery || u.Fragment != ""
+      - return: "!extra"
+  - of: webScheme
+    steps:
+      - return: strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")
+  - of: sameOrigin
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Hostname(), b.Hostname())"
+      - return: portOf(a) == portOf(b)
+  - of: portOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: portOf
+        kind: self
+      - id: u.Port
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: port
+          init:
+            bind: port
+            eval: u.Port()
+            to: u.Port
+          when: port != ""
+      - opt:
+          do:
+            - return: "\"443\""
+          when: strings.EqualFold(u.Scheme, "https")
+      - return: "\"80\""
   - of: canonicalHeaders
     steps:
       - opt:
@@ -303,6 +397,10 @@ sequences:
       - id: req.Header.Set
         kind: value
     steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(c.headers) == 0 || (c.base != nil && (req.URL == nil || !sameOrigin(req.URL, c.base)))
       - loop:
           do:
             - opt:
@@ -400,10 +498,12 @@ sequences:
         kind: self
       - id: errs
         kind: package
+      - id: stripDefaults
+        kind: internal
     steps:
       - return:
           closure:
-            params: _ *http.Request, via []*http.Request
+            params: req *http.Request, via []*http.Request
             results: error
             steps:
               - opt:
@@ -413,7 +513,54 @@ sequences:
                         				errs.Int("limit", maxRedirects))
                       to: errs
                   when: len(via) >= maxRedirects
+              - opt:
+                  do:
+                    - return: nil
+                  when: "!leavesOrigin(req, via)"
+              - opt:
+                  do:
+                    - return: |-
+                        errs.Wrap(corenet.RequestDenied, errs.WrapParams{},
+                        				errs.String("why", "the redirect leaves the origin"))
+                      to: errs
+                  when: "!admitsOrigin(origins, req.URL)"
+              - eval: stripDefaults(req.Header, defaults)
+                to: stripDefaults
               - return: nil
+  - of: leavesOrigin
+    participants:
+      - id: caller
+        kind: actor
+      - id: leavesOrigin
+        kind: self
+      - id: sameOrigin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: req == nil || req.URL == nil || len(via) == 0 || via[0].URL == nil
+      - return: "!sameOrigin(req.URL, via[0].URL)"
+        to: sameOrigin
+  - of: stripDefaults
+    participants:
+      - id: caller
+        kind: actor
+      - id: stripDefaults
+        kind: self
+      - id: header.Del
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: header.Del(name)
+                    to: header.Del
+                when: header.Get(name) == value
+          key: name
+          range: defaults
+          value: value
   - of: unwrapClientError
     steps:
       - bind: wrapped, ok

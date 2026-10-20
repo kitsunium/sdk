@@ -1272,11 +1272,29 @@ packages:
               type: int64
             - doc: |-
                 MaxRedirects caps the redirect chain. Every hop is re-authorised by the
-                policy, so a redirect cannot walk out of the allowed surface.
+                policy, and a hop to another origin is refused unless RedirectOrigins
+                names it, so a redirect cannot walk out of the allowed surface.
               name: MaxRedirects
               tag: json:"max_redirects"
               type: int
-            - doc: DefaultHeaders are added to every request that does not already set them.
+            - doc: |-
+                RedirectOrigins names the origins, each written scheme://host[:port], a
+                redirect may lead to besides the origin of the request that started the
+                chain. Empty — the default — refuses with RequestDenied every redirect
+                that changes the scheme, the host or the port, https to http included:
+                the built-in policies judge the method and the path, so a hop that keeps
+                the path and swaps the origin would otherwise pass them. A listed origin
+                is followed, and receives none of the DefaultHeaders. An entry that is
+                not a bare http or https origin fails New with InvalidAddress.
+              name: RedirectOrigins
+              tag: json:"redirect_origins"
+              type: '[]string'
+            - doc: |-
+                DefaultHeaders are added to every request that does not already set them
+                and is sent to the origin of BaseURL — or, with no BaseURL, to whatever
+                origin the request names. They are never sent to another origin: a
+                request built for one does not receive them, and a redirect that leaves
+                the origin of the request that started the chain is sent without them.
               name: DefaultHeaders
               tag: json:"default_headers"
               type: map[string]string
@@ -1708,6 +1726,10 @@ packages:
                 resume token — and it is the CALLER's to mint, because only the caller
                 knows what it means. Empty emits no id field, which leaves the client's
                 stored id untouched; that is the format's own behaviour, not an omission.
+                An id carrying U+0000 is refused with SSEFieldInvalid, as one carrying a
+                line terminator is: a client ignores such an id field (WHATWG HTML,
+                "process the field"), so its stored resume token would silently stay the
+                previous one.
               name: ID
               tag: json:"id"
               type: string
@@ -2234,7 +2256,11 @@ packages:
         name: TLS
         out:
           - type: GroupOption
-      - doc: ReadTimeout bounds one read from the peer.
+      - doc: |-
+          ReadTimeout bounds one read from the peer. On an HTTP group it bounds each
+          read of a request body, refreshed per read, the header phase unless
+          ReadHeaderTimeout is set, and the wait for the next request unless
+          IdleTimeout is.
         in:
           - name: d
             type: time.Duration
@@ -4415,9 +4441,13 @@ packages:
             It is refreshed per read, not installed once when the connection is accepted:
             a deadline set at accept time would be a budget for the connection's whole
             life, which a peer trickling one byte at a time stays comfortably inside. On
-            a group serving an http.Handler the same value becomes net/http's own
-            ReadTimeout — and its ReadHeaderTimeout too, unless [ReadHeaderTimeout] sets
-            the header phase apart — so it is refreshed per request there.
+            a group serving an http.Handler it bounds three things: each read
+            of a request body, refreshed before every read — never net/http's own
+            ReadTimeout, which budgets the whole request and would cut off a peer whose
+            every read is inside the bound —, the header phase, unless
+            [ReadHeaderTimeout] sets it apart, and the wait for the next request when
+            no [IdleTimeout] is set. The time a handler spends between two reads is its
+            own, and the deadline is cleared once the body has ended.
           forward: svcserver.ReadTimeout
           in:
             - name: d

@@ -372,6 +372,14 @@ sequences:
           when: err != nil
       - opt:
           do:
+            - return: |-
+                errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
+                			errs.String("field", "id"),
+                			errs.String("why", "the value carries U+0000, which a client ignores the whole id for"))
+              to: errs
+          when: e.ID != "" && strings.IndexByte(e.ID, 0) >= 0
+      - opt:
+          do:
             - return: err
           init:
             bind: err

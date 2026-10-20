@@ -1,6 +1,18 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: admitsOrigin
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: sameOrigin(origin, u)
+          key: _
+          range: origins
+          value: origin
+      - return: "false"
   - of: hasEncodedSeparator
     steps:
       - loop:

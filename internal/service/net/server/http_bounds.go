@@ -28,6 +28,19 @@ func (b httpBounds) headerTimeout(read time.Duration) time.Duration {
 	return read
 }
 
+// idleOrRead resolves http.Server.IdleTimeout: the idle budget when it was
+// set, the read budget otherwise — the fallback net/http applied itself while
+// the adapter still set ReadTimeout.
+func idleOrRead(idle, read time.Duration) time.Duration {
+	//: the caller bounded the wait between requests on its own.
+	if idle > 0 {
+		//: the option wins.
+		return idle
+	}
+	//: unset: the read budget, as net/http did.
+	return read
+}
+
 // headerBytes resolves the header cap handed to http.Server, where zero means
 // net/http's own default.
 func (b httpBounds) headerBytes() int {

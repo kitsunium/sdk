@@ -124,6 +124,12 @@ adapter.
   unrepresentable. A silently shortened id is a resume token that points at
   the wrong place, so `Validate` refuses it. The check is two `IndexByte`
   calls behind an emptiness test, not `ContainsAny` — `BENCH.md` prints why.
+- **U+0000 inside an SSE `ID` is refused (#456).** WHATWG HTML's "process the
+  field" ignores an `id` field whose value contains U+0000, so the frame would
+  arrive while the client's resume token silently stayed the previous one —
+  the wrong place to resume from, which is what the rule above refuses to
+  deliver. One more `IndexByte` behind the same emptiness test. `Data` and
+  `Name` carry U+0000 untouched: the client keeps them.
 - **An SSE `event:` with no `data:` is refused.** Every client discards a frame
   whose data buffer is empty and discards the event type with it, so a caller
   who names an event would watch it silently not arrive. A retry-only or id-only

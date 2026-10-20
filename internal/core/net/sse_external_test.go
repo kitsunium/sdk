@@ -30,6 +30,12 @@ func Test_SSEEventValue_Validate(t *testing.T) {
 	tests := []tc{
 		{name: "a newline in the id", event: corenet.SSEEventValue{ID: "4\n2", Data: "x"}},
 		{name: "a carriage return in the id", event: corenet.SSEEventValue{ID: "4\r2", Data: "x"}},
+		//: issue #456: a client IGNORES an id field carrying U+0000, so the
+		//: resume token would silently stay the previous one.
+		{name: "U+0000 inside the id", event: corenet.SSEEventValue{ID: "cursor-\x0042", Data: "x"}},
+		{name: "U+0000 ending the id", event: corenet.SSEEventValue{ID: "42\x00", Data: "x"}},
+		{name: "an id that is U+0000 alone", event: corenet.SSEEventValue{ID: "\x00", Data: "x"}},
+		{name: "U+0000 in an id-only frame", event: corenet.SSEEventValue{ID: "4\x002"}},
 		{name: "a newline in the event name", event: corenet.SSEEventValue{Name: "ti\nck", Data: "x"}},
 		{name: "a carriage return in the event name", event: corenet.SSEEventValue{Name: "ti\rck", Data: "x"}},
 		{name: "a negative retry", event: corenet.SSEEventValue{Data: "x", Retry: corenet.DurationValue(-time.Second)}},
@@ -68,6 +74,9 @@ func Test_SSEEventValue_ValidateAccepts(t *testing.T) {
 		{name: "a multi-line payload, which splits rather than fails", event: corenet.SSEEventValue{Data: "one\r\ntwo\nthree\r"}},
 		{name: "every field", event: corenet.SSEEventValue{ID: "42", Name: "tick", Data: "x", Retry: corenet.DurationValue(time.Second)}},
 		{name: "an id alone moves the cursor", event: corenet.SSEEventValue{ID: "cursor-9"}},
+		//: only the id field is discarded for U+0000; data and event carry it.
+		{name: "U+0000 in the data", event: corenet.SSEEventValue{ID: "42", Data: "a\x00b"}},
+		{name: "U+0000 in the event name", event: corenet.SSEEventValue{Name: "ti\x00ck", Data: "x"}},
 		{name: "a retry alone is the reconnection policy", event: corenet.SSEEventValue{Retry: corenet.DurationValue(corenet.SSEMinRetry)}},
 	}
 	runCase := func(t *testing.T, c tc) {

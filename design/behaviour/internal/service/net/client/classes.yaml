@@ -84,6 +84,11 @@ files:
       - maxPresizedRead
       - Client
       - New
+      - parseOrigins
+      - bareOrigin
+      - webScheme
+      - sameOrigin
+      - portOf
       - canonicalHeaders
       - (*Client).HTTP
       - (*Client).Get
@@ -95,6 +100,9 @@ files:
       - parseBase
       - newTransport
       - redirectLimiter
+      - leavesOrigin
+      - admitsOrigin
+      - stripDefaults
       - unwrapClientError
     name: client.go
   - decls:
@@ -150,6 +158,41 @@ functions:
   - name: New
     params: cfg corenet.ClientConfig, id corenet.IdentityValue, policy corenet.Policy, hook corenet.CallHook
     results: c *Client, err error
+  - doc: |-
+      parseOrigins reads RedirectOrigins into the origins a redirect may reach.
+
+      Each entry must be a bare http or https origin. Anything else — a path, a
+      query, credentials, another scheme — is refused rather than reduced to its
+      origin: a caller who wrote "https://cdn/assets" may believe the path narrows
+      the opening, and it would not.
+    name: parseOrigins
+    params: raw []string
+    results: origins []*url.URL, err error
+  - doc: |-
+      bareOrigin reports whether u is an http or https origin and nothing more: a
+      host, an optional port, at most a lone trailing slash, and no credentials,
+      query or fragment.
+    name: bareOrigin
+    params: u *url.URL
+    results: bool
+  - doc: webScheme reports whether scheme is http or https, in any case.
+    name: webScheme
+    params: scheme string
+    results: bool
+  - doc: |-
+      sameOrigin reports whether a and b name one origin: the scheme, the host and
+      the port, the scheme and the host compared without case, and a port left
+      out read as the scheme's default.
+
+      It compares substrings of the two URLs and allocates nothing, which is what
+      lets applyHeaders run it on every request.
+    name: sameOrigin
+    params: a, b *url.URL
+    results: bool
+  - doc: portOf returns u's port, or its scheme's default when it names none.
+    name: portOf
+    params: u *url.URL
+    results: string
   - doc: |-
       canonicalHeaders rewrites the configured default names into the canonical
       form net/http stores headers under, once, here.
@@ -207,13 +250,41 @@ functions:
     params: cfg corenet.ClientConfig, id corenet.IdentityValue
     results: "*http.Transport"
   - doc: |-
-      redirectLimiter caps the redirect chain.
+      redirectLimiter caps the redirect chain and keeps it on its origin.
 
       Every hop still re-enters the transport, so the policy authorises each one
-      individually: a 302 cannot walk the client out of its allowed surface.
+      individually. That is not enough on its own: the built-in policies judge the
+      method and the path, so a 302 that keeps the path and swaps the origin —
+      another host, the metadata address, https turned into http — passed every one
+      of them, and net/http copies the first request's headers onto each hop,
+      stripping only Authorization, WWW-Authenticate and Cookie. A hop to an origin
+      other than the first request's is therefore refused unless origins names it,
+      and one that origins admits is sent without the configured defaults.
+
+      Each hop's headers are a fresh copy of the first request's, so a chain that
+      leaves the origin and comes back to it carries the defaults again on the hop
+      that returns — the origin they were configured for.
     name: redirectLimiter
-    params: maxRedirects int
+    params: maxRedirects int, origins []*url.URL, defaults map[string]string
     results: func(*http.Request, []*http.Request) error
+  - doc: |-
+      leavesOrigin reports whether the hop req goes to an origin other than the
+      one the chain via started on. A hop with no chain or no URL leaves nothing.
+    name: leavesOrigin
+    params: req *http.Request, via []*http.Request
+    results: bool
+  - doc: admitsOrigin reports whether u's origin is one of origins.
+    name: admitsOrigin
+    params: origins []*url.URL, u *url.URL
+    results: bool
+  - doc: |-
+      stripDefaults removes from header every configured default it still carries.
+
+      A header whose value differs from the default was set by the caller, who
+      built the request and chose it; one that equals it is removed whoever set it,
+      since the two cannot be told apart and the default must not leave its origin.
+    name: stripDefaults
+    params: header http.Header, defaults map[string]string
   - doc: |-
       unwrapClientError pulls the typed cause out of the *url.Error that
       http.Client wraps every transport failure in, so the caller sees the domain
@@ -323,6 +394,7 @@ imports:
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   http: net/http
   io: io
+  math: math
   net: net
   regexp: regexp
   strings: strings
@@ -423,6 +495,10 @@ types:
 
           The keys were canonicalised by canonicalHeaders at construction, which is
           what keeps Get and Set on their non-allocating fast path here.
+
+          The defaults belong to the base's origin: a request Do is handed for another
+          origin is sent without them, since an API key configured for one peer is not
+          a header to show any other.
         name: applyHeaders
         params: req *http.Request
         recv: c *Client
