@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/vfs
+  name: vfs
+  purpose: "Package vfs is the public facade for the SDK's filesystem domain: reading stays io/fs, writing gets a contract, and publishing a file becomes one call that either replaces it completely or changes nothing at all."
+types: []

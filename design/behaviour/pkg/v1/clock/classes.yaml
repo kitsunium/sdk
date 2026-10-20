@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/clock
+  name: clock
+  purpose: "Package clock is the public facade for the SDK's time port: the interfaces a caller injects a time source through, the production clock, and the manual clock a test drives by hand."
+types: []

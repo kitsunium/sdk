@@ -1,0 +1,149 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ValidateAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateAttrs
+        kind: self
+      - id: coreotel
+        kind: package
+    steps:
+      - eval: coreotel.ValidateAttrs(sorted, InvalidAttribute)
+        to: coreotel
+  - of: NormalizeResource
+    participants:
+      - id: caller
+        kind: actor
+      - id: NormalizeResource
+        kind: self
+      - id: coreotel
+        kind: package
+    steps:
+      - return: coreotel.NormalizeResource(resource, InvalidAttribute)
+        to: coreotel
+  - of: ExporterName.String
+    steps:
+      - return: string(n)
+  - of: RegisterExporter
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterExporter
+        kind: self
+      - id: plugin
+        kind: package
+    steps:
+      - opt:
+          do:
+            - panic: "DuplicateRegistration.Error() + \": \" + why"
+          init:
+            bind: why
+            eval: plugin.Unusable(e)
+            to: plugin
+          when: why != ""
+      - opt:
+          do:
+            - panic: errs.Wrap(DuplicateRegistration, errs.WrapParams{}, errs.String("exporter", string(e.Name()))).Error()
+          when: registry.Publish(e.Name(), e)
+      - return: e
+  - of: LookupExporter
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupExporter
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - return: registry.Lookup(name)
+        to: registry.Lookup
+  - of: AvailableExporters
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableExporters
+        kind: self
+      - id: registry.Names
+        kind: value
+    steps:
+      - return: registry.Names()
+        to: registry.Names
+  - of: Export
+    participants:
+      - id: caller
+        kind: actor
+      - id: Export
+        kind: self
+      - id: LookupExporter
+        kind: internal
+      - id: exporter.Export
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: exporter, ok
+        eval: LookupExporter(name)
+        to: LookupExporter
+      - opt:
+          do:
+            - return: UnknownExporter
+          when: "!ok"
+      - bind: err
+        eval: exporter.Export(snap)
+        to: exporter.Export
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code:    CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The metrics exporter failed to ship the snapshot",
+          		Private: "core/observe/metrics.Export: the registered exporter returned an error",
+          	})
+        to: errs
+  - of: NormalizeScope
+    participants:
+      - id: caller
+        kind: actor
+      - id: NormalizeScope
+        kind: self
+      - id: coreotel
+        kind: package
+    steps:
+      - return: coreotel.NormalizeScope(scope, DefaultScopeName)
+        to: coreotel
+  - of: Temporality.String
+    steps:
+      - switch:
+          cases:
+            - case: TemporalityUnspecified
+              do:
+                - return: temporalityUnspecifiedText
+            - case: TemporalityDelta
+              do:
+                - return: temporalityDeltaText
+            - case: TemporalityCumulative
+              do:
+                - return: temporalityCumulativeText
+            - default: true
+              do:
+                - return: temporalityUnspecifiedText
+          "on": t
+  - of: Temporality.Resolved
+    steps:
+      - switch:
+          cases:
+            - case: TemporalityUnspecified, TemporalityCumulative
+              do:
+                - return: TemporalityCumulative
+            - case: TemporalityDelta
+              do:
+                - return: TemporalityDelta
+            - default: true
+              do:
+                - panic: InvalidTemporality.Error()
+          "on": t

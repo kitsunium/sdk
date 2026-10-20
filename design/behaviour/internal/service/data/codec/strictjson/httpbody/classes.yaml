@@ -1,0 +1,59 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Media types a request body may declare to be read as JSON.
+    grouped: true
+    items:
+      - doc: jsonMediaType is RFC 8259's registration.
+        name: jsonMediaType
+        type: string
+        value: "\"application/json\""
+      - doc: |-
+          jsonSuffix is the structured-syntax suffix of RFC 6839, §3.1: any
+          media type ending in it — application/problem+json,
+          application/vnd.acme+json — is JSON with a more specific meaning.
+        name: jsonSuffix
+        type: string
+        value: "\"+json\""
+    name: jsonMediaType
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - jsonMediaType
+      - DecodeRequest
+      - emptyOrUnreadable
+      - isJSONMediaType
+      - isMaxBytesError
+    name: httpbody.go
+functions:
+  - name: DecodeRequest
+    params: w http.ResponseWriter, req *http.Request, v any, maxBytes int64
+    results: error
+  - doc: emptyOrUnreadable classifies a failed first read.
+    name: emptyOrUnreadable
+    params: peekErr error
+    results: error
+  - doc: isJSONMediaType reports whether a Content-Type header declares JSON.
+    name: isJSONMediaType
+    params: header string
+    results: bool
+  - doc: isMaxBytesError recognises net/http's refusal of a body past its bound.
+    name: isMaxBytesError
+    params: err error
+    results: bool
+imports:
+  bufio: bufio
+  corestrictjson: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
+  errors: errors
+  http: net/http
+  io: io
+  mime: mime
+  strictjson: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody
+  name: httpbody
+  purpose: "Package httpbody decodes the JSON body of an HTTP request with the strict decoder of its parent package, adding the three things only an HTTP body has: a bound net/http enforces too, an empty body settled before anything else, and a media type that must declare JSON."
+types: []

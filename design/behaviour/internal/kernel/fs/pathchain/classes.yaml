@@ -1,0 +1,343 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxHops bounds how many indirections one resolution may follow.
+
+      It is Linux's MAXSYMLINKS, and the bound exists for the same reason the
+      kernel's does: two links pointing at each other resolve forever.
+    items:
+      - name: maxHops
+        type: int
+        value: "40"
+    name: maxHops
+  - doc: current is the component every filesystem spells "this directory".
+    items:
+      - name: current
+        type: string
+        value: "\".\""
+    name: current
+  - doc: parent is the component every filesystem spells "the directory above".
+    items:
+      - name: parent
+        type: string
+        value: "\"..\""
+    name: parent
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxHops
+      - current
+      - parent
+      - Resolve
+      - absoluteUncleaned
+      - resolveAbs
+      - walkState
+      - (*walkState).take
+      - (*walkState).step
+      - (*walkState).enter
+      - (*walkState).follow
+      - move
+      - describe
+      - indirect
+      - redirect
+      - rootOf
+      - split
+      - isSeparator
+      - exhausted
+    name: pathchain.go
+  - decls:
+      - rootStack
+      - openStack
+      - (*rootStack).top
+      - (*rootStack).path
+      - (*rootStack).push
+      - (*rootStack).pop
+      - (*rootStack).reset
+      - (*rootStack).close
+      - (*rootStack).closeAll
+    name: stack.go
+  - decls:
+      - StepValue
+    name: step.go
+functions:
+  - name: Resolve
+    params: path string
+    results: steps []StepValue, err error
+  - doc: |-
+      absoluteUncleaned makes path absolute WITHOUT normalising its components.
+
+      filepath.Abs is the obvious call and it is the wrong one: it Cleans, and
+      Clean removes "link/.." LEXICALLY while the kernel applies the parent step
+      AFTER following the link. Those are different directories whenever `link`
+      does not point at its own parent's child — so a walk over the cleaned path
+      would audit somewhere other than where the caller's open will land, which is
+      the single failure this package exists to prevent.
+
+      The one shape that cannot be kept verbatim is a Windows drive-relative path
+      ("C:foo"), which has no expansion but the lexical one. It is named here
+      rather than silently normalised with everything else.
+    name: absoluteUncleaned
+    params: path string
+    results: absolute string, err error
+  - doc: resolveAbs is [Resolve] once the path is known to be absolute.
+    name: resolveAbs
+    params: abs string
+    results: steps []StepValue, err error
+  - doc: |-
+      move applies a component that changes position without being part of the
+      chain.
+    name: move
+    params: stack *rootStack, name string
+  - doc: describe reads one component without traversing it.
+    name: describe
+    params: stack *rootStack, name string
+    results: step *StepValue, err error
+  - doc: |-
+      indirect reports whether a mode describes a component that redirects
+      resolution.
+
+      ModeSymlink covers a Unix symbolic link and, on Windows, both indirections
+      that matter: go1.27's src/os/types_windows.go maps IO_REPARSE_TAG_SYMLINK
+      and IO_REPARSE_TAG_MOUNT_POINT — a directory junction — onto it. Every other
+      reparse tag becomes ModeIrregular, which is also treated as an indirection
+      here rather than as an ordinary file, because a component the standard
+      library declines to classify is not one to walk through silently.
+    name: indirect
+    params: mode fs.FileMode
+    results: bool
+  - doc: |-
+      redirect turns an indirection's target into the components to resolve next,
+      resetting the stack to the target's own root when the target is absolute.
+    name: redirect
+    params: stack *rootStack, target, volume string
+    results: pending []string, err error
+  - doc: rootOf returns the filesystem root a target resolves against.
+    name: rootOf
+    params: target, fallback string
+    results: string
+  - doc: split breaks a path into its non-empty components.
+    name: split
+    params: path string
+    results: "[]string"
+  - doc: isSeparator reports whether r separates path components on this platform.
+    name: isSeparator
+    params: r rune
+    results: bool
+  - doc: |-
+      exhausted reports a path that could not be resolved within [maxHops].
+
+      It deliberately does not invent an errno. It hands the whole path to os.Stat
+      and returns what the KERNEL says about it, which for an indirection loop is
+      the platform's own spelling of the condition — ELOOP on Linux and Darwin,
+      EMLINK on FreeBSD and DragonFly, EFTYPE on NetBSD. A constant chosen here
+      would be one of those three and therefore wrong on at least two platforms,
+      and syscall does not define any of them on every GOOS this package compiles
+      for.
+    name: exhausted
+    params: path string
+    results: error
+  - doc: openStack opens base and returns a stack standing on it.
+    name: openStack
+    params: base string
+    results: stack *rootStack, err error
+imports:
+  cmp: cmp
+  errors: errors
+  filepath: path/filepath
+  fs: io/fs
+  os: os
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
+  name: pathchain
+  purpose: Package pathchain resolves a path one component at a time and reports what each component IS, instead of only what the whole path finally names.
+types:
+  - doc: |-
+      walkState is one resolution in progress: where it stands, what it has
+      described, and what it has left to describe.
+
+      It is a struct rather than four locals because the loop that drives it has
+      to hand all four to the step that follows a link, and a five-argument helper
+      returning three of them back is the shape this exists to avoid.
+    fields:
+      - doc: "stack is the position: one open directory handle per level entered."
+        name: stack
+        type: "*rootStack"
+      - doc: collected is one StepValue per component described so far, in order.
+        name: collected
+        type: "[]StepValue"
+      - doc: |-
+          pending is what is left to resolve, front first. Following a link
+          prepends the target's components to it.
+        name: pending
+        type: "[]string"
+      - doc: |-
+          volume is the walk's starting volume, empty outside Windows. An
+          absolute link target with no volume of its own resolves against it.
+        name: volume
+        type: string
+      - doc: hops counts the indirections followed so far, bounded by maxHops.
+        name: hops
+        type: int
+    kind: struct
+    methods:
+      - doc: take removes and returns the next component to resolve.
+        name: take
+        recv: w *walkState
+        results: string
+      - doc: |-
+          step describes one component and either enters it or follows it.
+
+          It reports done when the walk is over: the component does not exist, or it
+          exists and cannot be entered with nothing left to resolve — a regular file
+          as the last component, which is what a lock file is.
+        name: step
+        params: name, abs string
+        recv: w *walkState
+        results: done bool, err error
+      - doc: |-
+          enter descends into a component already known not to be an indirection.
+
+          described is the component as Lstat reported it a moment earlier, and it is
+          what decides whether a failed descent is an ANSWER or a FAILURE. Treating
+          every failure on the last component as a clean end reads two very different
+          things as one: a regular file, which is a legitimate terminal and what a
+          lock file is, and a directory that could not be opened — which is either a
+          permission fault worth reporting or, worse, an entry swapped for an
+          indirection between the Lstat and this call, where reporting success would
+          hand the caller a chain describing a component that no longer exists.
+        name: enter
+        params: name string, described *StepValue
+        recv: w *walkState
+        results: done bool, err error
+      - doc: follow re-queues an indirection's target, bounded by [maxHops].
+        name: follow
+        params: target, abs string
+        recv: w *walkState
+        results: error
+    name: walkState
+  - doc: |-
+      rootStack is the walk's position: one open directory handle per component
+      already entered, with the filesystem root at the bottom.
+
+      It is a stack rather than a single handle because ".." has to be expressible
+      and cannot be asked of os.Root — "openat ..: path escapes from parent" is
+      what a Root says to its own parent, which is the whole point of a Root.
+      Popping a handle we still hold is the same movement with none of the
+      re-resolution a second lookup of the parent's path string would need.
+
+      Nothing here is safe for concurrent use; a walk is one goroutine's.
+    fields:
+      - doc: |-
+          roots holds one open handle per level, roots[0] being the filesystem
+          root the walk started from. It is never empty between openStack and
+          close.
+        name: roots
+        type: "[]*os.Root"
+      - doc: |-
+          names holds the component that was entered to reach each level above
+          the root, so the stack can render the path it currently stands at
+          without re-joining the caller's string.
+        name: names
+        type: "[]string"
+      - doc: base is the path of roots[0] — "/" on Unix, a volume root on Windows.
+        name: base
+        type: string
+      - doc: |-
+          abandoned accumulates every handle this walk opened and could not give
+          back. Nothing is ever written through these descriptors, so a refused
+          close cannot have lost data — but a filesystem that will not close one
+          is saying something, and this package's consumer reports a refused close
+          for exactly that reason (see internal/service/app/lock's release).
+        name: abandoned
+        type: error
+    kind: struct
+    methods:
+      - doc: top returns the handle the walk currently stands on.
+        name: top
+        recv: s *rootStack
+        results: "*os.Root"
+      - doc: path renders where the walk currently stands.
+        name: path
+        recv: s *rootStack
+        results: string
+      - doc: push enters name, adding a level to the stack.
+        name: push
+        params: name string
+        recv: s *rootStack
+        results: error
+      - doc: pop leaves the current level, or stays at the root.
+        name: pop
+        recv: s *rootStack
+      - doc: |-
+          reset unwinds to base and reopens the stack there.
+
+          It is what an absolute indirection target needs: resolution restarts at a
+          root, and on Windows that may not even be the root the walk started from,
+          because a junction may point at another volume.
+        name: reset
+        params: base string
+        recv: s *rootStack
+        results: error
+      - doc: |-
+          close releases every handle the stack holds and reports every one it could
+          not give back, including those a pop released earlier.
+        name: close
+        recv: s *rootStack
+        results: error
+      - doc: closeAll releases directory handles, accumulating what it cannot.
+        name: closeAll
+        params: roots []*os.Root
+        recv: s *rootStack
+    name: rootStack
+  - fields:
+      - doc: |-
+          Path is the path as resolved up to and including this component. It
+          reflects the indirections already followed, so it is where the component
+          actually lives rather than what the caller typed.
+        name: Path
+        type: string
+      - doc: Name is this component alone, with no separator.
+        name: Name
+        type: string
+      - doc: |-
+          Container is the mode of the directory this component was looked up in.
+
+          On Unix its permission bits answer "who could have created this entry".
+          On Windows os.Stat synthesises the bits from one read-only attribute, so
+          they answer nothing there and a caller needing that answer must get it
+          from the platform's own access-control model. This package reports what
+          it read and takes no position on what it means.
+        name: Container
+        type: fs.FileMode
+      - doc: |-
+          Mode is the mode of the component itself, as lstat reports it: an
+          indirection is described here, never traversed to describe its target.
+        name: Mode
+        type: fs.FileMode
+      - doc: |-
+          Info is the whole of that lstat answer — Mode is Info.Mode() — for what
+          a mode does not say. On Unix, Info.Sys() is the *syscall.Stat_t naming
+          the component's OWNER, which is how a policy tells a component this
+          account or root created from one another account did. It is read the
+          way Container is, relative to the handle of the directory the component
+          was found in, never by a second lookup of Path; and like Mode it
+          describes an indirection itself, never its target.
+        name: Info
+        type: fs.FileInfo
+      - doc: |-
+          Target is where the indirection points, exactly as the filesystem stores
+          it — relative or absolute, unresolved. It is empty unless Indirect.
+        name: Target
+        type: string
+      - doc: |-
+          Indirect records that this component is a symbolic link on Unix or a
+          reparse point on Windows, so resolving the path CONTINUED somewhere the
+          component's own name does not say.
+        name: Indirect
+        type: bool
+    kind: struct
+    name: StepValue

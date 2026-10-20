@@ -1,0 +1,30 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: marshalPromotionShape
+    steps:
+      - bind: out
+        eval: make([]byte, 0, len(promotionHeaderCell)+1+1+promotionBufWorstCaseFactor*len(body)+1+1)
+      - set: out
+        value: append(out, promotionHeaderCell...)
+      - set: out
+        value: append(out, '\n')
+      - set: out
+        value: append(out, '"')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, '"', '"')
+                  - continue: true
+                when: body[i] == '"'
+            - set: out
+              value: append(out, body[i])
+          key: i
+          range: len(body)
+      - set: out
+        value: append(out, '"')
+      - set: out
+        value: append(out, '\n')
+      - return: out

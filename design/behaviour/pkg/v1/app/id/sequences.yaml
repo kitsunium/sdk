@@ -1,0 +1,69 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: UUIDv4
+    participants:
+      - id: caller
+        kind: actor
+      - id: UUIDv4
+        kind: self
+      - id: svcid.UUIDv4.New
+        kind: value
+    steps:
+      - return: svcid.UUIDv4.New()
+        to: svcid.UUIDv4.New
+  - of: UUIDv7
+    participants:
+      - id: caller
+        kind: actor
+      - id: UUIDv7
+        kind: self
+      - id: svcid.UUIDv7.New
+        kind: value
+    steps:
+      - return: svcid.UUIDv7.New()
+        to: svcid.UUIDv7.New
+  - of: ULID
+    participants:
+      - id: caller
+        kind: actor
+      - id: ULID
+        kind: self
+      - id: svcid.ULID.New
+        kind: value
+    steps:
+      - return: svcid.ULID.New()
+        to: svcid.ULID.New
+  - of: Snowflake
+    participants:
+      - id: caller
+        kind: actor
+      - id: Snowflake
+        kind: self
+      - id: svcid.Snowflake.New
+        kind: value
+    steps:
+      - return: svcid.Snowflake.New()
+        to: svcid.Snowflake.New
+  - of: NanoID
+    participants:
+      - id: caller
+        kind: actor
+      - id: NanoID
+        kind: self
+      - id: svcid.NanoID.New
+        kind: value
+    steps:
+      - return: svcid.NanoID.New()
+        to: svcid.NanoID.New
+  - of: KSUID
+    participants:
+      - id: caller
+        kind: actor
+      - id: KSUID
+        kind: self
+      - id: svcid.KSUID.New
+        kind: value
+    steps:
+      - return: svcid.KSUID.New()
+        to: svcid.KSUID.New

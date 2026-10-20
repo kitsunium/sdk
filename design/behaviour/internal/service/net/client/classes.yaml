@@ -1,0 +1,564 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxPresizedRead bounds how far the peer's own Content-Length is believed.
+
+      The bound is deliberately NOT the configured ceiling. Sizing the buffer from
+      an unverified header up to MaxResponseSize turns a ten-byte reply carrying
+      "Content-Length: 8388608" into an 8 MiB allocation per request — a
+      memory-amplification a peer buys for nothing, multiplied by every call in
+      flight. 64 KiB is above the size of nearly every JSON API response, so the
+      hint still buys the single-allocation read where it matters, and a peer that
+      lies wins 64 KiB rather than the whole ceiling.
+    items:
+      - name: maxPresizedRead
+        type: int64
+        value: 64 << 10
+    name: maxPresizedRead
+  - doc: |-
+      Defaults chosen to be safe rather than permissive: a misconfigured client
+      should fail fast and small, never hang or buffer without bound.
+    grouped: true
+    items:
+      - doc: defaultDialTimeout bounds connection establishment.
+        name: defaultDialTimeout
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: defaultHandshakeTimeout bounds the TLS handshake.
+        name: defaultHandshakeTimeout
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: defaultResponseTimeout bounds the wait for response headers.
+        name: defaultResponseTimeout
+        type: time.Duration
+        value: 10 * time.Second
+      - doc: defaultTotalTimeout bounds the whole call, body included.
+        name: defaultTotalTimeout
+        type: time.Duration
+        value: 30 * time.Second
+      - doc: defaultKeepAlive is the TCP keep-alive probe interval.
+        name: defaultKeepAlive
+        type: time.Duration
+        value: 30 * time.Second
+      - comment: 8 MiB
+        doc: |-
+          defaultMaxResponseSize is a deliberately modest ceiling — a client that
+          genuinely needs more should have to say so.
+        name: defaultMaxResponseSize
+        type: int64
+        value: 8 << 20
+      - doc: |-
+          defaultMaxRedirects is small because an API client following a long
+          redirect chain is nearly always a misconfiguration.
+        name: defaultMaxRedirects
+        type: int
+        value: "3"
+    name: defaultDialTimeout
+  - doc: |-
+      escapeSlash and escapeBackslash are the two percent-escapes a peer's router
+      re-reads as a path separator, written lowercase for the fold. They are the
+      same length — one "%" and two hex digits — which is what lets one window
+      serve both comparisons.
+    grouped: true
+    items:
+      - doc: escapeSlash is "/" percent-encoded.
+        name: escapeSlash
+        type: string
+        value: "\"%2f\""
+      - doc: escapeBackslash is "\" percent-encoded.
+        name: escapeBackslash
+        type: string
+        value: "\"%5c\""
+    name: escapeSlash
+files:
+  - decls:
+      - cappedBody
+      - (*cappedBody).finish
+      - (*cappedBody).Read
+      - readOutcome
+      - (*cappedBody).tooLarge
+      - (*cappedBody).Close
+    name: capped_body.go
+  - decls:
+      - maxPresizedRead
+      - Client
+      - New
+      - canonicalHeaders
+      - (*Client).HTTP
+      - (*Client).Get
+      - (*Client).Do
+      - readBody
+      - bodyError
+      - (*Client).applyHeaders
+      - (*Client).resolve
+      - parseBase
+      - newTransport
+      - redirectLimiter
+      - unwrapClientError
+    name: client.go
+  - decls:
+      - conjunction
+      - (*conjunction).Allow
+    name: conjunction.go
+  - decls:
+      - defaultDialTimeout
+      - withDefaults
+    name: defaults.go
+  - decls:
+      - denyPolicy
+      - (*denyPolicy).Allow
+    name: deny_policy.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - guard
+      - (*guard).RoundTrip
+      - (*guard).clockOrSystem
+      - (*guard).observe
+      - requestOf
+    name: guard.go
+  - decls:
+      - methodPolicy
+      - (*methodPolicy).Allow
+    name: method_policy.go
+  - decls:
+      - escapeSlash
+      - dotSegments
+      - checkPath
+      - hasEncodedSeparator
+      - hasDotSegment
+      - foldsASCII
+      - lowerASCII
+    name: path.go
+  - decls:
+      - pathPolicy
+      - (*pathPolicy).Allow
+    name: path_policy.go
+  - decls:
+      - AllowMethods
+      - AllowPaths
+      - DenyPaths
+      - Policies
+      - compileAnchored
+    name: policies.go
+functions:
+  - doc: readOutcome maps a terminal read result onto what the observer should record.
+    name: readOutcome
+    params: err error
+    results: error
+  - name: New
+    params: cfg corenet.ClientConfig, id corenet.IdentityValue, policy corenet.Policy, hook corenet.CallHook
+    results: c *Client, err error
+  - doc: |-
+      canonicalHeaders rewrites the configured default names into the canonical
+      form net/http stores headers under, once, here.
+
+      http.Header.Get and http.Header.Set both canonicalise their argument, and
+      that conversion ALLOCATES for a name that is not already canonical and not
+      one of net/http's interned common names — which is to say, for exactly the
+      custom "x-request-source" headers a caller writes in lowercase because
+      nothing said not to. Doing it per request charged that twice per header per
+      call for a configuration that was never wrong, only spelled differently.
+
+      A caller who configures two spellings of one name still gets one of them,
+      unpredictably, exactly as before — but now the choice is made once here
+      rather than freshly on every request from a map iteration order that is
+      randomised per range.
+    name: canonicalHeaders
+    params: configured map[string]string
+    results: map[string]string
+  - doc: |-
+      readBody reads the guarded response body in full, sized from the peer's own
+      Content-Length when that hint is usable.
+
+      io.ReadAll cannot do this: it starts at 512 bytes and grows by append, so a
+      1 MiB body is reallocated about a dozen times and roughly twice its own size
+      is allocated and copied.
+
+      The hint is the PEER'S claim and is treated as one — clamped by
+      maxPresizedRead, and ignored entirely when negative, which is what
+      net/http reports for a chunked or HTTP/2 body of unknown length. The ceiling
+      is NOT enforced here and must not be: body is the cappedBody installed by the
+      guard, which refuses an over-sized payload rather than truncating it, and it
+      does so whatever buffer this function hands it.
+    name: readBody
+    params: source io.Reader, hint int64
+    results: payload []byte, err error
+  - doc: |-
+      bodyError types a failure that happened while reading the response body.
+
+      The ceiling's own refusal already carries a domain code and is handed back
+      untouched, so errors.Is and errs.HasCode keep matching it. Everything else
+      comes from the transport — a connection reset part-way through the body, a
+      TLS failure, an expired deadline — and would otherwise leave
+      internal/service as a bare stdlib error, which is the one thing the error
+      model does not permit. Its text is deliberately not echoed: a transport
+      message can name the internal address, exactly as on the RoundTrip path.
+    name: bodyError
+    params: err error
+    results: error
+  - doc: parseBase validates the configured base URL.
+    name: parseBase
+    params: raw string
+    results: base *url.URL, err error
+  - doc: newTransport builds the per-phase-bounded transport.
+    name: newTransport
+    params: cfg corenet.ClientConfig, id corenet.IdentityValue
+    results: "*http.Transport"
+  - doc: |-
+      redirectLimiter caps the redirect chain.
+
+      Every hop still re-enters the transport, so the policy authorises each one
+      individually: a 302 cannot walk the client out of its allowed surface.
+    name: redirectLimiter
+    params: maxRedirects int
+    results: func(*http.Request, []*http.Request) error
+  - doc: |-
+      unwrapClientError pulls the typed cause out of the *url.Error that
+      http.Client wraps every transport failure in, so the caller sees the domain
+      code rather than a stdlib envelope that also quotes the full URL.
+    name: unwrapClientError
+    params: err error
+    results: error
+  - doc: |-
+      withDefaults returns a copy of cfg with every unset field filled.
+
+      It takes and returns a value rather than mutating through a pointer so the
+      caller's own Config is never modified behind its back: a client must not be
+      able to change the configuration its caller still holds.
+    name: withDefaults
+    params: cfg corenet.ClientConfig
+    results: corenet.ClientConfig
+  - doc: |-
+      requestOf projects an outbound request onto the immutable value a Policy
+      judges. The projection is deliberate: a Policy never receives the *http.Request
+      itself, so it cannot mutate the request it is authorising.
+
+      escapedPath is passed in rather than read from req because the caller already
+      needs it for the observation record, and url.URL.EscapedPath is not a field
+      read — see RoundTrip. It MUST be req.URL.EscapedPath() and never the decoded
+      url.URL.Path, which would let "%2e%2e" pass a correctly written rule.
+    name: requestOf
+    params: req *http.Request, escapedPath string
+    results: corenet.RequestValue
+  - doc: |-
+      checkPath refuses a path that is relative or carries a dot segment.
+
+      This runs BEFORE any allowlist pattern because an anchored pattern is not
+      sufficient on its own: `^/v1/supi/[^/]+$` matches `/v1/supi/..` perfectly
+      well, and the upstream then normalises that to a different resource. Go
+      reduces dot segments neither in url.URL nor in the transport, so nothing else
+      in the stack will catch it. No caller thinks to check, which is exactly why
+      it belongs here rather than in each consumer's policy.
+    name: checkPath
+    params: escapedPath string
+    results: error
+  - doc: |-
+      hasEncodedSeparator reports a percent-encoded path separator.
+
+      This closes the gap that judging the escaped path opens. Patterns are matched
+      against the wire form, so `/v1/supi/a%2fb` satisfies `^/v1/supi/[^/]+$` as a
+      single segment — while an upstream that decodes before routing sees
+      `/v1/supi/a/b`, two segments and a different resource than the policy believed
+      it was authorising. The two views disagree, so the only honest answer is to
+      refuse: a caller with a legitimate slash in an identifier is asking the
+      allowlist a question it cannot answer.
+
+      It scans in place. The obvious spelling — Contains over a lowercased copy —
+      allocated the WHOLE path for every request carrying a single uppercase byte,
+      which url.URL.EscapedPath guarantees on any percent-encoded path (it emits
+      %2F, not %2f) and which a canonical UUID carries on a path that is not
+      adversarial at all. Equivalence with that spelling is not argued, it is
+      tested: Test_pathScansAreASCIIFoldEquivalent sweeps every Unicode code point.
+    name: hasEncodedSeparator
+    params: escapedPath string
+    results: bool
+  - doc: |-
+      hasDotSegment reports a "." or ".." segment in literal or percent-encoded
+      form. Both forms are reinterpreted upstream, so neither may reach a pattern.
+    name: hasDotSegment
+    params: escapedPath string
+    results: bool
+  - doc: |-
+      foldsASCII reports whether s equals want when ASCII letters are compared
+      without regard to case. want MUST already be lowercase ASCII.
+
+      It is exactly strings.ToLower(s) == want for every want this package uses,
+      and it allocates nothing. The equality holds because no code point outside
+      ASCII lowercases into any byte those constants are spelled with, which the
+      equivalence test asserts by sweeping the whole code space rather than by
+      trusting this sentence.
+    name: foldsASCII
+    params: s, want string
+    results: bool
+  - doc: |-
+      lowerASCII lowercases one ASCII letter and leaves every other byte untouched,
+      including every byte of a multi-byte UTF-8 sequence.
+    name: lowerASCII
+    params: b byte
+    results: byte
+  - name: AllowMethods
+    params: methods ...string
+    results: corenet.Policy
+  - name: AllowPaths
+    params: patterns ...string
+    results: policy corenet.Policy, err error
+  - name: DenyPaths
+    params: patterns ...string
+    results: policy corenet.Policy, err error
+  - name: Policies
+    params: members ...corenet.Policy
+    results: corenet.Policy
+  - doc: compileAnchored wraps each pattern in its anchors and compiles it.
+    name: compileAnchored
+    params: patterns []string
+    results: compiled []*regexp.Regexp, err error
+imports:
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  io: io
+  net: net
+  regexp: regexp
+  strings: strings
+  sync: sync
+  time: time
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/client
+  name: client
+  purpose: Package client — the response body size ceiling.
+types:
+  - doc: |-
+      cappedBody stops reading past the configured ceiling.
+
+      It FAILS rather than truncating. A silent truncation does not stay silent: it
+      surfaces several layers away as an incomprehensible decode error on a body
+      that looks complete, and the operator has no way to connect the two. Failing
+      at the boundary names the actual problem.
+    fields:
+      - doc: inner is the transport's own body.
+        name: inner
+        type: io.ReadCloser
+      - doc: limit is the ceiling in bytes.
+        name: limit
+        type: int64
+      - doc: read counts what has been handed to the caller so far.
+        name: read
+        type: int64
+      - doc: |-
+          done reports the finished body exactly once, with the byte count and
+          whatever ended it. It is how the observation hook learns a size at all:
+          a body's length is only known once it has been read, so a record emitted
+          when the headers arrive can never carry one.
+        name: done
+        type: func(read int64, err error)
+      - doc: |-
+          once keeps that report to exactly one per body, whether the body ended at
+          EOF, at a read failure, or at Close.
+        name: once
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: finish reports the completed body to the observer, at most once.
+        name: finish
+        params: err error
+        recv: c *cappedBody
+      - doc: |-
+          Read implements io.Reader.
+
+          The ceiling is a MAXIMUM, so a body of exactly that size is admitted and only
+          one past it is refused. Telling those apart costs one byte: a wrapper that
+          stops the moment it has handed back `limit` bytes cannot distinguish "the
+          body ended exactly here" from "there is one more byte to come", and refuses
+          both. Whether it ever gets to make that distinction is decided by the
+          transport rather than by this package — an HTTP/1.1 body with a
+          Content-Length reports the end together with its last bytes, so the question
+          never arises, while an HTTP/2 body reports it on the following call, which is
+          the shape this client asks for by setting ForceAttemptHTTP2.
+        name: Read
+        params: p []byte
+        recv: c *cappedBody
+        results: n int, err error
+      - doc: tooLarge reports the refusal, naming the ceiling but never the body.
+        name: tooLarge
+        recv: c *cappedBody
+        results: error
+      - doc: Close implements io.Closer.
+        name: Close
+        recv: c *cappedBody
+        results: error
+    name: cappedBody
+  - fields:
+      - doc: http carries the guarded transport; handing it out keeps the guarantee.
+        name: http
+        type: "*http.Client"
+      - doc: base is the origin relative paths resolve against; may be nil.
+        name: base
+        type: "*url.URL"
+      - doc: headers are applied to requests that do not already set them.
+        name: headers
+        type: map[string]string
+    kind: struct
+    methods:
+      - name: HTTP
+        recv: c *Client
+        results: "*http.Client"
+      - name: Get
+        params: ctx context.Context, path string, query url.Values
+        recv: c *Client
+        results: resp corenet.ResponseValue, err error
+      - name: Do
+        params: req *http.Request
+        recv: c *Client
+        results: resp corenet.ResponseValue, err error
+      - doc: |-
+          applyHeaders adds the configured defaults without overriding the caller.
+
+          The keys were canonicalised by canonicalHeaders at construction, which is
+          what keeps Get and Set on their non-allocating fast path here.
+        name: applyHeaders
+        params: req *http.Request
+        recv: c *Client
+      - doc: resolve builds an absolute URL from a path relative to the base.
+        name: resolve
+        params: path string, query url.Values
+        recv: c *Client
+        results: target string, err error
+    name: Client
+  - doc: |-
+      conjunction requires every member policy to allow the request. Composing by
+      conjunction rather than disjunction is deliberate: adding a policy can only
+      ever narrow what is permitted, so a reviewer never has to check whether a new
+      rule accidentally widened the surface.
+    fields:
+      - doc: members must all allow; an empty set refuses.
+        name: members
+        type: "[]corenet.Policy"
+    kind: struct
+    methods:
+      - doc: Allow implements corenet.Policy.
+        name: Allow
+        params: req corenet.RequestValue
+        recv: p *conjunction
+        results: error
+    name: conjunction
+  - doc: |-
+      denyPolicy refuses paths matching any of its anchored patterns. It exists so a
+      narrow exclusion can be carved out of a broader allow pattern without
+      rewriting that pattern into something unreadable.
+    fields:
+      - doc: patterns were anchored at construction.
+        name: patterns
+        type: "[]*regexp.Regexp"
+    kind: struct
+    methods:
+      - doc: Allow implements corenet.Policy.
+        name: Allow
+        params: req corenet.RequestValue
+        recv: p *denyPolicy
+        results: error
+    name: denyPolicy
+  - doc: |-
+      guard decorates an http.RoundTripper with the outbound policy, the response
+      size ceiling and the observation hook.
+
+      Placing the check HERE rather than in the typed client is the whole design.
+      A caller cannot construct a request that bypasses it, because there is no
+      path to the network that does not pass through the transport — not even for
+      code that takes the *http.Client and forges its own request. "Read-only"
+      stops being a convention the next contributor must remember and becomes a
+      property of the code.
+    fields:
+      - doc: next is the underlying transport.
+        name: next
+        type: http.RoundTripper
+      - doc: policy authorises every request; never nil after construction.
+        name: policy
+        type: corenet.Policy
+      - doc: maxBytes caps the response body.
+        name: maxBytes
+        type: int64
+      - doc: hook observes each call; may be nil.
+        name: hook
+        type: corenet.CallHook
+      - doc: |-
+          clk times each call for the observation record. Nil — every guard New
+          builds — is clock.System; a white-box test sets a ManualClock so the
+          reported Duration is exactly what the test advanced.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: RoundTrip implements http.RoundTripper.
+        name: RoundTrip
+        params: req *http.Request
+        recv: g *guard
+        results: resp *http.Response, err error
+      - doc: |-
+          clockOrSystem returns the clock calls are timed on: the injected one, or the
+          wall clock when none was set.
+        name: clockOrSystem
+        recv: g *guard
+        results: clock.Clock
+      - doc: |-
+          observe hands the completed call to the hook when one is configured.
+
+          A nil hook costs one comparison HERE, and nothing at all on the request path:
+          the CallValue is passed by value, so a refusal reported to no observer never
+          leaves the stack, and RoundTrip builds neither the success record nor the
+          closure that fills it unless g.hook is set. The comparison alone was once the
+          whole claim, and it was wrong about the request even while being right about
+          this function.
+        name: observe
+        params: call corenet.CallValue
+        recv: g *guard
+    name: guard
+  - doc: methodPolicy admits a closed set of HTTP methods.
+    fields:
+      - doc: allowed is the uppercase method set; an empty set admits nothing.
+        name: allowed
+        type: map[string]struct{}
+    kind: struct
+    methods:
+      - doc: Allow implements corenet.Policy.
+        name: Allow
+        params: req corenet.RequestValue
+        recv: p *methodPolicy
+        results: error
+    name: methodPolicy
+  - doc: |-
+      pathPolicy admits paths matching any of its anchored patterns. A pathPolicy
+      with no patterns admits nothing: an allowlist that grew empty by accident must
+      close, never open.
+    fields:
+      - doc: patterns were anchored at construction, so a caller cannot forget to.
+        name: patterns
+        type: "[]*regexp.Regexp"
+    kind: struct
+    methods:
+      - doc: Allow implements corenet.Policy.
+        name: Allow
+        params: req corenet.RequestValue
+        recv: p *pathPolicy
+        results: error
+    name: pathPolicy
+vars:
+  - doc: |-
+      dotSegments is every spelling of "." and ".." that a peer would re-normalise,
+      written lowercase so a candidate segment is folded rather than the table.
+
+      Percent-encoding is case-insensitive — %2E and %2e denote the same octet — so
+      the comparison has to ignore case somewhere. Doing it on this side costs
+      nothing: the table is fixed and already lowercase, while folding the input
+      meant allocating a copy of every segment a caller ever sends.
+    items:
+      - name: dotSegments
+        value: "[...]string{\".\", \"..\", \"%2e\", \"%2e%2e\", \".%2e\", \"%2e.\"}"
+    name: dotSegments

@@ -1,0 +1,273 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: cutLine
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: s[:i], s[i+1:], true
+                when: s[i] == charNewline
+          key: i
+          range: len(s)
+      - return: s, "", false
+  - of: isBareKey
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: key == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isBareKeyByte(key[i])"
+          key: i
+          range: len(key)
+      - return: "true"
+  - of: canBeLiteral
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - return: "false"
+                when: c == charApostrophe || c == charDelete || c < charFirstPrintable
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: containsByte
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: s[i] == c
+          key: i
+          range: len(s)
+      - return: "false"
+  - of: (*parser).digitsThen
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(p.data)-p.pos <= count || p.data[p.pos+count] != mark
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: byteClass[c]&classDigit == 0
+          key: _
+          range: "p.data[p.pos : p.pos+count]"
+          value: c
+      - return: "true"
+  - of: (*parser).secondFraction
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: "!p.consume(charDot)"
+      - bind: start
+        eval: p.pos
+      - loop:
+          cond: p.pos < len(p.data) && byteClass[p.data[p.pos]]&classDigit != 0
+          do:
+            - opt:
+                do:
+                  - set: dt.nanosecond
+                    value: dt.nanosecond*int(decimalBase) + int(p.data[p.pos]-'0')
+                when: p.pos-start < nanoDigits
+            - op: ++
+              set: p.pos
+      - set: dt.precision
+        value: min(p.pos-start, nanoDigits)
+      - op: "*="
+        set: dt.nanosecond
+        value: nanoScale[dt.precision]
+      - return: p.pos > start
+  - of: (*parser).fixed
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(p.data)-p.pos < width
+      - bind: value
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: 0, false
+                when: byteClass[c]&classDigit == 0
+            - set: value
+              value: value*int(decimalBase) + int(c-'0')
+          key: _
+          range: "p.data[p.pos : p.pos+width]"
+          value: c
+      - op: +=
+        set: p.pos
+        value: width
+      - opt:
+          do:
+            - return: 0, false
+          when: sep != 0 && !p.consume(sep)
+      - return: value, true
+  - of: (*parser).integerOf
+    steps:
+      - bind: negative
+        eval: token[0] == '-'
+      - var:
+          name: limit
+          type: uint64
+          value: math.MaxInt64
+      - opt:
+          do:
+            - op: ++
+              set: limit
+          when: negative
+      - var:
+          name: value
+          type: uint64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: byteClass[c]&classDigit == 0
+            - bind: digit
+              eval: uint64(c - '0')
+            - opt:
+                do:
+                  - return: 0, 0, p.fail(at, problemIntegerRange)
+                when: value > (limit-digit)/uint64(decimalBase)
+            - set: value
+              value: value*uint64(decimalBase) + digit
+          key: _
+          range: token
+          value: c
+      - opt:
+          do:
+            - set: value
+              value: "-value"
+          when: negative
+      - return: kindInteger, value, nil
+  - of: significandOf
+    steps:
+      - bind: digits
+        eval: "0"
+      - bind: afterDot
+        eval: "false"
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i < len(b)
+          do:
+            - bind: c
+              eval: b[i]
+            - opt:
+                do:
+                  - set: afterDot
+                    value: "true"
+                  - continue: true
+                when: c == '.'
+            - opt:
+                do:
+                  - break: true
+                when: c == 'e' || c == 'E'
+            - opt:
+                do:
+                  - return: 0, 0, nil, false
+                when: digits == maxSignificandDigits
+            - set: significand
+              value: significand*uint64(decimalBase) + uint64(c-'0')
+            - op: ++
+              set: digits
+            - opt:
+                do:
+                  - op: "--"
+                    set: exponent
+                when: afterDot
+          post: i++
+      - return: significand, exponent, b[i:], true
+  - of: position
+    steps:
+      - set: at
+        value: min(max(at, 0), len(data))
+      - bind: line, lineStart
+        eval: 1, 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: line
+                  - set: lineStart
+                    value: i + 1
+                when: data[i] == charNewline
+          key: i
+          range: at
+      - return: line, utf8.RuneCount(data[lineStart:at]) + 1
+  - of: (*parser).indexLookup
+    steps:
+      - bind: c, ok
+        eval: p.index[keyHash(t, key)]
+      - opt:
+          do:
+            - return: noNode
+          when: "!ok"
+      - loop:
+          cond: c != noNode
+          do:
+            - bind: "n"
+              eval: "&p.nodes[c]"
+            - opt:
+                do:
+                  - return: c
+                when: n.parent == t && bytes.Equal(p.keyBytes(n), key)
+          post: c = p.nodes[c].hnext
+      - return: noNode
+  - of: (*typeInfo).lookupFolded
+    steps:
+      - var:
+          name: buf
+          type: "[foldBufferBytes]byte"
+      - opt:
+          do:
+            - bind: i, ok
+              eval: ti.folded[strings.ToLower(string(key))]
+            - return: i, ok
+          when: len(key) > len(buf) || !isASCII(key)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: +=
+                    set: c
+                    value: "'a' - 'A'"
+                when: c >= 'A' && c <= 'Z'
+            - set: buf[i]
+              value: c
+          key: i
+          range: key
+          value: c
+      - bind: i, ok
+        eval: ti.folded[string(buf[:len(key)])]
+      - return: i, ok
+  - of: isASCII
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: c >= charFirstNonASCII
+          key: _
+          range: b
+          value: c
+      - return: "true"

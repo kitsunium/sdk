@@ -1,0 +1,199 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      defaultMaxRows bounds the in-memory batch when Config leaves MaxRows at its
+      zero value. Row-count is the natural cap for a DB insert: most engines bound
+      a multi-row INSERT / pipeline by statement count, not by byte size.
+    items:
+      - name: defaultMaxRows
+        type: int
+        value: "256"
+    name: defaultMaxRows
+files:
+  - decls:
+      - defaultMaxRows
+      - execBatch
+      - dbSink
+      - newDBSink
+      - serializeErrorHook
+      - (*dbSink).Write
+      - (*dbSink).Flush
+      - (*dbSink).Close
+      - (*dbSink).deliver
+    name: dbsink.go
+  - decls:
+      - Config
+      - Compose
+    name: dbsink_config.go
+  - decls: []
+    name: doc.go
+functions:
+  - doc: |-
+      newDBSink builds a batching sink over exec. When flushEvery > 0 the underlying
+      batcher spawns a ticker goroutine that flushes on the interval; the goroutine
+      is joined by Close. A non-positive maxRows substitutes defaultMaxRows so the
+      batch can never grow unbounded.
+    name: newDBSink
+    params: exec execBatch, maxRows int, cfg Config
+    results: "*dbSink"
+  - doc: |-
+      serializeErrorHook wraps hook so concurrent callers run it one at a time. The
+      dbsink routes delivery failures to the user OnError from two goroutines — the
+      cap-flush on the async drainer and the FlushEvery ticker — so without this
+      guard a user hook that touches shared state would be entered concurrently
+      (V42). The mutex is captured per wrapped hook (not package-global) and held
+      only across the user call, so independent sinks never contend and a slow hook
+      blocks neither producers nor the other flush path's progress before the call.
+    name: serializeErrorHook
+    params: hook func(error)
+    results: func(error)
+  - name: Compose
+    params: exec execBatch, cfg Config
+    results: corelogger.Sink
+imports:
+  async: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
+  batcher: github.com/kitsunium/sdk/internal/kernel/concur/batcher
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink
+  name: dbsink
+  purpose: Package dbsink is the driver-AGNOSTIC database sink shell (ADR 0015, gated).
+types:
+  - doc: |-
+      execBatch is the deliver seam over a database: it persists one coalesced
+      batch of records, returning a non-nil error to fail the batch. A func type
+      (not an interface) keeps the real driver call an anonymous closure in each
+      concrete adapter — confining the driver/SDK there — while tests inject a
+      recording closure, so the batching logic needs no database and the seam
+      carries no untestable named method. It is the DB analogue of s3's uploadFunc.
+    kind: named
+    name: execBatch
+    underlying: func(ctx context.Context, batch []corelogger.RecordEvent) error
+  - doc: |-
+      dbSink coalesces formatted records into batched database writes. The
+      coalesce / flush / ticker lifecycle is delegated to a kernel batcher whose
+      items are the cloned RecordEvents; the deliver closure forwards the batch to
+      execBatch. The concrete type stays unexported (IFACE-PLUGIN): New returns it
+      behind the core/observe/logger.Sink interface.
+    fields:
+      - doc: exec is the driver-supplied deliver seam, captured at construction.
+        name: exec
+        type: execBatch
+      - doc: |-
+          onError surfaces cap-triggered delivery failures seen on the Write path;
+          never nil after newDBSink (a nil hook degrades to a no-op). When the caller
+          supplied a real hook, newDBSink wraps it so this field AND the batcher's
+          OnError share one serializing mutex: the cap-flush (drainer goroutine) and
+          the ticker flush invoke the SAME wrapped closure, so the user callback is
+          never entered from two goroutines at once (V42).
+        name: onError
+        type: func(err error)
+      - doc: |-
+          clk sources the timestamp when RecordEvent.Time is the zero value; never
+          nil after newDBSink (a nil Config.Clock defaults to clock.System).
+        name: clk
+        type: clock.Clock
+      - doc: batch is the generic coalescing buffer; each item is one cloned record.
+        name: batch
+        type: "*batcher.Batcher[corelogger.RecordEvent]"
+    kind: struct
+    methods:
+      - doc: |-
+          Write appends the originating record to the current batch; the batcher flushes
+          eagerly once the row cap is reached. It never blocks on the database — the
+          producer is decoupled by the async middleware wrapping this sink — and a
+          cap-triggered batch failure is routed to onError, not returned, so a slow /
+          failing DB never propagates to the logging call site. A zero RecordEvent.Time
+          is the documented "fill at handle time" sentinel; since the DB path persists
+          the structured record (the payload p is ignored, re-serialised per wire
+          protocol in execBatch) it must do the fill itself — the format-side encoder's
+          fill is invisible here — so Write stamps clk.Now() before batching to keep the
+          drivers from persisting a year-0001 timestamp.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *dbSink
+        results: n int, err error
+      - doc: |-
+          Flush delivers the pending batch synchronously, returning any execBatch error
+          to the caller (the caller-facing path propagates rather than routing to
+          OnError).
+        name: Flush
+        params: ctx context.Context
+        recv: s *dbSink
+        results: error
+      - doc: |-
+          Close stops the ticker (if any), delivers the final batch, and returns the
+          flush error. Close has no caller ctx, so it uses a background context; the
+          batcher joins the ticker goroutine before the final flush.
+        name: Close
+        recv: s *dbSink
+        results: error
+      - doc: |-
+          deliver forwards a coalesced batch of records to the execBatch seam. It runs
+          outside the batcher's lock, so a slow database round-trip never blocks
+          producers. The batcher already wraps a non-nil result as its typed
+          DeliverFailed sentinel (the driver's own cause stays reachable via
+          errors.Is), so deliver only needs to relay the seam's verdict.
+        name: deliver
+        params: ctx context.Context, items []corelogger.RecordEvent
+        recv: s *dbSink
+        results: error
+    name: dbSink
+  - fields:
+      - doc: |-
+          MaxRows forces a flush once the pending batch reaches this many records;
+          a non-positive value applies the shell's default (defaultMaxRows). A DB
+          insert is bounded by statement / pipeline row count, so the shell batches
+          by count rather than by byte size.
+        name: MaxRows
+        type: int
+      - doc: |-
+          FlushEvery bounds how long a partial batch waits before it is delivered;
+          the zero value delivers only on an explicit Flush / Close.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          (level.Info) inherits the handler-global level and adds no per-record gate.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          BufferSize is the async ring capacity handed to the async middleware; a
+          non-positive value applies async's own default (1024 slots).
+        name: BufferSize
+        type: int
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated. Wire it to a metric counter: the
+          hot path never blocks on a slow database, so drops are how back-pressure
+          surfaces.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every failed batch delivery seen by
+          the background drainer / ticker. Without it those errors are lost (the
+          producer cannot be blocked on a database failure). The cap-flush (drainer
+          goroutine) and the FlushEvery ticker both route here from distinct
+          goroutines, so the shell serializes the two paths behind an internal mutex
+          before invoking this hook: the callback is therefore never entered
+          concurrently with itself, yet it MUST NOT block for long — the mutex is
+          held across the call, so a slow OnError stalls the next routed failure.
+        name: OnError
+        type: func(err error)
+      - doc: |-
+          Clock sources the timestamp the sink stamps onto a record whose Time is the
+          zero value (the "fill at handle time" sentinel) before batching it for the
+          driver. The zero value (nil) defaults to clock.System; tests inject a fake
+          Clock for deterministic timestamps.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    name: Config

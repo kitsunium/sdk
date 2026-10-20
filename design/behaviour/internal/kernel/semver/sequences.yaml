@@ -1,0 +1,519 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: IsPseudoVersion
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsPseudoVersion
+        kind: self
+      - id: isPseudoVersion
+        kind: internal
+    steps:
+      - return: isPseudoVersion(v)
+        to: isPseudoVersion
+  - of: IsValid
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsValid
+        kind: self
+      - id: isValid
+        kind: internal
+    steps:
+      - return: isValid(v)
+        to: isValid
+  - of: Prerelease
+    participants:
+      - id: caller
+        kind: actor
+      - id: Prerelease
+        kind: self
+      - id: prerelease
+        kind: internal
+    steps:
+      - return: prerelease(v)
+        to: prerelease
+  - of: parse
+    steps:
+      - var:
+          name: parts
+          type: components
+      - opt:
+          do:
+            - return: components{}, false
+          when: v == "" || v[0] != prefix || !parts.read(v[1:])
+      - return: parts, true
+  - of: (*components).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*components).read
+        kind: self
+      - id: number
+        kind: internal
+      - id: suffixes
+        kind: internal
+    steps:
+      - var:
+          name: ok
+          type: bool
+      - set: c.major, rest, ok
+        to: number
+        value: number(rest)
+      - opt:
+          do:
+            - set: c.minor, c.patch
+              value: zero, zero
+            - return: ok
+          when: "!ok || rest == \"\""
+      - opt:
+          do:
+            - return: "false"
+          when: rest[0] != dot
+      - set: c.minor, rest, ok
+        to: number
+        value: number(rest[1:])
+      - opt:
+          do:
+            - set: c.patch
+              value: zero
+            - return: ok
+          when: "!ok || rest == \"\""
+      - opt:
+          do:
+            - return: "false"
+          when: rest[0] != dot
+      - set: c.patch, rest, ok
+        to: number
+        value: number(rest[1:])
+      - opt:
+          do:
+            - return: ok
+          when: "!ok || rest == \"\""
+      - set: c.prerelease, ok
+        to: suffixes
+        value: suffixes(rest)
+      - return: ok
+  - of: number
+    steps:
+      - bind: end
+        eval: "0"
+      - loop:
+          cond: end < len(s) && isDigit(s[end])
+          do:
+            - op: ++
+              set: end
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: end == 0 || (end > 1 && s[0] == '0')
+      - return: s[:end], s[end:], true
+  - of: suffixes
+    participants:
+      - id: caller
+        kind: actor
+      - id: suffixes
+        kind: self
+      - id: identifiers
+        kind: internal
+    steps:
+      - bind: end
+        eval: "0"
+      - opt:
+          do:
+            - var:
+                name: found
+                type: identifierList
+            - set: end, found
+              to: identifiers
+              value: identifiers(rest, 1)
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: found.empty || found.padded
+          when: rest != "" && rest[0] == hyphen
+      - opt:
+          do:
+            - return: rest[:end], true
+          when: end == len(rest)
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: rest[end] != plus
+      - bind: tail, found
+        eval: identifiers(rest, end+1)
+        to: identifiers
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: found.empty || tail != len(rest)
+      - return: rest[:end], true
+  - of: (*identifierList).add
+    steps:
+      - set: l.empty
+        value: l.empty || id == ""
+      - set: l.padded
+        value: l.padded || paddedNumber(id, numeric)
+  - of: identifiers
+    participants:
+      - id: caller
+        kind: actor
+      - id: identifiers
+        kind: self
+      - id: found.add
+        kind: internal
+    steps:
+      - var:
+          name: found
+          type: identifierList
+      - bind: start, numeric
+        eval: from, true
+      - loop:
+          cond: end < len(s)
+          do:
+            - switch:
+                cases:
+                  - case: isDigit(c)
+                  - case: isLetter(c) || c == hyphen
+                    do:
+                      - set: numeric
+                        value: "false"
+                  - case: c == dot
+                    do:
+                      - eval: found.add(s[start:end], numeric)
+                        to: found.add
+                      - set: start, numeric
+                        value: end+1, true
+                  - default: true
+                    do:
+                      - eval: found.add(s[start:end], numeric)
+                        to: found.add
+                      - return: end, found
+                init:
+                  bind: c
+                  eval: s[end]
+          init: end := from
+          post: end++
+      - eval: found.add(s[start:], numeric)
+        to: found.add
+      - return: len(s), found
+  - of: paddedNumber
+    steps:
+      - return: numeric && len(id) > 1 && id[0] == '0'
+  - of: isDigit
+    steps:
+      - return: c-'0' < digitCount
+  - of: isLetter
+    steps:
+      - return: (c|lowerCaseBit)-'a' < letterCount
+  - of: falseFirst
+    steps:
+      - switch:
+          cases:
+            - case: x == y
+              do:
+                - return: "0"
+            - case: x
+              do:
+                - return: "1"
+            - default: true
+              do:
+                - return: "-1"
+  - of: compareNumbers
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareNumbers
+        kind: self
+      - id: falseFirst
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: falseFirst(len(x) > len(y), len(y) > len(x))
+              to: falseFirst
+          when: len(x) != len(y)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: falseFirst(x[i] > y[i], y[i] > x[i])
+                    to: falseFirst
+                when: x[i] != y[i]
+          key: i
+          range: len(x)
+      - return: "0"
+  - of: comparePrereleases
+    participants:
+      - id: caller
+        kind: actor
+      - id: comparePrereleases
+        kind: self
+      - id: falseFirst
+        kind: internal
+      - id: compareIdentifierLists
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: x == y
+              do:
+                - return: "0"
+            - case: x == "" || y == ""
+              do:
+                - return: falseFirst(x == "", y == "")
+                  to: falseFirst
+            - default: true
+              do:
+                - return: compareIdentifierLists(x[1:], y[1:])
+                  to: compareIdentifierLists
+  - of: compareIdentifierLists
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareIdentifierLists
+        kind: self
+      - id: nextIdentifier
+        kind: internal
+      - id: compareIdentifiers
+        kind: internal
+      - id: falseFirst
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: idX, restX
+              eval: nextIdentifier(x)
+              to: nextIdentifier
+            - bind: idY, restY
+              eval: nextIdentifier(y)
+              to: nextIdentifier
+            - opt:
+                do:
+                  - return: order
+                init:
+                  bind: order
+                  eval: compareIdentifiers(idX, idY)
+                  to: compareIdentifiers
+                when: order != 0
+            - opt:
+                do:
+                  - return: falseFirst(restX != "", restY != "")
+                    to: falseFirst
+                when: restX == "" || restY == ""
+            - set: x, y
+              value: restX[1:], restY[1:]
+          forever: true
+  - of: nextIdentifier
+    steps:
+      - bind: end
+        eval: "0"
+      - loop:
+          cond: end < len(list) && list[end] != dot
+          do:
+            - op: ++
+              set: end
+      - return: list[:end], list[end:]
+  - of: compareIdentifiers
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareIdentifiers
+        kind: self
+      - id: compareNumbers
+        kind: internal
+      - id: falseFirst
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: numericX, numericY
+        eval: isNumeric(x), isNumeric(y)
+      - switch:
+          cases:
+            - case: numericX && numericY
+              do:
+                - return: compareNumbers(x, y)
+                  to: compareNumbers
+            - case: numericX || numericY
+              do:
+                - return: falseFirst(!numericX, !numericY)
+                  to: falseFirst
+            - default: true
+              do:
+                - return: strings.Compare(x, y)
+                  to: strings
+  - of: isPseudoVersion
+    participants:
+      - id: caller
+        kind: actor
+      - id: isPseudoVersion
+        kind: self
+      - id: pseudoStamp
+        kind: internal
+    steps:
+      - bind: _, ok
+        eval: pseudoStamp(v)
+        to: pseudoStamp
+      - return: ok
+  - of: PseudoVersionRev
+    participants:
+      - id: caller
+        kind: actor
+      - id: PseudoVersionRev
+        kind: self
+      - id: pseudoStamp
+        kind: internal
+    steps:
+      - bind: stamp, ok
+        eval: pseudoStamp(v)
+        to: pseudoStamp
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok"
+      - return: stamp[stampLen+1:], true
+  - of: PseudoVersionTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: PseudoVersionTime
+        kind: self
+      - id: pseudoStamp
+        kind: internal
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: stamp, ok
+        eval: pseudoStamp(v)
+        to: pseudoStamp
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: "!ok"
+      - bind: at, err
+        eval: time.Parse(stampLayout, stamp[:stampLen])
+        to: time
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: err != nil
+      - return: at, true
+  - of: pseudoStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: pseudoStamp
+        kind: self
+      - id: parse
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts, ok
+        eval: parse(v)
+        to: parse
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok || parts.prerelease == \"\""
+      - bind: list
+        eval: parts.prerelease[1:]
+      - bind: lastDot
+        eval: strings.LastIndexByte(list, dot)
+        to: strings
+      - bind: stamp
+        eval: list[lastDot+1:]
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!isStamp(stamp) || !stampPlaced(&parts, list, lastDot)"
+      - return: stamp, true
+  - of: stampPlaced
+    steps:
+      - opt:
+          do:
+            - return: parts.minor == zero && parts.patch == zero
+          when: lastDot < 0
+      - bind: head
+        eval: list[:lastDot]
+      - return: head[strings.LastIndexByte(head, dot)+1:] == zero
+  - of: isValid
+    participants:
+      - id: caller
+        kind: actor
+      - id: isValid
+        kind: self
+      - id: parse
+        kind: internal
+    steps:
+      - bind: _, ok
+        eval: parse(v)
+        to: parse
+      - return: ok
+  - of: Compare
+    participants:
+      - id: caller
+        kind: actor
+      - id: Compare
+        kind: self
+      - id: parse
+        kind: internal
+      - id: falseFirst
+        kind: internal
+      - id: compareNumbers
+        kind: internal
+      - id: comparePrereleases
+        kind: internal
+    steps:
+      - bind: left, leftOK
+        eval: parse(v)
+        to: parse
+      - bind: right, rightOK
+        eval: parse(w)
+        to: parse
+      - opt:
+          do:
+            - return: falseFirst(leftOK, rightOK)
+              to: falseFirst
+          when: "!leftOK || !rightOK"
+      - opt:
+          do:
+            - return: order
+          init:
+            bind: order
+            eval: compareNumbers(left.major, right.major)
+            to: compareNumbers
+          when: order != 0
+      - opt:
+          do:
+            - return: order
+          init:
+            bind: order
+            eval: compareNumbers(left.minor, right.minor)
+            to: compareNumbers
+          when: order != 0
+      - opt:
+          do:
+            - return: order
+          init:
+            bind: order
+            eval: compareNumbers(left.patch, right.patch)
+            to: compareNumbers
+          when: order != 0
+      - return: comparePrereleases(left.prerelease, right.prerelease)
+        to: comparePrereleases
+  - of: prerelease
+    participants:
+      - id: caller
+        kind: actor
+      - id: prerelease
+        kind: self
+      - id: parse
+        kind: internal
+    steps:
+      - bind: parts, _
+        eval: parse(v)
+        to: parse
+      - return: parts.prerelease

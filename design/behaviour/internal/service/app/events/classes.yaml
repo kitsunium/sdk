@@ -1,0 +1,282 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - bus
+      - New
+      - (*bus).Subscribe
+      - (*bus).Unsubscribe
+      - holds
+      - validateEventType
+      - validateSubscription
+    name: events.go
+  - decls:
+      - Handler
+      - "On"
+      - "Off"
+      - erase
+    name: on.go
+  - decls:
+      - (*bus).Publish
+      - dispatch
+      - classify
+      - joinListenerFailure
+      - call
+    name: publish.go
+  - decls:
+      - state
+      - cloneStateWith
+      - cloneStateWithout
+      - cloneByType
+      - insertOrdered
+    name: state.go
+functions:
+  - name: New
+    results: corev.Bus
+  - doc: |-
+      holds reports whether a listener is already registered under name for
+      eventType in the given membership version.
+    name: holds
+    params: current *state, eventType corev.EventType, name string
+    results: bool
+  - doc: |-
+      validateEventType refuses a type no dispatch could ever match.
+
+      The interface case is the one this exists for. Publish resolves an event's
+      type with reflect.TypeOf, which returns the DYNAMIC type of the value and
+      never an interface type, so a subscription keyed on an interface would be
+      accepted, listed, and never called — the inert registration ADR 0031
+      removes from this SDK.
+    name: validateEventType
+    params: eventType corev.EventType, at string
+    results: error
+  - doc: |-
+      validateSubscription refuses a subscription that could never run, naming
+      the missing part.
+    name: validateSubscription
+    params: sub corev.SubscriptionValue, eventType corev.EventType
+    results: error
+  - name: "On"
+    params: bus corev.Bus, handler Handler[E]
+    results: error
+    typeParams: E any
+  - name: "Off"
+    params: bus corev.Bus, name string
+    results: error
+    typeParams: E any
+  - doc: |-
+      erase wraps a typed handler in the core/app/events.Listener the bus dispatches.
+
+      The assertion is the ENTIRE cost of a heterogeneous bus in Go, and it is
+      one comparison of two type pointers — measured against a direct call in
+      BENCH.md. Its failure branch is unreachable through this package's API: On
+      keys the subscription on reflect.TypeFor[E](), Publish only calls the
+      listeners filed under reflect.TypeOf(event), and the bus refuses an
+      interface E — so the dynamic type IS E whenever this runs. It is still
+      checked, because a comma-ok that is never false costs nothing and a silent
+      zero value would cost a listener firing on an event it never received.
+    name: erase
+    params: handle func(ctx context.Context, event E) error
+    results: corev.Listener
+    typeParams: E any
+  - doc: |-
+      dispatch walks the ordered subscriptions, stopping only for an authorised
+      halt, and aggregates what came back.
+
+      A failure never short-circuits. Listeners are INDEPENDENT consequences of
+      one fact, and making the third one's delivery depend on the second one's
+      disk being full would reintroduce precisely the coupling a bus removes.
+    name: dispatch
+    params: |2
+
+      	ctx context.Context, eventType corev.EventType, event any, subs []corev.SubscriptionValue,
+    results: report corev.DispatchValue, aggregate error
+  - doc: |-
+      classify sorts one non-nil listener outcome, updates the report and the
+      failure list, and reports whether the dispatch must stop here.
+    name: classify
+    params: |2
+
+      	report *corev.DispatchValue, failures *[]error,
+      	sub corev.SubscriptionValue, eventType corev.EventType, err error,
+    results: bool
+  - doc: |-
+      joinListenerFailure puts the bus's verdict and the listener's own error
+      side by side.
+
+      errs.Wrap would hit the origin-wins rule and inherit the listener's code,
+      so "did any listener fail?" would only be answerable by someone who already
+      knew every code every listener might produce. Joined, errs.HasCode(err,
+      CodeListenerFailed) and the caller's own errors.Is both answer.
+    name: joinListenerFailure
+    params: name string, eventType corev.EventType, err error
+    results: error
+  - doc: |-
+      call invokes one listener with its panic recovered.
+
+      A panic escaping a listener would kill the PUBLISHER — which, in a
+      synchronous same-goroutine bus, is the caller's request or transaction, and
+      is the one party that did nothing wrong. It would also silently cancel
+      every listener after this one, so a single broken observer would decide
+      what the rest of the application gets to see.
+
+      The stack is captured here, inside the deferred recover, while the
+      panicking frames are still unwinding. kernel/concur/group needed a PanicValue type
+      to carry that across a goroutine boundary; there is no boundary here — the
+      listener ran on this goroutine — so the stack goes straight into a field
+      and the recovered value becomes an ordinary typed error.
+    name: call
+    params: |2
+
+      	ctx context.Context, eventType corev.EventType, sub corev.SubscriptionValue, event any,
+    results: err error
+  - doc: |-
+      cloneStateWith returns a copy of current with sub inserted in its ordered
+      position among the subscriptions for eventType. A nil current is the
+      never-published state and yields a fresh membership of exactly one.
+    name: cloneStateWith
+    params: current *state, eventType corev.EventType, sub corev.SubscriptionValue
+    results: "*state"
+  - doc: |-
+      cloneStateWithout returns a copy of current with the listener named name
+      removed from eventType's list, and reports whether it was there.
+    name: cloneStateWithout
+    params: current *state, eventType corev.EventType, name string
+    results: next *state, found bool
+  - doc: |-
+      cloneByType copies the type index. The copy is SHALLOW by design: a
+      subscription list is only ever replaced whole, so sharing a slice header
+      with the previous version is safe, and it is what keeps a rewrite
+      proportional to the number of TYPES rather than to the number of listeners.
+    name: cloneByType
+    params: |2
+
+      	current map[corev.EventType][]corev.SubscriptionValue,
+    results: map[corev.EventType][]corev.SubscriptionValue
+  - doc: |-
+      insertOrdered returns a NEW slice with sub placed after every subscription
+      whose Priority is less than or equal to its own.
+
+      "Less than or equal" is the whole tie rule: an equal priority means the
+      newcomer goes AFTER the incumbents, so subscriptions registered at the same
+      priority run in registration order. Sorting the list instead would need a
+      stable sort AND a sequence number to stay stable across the rewrites, and
+      would re-derive on every Subscribe an order the insert already knows.
+    name: insertOrdered
+    params: current []corev.SubscriptionValue, sub corev.SubscriptionValue
+    results: "[]corev.SubscriptionValue"
+imports:
+  context: context
+  corev: github.com/kitsunium/sdk/internal/core/app/events
+  debug: runtime/debug
+  errors: errors
+  fmt: fmt
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  reflect: reflect
+  slices: slices
+  snapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/events
+  name: events
+  purpose: "Package events — hosts the engine: registration, removal, and the copy-on-write membership the dispatch reads."
+types:
+  - doc: |-
+      bus is the concrete core/app/events.Bus. It is unexported: there is one
+      canonical in-process dispatch discipline, so a registry would have exactly
+      one entry and would add a way to misconfigure it at runtime (the proc,
+      resilience, scheduler and lifecycle precedents — ADR 0016 / 0026 / 0041 /
+      0050).
+    fields:
+      - doc: |-
+          members is the per-type subscription index, published as one
+          copy-on-write snapshot. Publish reads it with a single atomic load and
+          no allocation; Subscribe and Unsubscribe rebuild it — the right trade
+          for an index written at wiring time and read once per published event.
+          The primitive a copy-on-write membership list always takes (ADR 0011).
+        name: members
+        type: snapshot.Value[state]
+    kind: struct
+    methods:
+      - doc: |-
+          Subscribe registers sub against eventType, refusing anything that could
+          never fire.
+        name: Subscribe
+        params: eventType corev.EventType, sub corev.SubscriptionValue
+        recv: b *bus
+        results: error
+      - doc: Unsubscribe removes the listener registered under name for eventType.
+        name: Unsubscribe
+        params: eventType corev.EventType, name string
+        recv: b *bus
+        results: error
+      - doc: |-
+          Publish calls every listener registered for the event's dynamic type, in
+          ascending priority and then registration order, ON THIS GOROUTINE, and
+          returns when the last one has returned.
+
+          ctx is passed to every listener and is never inspected by the bus. An event
+          is a fact that has already happened; abandoning half of its consequences
+          because the publisher's deadline expired would produce exactly the partial
+          state the synchronous contract exists to prevent. The price is stated
+          rather than hidden: a dispatch does not end early, so a listener that must
+          honour cancellation has to do it itself — and a caller who wants the bus to
+          return before the work finishes wants a queue, not this.
+
+          A bus with no listener for this type is legitimate: the zero DispatchValue
+          and a nil error. A publisher must not have to know whether anybody is
+          listening.
+        name: Publish
+        params: ctx context.Context, event any
+        recv: b *bus
+        results: report corev.DispatchValue, err error
+    name: bus
+  - fields:
+      - doc: |-
+          Name identifies the listener in every error field and is the handle
+          [Off] removes it by. It must be non-empty and unique among the
+          listeners registered for E.
+        name: Name
+        type: string
+      - doc: |-
+          Priority orders this listener among the others registered for E. Lower
+          runs first; equal priorities run in registration order. Its zero value,
+          core/app/events.PriorityNormal, is a working default.
+        name: Priority
+        type: corev.Priority
+      - doc: |-
+          MayHalt authorises Handle to stop the dispatch by returning
+          core/app/events.Halt. False — the zero value — means it cannot.
+        name: MayHalt
+        type: bool
+      - doc: |-
+          Handle is the reaction. It receives the event ALREADY TYPED. It must be
+          non-nil.
+        name: Handle
+        type: func(ctx context.Context, event E) error
+    kind: struct
+    name: Handler
+    typeParams: E any
+  - doc: |-
+      state is the value a bus publishes through its copy-on-write snapshot: the
+      subscriptions held for each event type, each list ALREADY ORDERED.
+
+      It is replaced, never mutated. A publisher may be ranging over one of these
+      slices at any moment with no lock held, which is what makes a Subscribe or
+      an Unsubscribe during a live dispatch harmless — and what makes the
+      dispatch itself a single atomic load.
+
+      The lists are kept sorted at REGISTRATION rather than at publication. A bus
+      is written once at wiring time and read once per event for the life of the
+      process, so sorting on the read path would pay the cost on exactly the side
+      that cannot afford it — and would allocate a scratch slice per published
+      event, on the hottest path there is.
+    fields:
+      - doc: byType maps a concrete event type to its ordered subscriptions.
+        name: byType
+        type: map[corev.EventType][]corev.SubscriptionValue
+    kind: struct
+    name: state

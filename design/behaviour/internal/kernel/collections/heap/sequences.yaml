@@ -1,0 +1,68 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - opt:
+          do:
+            - panic: "\"kernel/collections/heap: New requires a comparison function — there is no order a heap can invent for an arbitrary T\""
+          when: cmp == nil
+      - return: "&Heap[T]{cmp: cmp}"
+  - of: (*Heap).Len
+    steps:
+      - return: len(h.items)
+  - of: (*Heap).Push
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Heap).Push
+        kind: self
+      - id: h.up
+        kind: internal
+    steps:
+      - set: h.items
+        value: append(h.items, v)
+      - eval: h.up(len(h.items) - 1)
+        to: h.up
+  - of: (*Heap).Peek
+    steps:
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: T
+            - return: zero, false
+          when: len(h.items) == 0
+      - return: h.items[0], true
+  - of: (*Heap).Pop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Heap).Pop
+        kind: self
+      - id: h.down
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - bind: last
+        eval: len(h.items) - 1
+      - opt:
+          do:
+            - return: zero, false
+          when: last < 0
+      - bind: top
+        eval: h.items[0]
+      - set: h.items[0]
+        value: h.items[last]
+      - set: h.items[last]
+        value: zero
+      - set: h.items
+        value: h.items[:last]
+      - opt:
+          do:
+            - eval: h.down(0)
+              to: h.down
+          when: last > 0
+      - return: top, true

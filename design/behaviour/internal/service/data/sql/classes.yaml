@@ -1,0 +1,1500 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultMaxLifetime is the connection lifetime a non-positive
+      [PoolConfig.MaxLifetime] clamps to.
+
+      database/sql reads 0 as "reuse a connection forever", and a connection that
+      lives forever survives a failover, a DNS change and a credential rotation —
+      it keeps talking to a replica that has been demoted, and nothing in the
+      application ever notices. The exact number matters far less than its being
+      FINITE, so this is a clamp rather than a refusal (ADR 0031): thirty minutes
+      is long enough to be invisible on the hot path and short enough that a
+      topology change is picked up without a restart.
+    items:
+      - name: DefaultMaxLifetime
+        type: time.Duration
+        value: 30 * time.Minute
+    name: DefaultMaxLifetime
+  - doc: |-
+      DefaultMaxIdle is the idle-connection ceiling a non-positive
+      [PoolConfig.MaxIdle] clamps to — the same value database/sql itself uses, so
+      the clamp changes nothing a caller could have observed.
+    items:
+      - name: DefaultMaxIdle
+        type: int
+        value: "2"
+    name: DefaultMaxIdle
+  - doc: |-
+      DefaultCheckTimeout is the liveness-probe budget a non-positive
+      [Config.CheckTimeout] clamps to. A health check that can hang forever is
+      not a health check.
+    items:
+      - name: DefaultCheckTimeout
+        type: time.Duration
+        value: 5 * time.Second
+    name: DefaultCheckTimeout
+  - doc: |-
+      savepointPrefix names every savepoint this package creates. It is a fixed
+      SDK-owned prefix so a savepoint in a database log is attributable, and so a
+      caller's own savepoints (if they issue any by hand) cannot collide with the
+      runner's.
+    items:
+      - name: savepointPrefix
+        type: string
+        value: "\"ktn_sp_\""
+    name: savepointPrefix
+  - doc: decimalBase is the radix used when rendering counters into identifiers.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: |-
+      directionUp / directionDown label a migration failure so the error says
+      which way the schema was moving when it broke.
+    grouped: true
+    items:
+      - name: directionUp
+        type: string
+        value: "\"up\""
+      - name: directionDown
+        type: string
+        value: "\"down\""
+    name: directionUp
+  - doc: |-
+      DefaultVersionTable is the table an empty [MigrateConfig.VersionTable]
+      clamps to. The name matches the de-facto convention of every migration tool
+      in the ecosystem, so an operator inspecting a database recognises it without
+      being told.
+    items:
+      - name: DefaultVersionTable
+        type: string
+        value: "\"schema_migrations\""
+    name: DefaultVersionTable
+  - doc: |-
+      DefaultLockTimeout is the migration-lock budget a non-positive
+      [MigrateConfig.LockTimeout] clamps to.
+
+      A migration run that waits forever for another holder is a deployment that
+      hangs with no output, which is strictly worse than one that fails and says
+      why. Two minutes is longer than almost every migration and shorter than
+      every deployment timeout that would otherwise kill the pod first.
+    items:
+      - name: DefaultLockTimeout
+        type: time.Duration
+        value: 2 * time.Minute
+    name: DefaultLockTimeout
+  - doc: |-
+      DefaultLockRetryInterval is how often a blocked runner retries the
+      non-blocking lock acquisition. A non-positive
+      [MigrateConfig.LockRetryInterval] clamps to it.
+    items:
+      - name: DefaultLockRetryInterval
+        type: time.Duration
+        value: 250 * time.Millisecond
+    name: DefaultLockRetryInterval
+  - doc: |-
+      commitPhase labels a SQLite run whose final COMMIT failed: every migration
+      the run applied is undone with it, so the database is where it was.
+    items:
+      - name: commitPhase
+        type: string
+        value: "\"commit\""
+    name: commitPhase
+  - doc: |-
+      lockPhase labels every error raised while taking or releasing the migration
+      lock, so a failed run says which phase it died in.
+    items:
+      - name: lockPhase
+        type: string
+        value: "\"lock\""
+    name: lockPhase
+  - doc: |-
+      tablePhase labels every error raised while reading or writing the version
+      table, so a failed run says which phase it died in.
+    items:
+      - name: tablePhase
+        type: string
+        value: "\"version-table\""
+    name: tablePhase
+  - doc: |-
+      The bind positions of the version row's three columns, 1-based as every
+      supported placeholder grammar counts them. Named because a bare 2 and 3 in
+      an INSERT are exactly the literals a column reorder silently invalidates.
+    grouped: true
+    items:
+      - comment: "1"
+        name: bindVersion
+        type: int
+        value: iota + 1
+      - comment: "2"
+        name: bindName
+      - comment: "3"
+        name: bindAppliedAt
+    name: bindVersion
+  - doc: |-
+      rootScope identifies the scope of a root transaction. A savepoint scope is
+      identified by its savepoint counter, which starts at one, so zero is free
+      for the root and sorts before every scope opened inside it.
+    items:
+      - name: rootScope
+        type: uint64
+        value: "0"
+    name: rootScope
+files:
+  - decls:
+      - DefaultMaxLifetime
+      - DefaultMaxIdle
+      - DefaultCheckTimeout
+      - PoolConfig
+      - Config
+      - Config.resolve
+      - Config.resolvedClock
+      - Config.probeBudget
+      - PoolConfig.apply
+      - PoolConfig.idleCeiling
+      - PoolConfig.lifetime
+    name: config.go
+  - decls:
+      - savepointPrefix
+      - decimalBase
+      - savepointName
+      - savepointSQL
+      - tryLockSQL
+      - unlockSQL
+      - FileLockSQL
+      - lockKey
+    name: dialect_sql.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - deadContext
+      - scopedExecutor
+      - newScopedExecutor
+      - (*scopedExecutor).retire
+      - (*scopedExecutor).usable
+      - (*scopedExecutor).ExecContext
+      - (*scopedExecutor).QueryContext
+      - (*scopedExecutor).QueryRowContext
+      - (*scopedExecutor).PrepareContext
+    name: executor.go
+  - decls:
+      - checker
+      - NewChecker
+      - (*checker).Check
+      - pingVerdict
+    name: health.go
+  - decls:
+      - (*transactor).Join
+      - (*transactor).Defer
+      - (*transactor).OnAbort
+    name: join.go
+  - decls:
+      - directionUp
+      - migrator
+      - NewMigrator
+      - (*migrator).Plan
+      - (*migrator).Up
+      - (*migrator).upAll
+      - (*migrator).Down
+      - (*migrator).downTo
+      - (*migrator).serialised
+      - (*migrator).reverseAll
+      - (*migrator).assertNoUnknown
+      - (*migrator).applyOne
+      - (*migrator).revertOne
+      - versionField
+      - directionField
+    name: migrate.go
+  - decls:
+      - DefaultVersionTable
+      - DefaultLockTimeout
+      - DefaultLockRetryInterval
+      - isIdentifier
+      - identStart
+      - MigrateConfig
+      - MigrateConfig.resolve
+      - MigrateConfig.resolvedTable
+      - MigrateConfig.lockBudget
+      - MigrateConfig.retryInterval
+      - compareVersions
+      - validateSet
+    name: migrate_config.go
+  - decls:
+      - commitPhase
+      - busyMarkers
+      - (*migrator).underFileLock
+      - (*migrator).fileLockedRun
+      - runPhase
+      - (*migrator).takeFileLock
+      - lockBusy
+    name: migrate_filelock.go
+  - decls:
+      - lockPhase
+      - advisoryLock
+      - (*migrator).acquire
+      - (*migrator).waitForLock
+      - (*migrator).pause
+      - tryOnce
+      - lockGranted
+      - (*advisoryLock).release
+      - closeVerdict
+    name: migrate_lock.go
+  - decls:
+      - migratePlan
+    name: migrate_plan.go
+  - decls:
+      - tablePhase
+      - bindVersion
+      - createTableSQL
+      - (*migrator).ensureTable
+      - (*migrator).applied
+      - (*migrator).pending
+      - (*migrator).record
+      - (*migrator).forget
+      - scanVersions
+    name: migrate_table.go
+  - decls:
+      - resolved
+    name: resolved.go
+  - decls:
+      - savepointStmts
+    name: savepoint_stmts.go
+  - decls:
+      - scopeKeyType
+      - scopeKey
+    name: scope_key_type.go
+  - decls:
+      - failed
+    name: sql.go
+  - decls:
+      - Statements
+    name: statements.go
+  - decls:
+      - transactor
+      - NewTransactor
+      - (*transactor).Transact
+      - (*transactor).root
+      - (*transactor).settle
+      - rollback
+      - cleanup
+      - txEnded
+      - (*transactor).nested
+      - (*transactor).runNested
+      - (*transactor).settleNested
+      - (*transactor).undoSavepoint
+    name: tx.go
+  - decls:
+      - rootScope
+      - txScope
+      - scopeOf
+      - scopeFor
+      - withScope
+    name: txscope.go
+  - decls:
+      - heldFn
+      - abortFn
+      - txState
+      - (*txState).nextSavepoint
+      - (*txState).poison
+      - (*txState).poisonedErr
+      - (*txState).hold
+      - (*txState).holdAbort
+      - (*txState).dropFrom
+      - (*txState).drain
+      - runAborted
+    name: txstate.go
+  - decls:
+      - Withheld
+      - NewWithheld
+      - Withheld.Error
+      - Withheld.Unwrap
+    name: withheld.go
+functions:
+  - doc: |-
+      savepointName renders the identifier for nesting level n.
+
+      The name is SDK-generated and never caller-supplied: an SQL identifier
+      cannot be a bound parameter, so a caller-supplied name would be
+      concatenated into a statement — an injection with the shape of a feature.
+
+      n comes from a counter that never resets inside one transaction, so a name
+      is never REUSED either. Reuse is legal in every supported dialect and it is
+      a trap: `SAVEPOINT a` twice creates a second savepoint that shadows the
+      first, and `RELEASE SAVEPOINT a` then releases only the inner one, leaving
+      the outer alive under a name the caller believes is gone.
+    name: savepointName
+    params: n uint64
+    results: string
+  - doc: |-
+      savepointSQL renders the three savepoint statements for the dialect.
+
+      All three supported dialects spell them IDENTICALLY — `SAVEPOINT n`,
+      `ROLLBACK TO SAVEPOINT n`, `RELEASE SAVEPOINT n` — and that is not a
+      coincidence, it is the selection criterion. The engines refused by name in
+      core/data/sql spell nesting differently enough that it is a different algorithm:
+      T-SQL has no RELEASE at all, Oracle has no RELEASE, Db2 requires a
+      mandatory cursor-retention clause. The function still takes the dialect so
+      that adding a fourth engine cannot be done by forgetting this file.
+    name: savepointSQL
+    params: _ coresql.Dialect, name string
+    results: create, rollback, release string
+  - doc: |-
+      tryLockSQL renders the statement that attempts the advisory lock WITHOUT
+      blocking, and the argument to bind to it.
+
+      Both forms are non-blocking on purpose. A blocking acquisition would be
+      bounded only by the caller's context, and a cancelled context racing a
+      server-side grant can leave a lock held by a session nobody is watching.
+      Trying, failing and retrying on an injected clock is race-free, uniform
+      across the two engines, and testable without sleeping.
+    name: tryLockSQL
+    params: dialect coresql.Dialect, key string
+    results: query string, arg any
+  - doc: |-
+      unlockSQL renders the statement that releases the advisory lock, and the
+      argument to bind to it.
+    name: unlockSQL
+    params: dialect coresql.Dialect, key string
+    results: query string, arg any
+  - name: FileLockSQL
+    params: table string
+    results: string
+  - doc: |-
+      lockKey folds a lock name into the 64-bit integer PostgreSQL's advisory
+      locks are keyed by.
+
+      FNV-1a rather than a cryptographic hash: the value is a namespace
+      coordinate, not a secret, and a collision would only make two DIFFERENT
+      migration sets serialise against each other — a performance surprise, never
+      a correctness one. The result is reduced into the signed range because
+      pg_advisory_lock takes a bigint.
+    name: lockKey
+    params: name string
+    results: int64
+  - doc: newScopedExecutor returns an executor valid until [scopedExecutor.retire].
+    name: newScopedExecutor
+    params: state *txState
+    results: "*scopedExecutor"
+  - name: NewChecker
+    params: cfg Config
+    results: probe coresql.Checker, err error
+  - doc: pingVerdict turns a ping result into the port's answer.
+    name: pingVerdict
+    params: err error
+    results: error
+  - name: NewMigrator
+    params: cfg Config, mig MigrateConfig
+    results: runner coresql.Migrator, err error
+  - doc: versionField renders a migration's version as an error field.
+    name: versionField
+    params: migration coresql.MigrationValue
+    results: kerrs.FieldValue
+  - doc: directionField renders which way the schema was moving.
+    name: directionField
+    params: direction string
+    results: kerrs.FieldValue
+  - doc: |-
+      isIdentifier reports whether name has the only shape accepted for a
+      version-table name — ^[A-Za-z_][A-Za-z0-9_]*$, one ASCII letter or
+      underscore, then letters, digits and underscores. A table name cannot be a
+      bound parameter, so it is interpolated — and this check is the whole thing
+      standing between a configuration string and an injection. It is written
+      out rather than a regular expression compiled at the package's
+      initialisation, which every program that imports the package paid.
+    name: isIdentifier
+    params: name string
+    results: bool
+  - doc: |-
+      identStart reports whether c may start an identifier: an ASCII letter or
+      an underscore.
+    name: identStart
+    params: c byte
+    results: bool
+  - doc: |-
+      compareVersions orders two versions without a signed conversion that could
+      wrap on a large timestamp-shaped value.
+    name: compareVersions
+    params: a, b uint64
+    results: int
+  - doc: |-
+      validateSet reports the first migration that could never run, or the first
+      duplicated version.
+    name: validateSet
+    params: sorted []coresql.MigrationValue
+    results: error
+  - doc: |-
+      runPhase labels a run's transaction error with the phase it came from, when
+      the error does not already say: the lock's, for a transaction that never
+      began — BEGIN refused for another reason than a busy lock — and the
+      commit's, for one whose work finished, since a COMMIT that fails loses every
+      migration the run applied.
+    name: runPhase
+    params: err error, began bool, outcome error
+    results: error
+  - doc: |-
+      lockBusy reports whether err is SQLite answering that another connection
+      holds the write lock. See busyMarkers for why a miss is read as a failure.
+    name: lockBusy
+    params: err error
+    results: bool
+  - doc: |-
+      tryOnce runs one non-blocking acquisition and reports whether it was
+      granted.
+    name: tryOnce
+    params: |2
+
+      	ctx context.Context, conn *stdsql.Conn, query string, arg any,
+    results: granted bool, err error
+  - doc: |-
+      lockGranted reads the truthiness of an advisory-lock answer.
+
+      PostgreSQL's pg_try_advisory_lock returns a boolean; MySQL's GET_LOCK
+      returns 1, 0, or NULL (NULL meaning the attempt errored). Drivers surface
+      those as bool, int64, or — for text protocols — as bytes. Reading all four
+      here is not defensive programming, it is the actual shape of the two
+      contracts this package supports.
+    name: lockGranted
+    params: answer any
+    results: bool
+  - doc: |-
+      closeVerdict returns the connection's close failure, or nil.
+
+      A connection returned to the pool is the migration lock's whole guarantee,
+      so its failure is worth a sentence rather than a discard — but it is never
+      the error a caller acts on, which is why every call site joins it beside the
+      outcome instead of returning it alone.
+    name: closeVerdict
+    params: conn *stdsql.Conn
+    results: error
+  - doc: |-
+      createTableSQL renders the version table's definition.
+
+      Three columns and no more, all of them portable:
+
+        - version BIGINT PRIMARY KEY — the identity. BIGINT is spelled the same
+          by PostgreSQL, MySQL and SQLite.
+        - name TEXT NOT NULL — so a history read during an incident says
+          something a human can act on.
+        - applied_at_unix BIGINT NOT NULL — seconds since the epoch, NOT a
+          timestamp type. TIMESTAMP / DATETIME / TEXT diverge in spelling, in
+          precision and in time-zone handling across the three engines; an
+          integer does not. The runner reads it from the injected clock, so the
+          value is deterministic in a test.
+
+      The identifier is interpolated, not bound — a table name cannot be a
+      parameter. It was validated by isIdentifier at construction,
+      which is the whole defence.
+    name: createTableSQL
+    params: table string
+    results: string
+  - doc: scanVersions collects the version column into a set and tracks the highest.
+    name: scanVersions
+    params: rows *stdsql.Rows
+    results: versions map[uint64]bool, highest uint64, err error
+  - doc: |-
+      failed returns the SDK's verdict for a driver-level failure, side by side
+      with the driver's own error.
+
+      errors.Join rather than errs.Wrap, for the reason ADR 0050 gives: origin-wins
+      (CLAUDE.md rule 6) would make the driver's error the origin and relabel the
+      SDK's verdict with whatever code the driver happened to carry. Side by side,
+      errs.HasCode(err, CodeCommitFailed) and the caller's own
+      errors.Is(err, driver.ErrBadConn) both answer.
+
+      The driver's error is never read into a Public: the verdict's own Public is
+      a fixed literal, and the join only affects Error() and errors.Is.
+    name: failed
+    params: sentinel *kerrs.Error, cause error, fields ...kerrs.FieldValue
+    results: error
+  - name: Statements
+    params: stmts ...string
+    results: coresql.Step
+  - name: NewTransactor
+    params: cfg Config
+    results: manager coresql.Transactor, err error
+  - doc: rollback undoes a root transaction and reports only a real failure.
+    name: rollback
+    params: state *txState
+    results: error
+  - doc: |-
+      cleanup returns a context for a statement that must run BECAUSE the
+      caller's context ended.
+
+      This is ADR 0050's rule, one layer down. A ROLLBACK TO SAVEPOINT issued on
+      the very context whose cancellation caused the rollback fails before it
+      reaches the driver — (*sql.Tx).grabConn checks ctx.Done() first — so the
+      undo the transaction needs is exactly the undo the cancellation prevents.
+      Bounding ONE nested scope with its own deadline is an ordinary thing to do,
+      and without this detach it would poison the healthy transaction around it.
+
+      It drops the deadline as well as the cancellation, and that is stated
+      rather than hidden: see the package documentation for what bounds these
+      statements instead, and for why this domain does NOT add a second budget
+      the way lifecycle does for an arbitrary component's Stop.
+    name: cleanup
+    params: ctx context.Context
+    results: context.Context
+  - doc: |-
+      txEnded reports whether err means the transaction is already OVER rather
+      than in an unknown state.
+
+      The distinction is the whole poison mechanism. Poison means the SDK no
+      longer knows what the engine kept. ErrTxDone means database/sql has already
+      retired the transaction — every statement was rolled back, nothing can be
+      committed, and there is nothing left to be uncertain about. Reading the
+      second as the first would turn the ordinary "the caller cancelled" path
+      into a diagnosis about savepoints.
+    name: txEnded
+    params: err error
+    results: bool
+  - doc: scopeOf returns the innermost scope carried by ctx, or nil.
+    name: scopeOf
+    params: ctx context.Context
+    results: "*txScope"
+  - doc: scopeFor returns the innermost scope on ctx that belongs to owner, or nil.
+    name: scopeFor
+    params: ctx context.Context, owner *transactor
+    results: "*txScope"
+  - doc: withScope returns ctx carrying scope as its new innermost scope.
+    name: withScope
+    params: ctx context.Context, scope *txScope
+    results: context.Context
+  - doc: |-
+      runAborted runs the functions held for an abort, newest first — the order
+      in which work is undone —, each on its own detached context.
+    name: runAborted
+    params: aborted []abortFn
+  - name: NewWithheld
+    params: cause error
+    results: Withheld
+imports:
+  atomic: sync/atomic
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  coresql: github.com/kitsunium/sdk/internal/core/data/sql
+  errors: errors
+  fmt: fmt
+  fnv: hash/fnv
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  slices: slices
+  stdsql: database/sql
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/sql
+  name: sql
+  purpose: Package sql — hosts Config, the parameters every port in this package is built from, and the pool policy it applies.
+types:
+  - fields:
+      - doc: |-
+          MaxOpen is the hard ceiling on open connections. It is REQUIRED and
+          must be positive.
+
+          database/sql reads 0 as UNLIMITED. "As many connections as the
+          application happens to want" is a decision made by forgetting a line,
+          and the consequence lands on the database rather than on the process
+          that forgot — every replica racing to exhaust one server's
+          max_connections. No value the SDK could invent is defensible either,
+          because the right one depends on the server's ceiling divided by the
+          number of replicas, which the SDK cannot see. So this is the REFUSAL
+          side of ADR 0031.
+        name: MaxOpen
+        type: int
+      - doc: |-
+          MaxIdle is the number of connections kept warm. A non-positive value
+          clamps to [DefaultMaxIdle]; a value above MaxOpen clamps DOWN to
+          MaxOpen, because database/sql does that reduction silently and a caller
+          reading their own configuration back would otherwise be misled.
+        name: MaxIdle
+        type: int
+      - doc: |-
+          MaxLifetime is how long a connection may be reused. A non-positive
+          value clamps to [DefaultMaxLifetime]; see that constant for why an
+          unbounded lifetime is not an option.
+        name: MaxLifetime
+        type: time.Duration
+      - doc: |-
+          MaxIdleTime is how long an unused connection is kept. A non-positive
+          value is passed through as "no idle deadline", and that is deliberate
+          rather than an oversight: MaxLifetime is now always finite, so an idle
+          connection is already retired on a bounded schedule, and a second
+          timer would only decide how aggressively to shrink a warm pool — a
+          tuning choice with no dangerous zero.
+        name: MaxIdleTime
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: apply validates the pool policy and installs it on db.
+        name: apply
+        params: db *stdsql.DB
+        recv: p PoolConfig
+        results: error
+      - doc: idleCeiling applies both documented idle clamps.
+        name: idleCeiling
+        recv: p PoolConfig
+        results: int
+      - doc: lifetime applies the documented lifetime clamp.
+        name: lifetime
+        recv: p PoolConfig
+        results: time.Duration
+    name: PoolConfig
+  - fields:
+      - doc: |-
+          DB is the caller's pool. REQUIRED — this package never opens one,
+          because opening one means importing a driver (ADR 0055 §D2).
+        name: DB
+        type: "*stdsql.DB"
+      - doc: |-
+          Dialect selects the SQL grammar. REQUIRED and must be a dialect this
+          SDK can spell; resolve a configuration string through
+          core/data/sql.ParseDialect, which refuses the engines it cannot support BY
+          NAME instead of guessing.
+        name: Dialect
+        type: coresql.Dialect
+      - doc: Pool is the connection-pool policy, applied to DB at construction.
+        name: Pool
+        type: PoolConfig
+      - doc: |-
+          Clock is the time source every budget in this package is read from. A
+          nil Clock falls back to clock.System.
+
+          clock.Timed rather than clock.Clock because this package both stamps
+          (the version table's applied_at) and WAITS (the probe budget, the lock
+          retry). Reading package time instead would make every budget assertion
+          a sleep, and a sleep a tolerance, and a tolerance a flake.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          CheckTimeout is the budget one [core/data/sql.Checker.Check] gets. A
+          non-positive value clamps to [DefaultCheckTimeout].
+        name: CheckTimeout
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: |-
+          resolve validates the Config, applies the pool policy to the caller's DB,
+          and returns the clamped form.
+        name: resolve
+        recv: c Config
+        results: settings resolved, err error
+      - doc: resolvedClock applies the documented time-source fallback.
+        name: resolvedClock
+        recv: c Config
+        results: clock.Timed
+      - doc: probeBudget applies the documented health-check clamp.
+        name: probeBudget
+        recv: c Config
+        results: time.Duration
+    name: Config
+  - doc: |-
+      scopedExecutor is the core/data/sql.Executor a TxFunc receives. It is valid for
+      the duration of that call and refuses afterwards.
+
+      Two things it deliberately is NOT: it is not a *sql.Tx (which would carry
+      Commit and Rollback into the unit of work) and it is not a copy of the
+      transaction (which would need a second commit path). It is a guard in front
+      of the one transaction its scope belongs to.
+    fields:
+      - doc: |-
+          state is the shared transaction state — the tx itself and the poison
+          flag every scope of this transaction reads.
+        name: state
+        type: "*txState"
+      - doc: |-
+          live is cleared when the scope returns. Atomic because a caller that
+          leaks the executor to another goroutine is exactly the case this
+          field exists to catch, and racing on the check would make the race
+          detector fire instead of the guard.
+        name: live
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: |-
+          retire invalidates the executor. Called when the scope that lent it returns
+          — on success, on failure and on the panic path alike.
+        name: retire
+        recv: e *scopedExecutor
+      - doc: |-
+          usable reports why the executor may not run a statement, or nil.
+
+          Two refusals, in the order that makes a diagnosis readable: a stale handle
+          is the caller's bug, a poisoned transaction is the database's state. Both
+          must be checked BEFORE the statement reaches the driver — for a nested
+          scope, the outer transaction is still open, so a stale handle would happily
+          execute against it.
+        name: usable
+        recv: e *scopedExecutor
+        results: error
+      - doc: ExecContext runs a statement that returns no rows.
+        name: ExecContext
+        params: |2
+
+          	ctx context.Context, query string, args ...any,
+        recv: e *scopedExecutor
+        results: result stdsql.Result, err error
+      - doc: QueryContext runs a statement that returns rows.
+        name: QueryContext
+        params: |2
+
+          	ctx context.Context, query string, args ...any,
+        recv: e *scopedExecutor
+        results: rows *stdsql.Rows, err error
+      - doc: |-
+          QueryRowContext runs a statement expected to return at most one row.
+
+          # A named stdlib limitation
+
+          This is the one method that cannot carry a typed refusal. *sql.Row has no
+          exported constructor and no exported error field, so there is no way to
+          hand back a Row whose Scan returns [coresql.TxClosed] or
+          [coresql.TxPoisoned].
+
+          What matters more than the code is that NOTHING EXECUTES, and that is
+          guaranteed: on a refused handle the call is delegated with an
+          already-cancelled context, and (*sql.Tx).QueryRowContext checks ctx.Done
+          before it acquires a connection. Scan then reports the cancellation.
+          TestQueryRowOnARetiredExecutorReachesNoDriver pins both halves.
+
+          A caller who needs the typed code for a single-row read uses QueryContext.
+        name: QueryRowContext
+        params: ctx context.Context, query string, args ...any
+        recv: e *scopedExecutor
+        results: "*stdsql.Row"
+      - doc: |-
+          PrepareContext compiles a statement for repeated execution inside this
+          scope. It satisfies the ADR 0039 sibling core/data/sql.Preparer; the returned
+          statement is bound to the transaction and dies with it.
+        name: PrepareContext
+        params: |2
+
+          	ctx context.Context, query string,
+        recv: e *scopedExecutor
+        results: stmt *stdsql.Stmt, err error
+    name: scopedExecutor
+  - doc: |-
+      checker is the concrete core/data/sql.Checker. It stays unexported behind
+      [NewChecker] (IFACE-PLUGIN).
+    fields:
+      - doc: cfg is the validated, clamped configuration.
+        name: cfg
+        type: resolved
+    kind: struct
+    methods:
+      - doc: |-
+          Check pings the database under [Config.CheckTimeout].
+
+          The budget is armed on the injected clock rather than with
+          context.WithTimeout, so a test asserts the timeout by advancing a
+          ManualClock instead of sleeping through a real one. What an expired budget
+          does is deliberately the same three things ADR 0050 fixed on lifecycle's
+          shutdown: it CANCELS the probe's context — an announcement the driver acts
+          on — it stops WAITING, and it reports. It kills no goroutine, because Go
+          cannot, and it closes nothing the pool owns.
+        name: Check
+        params: ctx context.Context
+        recv: c *checker
+        results: error
+    name: checker
+  - doc: |-
+      migrator is the concrete core/data/sql.Migrator. It stays unexported behind
+      [NewMigrator] (IFACE-PLUGIN).
+    fields:
+      - doc: cfg is the validated, clamped connection configuration.
+        name: cfg
+        type: resolved
+      - doc: plan is the validated, sorted migration set and its budgets.
+        name: plan
+        type: migratePlan
+      - doc: |-
+          tx opens one transaction per migration. It is the SAME manager type a
+          consumer uses, so a migration step and application code see identical
+          transaction semantics. Its Join is also where the version table is read
+          and written: on the pool under an advisory lock, and inside the run's
+          own transaction under SQLite's file lock.
+        name: tx
+        type: "*transactor"
+    kind: struct
+    methods:
+      - doc: |-
+          Plan reports what [migrator.Up] would apply, without applying anything and
+          without taking the migration lock.
+
+          It DOES create the version table if it is absent, and that is stated rather
+          than hidden: reading a table that does not exist is not a portable
+          operation — every engine reports it with its own SQLSTATE — so the only
+          alternative would be to guess from a driver error string. Creating the
+          runner's own bookkeeping table is not a schema migration.
+
+          The price of not taking the lock is also stated: on PostgreSQL, two
+          concurrent CREATE TABLE IF NOT EXISTS can race on pg_class and one of them
+          gets a unique violation. That is a spurious failure the caller retries, not
+          a corrupted schema — and it is a better trade than a dry run that blocks
+          behind a real migration for its entire duration.
+        name: Plan
+        params: ctx context.Context
+        recv: m *migrator
+        results: pending []coresql.MigrationValue, err error
+      - doc: |-
+          Up applies every pending migration in ascending version order, each atomic
+          on its own, under the migration lock.
+        name: Up
+        params: ctx context.Context
+        recv: m *migrator
+        results: error
+      - doc: |-
+          upAll is Up's work, run under the lock: the plan, then every pending
+          migration in ascending order, stopping at the first failure.
+        name: upAll
+        params: ctx context.Context
+        recv: m *migrator
+        results: error
+      - doc: Down reverses every applied migration above target, in descending order.
+        name: Down
+        params: ctx context.Context, target uint64
+        recv: m *migrator
+        results: error
+      - doc: |-
+          downTo is Down's work, run under the lock: the history read, then every
+          reversal down to target.
+        name: downTo
+        params: ctx context.Context, target uint64
+        recv: m *migrator
+        results: error
+      - doc: |-
+          serialised runs work under the migration lock the dialect has: the
+          session's advisory lock where the engine offers one, the database file's
+          write lock on SQLite (ADR 0140).
+        name: serialised
+        params: ctx context.Context, work func(context.Context) error
+        recv: m *migrator
+        results: err error
+      - doc: reverseAll walks the applied set downwards to target.
+        name: reverseAll
+        params: ctx context.Context, applied map[uint64]bool, target uint64
+        recv: m *migrator
+        results: error
+      - doc: |-
+          assertNoUnknown refuses a reversal while the database records a version
+          this build cannot reverse.
+
+          The database being AHEAD of the code is a real deployment state — a rollback
+          to a previous image is exactly how it happens — and guessing is not an
+          option: reversing a change whose Down step is not present would be inventing
+          one.
+        name: assertNoUnknown
+        params: applied map[uint64]bool, target uint64
+        recv: m *migrator
+        results: error
+      - doc: |-
+          applyOne runs one migration's Up and records it, in ONE transaction — or,
+          on SQLite, in one savepoint of the run's transaction, which ctx carries, so
+          the same Transact nests instead of opening a second.
+        name: applyOne
+        params: ctx context.Context, migration coresql.MigrationValue
+        recv: m *migrator
+        results: error
+      - doc: |-
+          revertOne runs one migration's Down and forgets it, in ONE transaction — or
+          in one savepoint of the run's transaction on SQLite, as applyOne does.
+        name: revertOne
+        params: ctx context.Context, migration coresql.MigrationValue
+        recv: m *migrator
+        results: error
+      - doc: |-
+          underFileLock runs work inside ONE transaction that holds SQLite's write
+          lock from its first statement to its commit.
+
+          # Why the file's lock
+
+          ADR 0055 §D7 chose the engine's advisory lock for one property: the server
+          releases it when its holder dies. SQLite has no advisory lock, but its
+          write lock has the same property one layer down — it is a lock on the
+          database file, and the operating system releases a dead process's file
+          locks. So the run holds it (ADR 0140): the transaction takes it with its
+          first statement, every migration runs in a savepoint of it, and the commit
+          releases it.
+
+          # What changes against the advisory lock
+
+          Each migration is still atomic on its own: a failing one rolls back to its
+          savepoint, the ones before it are committed, and the run stops. A process
+          that dies mid-run, though, loses the whole run rather than its last
+          migration, because the run is one transaction. That leaves the version
+          table matching the schema either way. And a step cannot run what SQLite
+          refuses inside a transaction: VACUUM, or a PRAGMA such as journal_mode or
+          foreign_keys.
+        name: underFileLock
+        params: ctx context.Context, work func(context.Context) error
+        recv: m *migrator
+        results: error
+      - doc: |-
+          fileLockedRun makes one attempt: it opens the run's transaction, takes the
+          write lock, and runs work. busy reports that another connection held the
+          lock, so nothing ran and the transaction was rolled back; otherwise err is
+          the work's verdict, with the transaction's beside it.
+        name: fileLockedRun
+        params: ctx context.Context, work func(context.Context) error
+        recv: m *migrator
+        results: busy bool, err error
+      - doc: |-
+          takeFileLock makes the run's transaction the database's one writer.
+
+          The version table comes first because it is the table the lock statement
+          names, and because creating it is itself a write the lock must cover; if it
+          already exists that statement writes nothing, and the lock statement takes
+          the lock.
+        name: takeFileLock
+        params: ctx context.Context, ex coresql.Executor
+        recv: m *migrator
+        results: error
+      - doc: |-
+          acquire takes the migration lock, retrying until the budget expires.
+
+          # Why the engine's advisory lock and not a lock table, or the SDK's own lock domain
+
+          The property that decides it is what happens when the holder DIES. A
+          migration runner is killed mid-run more often than any other piece of a
+          deployment — an OOM kill, a node drain, a CI job cancelled by a human. A
+          row in a lock table, or a lease in a separate lock service, survives that
+          death: it stays held until something notices the holder is gone, and until
+          then every subsequent deploy either hangs or is told to steal a lock nobody
+          can prove is dead.
+
+          A session-scoped advisory lock has no such window. The server releases it
+          when the connection drops, which the operating system does for a process
+          that no longer exists. There is no lease, no heartbeat, no expiry to tune
+          and no stealing.
+
+          It is also the same failure domain as the thing being protected: if the
+          database is unreachable, no migration can run anyway, so a lock that lives
+          in the database adds no new way to be unavailable — which a separate lock
+          service would (ADR 0055 §D7).
+        name: acquire
+        params: ctx context.Context
+        recv: m *migrator
+        results: held *advisoryLock, err error
+      - doc: waitForLock retries the non-blocking acquisition on the injected clock.
+        name: waitForLock
+        params: |2
+
+          	ctx context.Context, conn *stdsql.Conn,
+        recv: m *migrator
+        results: held *advisoryLock, err error
+      - doc: pause waits one retry interval, or reports why waiting has ended.
+        name: pause
+        params: ctx context.Context, deadline time.Time
+        recv: m *migrator
+        results: error
+      - doc: |-
+          ensureTable creates the bookkeeping table if it is absent.
+
+          It runs where ctx says. Under an advisory lock that is the pool — no
+          transaction is needed for an idempotent DDL statement, and wrapping one would
+          be meaningless on an engine with non-transactional DDL anyway. Under SQLite's
+          file lock it is the run's own transaction: the pool's other connections are
+          exactly the writers the lock is holding off, this one included.
+        name: ensureTable
+        params: ctx context.Context
+        recv: m *migrator
+        results: error
+      - doc: |-
+          applied reads every recorded version and the highest of them, where ctx
+          says, for the reason ensureTable gives.
+        name: applied
+        params: ctx context.Context
+        recv: m *migrator
+        results: versions map[uint64]bool, highest uint64, err error
+      - doc: |-
+          pending returns the migrations not yet applied, in ascending order, and
+          refuses the two-branches-merged hazard.
+        name: pending
+        params: |2
+
+          	applied map[uint64]bool, highest uint64,
+        recv: m *migrator
+        results: queued []coresql.MigrationValue, err error
+      - doc: record writes the version row for a migration that just applied.
+        name: record
+        params: ctx context.Context, ex coresql.Executor, migration coresql.MigrationValue
+        recv: m *migrator
+        results: error
+      - doc: forget removes the version row for a migration that was just reversed.
+        name: forget
+        params: ctx context.Context, ex coresql.Executor, migration coresql.MigrationValue
+        recv: m *migrator
+        results: error
+    name: migrator
+  - fields:
+      - doc: |-
+          Migrations is the complete set this binary carries. Order does not
+          matter — the runner sorts by Version — but every entry must be valid
+          and no two may share a version.
+
+          It is COPIED at construction, so a caller appending to their slice
+          afterwards cannot change what the runner will apply.
+        name: Migrations
+        type: "[]coresql.MigrationValue"
+      - doc: |-
+          VersionTable names the bookkeeping table. Empty clamps to
+          [DefaultVersionTable]; anything that is not a bare SQL identifier is
+          REFUSED, because it is interpolated rather than bound.
+        name: VersionTable
+        type: string
+      - doc: |-
+          LockTimeout bounds the wait for the advisory lock. Non-positive clamps
+          to [DefaultLockTimeout].
+        name: LockTimeout
+        type: time.Duration
+      - doc: |-
+          LockRetryInterval is how often the non-blocking acquisition is retried
+          while another holder has the lock. Non-positive clamps to
+          [DefaultLockRetryInterval].
+        name: LockRetryInterval
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: resolve validates and normalises the migration configuration.
+        name: resolve
+        recv: m MigrateConfig
+        results: plan migratePlan, err error
+      - doc: resolvedTable applies the version-table clamp and validation.
+        name: resolvedTable
+        recv: m MigrateConfig
+        results: table string, err error
+      - doc: lockBudget applies the documented lock-timeout clamp.
+        name: lockBudget
+        recv: m MigrateConfig
+        results: time.Duration
+      - doc: retryInterval applies the documented retry-interval clamp.
+        name: retryInterval
+        recv: m MigrateConfig
+        results: time.Duration
+    name: MigrateConfig
+  - doc: |-
+      advisoryLock is a held migration lock: the connection that holds it, and
+      the statement that gives it back.
+
+      The connection is DEDICATED and is not the pool. Both mechanisms this
+      package uses — pg_advisory_lock and GET_LOCK — are scoped to a SESSION, so
+      releasing from a pooled connection would release nothing on a different
+      session and report success. Holding one connection for the duration of the
+      run is the price of a lock that is actually held.
+    fields:
+      - doc: conn is the session that holds the lock.
+        name: conn
+        type: "*stdsql.Conn"
+      - doc: query is the pre-rendered release statement.
+        name: query
+        type: string
+      - doc: arg is the pre-rendered release argument.
+        name: arg
+        type: any
+    kind: struct
+    methods:
+      - doc: |-
+          release gives the lock back and closes the connection that held it.
+
+          Both halves are attempted even when the first fails: an unreleased advisory
+          lock still dies with the connection, so closing is the guarantee and the
+          explicit release is only the courtesy that makes the next run immediate.
+        name: release
+        params: ctx context.Context
+        recv: l *advisoryLock
+        results: error
+    name: advisoryLock
+  - doc: migratePlan is the validated, sorted, clamped form of a MigrateConfig.
+    fields:
+      - doc: migrations is the runner's own copy, sorted by ascending version.
+        name: migrations
+        type: "[]coresql.MigrationValue"
+      - doc: table is the validated version-table identifier.
+        name: table
+        type: string
+      - doc: lockBudget bounds the wait for the advisory lock.
+        name: lockBudget
+        type: time.Duration
+      - doc: retry is the interval between acquisition attempts.
+        name: retry
+        type: time.Duration
+    kind: struct
+    name: migratePlan
+  - doc: |-
+      resolved is the validated, clamped form of a Config. Constructors work from
+      this so the clamps are applied in exactly one place.
+    fields:
+      - name: db
+        type: "*stdsql.DB"
+      - name: dialect
+        type: coresql.Dialect
+      - name: clk
+        type: clock.Timed
+      - name: probe
+        type: time.Duration
+    kind: struct
+    name: resolved
+  - doc: |-
+      savepointStmts groups one savepoint's rendered statements so runNested
+      stays under the parameter ceiling and reads as one operation.
+    fields:
+      - doc: name is the generated identifier, carried into every error field.
+        name: name
+        type: string
+      - doc: undo is the ROLLBACK TO SAVEPOINT statement.
+        name: undo
+        type: string
+      - doc: release is the RELEASE SAVEPOINT statement.
+        name: release
+        type: string
+      - doc: |-
+          id is the savepoint's number: the id of the scope it opens, which the
+          functions held inside it carry.
+        name: id
+        type: uint64
+    kind: struct
+    name: savepointStmts
+  - doc: |-
+      scopeKeyType is the unexported context key type, so no other package can
+      collide with it.
+    kind: struct
+    name: scopeKeyType
+  - doc: |-
+      transactor is the concrete core/data/sql.Transactor. It stays unexported behind
+      [NewTransactor] (IFACE-PLUGIN), and its IDENTITY matters: the context chain
+      is keyed on the pointer, so a Transact on one database never nests inside a
+      transaction of another.
+    fields:
+      - doc: cfg is the validated, clamped configuration.
+        name: cfg
+        type: resolved
+    kind: struct
+    methods:
+      - doc: |-
+          Join returns the executor a statement issued under ctx runs on: the
+          innermost scope of the transaction ctx carries for this transactor, else the
+          pool (core/data/sql.Joiner, ADR 0139).
+
+          A scope that has already returned still answers with its own, retired,
+          executor rather than with the pool: a context that outlived its transaction
+          gets TX_CLOSED on its next statement instead of running it, silently,
+          outside the transaction it was written for.
+        name: Join
+        params: ctx context.Context
+        recv: t *transactor
+        results: ex coresql.Executor, inTx bool
+      - doc: |-
+          Defer holds fn until the transaction ctx carries for this transactor
+          commits, and reports whether it did (core/data/sql.Deferrer, ADR 0139).
+
+          fn is tagged with the scope ctx names, so a savepoint that rolls back drops
+          what was held inside it, and one that is released leaves it to the scope
+          around it. The root runs what is left, in order, once its commit stood.
+        name: Defer
+        params: ctx context.Context, fn func()
+        recv: t *transactor
+        results: bool
+      - doc: |-
+          OnAbort holds fn until the work of the scope ctx carries for this
+          transactor is undone, and reports whether it did (core/data/sql.Aborter,
+          ADR 0139 as amended on 2026-10-14).
+
+          fn is tagged with the scope ctx names, so a savepoint that rolls back runs
+          what was held inside it once its ROLLBACK TO SAVEPOINT ran, and one that is
+          released leaves it to the scope around it. The root runs what is left after
+          a ROLLBACK, and drops it with a COMMIT that stood.
+        name: OnAbort
+        params: ctx context.Context, fn func(ctx context.Context)
+        recv: t *transactor
+        results: bool
+      - doc: |-
+          Transact runs fn inside a transaction, or inside a savepoint of the
+          transaction ctx already carries. See the package documentation for what a
+          failed nested scope does and does not do to the outer one.
+        name: Transact
+        params: ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc
+        recv: t *transactor
+        results: error
+      - doc: root opens a real transaction, runs fn, and is the ONLY thing that commits.
+        name: root
+        params: ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc
+        recv: t *transactor
+        results: error
+      - doc: |-
+          settle ends a root transaction: commit on success, roll back otherwise.
+
+          It is the single commit path. A TxFunc cannot reach it, because the
+          core/data/sql.Executor it was handed has no Commit method — which is what makes
+          "a callee committed the transaction under its caller" a sentence with no
+          spelling (ADR 0055 §D3).
+        name: settle
+        params: state *txState, cause error
+        recv: t *transactor
+        results: error
+      - doc: nested runs fn inside a SAVEPOINT of the transaction scope already owns.
+        name: nested
+        params: |2
+
+          	ctx context.Context, scope *txScope, opts coresql.TxOptionsValue, fn coresql.TxFunc,
+        recv: t *transactor
+        results: error
+      - doc: runNested runs the unit of work under an already-created savepoint.
+        name: runNested
+        params: |2
+
+          	ctx context.Context, scope *txScope, fn coresql.TxFunc, sp savepointStmts,
+        recv: t *transactor
+        results: error
+      - doc: |-
+          settleNested ends a nested scope and decides what its outcome does to the
+          transaction around it.
+        name: settleNested
+        params: |2
+
+          	ctx context.Context, scope *txScope, sp savepointStmts, cause error,
+        recv: t *transactor
+        results: error
+      - doc: |-
+          undoSavepoint rolls back to the savepoint and decides whether the outer
+          transaction survives.
+
+          This is the answer to the third question a savepoint implementation owes:
+          does a failed sub-transaction condemn the outer one? NO — ROLLBACK TO
+          SAVEPOINT is precisely the statement that clears PostgreSQL's aborted state
+          (SQLSTATE 25P02), so a caller who catches the inner error has a usable
+          transaction to continue in. But if that statement ITSELF fails, the engine's
+          state is unknown, and the transaction is poisoned rather than trusted.
+        name: undoSavepoint
+        params: ctx context.Context, scope *txScope, sp savepointStmts
+        recv: t *transactor
+        results: error
+    name: transactor
+  - doc: |-
+      txScope is one link of the per-context transaction chain: which transactor
+      opened a transaction, its shared state, the executor the scope lent, and
+      whatever scope was already on the context.
+
+      A chain rather than a single value because an application with TWO databases
+      is normal, and a Transact on database B inside a Transact on database A must
+      open a real transaction on B — not a savepoint on A's. Walking the chain for
+      the matching owner is what makes that true.
+    fields:
+      - doc: owner identifies the transactor whose transaction this is.
+        name: owner
+        type: "*transactor"
+      - doc: state is the shared per-transaction state.
+        name: state
+        type: "*txState"
+      - doc: |-
+          exec is the executor this scope lent its unit of work. Join hands it to
+          a callee, so a statement issued under this context runs in this
+          transaction — and is refused once the scope has returned.
+        name: exec
+        type: "*scopedExecutor"
+      - doc: parent is the scope this one was opened inside, or nil.
+        name: parent
+        type: "*txScope"
+      - doc: |-
+          id is rootScope for a root transaction and the savepoint counter for a
+          nested one. A function held under this scope carries it, so the
+          savepoint's rollback drops exactly what was held inside it.
+        name: id
+        type: uint64
+    kind: struct
+    name: txScope
+  - doc: |-
+      heldFn is one function held until the commit, tagged with the scope it was
+      held in.
+    fields:
+      - doc: fn runs after the commit.
+        name: fn
+        type: func()
+      - doc: scope is the id of the scope ctx named when fn was held.
+        name: scope
+        type: uint64
+    kind: struct
+    name: heldFn
+  - doc: |-
+      abortFn is one function held until the work of its scope is undone, tagged
+      with that scope and handed the context it was held under, detached.
+    fields:
+      - doc: |-
+          ctx is the context OnAbort was given, without its ending: a function
+          that cleans up after a rollback must not die of the cancellation that
+          caused it.
+        name: ctx
+        type: context.Context
+      - doc: fn runs after the rollback.
+        name: fn
+        type: func(ctx context.Context)
+      - doc: scope is the id of the scope ctx named when fn was held.
+        name: scope
+        type: uint64
+    kind: struct
+    name: abortFn
+  - doc: |-
+      txState is the state ONE transaction shares across its root scope and every
+      savepoint nested inside it.
+
+      It is reachable only through the context chain, and only by the transactor
+      that created it, so two managers over two different databases never see each
+      other's transactions.
+    fields:
+      - doc: |-
+          mu serialises the savepoint counter, the poison flag and the held
+          functions. The underlying *sql.Tx is itself safe for concurrent use, but
+          the counter must not hand two goroutines the same savepoint name.
+
+          RWMutex rather than Mutex because the poison flag is READ on every
+          statement (executor.usable) and written at most once per transaction:
+          the read side is the hot one, and it is the one that must not serialise
+          two goroutines sharing a transaction.
+        name: mu
+        type: sync.RWMutex
+      - doc: tx is the single database transaction every scope runs on.
+        name: tx
+        type: "*stdsql.Tx"
+      - doc: |-
+          poisoned is non-nil once the transaction can no longer be trusted:
+          a savepoint rollback failed, so what the engine has kept is unknown.
+        name: poisoned
+        type: error
+      - doc: |-
+          held are the functions waiting for the commit, in the order they were
+          held (the Deferrer sibling, ADR 0139).
+        name: held
+        type: "[]heldFn"
+      - doc: |-
+          aborted are the functions waiting for the work of their scope to be
+          undone, in the order they were held (the Aborter sibling, ADR 0139 as
+          amended on 2026-10-14).
+        name: aborted
+        type: "[]abortFn"
+      - doc: |-
+          counter numbers savepoints and NEVER resets inside one transaction, so
+          a name is never reused — see savepointName for why reuse is a trap.
+        name: counter
+        type: uint64
+      - doc: dialect selects the savepoint grammar.
+        name: dialect
+        type: coresql.Dialect
+      - doc: |-
+          ended is set once the root scope has committed or rolled back: nothing
+          is held after that, because there is no commit left to wait for.
+        name: ended
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          nextSavepoint reserves the next savepoint for this transaction: its number,
+          which identifies the scope it opens, and its name.
+        name: nextSavepoint
+        recv: s *txState
+        results: id uint64, name string
+      - doc: |-
+          poison marks the transaction unusable and records why. The FIRST poison
+          wins: a later failure caused by the first must not overwrite the diagnosis
+          that explains it.
+        name: poison
+        params: cause error
+        recv: s *txState
+      - doc: poisonedErr returns the recorded poison cause, or nil.
+        name: poisonedErr
+        recv: s *txState
+        results: error
+      - doc: |-
+          hold keeps fn until the commit, tagged with scope, and reports whether the
+          transaction is still open to take it.
+        name: hold
+        params: scope uint64, fn func()
+        recv: s *txState
+        results: bool
+      - doc: |-
+          holdAbort keeps fn until the work of scope is undone, with ctx detached,
+          and reports whether the transaction is still open to take it.
+        name: holdAbort
+        params: ctx context.Context, scope uint64, fn func(ctx context.Context)
+        recv: s *txState
+        results: bool
+      - doc: |-
+          dropFrom drops every function held for the commit in the scope a failed
+          savepoint opened, or in a scope opened inside it, and hands back the
+          functions those scopes held for an abort, to run once the savepoint has
+          rolled back.
+
+          Scopes are a stack and their ids grow with every savepoint, so while the
+          scope numbered from is unwinding, everything held with an id at or above it
+          was held inside it. A savepoint that is released drops nothing: what it held
+          stays, and now belongs to the scope around it.
+        name: dropFrom
+        params: from uint64
+        recv: s *txState
+        results: "[]abortFn"
+      - doc: |-
+          drain closes the transaction to Defer and OnAbort and hands back what is
+          due: the functions held for the commit when committed is true, the ones
+          held for an abort otherwise. The other list is dropped.
+        name: drain
+        params: committed bool
+        recv: s *txState
+        results: held []heldFn, aborted []abortFn
+    name: txState
+  - fields:
+      - doc: cause is the driver's own error.
+        name: cause
+        type: error
+    kind: struct
+    methods:
+      - name: Error
+        recv: w Withheld
+        results: string
+      - name: Unwrap
+        recv: w Withheld
+        results: error
+    name: Withheld
+vars:
+  - doc: |-
+      deadContext is an already-cancelled context, built once at init.
+
+      It is how [scopedExecutor.QueryRowContext] refuses: *sql.Row has no
+      exported constructor and no exported error field, so a typed refusal cannot
+      be handed back — but (*sql.Tx).QueryRowContext checks ctx.Done() in
+      grabConn BEFORE it acquires a connection, so delegating with a dead context
+      guarantees the statement never leaves the process, and Scan reports the
+      cancellation.
+
+      Package-level rather than derived per call: the caller's context values are
+      irrelevant to a statement that will not run, and building one cancelled
+      context per refusal would allocate on the path that exists to do nothing.
+    items:
+      - name: deadContext
+        value: |-
+          func() context.Context {
+          	ctx, cancel := context.WithCancel(context.Background())
+          	//: born cancelled — that IS the value.
+          	cancel()
+          	//: every read through it stops in grabConn.
+          	return ctx
+          }()
+    name: deadContext
+  - doc: |-
+      busyMarkers are the words SQLite itself gives SQLITE_BUSY — "database is
+      locked" is sqlite3_errstr's text for the code, and drivers that name the
+      code add "SQLITE_BUSY". A driver error carrying neither is read as a failure
+      rather than as a lock held elsewhere: misreading the other way would retry
+      a broken database until the budget ran out, and misreading this way stops
+      the run — it never runs one unlocked.
+    items:
+      - name: busyMarkers
+        value: "[]string{\"database is locked\", \"SQLITE_BUSY\"}"
+    name: busyMarkers
+  - doc: scopeKey is the single context key this package stores under.
+    items:
+      - name: scopeKey
+        type: scopeKeyType
+    name: scopeKey

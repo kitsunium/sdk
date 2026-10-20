@@ -1,0 +1,323 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The bytes the grammar gives a meaning to.
+    grouped: true
+    items:
+      - doc: prefix opens every version.
+        name: prefix
+        type: byte
+        value: "'v'"
+      - doc: dot separates two numbers, and two identifiers.
+        name: dot
+        type: byte
+        value: "'.'"
+      - doc: |-
+          hyphen opens the pre-release part, and is the one byte an identifier
+          may hold besides letters and digits.
+        name: hyphen
+        type: byte
+        value: "'-'"
+      - doc: plus opens the build metadata, and so ends the pre-release part.
+        name: plus
+        type: byte
+        value: "'+'"
+    name: prefix
+  - doc: zero is the number a shorthand's omitted component stands for.
+    items:
+      - name: zero
+        type: string
+        value: "\"0\""
+    name: zero
+  - doc: |-
+      The two ranges an identifier byte is drawn from, and the bit between the two
+      cases of an ASCII letter — what lets isDigit and isLetter decide with one
+      comparison each.
+    grouped: true
+    items:
+      - doc: digitCount is how many ASCII digits there are, '0' to '9'.
+        name: digitCount
+        type: byte
+        value: "10"
+      - doc: letterCount is how many ASCII letters one case has, 'a' to 'z'.
+        name: letterCount
+        type: byte
+        value: "26"
+      - doc: |-
+          lowerCaseBit turns an ASCII capital into its lower case, and leaves a
+          lower-case letter as it is.
+        name: lowerCaseBit
+        type: byte
+        value: "0x20"
+    name: digitCount
+  - doc: |-
+      stampLayout is the commit time a pseudo-version carries: UTC, to the second,
+      as fourteen digits — the layout the Go toolchain writes it in.
+    items:
+      - name: stampLayout
+        type: string
+        value: "\"20060102150405\""
+    name: stampLayout
+  - doc: |-
+      stampLen is the length of that time: the fourteen digits before the hyphen
+      of the stamp "yyyymmddhhmmss-abcdefabcdef".
+    items:
+      - name: stampLen
+        type: int
+        value: len(stampLayout)
+    name: stampLen
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - IsPseudoVersion
+      - IsValid
+      - Prerelease
+    name: gen_decls.go
+  - decls:
+      - prefix
+      - zero
+      - digitCount
+      - components
+      - parse
+      - (*components).read
+      - number
+      - suffixes
+      - identifierList
+      - (*identifierList).add
+      - identifiers
+      - paddedNumber
+      - isDigit
+      - isLetter
+      - falseFirst
+      - compareNumbers
+      - comparePrereleases
+      - compareIdentifierLists
+      - nextIdentifier
+      - compareIdentifiers
+      - isNumeric
+    name: parse.go
+  - decls:
+      - stampLayout
+      - stampLen
+      - isPseudoVersion
+      - PseudoVersionRev
+      - PseudoVersionTime
+      - pseudoStamp
+      - stampPlaced
+      - isStamp
+    name: pseudo.go
+  - decls:
+      - isValid
+      - Compare
+      - prerelease
+    name: semver.go
+functions:
+  - name: IsPseudoVersion
+    params: v string
+    results: bool
+  - name: IsValid
+    params: v string
+    results: bool
+  - name: Prerelease
+    params: v string
+    results: string
+  - doc: |-
+      parse cuts v into its components and reports whether v is a version. On
+      failure the components are all empty — so a reading of an invalid version
+      is the empty string, as the package documents.
+    name: parse
+    params: v string
+    results: components, bool
+  - doc: |-
+      number cuts a decimal number off the front of s: at least one digit, and no
+      leading zero unless the number is 0 (SemVer §2).
+    name: number
+    params: s string
+    results: num, rest string, ok bool
+  - doc: |-
+      suffixes reads what follows PATCH — an optional pre-release, then optional
+      build metadata — and returns the pre-release with its '-', reporting whether
+      both are well formed and nothing else follows them.
+    name: suffixes
+    params: rest string
+    results: prerelease string, ok bool
+  - doc: |-
+      identifiers scans dot-separated identifiers in s from index from, stopping
+      at the first byte no identifier holds — anything but an ASCII letter, digit,
+      hyphen or dot — or at the end. It returns where it stopped and what it found
+      wrong with the identifiers it read.
+    name: identifiers
+    params: s string, from int
+    results: int, identifierList
+  - doc: |-
+      paddedNumber reports whether id, known to be all digits when numeric, is a
+      number written with a leading zero — a second spelling of a number, which
+      SemVer refuses in a pre-release (§9).
+    name: paddedNumber
+    params: id string, numeric bool
+    results: bool
+  - doc: |-
+      isDigit reports whether c is an ASCII decimal digit — the ten ASCII digits
+      only, SemVer being ASCII. One unsigned comparison: a byte below '0' wraps
+      around to 208 or more.
+    name: isDigit
+    params: c byte
+    results: bool
+  - doc: |-
+      isLetter reports whether c is an ASCII letter of either case. Setting
+      lowerCaseBit maps 'A'-'Z' onto 'a'-'z' and no other byte into that range, so
+      one unsigned comparison decides it.
+    name: isLetter
+    params: c byte
+    results: bool
+  - doc: |-
+      falseFirst orders two booleans, false before true. It decides the two
+      orderings the grammar states as "one has it, the other does not": an
+      invalid string below a version, and an identifier list that runs out below
+      one that goes on.
+    name: falseFirst
+    params: x, y bool
+    results: int
+  - doc: |-
+      compareNumbers orders two decimal numbers written without leading zeros: the
+      longer is the larger, and two of one length compare digit by digit. No
+      conversion takes place, so a number of any size orders exactly.
+    name: compareNumbers
+    params: x, y string
+    results: int
+  - doc: |-
+      comparePrereleases orders two pre-release parts, each "" or "-" followed by
+      identifiers, by SemVer §11.3 and §11.4.
+    name: comparePrereleases
+    params: x, y string
+    results: int
+  - doc: |-
+      compareIdentifierLists orders two dot-separated identifier lists left to
+      right until one identifier differs; when one list runs out first, it is the
+      lower (SemVer §11.4.4).
+    name: compareIdentifierLists
+    params: x, y string
+    results: int
+  - doc: |-
+      nextIdentifier splits the first identifier off list; the rest keeps its
+      leading dot, so it is "" exactly when the list is exhausted.
+    name: nextIdentifier
+    params: list string
+    results: id, rest string
+  - doc: |-
+      compareIdentifiers orders two pre-release identifiers by SemVer §11.4.1 to
+      §11.4.3: numbers numerically, other identifiers in ASCII order, and a number
+      below any identifier that is not one.
+    name: compareIdentifiers
+    params: x, y string
+    results: int
+  - doc: |-
+      isNumeric reports whether id — a well-formed identifier — is made of digits
+      only, which is what makes it a number to precedence.
+    name: isNumeric
+    params: id string
+    results: bool
+  - doc: |-
+      isPseudoVersion is IsPseudoVersion's body: gen_decls.go writes IsPseudoVersion, from the
+      design, as one call of it.
+    name: isPseudoVersion
+    params: v string
+    results: bool
+  - name: PseudoVersionRev
+    params: v string
+    results: string, bool
+  - name: PseudoVersionTime
+    params: v string
+    results: time.Time, bool
+  - doc: |-
+      pseudoStamp returns the last pre-release identifier of a pseudo-version —
+      its stamp, "yyyymmddhhmmss-REVISION" — and reports whether v is one.
+    name: pseudoStamp
+    params: v string
+    results: string, bool
+  - doc: |-
+      stampPlaced reports whether the stamp ending list — at lastDot+1, lastDot
+      being -1 when it is the only identifier — sits where a pseudo-version puts
+      it: alone in the pre-release of a vX.0.0, or right after an identifier "0".
+    name: stampPlaced
+    params: parts *components, list string, lastDot int
+    results: bool
+  - doc: |-
+      isStamp reports whether id is "yyyymmddhhmmss-REVISION": exactly fourteen
+      digits, a hyphen, and one or more ASCII letters and digits — no hyphen in
+      the revision, so a stamp holds exactly one.
+    name: isStamp
+    params: id string
+    results: bool
+  - doc: |-
+      isValid is IsValid's body: gen_decls.go writes IsValid, from the
+      design, as one call of it.
+    name: isValid
+    params: v string
+    results: bool
+  - name: Compare
+    params: v, w string
+    results: int
+  - doc: |-
+      prerelease is Prerelease's body: gen_decls.go writes Prerelease, from the
+      design, as one call of it.
+    name: prerelease
+    params: v string
+    results: string
+imports:
+  strings: strings
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/semver
+  name: semver
+  purpose: "Package semver — the parser: a version cut into what precedence reads, in one pass over its bytes and without a copy of any of them."
+types:
+  - doc: |-
+      components is a version cut into what precedence reads. Every part is a
+      substring of the version it was cut from, so cutting allocates nothing; the
+      build metadata is checked and dropped, because nothing here reads it.
+    fields:
+      - doc: major is the major number, as written.
+        name: major
+        type: string
+      - doc: minor is the minor number as written, or "0" for "vMAJOR".
+        name: minor
+        type: string
+      - doc: patch is the patch number as written, or "0" for a shorthand.
+        name: patch
+        type: string
+      - doc: prerelease is the pre-release part with its leading '-', or "".
+        name: prerelease
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          read fills the components from rest — the version after its "v" — and
+          reports whether rest is MAJOR, MAJOR.MINOR, or MAJOR.MINOR.PATCH followed by
+          a well-formed pre-release and build metadata.
+        name: read
+        params: rest string
+        recv: c *components
+        results: bool
+    name: components
+  - doc: |-
+      identifierList is what a scan of dot-separated identifiers found wrong with
+      them, if anything.
+    fields:
+      - doc: empty reports that an identifier held no byte (SemVer §9, §10).
+        name: empty
+        type: bool
+      - doc: |-
+          padded reports that an identifier made of digits only was written with
+          a leading zero — refused in a pre-release, allowed in build metadata.
+        name: padded
+        type: bool
+    kind: struct
+    methods:
+      - doc: add records one finished identifier, numeric when it held digits only.
+        name: add
+        params: id string, numeric bool
+        recv: l *identifierList
+    name: identifierList

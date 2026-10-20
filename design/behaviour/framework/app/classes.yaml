@@ -1,0 +1,1956 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      CodeSingletonHeld reports a start refused because another process of the
+      app holds its singleton lock.
+    items:
+      - name: CodeSingletonHeld
+        type: errs.Code
+        value: iapp.CodeSingletonHeld
+    name: CodeSingletonHeld
+  - doc: CodeCLIFailed marks the span of a CLI command that exited non-zero.
+    items:
+      - name: CodeCLIFailed
+        type: errs.Code
+        value: iapp.CodeCLIFailed
+    name: CodeCLIFailed
+  - grouped: true
+    items:
+      - doc: |-
+          EnvDev serves the Studio, analyzes the source and binds loopback. Only
+          `kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.
+        name: EnvDev
+        type: string
+        value: iapp.EnvDev
+      - doc: "EnvProduction is the default: no Studio, no source, no analysis."
+        name: EnvProduction
+        type: string
+        value: iapp.EnvProduction
+    name: EnvDev
+  - doc: |-
+      The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
+      the store subsystem maps onto the SDK's.
+    grouped: true
+    items:
+      - doc: DialectPostgres is PostgreSQL.
+        name: DialectPostgres
+        type: Dialect
+        value: iapp.DialectPostgres
+      - doc: DialectMySQL is MySQL or MariaDB.
+        name: DialectMySQL
+        type: Dialect
+        value: iapp.DialectMySQL
+      - doc: DialectSQLite is SQLite.
+        name: DialectSQLite
+        type: Dialect
+        value: iapp.DialectSQLite
+    name: DialectPostgres
+  - doc: |-
+      DefaultMaxBody is the largest request body an endpoint reads, unless the
+      endpoint says otherwise with [MaxBody].
+    items:
+      - name: DefaultMaxBody
+        type: int64
+        value: iapp.DefaultMaxBody
+    name: DefaultMaxBody
+  - grouped: true
+    items:
+      - doc: WireInvalid is WireInvalid.
+        name: WireInvalid
+        type: string
+        value: iapp.WireInvalid
+      - doc: WireNotFound is WireNotFound.
+        name: WireNotFound
+        type: string
+        value: iapp.WireNotFound
+      - doc: WireConflict is WireConflict.
+        name: WireConflict
+        type: string
+        value: iapp.WireConflict
+      - doc: WireUnauth is WireUnauth.
+        name: WireUnauth
+        type: string
+        value: iapp.WireUnauth
+      - doc: WireForbidden is WireForbidden.
+        name: WireForbidden
+        type: string
+        value: iapp.WireForbidden
+      - doc: WireTooLarge is WireTooLarge.
+        name: WireTooLarge
+        type: string
+        value: iapp.WireTooLarge
+      - doc: WireUnsupported is WireUnsupported.
+        name: WireUnsupported
+        type: string
+        value: iapp.WireUnsupported
+      - doc: WireRateLimited is WireRateLimited.
+        name: WireRateLimited
+        type: string
+        value: iapp.WireRateLimited
+      - doc: WireUnavailable is WireUnavailable.
+        name: WireUnavailable
+        type: string
+        value: iapp.WireUnavailable
+      - doc: WireTimeout is WireTimeout.
+        name: WireTimeout
+        type: string
+        value: iapp.WireTimeout
+      - doc: WireCanceled is WireCanceled.
+        name: WireCanceled
+        type: string
+        value: iapp.WireCanceled
+      - doc: WireInternal is WireInternal.
+        name: WireInternal
+        type: string
+        value: iapp.WireInternal
+      - doc: CodeStoreDecode is CodeStoreDecode.
+        name: CodeStoreDecode
+        type: errs.Code
+        value: iapp.CodeStoreDecode
+      - doc: CodeStoreEncode is CodeStoreEncode.
+        name: CodeStoreEncode
+        type: errs.Code
+        value: iapp.CodeStoreEncode
+      - doc: CodeStorePersist is CodeStorePersist.
+        name: CodeStorePersist
+        type: errs.Code
+        value: iapp.CodeStorePersist
+      - doc: CodeStoreLoad is CodeStoreLoad.
+        name: CodeStoreLoad
+        type: errs.Code
+        value: iapp.CodeStoreLoad
+      - doc: CodeStoreIndex is CodeStoreIndex.
+        name: CodeStoreIndex
+        type: errs.Code
+        value: iapp.CodeStoreIndex
+      - doc: CodeTopicEncode is CodeTopicEncode.
+        name: CodeTopicEncode
+        type: errs.Code
+        value: iapp.CodeTopicEncode
+      - doc: CodeTopicPublish is CodeTopicPublish.
+        name: CodeTopicPublish
+        type: errs.Code
+        value: iapp.CodeTopicPublish
+      - doc: CodeQueueOpen is CodeQueueOpen.
+        name: CodeQueueOpen
+        type: errs.Code
+        value: iapp.CodeQueueOpen
+      - doc: CodeUndecodable is CodeUndecodable.
+        name: CodeUndecodable
+        type: errs.Code
+        value: iapp.CodeUndecodable
+      - doc: CodeHandlerPanic is CodeHandlerPanic.
+        name: CodeHandlerPanic
+        type: errs.Code
+        value: iapp.CodeHandlerPanic
+      - doc: CodeNotMounted is CodeNotMounted.
+        name: CodeNotMounted
+        type: errs.Code
+        value: iapp.CodeNotMounted
+      - doc: CodeWorkflowLoad is CodeWorkflowLoad.
+        name: CodeWorkflowLoad
+        type: errs.Code
+        value: iapp.CodeWorkflowLoad
+      - doc: |-
+          A workflow hook panicked: an OnEnter hook fails its transition with it,
+          an OnTransition hook is reported and the transition stands.
+        name: CodeWorkflowHookPanic
+        type: errs.Code
+        value: iapp.CodeWorkflowHookPanic
+      - doc: |-
+          An OnEnter hook changed the state its entity was entering, or the
+          entity's key: the transition is refused.
+        name: CodeWorkflowHookChange
+        type: errs.Code
+        value: iapp.CodeWorkflowHookChange
+      - doc: |-
+          An OnEnter hook fired its own workflow: refused, where it would wait
+          for itself.
+        name: CodeWorkflowReentrant
+        type: errs.Code
+        value: iapp.CodeWorkflowReentrant
+      - doc: CodeAppConfig is CodeAppConfig.
+        name: CodeAppConfig
+        type: errs.Code
+        value: iapp.CodeAppConfig
+      - doc: CodeAppRunning is CodeAppRunning.
+        name: CodeAppRunning
+        type: errs.Code
+        value: iapp.CodeAppRunning
+      - doc: CodeAppListen is CodeAppListen.
+        name: CodeAppListen
+        type: errs.Code
+        value: iapp.CodeAppListen
+      - doc: Mailers.
+        name: CodeMailConfig
+        type: errs.Code
+        value: iapp.CodeMailConfig
+      - doc: CodeMailEncode is CodeMailEncode.
+        name: CodeMailEncode
+        type: errs.Code
+        value: iapp.CodeMailEncode
+      - doc: CodeMailQueue is CodeMailQueue.
+        name: CodeMailQueue
+        type: errs.Code
+        value: iapp.CodeMailQueue
+      - doc: |-
+          Deprecated: the framework no longer returns it. The outbox is the SDK's mail
+          spool, which dead-letters a record that does not decode itself
+          (MessageUndecodable, in pkg/v1/app/mail/spool).
+        name: CodeMailUndecodable
+        type: errs.Code
+        value: iapp.CodeMailUndecodable
+      - doc: CodeMailPanic is CodeMailPanic.
+        name: CodeMailPanic
+        type: errs.Code
+        value: iapp.CodeMailPanic
+      - doc: Loops.
+        name: CodeLoopPanic
+        type: errs.Code
+        value: iapp.CodeLoopPanic
+      - doc: CodeLoopNotMounted is CodeLoopNotMounted.
+        name: CodeLoopNotMounted
+        type: errs.Code
+        value: iapp.CodeLoopNotMounted
+      - doc: CodeLoopStart is CodeLoopStart.
+        name: CodeLoopStart
+        type: errs.Code
+        value: iapp.CodeLoopStart
+      - doc: Secrets.
+        name: CodeSecretStore
+        type: errs.Code
+        value: iapp.CodeSecretStore
+      - doc: CodeSecretMissing is CodeSecretMissing.
+        name: CodeSecretMissing
+        type: errs.Code
+        value: iapp.CodeSecretMissing
+      - doc: CodeSecretRead is CodeSecretRead.
+        name: CodeSecretRead
+        type: errs.Code
+        value: iapp.CodeSecretRead
+      - doc: CodeSecretRotate is CodeSecretRotate.
+        name: CodeSecretRotate
+        type: errs.Code
+        value: iapp.CodeSecretRotate
+      - doc: Databases, ADR 0004.
+        name: CodeDatabaseOpen
+        type: errs.Code
+        value: iapp.CodeDatabaseOpen
+      - doc: CodeDatabaseMigrate is CodeDatabaseMigrate.
+        name: CodeDatabaseMigrate
+        type: errs.Code
+        value: iapp.CodeDatabaseMigrate
+      - doc: CodeDatabaseUnavailable is CodeDatabaseUnavailable.
+        name: CodeDatabaseUnavailable
+        type: errs.Code
+        value: iapp.CodeDatabaseUnavailable
+      - doc: CodeDatabaseConfig is CodeDatabaseConfig.
+        name: CodeDatabaseConfig
+        type: errs.Code
+        value: iapp.CodeDatabaseConfig
+      - doc: |-
+          CodeDatabaseVersion refuses the start of a database whose server is below
+          the framework's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
+        name: CodeDatabaseVersion
+        type: errs.Code
+        value: iapp.CodeDatabaseVersion
+      - doc: CodeTransactionSpan is CodeTransactionSpan.
+        name: CodeTransactionSpan
+        type: errs.Code
+        value: iapp.CodeTransactionSpan
+      - doc: Privacy (ADR 0006).
+        name: CodePrivacyKey
+        type: errs.Code
+        value: iapp.CodePrivacyKey
+      - doc: CodePrivacyErase is CodePrivacyErase.
+        name: CodePrivacyErase
+        type: errs.Code
+        value: iapp.CodePrivacyErase
+      - doc: CodePrivacyJournal is CodePrivacyJournal.
+        name: CodePrivacyJournal
+        type: errs.Code
+        value: iapp.CodePrivacyJournal
+      - doc: CodePrivacyData is CodePrivacyData.
+        name: CodePrivacyData
+        type: errs.Code
+        value: iapp.CodePrivacyData
+      - doc: History (ADR 0007).
+        name: CodeHistoryLoad
+        type: errs.Code
+        value: iapp.CodeHistoryLoad
+      - doc: CodeHistoryWrite is CodeHistoryWrite.
+        name: CodeHistoryWrite
+        type: errs.Code
+        value: iapp.CodeHistoryWrite
+      - doc: CodeHistoryRead is CodeHistoryRead.
+        name: CodeHistoryRead
+        type: errs.Code
+        value: iapp.CodeHistoryRead
+      - doc: CodePasswordHash is CodePasswordHash.
+        name: CodePasswordHash
+        type: errs.Code
+        value: iapp.CodePasswordHash
+      - doc: Commands and queries.
+        name: CodeCommandReentrant
+        type: errs.Code
+        value: iapp.CodeCommandReentrant
+      - doc: CodeCommandKey is CodeCommandKey.
+        name: CodeCommandKey
+        type: errs.Code
+        value: iapp.CodeCommandKey
+      - doc: CodeCommandQueue is CodeCommandQueue.
+        name: CodeCommandQueue
+        type: errs.Code
+        value: iapp.CodeCommandQueue
+      - doc: CodeCommandEncode is CodeCommandEncode.
+        name: CodeCommandEncode
+        type: errs.Code
+        value: iapp.CodeCommandEncode
+      - doc: Watches (ADR 0008).
+        name: CodeWatchQueue
+        type: errs.Code
+        value: iapp.CodeWatchQueue
+      - doc: |-
+          CodeRecordsKeys refuses [Records].Keys to a caller none of whose module's
+          watches the store feeds: only a module that watches a store lists its
+          keys (ADR 0178 C6).
+        name: CodeRecordsKeys
+        type: errs.Code
+        value: iapp.CodeRecordsKeys
+      - doc: |-
+          CodeWatchReplay refuses `<product> watch replay WATCH` when WATCH names no
+          watch of the product: the command replays a watch the product declares,
+          and nothing else (ADR 0178 C6).
+        name: CodeWatchReplay
+        type: errs.Code
+        value: iapp.CodeWatchReplay
+      - doc: Sealing at rest (ADR 0006, step 3).
+        name: CodeSealKey
+        type: errs.Code
+        value: iapp.CodeSealKey
+      - doc: CodeSealWrite is CodeSealWrite.
+        name: CodeSealWrite
+        type: errs.Code
+        value: iapp.CodeSealWrite
+      - doc: CodeSealOpen is CodeSealOpen.
+        name: CodeSealOpen
+        type: errs.Code
+        value: iapp.CodeSealOpen
+      - doc: CodeSealRewrap is CodeSealRewrap.
+        name: CodeSealRewrap
+        type: errs.Code
+        value: iapp.CodeSealRewrap
+      - doc: CodeSealShred is CodeSealShred.
+        name: CodeSealShred
+        type: errs.Code
+        value: iapp.CodeSealShred
+      - doc: Revisions (ADR 0007 §3).
+        name: CodeRevisionRead
+        type: errs.Code
+        value: iapp.CodeRevisionRead
+      - doc: CodeRevisionWrite is CodeRevisionWrite.
+        name: CodeRevisionWrite
+        type: errs.Code
+        value: iapp.CodeRevisionWrite
+      - doc: CodeRevisionDecode is CodeRevisionDecode.
+        name: CodeRevisionDecode
+        type: errs.Code
+        value: iapp.CodeRevisionDecode
+      - doc: |-
+          CodeTrash is a store's trash that cannot be read or emptied: what the
+          product deleted stays in it until a later purge (ADR 0178 C4).
+        name: CodeTrash
+        type: errs.Code
+        value: iapp.CodeTrash
+      - doc: |-
+          CodeTrashList refuses the Studio's list of a store's trash (GET
+          /_app/api/trash) when the store named is none of the product's — a
+          NotFound — or keeps no trash, having no app.Revisions — an Invalid (ADR
+          0178 C4).
+        name: CodeTrashList
+        type: errs.Code
+        value: iapp.CodeTrashList
+      - doc: |-
+          The framework's own signals and refusals, typed since the move into the
+          SDK (rule 2: no fmt.Errorf, no errors.New in production code).
+        name: CodeJobOverlapped
+        type: errs.Code
+        value: iapp.CodeJobOverlapped
+      - doc: CodeHistoryMoved is CodeHistoryMoved.
+        name: CodeHistoryMoved
+        type: errs.Code
+        value: iapp.CodeHistoryMoved
+      - doc: CodeNotSource is CodeNotSource.
+        name: CodeNotSource
+        type: errs.Code
+        value: iapp.CodeNotSource
+      - doc: CodePasswordMoved is CodePasswordMoved.
+        name: CodePasswordMoved
+        type: errs.Code
+        value: iapp.CodePasswordMoved
+      - doc: CodeNothingToErase is CodeNothingToErase.
+        name: CodeNothingToErase
+        type: errs.Code
+        value: iapp.CodeNothingToErase
+      - doc: CodeKeyRekeyed is CodeKeyRekeyed.
+        name: CodeKeyRekeyed
+        type: errs.Code
+        value: iapp.CodeKeyRekeyed
+      - doc: CodeMigrateRefused is CodeMigrateRefused.
+        name: CodeMigrateRefused
+        type: errs.Code
+        value: iapp.CodeMigrateRefused
+      - doc: CodeCatalogue is CodeCatalogue.
+        name: CodeCatalogue
+        type: errs.Code
+        value: iapp.CodeCatalogue
+      - doc: CodeRetentionPanic is CodeRetentionPanic.
+        name: CodeRetentionPanic
+        type: errs.Code
+        value: iapp.CodeRetentionPanic
+      - doc: |-
+          CodeDataCopy refuses a data copy: a database the product does not declare
+          or cannot open, data kept in memory, a product that answers on its
+          address, a table of the database that already holds a row.
+        name: CodeDataCopy
+        type: errs.Code
+        value: iapp.CodeDataCopy
+      - doc: |-
+          CodeDataCopyDiverged reports a data copy whose fingerprints differ: the
+          copy is rolled back, and the first key that differs is named.
+        name: CodeDataCopyDiverged
+        type: errs.Code
+        value: iapp.CodeDataCopyDiverged
+      - doc: |-
+          CodeSubsystemMissing refuses a start whose declarations need a subsystem
+          the program does not import (ADR 0179 §6): the [DiagnosticsError] names
+          each declaration and the package to import, and carries this code.
+        name: CodeSubsystemMissing
+        type: errs.Code
+        value: iapp.CodeSubsystemMissing
+      - doc: |-
+          CodeMigrationIrreversible refuses the Down of a migration declared
+          irreversible with [Irreversible]: what it changed is undone by a new
+          forward migration, never by migrate down.
+        name: CodeMigrationIrreversible
+        type: errs.Code
+        value: iapp.CodeMigrationIrreversible
+      - doc: |-
+          CodeRenamed refuses a start that meets a runtime name the framework no
+          longer reads (ADR 0180 §3): a KIT_<NAME> variable of the operator's, a
+          field tagged kit:"…". The [DiagnosticsError] names each old name and
+          the one that replaces it, and carries this code.
+        name: CodeRenamed
+        type: errs.Code
+        value: iapp.CodeRenamed
+      - doc: |-
+          CodeRenameTarget refuses a start that meets data a former release kept
+          under the tool's name while its present name is taken too (ADR 0180
+          step 5): nothing is moved, and both names are said.
+        name: CodeRenameTarget
+        type: errs.Code
+        value: iapp.CodeRenameTarget
+      - doc: |-
+          CodeRenameFailed refuses a start whose move of a name at rest did not
+          complete (ADR 0180 step 5): what was not moved stays readable under its
+          former name, and the next start resumes the move.
+        name: CodeRenameFailed
+        type: errs.Code
+        value: iapp.CodeRenameFailed
+      - doc: |-
+          The signals the framework ends one of its own steps with and catches itself — a
+          caller never receives one —, typed when the SDK made rule 2 a gate.
+        name: CodeSealErased
+        type: errs.Code
+        value: iapp.CodeSealErased
+      - doc: CodeSealKeyMoved is CodeSealKeyMoved.
+        name: CodeSealKeyMoved
+        type: errs.Code
+        value: iapp.CodeSealKeyMoved
+      - doc: CodeResealInPlace is CodeResealInPlace.
+        name: CodeResealInPlace
+        type: errs.Code
+        value: iapp.CodeResealInPlace
+      - doc: CodeResealMoved is CodeResealMoved.
+        name: CodeResealMoved
+        type: errs.Code
+        value: iapp.CodeResealMoved
+      - doc: CodeWorkflowNotInPlace is CodeWorkflowNotInPlace.
+        name: CodeWorkflowNotInPlace
+        type: errs.Code
+        value: iapp.CodeWorkflowNotInPlace
+      - doc: CodeTransactionPanic is CodeTransactionPanic.
+        name: CodeTransactionPanic
+        type: errs.Code
+        value: iapp.CodeTransactionPanic
+    name: WireInvalid
+  - doc: |-
+      CodeProfileRead reports a profile of the process that could not be written
+      or read back. It is in the framework's 0.4.2.* range.
+    items:
+      - name: CodeProfileRead
+        type: errs.Code
+        value: iapp.CodeProfileRead
+    name: CodeProfileRead
+  - grouped: true
+    items:
+      - doc: |-
+          Personal marks a field that holds data about a person: personal,
+          special, or a record's subject.
+        name: Personal
+        type: Mark
+        value: iapp.Personal
+      - doc: Special marks a field of GDPR art. 9(1) or art. 10.
+        name: Special
+        type: Mark
+        value: iapp.Special
+      - doc: Moderated marks content others see and a moderator may act on.
+        name: Moderated
+        type: Mark
+        value: iapp.Moderated
+    name: Personal
+  - doc: |-
+      CodeScopeUnknown reports a scope whose value could not be read at the
+      start: no current user, no executable path, no configuration directory.
+    items:
+      - name: CodeScopeUnknown
+        type: errs.Code
+        value: iapp.CodeScopeUnknown
+    name: CodeScopeUnknown
+files:
+  - decls:
+      - Principal
+    name: access.go
+  - decls:
+      - Activity
+    name: activity.go
+  - decls:
+      - App
+      - DiagnosticsError
+      - NewApp
+    name: app.go
+  - decls:
+      - AnalyzeFunc
+      - Analyzer
+    name: app_analysis.go
+  - decls:
+      - CodeSingletonHeld
+      - Profile
+      - IdleStop
+      - Singleton
+      - SingletonPer
+      - Stop
+    name: app_profiles.go
+  - decls:
+      - UID
+      - Authenticator
+      - Auth
+      - AuthOptional
+      - UserID
+      - AuthData
+      - WithUser
+    name: auth.go
+  - decls:
+      - Catalog
+      - NewID
+    name: catalog.go
+  - decls:
+      - CodeCLIFailed
+      - Stdio
+      - CLIFunc
+      - CLI
+      - CLIOption
+      - DefaultCommand
+      - FailSafe
+    name: cli.go
+  - decls:
+      - Command
+      - CommandOption
+      - Queued
+      - NoTransaction
+    name: command.go
+  - decls:
+      - EnvDev
+      - AppOption
+      - Env
+      - Listen
+      - DataDir
+      - Studio
+      - Analyze
+      - Logs
+      - Clock
+      - InMemory
+    name: config.go
+  - decls:
+      - DialectPostgres
+      - Dialect
+      - DatabaseURL
+      - Migration
+      - MigrationStep
+      - MigrationExecutor
+      - Keeps
+      - Migrations
+      - Statements
+      - Irreversible
+      - Database
+    name: database.go
+  - decls:
+      - Engine
+      - LockWaiter
+      - DatabaseOption
+      - Keepable
+    name: database_interface.go
+  - decls:
+      - DefaultMaxBody
+    name: decode.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Empty
+      - Endpoint
+      - EndpointOption
+      - OperationOption
+      - Name
+      - MaxBody
+      - RateLimit
+      - Timeout
+      - Bulkhead
+    name: endpoint.go
+  - decls:
+      - WireInvalid
+      - Error
+      - Violation
+      - Invalid
+      - NotFound
+      - Conflict
+      - Unauthenticated
+      - Forbidden
+      - Unavailable
+    name: errors.go
+  - decls:
+      - ExposeOption
+      - Anyone
+      - AnyUser
+    name: expose.go
+  - decls:
+      - Former
+    name: history_read.go
+  - decls:
+      - HoldSubject
+    name: hold.go
+  - decls:
+      - Unique
+      - Index
+    name: index.go
+  - decls:
+      - Job
+    name: job.go
+  - decls:
+      - ListenHandler
+      - Listener
+      - ListenerOption
+      - SocketPath
+      - SocketPer
+      - AllowPeers
+      - SocketPathFor
+    name: listener.go
+  - decls:
+      - Loop
+      - Wake
+      - LoopOption
+      - Routine
+      - WakeEvery
+      - WakeAt
+      - WakeOn
+    name: loop.go
+  - decls:
+      - Mailer
+      - MailerOption
+      - From
+      - MailAttempts
+    name: mailer.go
+  - decls:
+      - Module
+      - ModulePart
+      - NewModule
+      - Requires
+    name: module.go
+  - decls:
+      - MountOption
+      - Mount
+      - Prefix
+      - Only
+    name: mount.go
+  - decls:
+      - Operation
+    name: operation.go
+  - decls:
+      - PasswordPolicy
+      - PasswordOption
+      - MinLength
+      - NotReused
+      - NotCommon
+    name: passwords.go
+  - decls:
+      - Port
+      - PortOption
+      - Fallback
+      - Bind
+    name: port.go
+  - decls:
+      - Privacy
+    name: privacy.go
+  - decls:
+      - Erasure
+      - Erase
+    name: privacy_erase.go
+  - decls:
+      - PersonalData
+      - Export
+    name: privacy_export.go
+  - decls:
+      - CodeProfileRead
+    name: profile.go
+  - decls:
+      - Query
+      - QueryOption
+    name: query.go
+  - decls:
+      - RateLimitPerClient
+    name: ratelimit.go
+  - decls:
+      - Personal
+      - Records
+      - RecordsOf
+    name: records.go
+  - decls:
+      - Replace
+    name: replace.go
+  - decls:
+      - SetCookie
+      - ClearCookie
+      - ClientIP
+      - UserAgent
+      - Now
+      - NewTicker
+      - After
+      - Log
+    name: request.go
+  - decls:
+      - EraseAfter
+      - EraseAt
+      - DeleteAfter
+      - DeleteAt
+      - Anonymise
+      - HeldUntil
+      - Purpose
+      - DeleteOnErasure
+      - RetentionByProduct
+    name: retention.go
+  - decls:
+      - Revisions
+      - Revision
+      - Tombstone
+      - Edit
+    name: revisions.go
+  - decls:
+      - Binary
+      - NewBinary
+    name: roles.go
+  - decls:
+      - CodeScopeUnknown
+      - PerUID
+      - Scope
+      - PerEnv
+      - ScopeKey
+    name: scope.go
+  - decls:
+      - Secret
+      - SecretOption
+      - Generated
+      - RotateEvery
+      - KeepVersions
+      - Optional
+    name: secret.go
+  - decls:
+      - SecretStore
+    name: secretstore.go
+  - decls:
+      - Service
+      - NewService
+    name: service.go
+  - decls:
+      - Setting
+      - Required
+      - Set
+      - ConfigFiles
+    name: setting.go
+  - decls:
+      - SettingValue
+      - SettingOption
+    name: setting_interface.go
+  - decls:
+      - Frontend
+      - StaticOption
+      - Root
+    name: static.go
+  - decls:
+      - Store
+      - StoreOption
+      - ReadModel
+    name: store.go
+  - decls:
+      - Telemetry
+      - DesignDigest
+    name: telemetry.go
+  - decls:
+      - Topic
+      - Subscription
+      - SubscriptionOption
+      - DeliveryOption
+      - MaxDeliveries
+      - Parallelism
+      - OwnStores
+    name: topic.go
+  - decls:
+      - Transact
+    name: transact.go
+  - decls:
+      - Written
+      - Watch
+      - Mark
+      - FieldRef
+    name: watch.go
+  - decls:
+      - Workflow
+      - Delay
+      - Change
+    name: workflow.go
+functions:
+  - name: NewApp
+    params: name string, services ...*Service
+    results: "*App"
+  - name: Analyzer
+    params: fn AnalyzeFunc
+    results: AppOption
+  - name: Profile
+    params: p string
+    results: AppOption
+  - name: IdleStop
+    params: d time.Duration
+    results: AppOption
+  - name: Singleton
+    params: scope string
+    results: AppOption
+  - name: SingletonPer
+    params: scopes ...Scope
+    results: AppOption
+  - name: Stop
+    params: ctx context.Context
+    results: bool
+  - name: Auth
+    results: OperationOption
+  - name: AuthOptional
+    results: OperationOption
+  - name: UserID
+    params: ctx context.Context
+    results: UID, bool
+  - name: AuthData
+    params: ctx context.Context
+    results: D, bool
+    typeParams: D any
+  - name: WithUser
+    params: ctx context.Context, uid UID, data D
+    results: context.Context
+    typeParams: D any
+  - name: Catalog
+    results: "[]model.Mechanic"
+  - name: NewID
+    params: prefix string
+    results: string
+  - name: DefaultCommand
+    results: CLIOption
+  - name: FailSafe
+    results: CLIOption
+  - name: Queued
+    results: CommandOption
+  - name: NoTransaction
+    results: CommandOption
+  - name: Env
+    params: env string
+    results: AppOption
+  - name: Listen
+    params: addr string
+    results: AppOption
+  - name: DataDir
+    params: dir string
+    results: AppOption
+  - name: Studio
+    params: on bool
+    results: AppOption
+  - name: Analyze
+    params: on bool
+    results: AppOption
+  - name: Logs
+    params: w io.Writer
+    results: AppOption
+  - name: Clock
+    params: c clock.Timed
+    results: AppOption
+  - name: InMemory
+    results: |-
+      interface {
+      	StoreOption
+      	AppOption
+      }
+  - name: Keeps
+    params: things ...Keepable
+    results: DatabaseOption
+  - name: Migrations
+    params: m ...Migration
+    results: |-
+      interface {
+      	DatabaseOption
+      	ModulePart
+      }
+  - name: Statements
+    params: stmts ...string
+    results: MigrationStep
+  - name: Irreversible
+    params: ctx context.Context, ex MigrationExecutor
+    results: error
+  - name: Database
+    params: name string, engine Engine, opts ...DatabaseOption
+    results: AppOption
+  - name: Name
+    params: name string
+    results: EndpointOption
+  - name: MaxBody
+    params: bytes int64
+    results: EndpointOption
+  - name: RateLimit
+    params: perSecond float64, burst int
+    results: OperationOption
+  - name: Timeout
+    params: d time.Duration
+    results: OperationOption
+  - name: Bulkhead
+    params: maxConcurrent int
+    results: OperationOption
+  - name: Invalid
+    params: message string
+    results: "*Error"
+  - name: NotFound
+    params: message string
+    results: "*Error"
+  - name: Conflict
+    params: message string
+    results: "*Error"
+  - name: Unauthenticated
+    params: message string
+    results: "*Error"
+  - name: Forbidden
+    params: message string
+    results: "*Error"
+  - name: Unavailable
+    params: message string
+    results: "*Error"
+  - name: Anyone
+    results: ExposeOption
+  - name: AnyUser
+    results: ExposeOption
+  - name: HoldSubject
+    params: ctx context.Context, reason string, ids ...string
+    results: error
+  - name: Unique
+    params: name string, key func(T) string
+    results: StoreOption
+    typeParams: T any
+  - name: Index
+    params: name string, keys func(T) []string
+    results: StoreOption
+    typeParams: T any
+  - name: SocketPath
+    params: path string
+    results: ListenerOption
+  - name: SocketPer
+    params: scopes ...Scope
+    results: ListenerOption
+  - name: AllowPeers
+    params: uids, gids []int
+    results: ListenerOption
+  - name: SocketPathFor
+    params: product, service, name string, scopes ...Scope
+    results: string, error
+  - name: WakeEvery
+    params: d time.Duration
+    results: LoopOption
+  - name: WakeAt
+    params: next func(context.Context) (time.Time, bool)
+    results: LoopOption
+  - name: WakeOn
+    params: topic *iapp.TopicService[T]
+    results: LoopOption
+    typeParams: T any
+  - name: From
+    params: name, addr string
+    results: MailerOption
+  - name: MailAttempts
+    params: n int
+    results: MailerOption
+  - name: NewModule
+    params: name, doc string, parts ...ModulePart
+    results: "*Module"
+  - name: Requires
+    params: other *Module
+    results: ModulePart
+  - name: Mount
+    params: m *Module, opts ...MountOption
+    results: AppOption
+  - name: Prefix
+    params: prefix string
+    results: MountOption
+  - name: Only
+    params: envs ...string
+    results: MountOption
+  - name: MinLength
+    params: n int
+    results: PasswordOption
+  - name: NotReused
+    params: n int
+    results: PasswordOption
+  - name: NotCommon
+    results: PasswordOption
+  - name: Fallback
+    params: op iapp.Operation[Req, Resp]
+    results: iapp.PortConfigurer[Req, Resp]
+    typeParams: Req, Resp any
+  - name: Bind
+    params: port *iapp.PortService[Req, Resp], op iapp.Operation[Req, Resp]
+    results: |-
+      interface {
+      	AppOption
+      	MountOption
+      }
+    typeParams: Req, Resp any
+  - name: Erase
+    params: ctx context.Context, reason string, ids ...string
+    results: Erasure, error
+  - name: Export
+    params: ctx context.Context, ids ...string
+    results: PersonalData, error
+  - name: RateLimitPerClient
+    params: perSecond float64, burst int
+    results: OperationOption
+  - name: RecordsOf
+    params: ctx context.Context, store string
+    results: Records, error
+  - name: Replace
+    params: op iapp.Operation[Req, Resp], fn func(context.Context, Req) (Resp, error)
+    results: AppOption
+    typeParams: Req, Resp any
+  - name: SetCookie
+    params: ctx context.Context, c *http.Cookie
+  - name: ClearCookie
+    params: ctx context.Context, name string
+  - name: ClientIP
+    params: ctx context.Context
+    results: string
+  - name: UserAgent
+    params: ctx context.Context
+    results: string
+  - name: Now
+    params: ctx context.Context
+    results: time.Time
+  - name: NewTicker
+    params: ctx context.Context, d time.Duration
+    results: clock.Ticker
+  - name: After
+    params: ctx context.Context, d time.Duration
+    results: <-chan time.Time
+  - name: Log
+    params: ctx context.Context
+    results: logger.Logger
+  - name: EraseAfter
+    params: delay D, since func(T) (time.Time, bool)
+    results: StoreOption
+    typeParams: T any, D Delay
+  - name: EraseAt
+    params: at func(T) (time.Time, bool)
+    results: StoreOption
+    typeParams: T any
+  - name: DeleteAfter
+    params: delay D, since func(T) (time.Time, bool)
+    results: StoreOption
+    typeParams: T any, D Delay
+  - name: DeleteAt
+    params: at func(T) (time.Time, bool)
+    results: StoreOption
+    typeParams: T any
+  - name: Anonymise
+    params: fn func(*T)
+    results: StoreOption
+    typeParams: T any
+  - name: HeldUntil
+    params: until func(T) (time.Time, bool), reason string
+    results: StoreOption
+    typeParams: T any
+  - name: Purpose
+    params: text string
+    results: StoreOption
+  - name: DeleteOnErasure
+    results: StoreOption
+  - name: RetentionByProduct
+    params: limits string
+    results: StoreOption
+  - name: Revisions
+    params: n int
+    results: StoreOption
+  - name: NewBinary
+    params: name, doc string
+    results: "*Binary"
+  - name: PerEnv
+    params: name, fallback string
+    results: Scope
+  - name: ScopeKey
+    params: scopes ...Scope
+    results: string, error
+  - name: Generated
+    params: bytes int
+    results: SecretOption
+  - name: RotateEvery
+    params: d time.Duration
+    results: SecretOption
+  - name: KeepVersions
+    params: n int
+    results: SecretOption
+  - name: Optional
+    results: SecretOption
+  - name: SecretStore
+    params: store secret.Store
+    results: AppOption
+  - name: NewService
+    params: name, doc string
+    results: "*Service"
+  - name: Required
+    results: SettingOption
+  - name: Set
+    params: name string, value V
+    results: AppOption
+    typeParams: V any
+  - name: ConfigFiles
+    params: fsys fs.FS
+    results: AppOption
+  - name: Root
+    params: dir string
+    results: StaticOption
+  - name: ReadModel
+    results: StoreOption
+  - name: Telemetry
+    params: path string, gids ...int
+    results: AppOption
+  - name: DesignDigest
+    params: digest string
+    results: AppOption
+  - name: MaxDeliveries
+    params: n int
+    results: DeliveryOption
+  - name: Parallelism
+    params: n int
+    results: DeliveryOption
+  - name: OwnStores
+    results: SubscriptionOption
+  - name: Transact
+    params: ctx context.Context, fn func(context.Context) error
+    results: error
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  fs: io/fs
+  http: net/http
+  iapp: github.com/kitsunium/sdk/framework/internal/app
+  io: io
+  logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+  model: github.com/kitsunium/sdk/framework/model
+  secret: github.com/kitsunium/sdk/pkg/v1/security/secret
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/app
+  name: app
+  purpose: "Package app — who may call an operation: the principal, the rules and their checks."
+types:
+  - alias: true
+    doc: |-
+      Principal is what the app's auth data says about the caller to the
+      SDK's authz: the attributes [Command].Allow and [Query].Allow hand a
+      policy — the caller's roles, its groups. Auth data that does not
+      implement it gives none, and every Allow refuses: the start warns of it.
+
+      	type Me struct{ Roles []string }
+
+      	func (m Me) Attrs() []authz.Attr { return []authz.Attr{authz.AttrStrings("roles", m.Roles...)} }
+
+      The framework calls the caller a principal: in the framework, a subject is the person
+      personal data is about (ADR 0006).
+    kind: alias
+    name: Principal
+    underlying: iapp.AttrsProvider
+  - alias: true
+    doc: |-
+      Activity is a declared activity of a service: a function that says
+      whether the product is busy. A daemon's IdleStop waits until every
+      activity of its mounted services says false AND no connection is open on
+      its listeners.
+    kind: alias
+    name: Activity
+    underlying: iapp.ActivityHandler
+  - alias: true
+    doc: |-
+      App is the whole product: the services it mounts, served by one process.
+      The same services can be mounted by several apps — one binary per service,
+      or all of them in one — and each app draws exactly what it runs.
+    kind: alias
+    name: App
+    underlying: iapp.App
+  - alias: true
+    doc: |-
+      DiagnosticsError is returned by Start when declarations are wrong. It lists
+      every problem at once, each with its position.
+    kind: alias
+    name: DiagnosticsError
+    underlying: iapp.DiagnosticsError
+  - alias: true
+    doc: |-
+      AnalyzeFunc reads the product's source — the Go module rooted at dir, and
+      the packages that declare the modules it mounts — into a graph the runtime
+      merges into its own: the edges found in handler bodies, each function's
+      steps. The framework links no analyzer (ADR 0147 §1): the platform's former runtime
+      tool gives one, in dev, through [Analyzer].
+    kind: alias
+    name: AnalyzeFunc
+    underlying: iapp.AnalyzeFunc
+  - alias: true
+    doc: |-
+      UID identifies an authenticated user. It is what the auth handler returns
+      and what every endpoint reads with [UserID].
+    kind: alias
+    name: UID
+    underlying: iapp.UID
+  - alias: true
+    doc: |-
+      Authenticator is the app's authentication handler: it turns the
+      credentials of a request — a session cookie, a bearer token — into a user,
+      in front of every endpoint declared with [Auth] or [AuthOptional]. An app
+      has at most one.
+
+      P is the credentials: a struct whose fields are tagged cookie:"…" or
+      header:"…", decoded like an endpoint's request. D is what the handler says
+      about the user; endpoints read it with [AuthData].
+    kind: alias
+    name: Authenticator
+    typeParams: P, D any
+    underlying: iapp.AuthenticatorHandler[P, D]
+  - alias: true
+    doc: |-
+      Stdio is where a CLI command reads and writes: the process's own streams
+      under Main, buffers in a test.
+    kind: alias
+    name: Stdio
+    underlying: iapp.StdioValue
+  - alias: true
+    doc: |-
+      CLIFunc is a CLI command's body: its arguments after its name, and the
+      streams; it returns the process exit status (0 success, 64 usage, 70
+      software — the sysexits a shell script branches on).
+    kind: alias
+    name: CLIFunc
+    underlying: iapp.CLIFunc
+  - alias: true
+    doc: |-
+      CLI is a short command-line command of the product: it runs once, in the
+      CLI profile, and exits with its status. Main runs it when the process's
+      first argument is its name.
+    kind: alias
+    name: CLI
+    underlying: iapp.CLI
+  - alias: true
+    doc: CLIOption tunes a CLI command.
+    kind: alias
+    name: CLIOption
+    underlying: iapp.CommandLineConfigurer
+  - alias: true
+    doc: |-
+      Command changes something: a typed input, a typed result, and one handler
+      — the one declared with it. Declare it with [Service].Command; dispatch it
+      with [Command].Dispatch from any building block, which draws a dispatches
+      edge from the caller; give it a route with [Command].Expose.
+
+      A dispatch runs, in this order: the caller's user when the command asks
+      for one ([Auth], implied by [Command].Allow) — an in-process dispatch
+      carries its caller's and is not authenticated again —, the input's
+      validate tags, the policies ([RateLimit], [RateLimitPerClient],
+      [Timeout], [Bulkhead]), the key ([Command].Key), the authorization
+      ([Command].Allow, then [Command].Authorize), then the handler. A queued
+      command ([Queued]) is checked at its dispatch, as its caller — its
+      validate tags, its authorization, its key —, and handled by its queue's
+      consumer, the policies around the handling.
+
+      ADR 0004's step 2 makes a command its unit of work: its authorization and
+      its handler will run in one transaction, which holds its effects until
+      the commit. Until then, a command's writes and effects are made as the
+      handler makes them.
+    kind: alias
+    name: Command
+    typeParams: C, R any
+    underlying: iapp.Command[C, R]
+  - alias: true
+    doc: |-
+      CommandOption configures a command: [Queued]; the options every operation
+      takes — [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient],
+      [Timeout], [Bulkhead]; and, for a queued one, [MaxDeliveries] and
+      [Parallelism].
+    kind: alias
+    name: CommandOption
+    underlying: iapp.CommandConfigurer
+  - alias: true
+    doc: AppOption configures an app. Options win over the environment.
+    kind: alias
+    name: AppOption
+    underlying: iapp.AppConfigurer
+  - alias: true
+    doc: |-
+      Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
+      [DialectSQLite], the framework's own names (ADR 0179 Q5) — the graph names the
+      engine by it.
+    kind: alias
+    name: Dialect
+    underlying: iapp.Dialect
+  - alias: true
+    doc: |-
+      DatabaseURL is what a database's URL points at, as its engine describes it
+      for the graph, the Studio, the logs and every error: never a user, never a
+      password, never a parameter.
+    kind: alias
+    name: DatabaseURL
+    underlying: iapp.DatabaseURLValue
+  - alias: true
+    doc: |-
+      Migration is one versioned change of a database's schema and its
+      reversal, the framework's own (ADR 0179 step 10): the shape the SDK's sql runs,
+      which the store subsystem hands it.
+
+      	app.Migration{
+      		Version: 20261017120000,
+      		Name:    "notes",
+      		Up:      app.Statements("CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)"),
+      		Down:    app.Statements("DROP TABLE notes"),
+      	}
+    kind: alias
+    name: Migration
+    underlying: iapp.MigrationValue
+  - alias: true
+    doc: |-
+      MigrationStep is one direction of a [Migration], run on ex — the
+      transaction its version row is written in, so that both commit
+      together.
+    kind: alias
+    name: MigrationStep
+    underlying: iapp.MigrationStep
+  - alias: true
+    doc: |-
+      MigrationExecutor is what a migration's step runs its statements on: a
+      transaction, which a step cannot end.
+    kind: alias
+    name: MigrationExecutor
+    underlying: iapp.MigrationExecutor
+  - alias: true
+    doc: |-
+      Engine is an SQL engine a database runs on. An engine module returns one —
+      github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;
+      the framework calls it when the database starts. Like an SDK port, it grows by
+      sibling interfaces, never by a method.
+    kind: alias
+    name: Engine
+    underlying: iapp.Engine
+  - alias: true
+    doc: |-
+      LockWaiter is an [Engine] whose connections wait a bounded time for a lock
+      another connection holds — SQLite's busy timeout —, a sibling of Engine
+      (ADR 0178 C2). The framework opens such an engine's pool with OpenWaiting instead
+      of Open, and gives it a wait under <name>-timeout, so that a lost race on
+      the lock comes back as the engine's refusal before the call's own
+      deadline. An engine that does not implement it keeps its own wait.
+    kind: alias
+    name: LockWaiter
+    underlying: iapp.LockWaiter
+  - alias: true
+    doc: "DatabaseOption configures a database: [Keeps], [Migrations]."
+    kind: alias
+    name: DatabaseOption
+    underlying: iapp.DatabaseConfigurer
+  - alias: true
+    doc: |-
+      Keepable is what a database keeps: a service — every store it declares —,
+      a store, or a module (ADR 0008) — every store of its services.
+    kind: alias
+    name: Keepable
+    underlying: iapp.Keeper
+  - alias: true
+    doc: |-
+      Empty is the request or the response of an endpoint that has none. An
+      endpoint answering EmptyValue replies 204 No Content.
+    kind: alias
+    name: Empty
+    underlying: iapp.EmptyValue
+  - alias: true
+    doc: |-
+      Endpoint is an HTTP endpoint with a typed request and a typed response.
+      Declare it with [Service].Endpoint; call it from another service with
+      [Endpoint].Call, which is how the diagram sees service-to-service calls.
+    kind: alias
+    name: Endpoint
+    typeParams: Req, Resp any
+    underlying: iapp.EndpointService[Req, Resp]
+  - alias: true
+    doc: EndpointOption configures an endpoint.
+    kind: alias
+    name: EndpointOption
+    underlying: iapp.EndpointConfigurer
+  - alias: true
+    doc: |-
+      OperationOption configures an endpoint, a command or a query alike: the
+      authentication it asks for ([Auth], [AuthOptional]) and the policies in
+      front of its handler ([RateLimit], [RateLimitPerClient], [Timeout],
+      [Bulkhead]).
+    kind: alias
+    name: OperationOption
+    underlying: iapp.OperationOption
+  - alias: true
+    doc: |-
+      Error is an error a product returns to its callers. Message travels on the
+      wire; the cause attached with [Error].Wrap is logged and never sent.
+
+      Return one from a handler to choose the HTTP status and the message the
+      caller reads. Any other error becomes a 500 whose body says nothing about
+      it: an error message is the classic place a secret leaks from.
+    kind: alias
+    name: Error
+    underlying: iapp.Error
+  - alias: true
+    doc: |-
+      Violation is one validation rule a request failed: where, which rule, and
+      why — never the value.
+    kind: alias
+    name: Violation
+    underlying: iapp.ViolationMessage
+  - alias: true
+    doc: |-
+      ExposeConfigurer configures an exposure ([Command].Expose, [Query].Expose):
+      every [EndpointOption] — [Name], [MaxBody], [RateLimitPerClient]… — and
+      the markers that say who may run an operation declaring no rule of its
+      own: [Anyone], [AnyUser].
+    kind: alias
+    name: ExposeOption
+    underlying: iapp.ExposeConfigurer
+  - alias: true
+    doc: |-
+      Former is one former value of a field that keeps its history: what it was,
+      until when, and who replaced it.
+    kind: alias
+    name: Former
+    underlying: iapp.Former
+  - alias: true
+    doc: |-
+      Job is scheduled work: a piece of the daemon's internal loop. It runs on
+      the SDK scheduler, whose decisions about time are documented rather than
+      emergent: a fire that is due while the previous run of the same job is
+      still going is skipped and counted, and a missed deadline is skipped and
+      counted, never caught up.
+    kind: alias
+    name: Job
+    underlying: iapp.Job
+  - alias: true
+    doc: |-
+      ListenHandler serves one connection of a [Listener] until it returns; the
+      connection is closed after it. conn.Peer says who connected, as the kernel
+      says where it can (pkg/v1/proc/ipc).
+    kind: alias
+    name: ListenHandler
+    underlying: iapp.ListenHandler
+  - alias: true
+    doc: |-
+      Listener is an inbound port that is not HTTP: a private socket on this
+      machine — a Unix socket in a directory only the product's account can
+      reach, the kernel naming the peer on Linux (ADR 0148) — speaking a
+      versioned contract. It is how a daemon profile serves its clients, and how
+      two process roles of one binary talk (D22): through the contract, never
+      through each other's code.
+    kind: alias
+    name: Listener
+    underlying: iapp.Listener
+  - alias: true
+    doc: ListenerOption tunes a listener.
+    kind: alias
+    name: ListenerOption
+    underlying: iapp.ListenerConfigurer
+  - alias: true
+    doc: |-
+      Loop is a declared loop of the daemon: the framework owns the wait, the product owns
+      the work. Its wake sources — a period, a deadline the product computes, a
+      topic — are data, so the diagram draws exactly what wakes it; the framework runs it on
+      its own goroutine, one run at a time, observes every run, and restarts it
+      after a panic.
+    kind: alias
+    name: Loop
+    underlying: iapp.Loop
+  - alias: true
+    doc: |-
+      Wake says why a declared loop runs: the reason, the instant, and the
+      topic that woke it when one did. Wakes that come while it runs, or while
+      it backs off after a failure, are gathered into one run: Reasons and
+      Topics say every one of them, and Reason the one that decides the run.
+    kind: alias
+    name: Wake
+    underlying: iapp.WakeEvent
+  - alias: true
+    doc: LoopOption configures a declared loop.
+    kind: alias
+    name: LoopOption
+    underlying: iapp.LoopConfigurer
+  - alias: true
+    doc: |-
+      Routine is a loop written by hand: a function that runs until its context
+      ends. The framework starts it with the app, cancels its context on shutdown and waits
+      for it, restarts it after an error or a panic — backing off from one second
+      to one minute — and reads its select statements to draw what it waits on.
+    kind: alias
+    name: Routine
+    underlying: iapp.Routine
+  - alias: true
+    doc: |-
+      Mailer is outbound mail: a durable outbox and the transport that empties
+      it. [Mailer].Send only queues — it returns once the message is safely in
+      the outbox — and the mailer's own loop hands each message to the transport,
+      retrying a failure and dead-lettering a message after its last attempt.
+
+      The transport is the SDK's mail package: SMTP when the mail connector's
+      secret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=
+      starttls|implicit|none — and otherwise the capture transport, which keeps
+      every message for the Studio's mailbox and for tests ([Mailer].Captured)
+      and delivers nothing. Outside dev, the capture transport is reported as a
+      warning. The URL is read again before every delivery: replacing it where
+      it lives — a new version in the store, a new file behind
+      <PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+      transports are the SDK's, which the mail subsystem plugs in
+      (framework/app/mail, ADR 0179 step 6).
+    kind: alias
+    name: Mailer
+    underlying: iapp.Mailer
+  - alias: true
+    doc: MailerOption configures a mailer.
+    kind: alias
+    name: MailerOption
+    underlying: iapp.MailerConfigurer
+  - alias: true
+    doc: |-
+      Module is a set of services a product mounts as one: [NewModule] declares
+      it, [App].With or [Mount] mounts it.
+    kind: alias
+    name: Module
+    underlying: iapp.Module
+  - alias: true
+    doc: |-
+      ModulePart is what a module is made of: its services, the modules it
+      requires ([Requires]), and the migrations of the data it keeps outside
+      the framework's stores ([Migrations]).
+    kind: alias
+    name: ModulePart
+    underlying: iapp.ModuleConfigurer
+  - alias: true
+    doc: "MountOption configures the mount of a module: [Prefix], [Bind], [Only]."
+    kind: alias
+    name: MountOption
+    underlying: iapp.MountConfigurer
+  - alias: true
+    doc: |-
+      Operation takes a typed request and answers a typed response: an
+      endpoint, a port — and, with ADR 0005, a command or a query. It is what
+      [Fallback] and [Bind] give a port, and what [Replace] replaces in a test;
+      a request or a response of other types does not compile. Its methods are
+      unexported: only the framework implements it.
+
+      Every operation is a node of the graph, and runs in a span of its own
+      through its whole pipeline — authentication, validation, policies, the
+      Studio's mocks — whoever calls it.
+    kind: alias
+    name: Operation
+    typeParams: Req, Resp any
+    underlying: iapp.Operation[Req, Resp]
+  - alias: true
+    doc: |-
+      PasswordPolicy is the policy of one secret field that holds a password's
+      hash: how long a password is at least, and how many former passwords it
+      refuses. [Store].Passwords declares it; Set, Change and Verify apply it.
+    kind: alias
+    name: PasswordPolicy
+    typeParams: T any
+    underlying: iapp.PasswordPolicyService[T]
+  - alias: true
+    doc: "PasswordOption configures a password policy: [MinLength], [NotReused]."
+    kind: alias
+    name: PasswordOption
+    underlying: iapp.PasswordConfigurer
+  - alias: true
+    doc: |-
+      Port is an operation a service needs and does not implement: a typed
+      request, a typed response, a name. Declare it with [Service].Port, and
+      call it with [Port].Call as an endpoint is called: validated, observed,
+      drawn.
+
+      What a port calls is decided when the app starts, by one rule the static
+      analysis shares: the app's [Bind], else the one [Service].Implement among
+      the services the app mounts, else the port's own [Fallback]. The start
+      refuses a port it cannot bind, with every other problem at once.
+
+      A port is how a service reaches what it cannot import — a module its
+      host's content, a service another that imports it — the consumer owning
+      the contract.
+    kind: alias
+    name: Port
+    typeParams: Req, Resp any
+    underlying: iapp.PortService[Req, Resp]
+  - alias: true
+    doc: "PortOption configures a port: [Fallback]."
+    kind: alias
+    name: PortOption
+    typeParams: Req, Resp any
+    underlying: iapp.PortConfigurer[Req, Resp]
+  - alias: true
+    doc: Erasure is what app.Erase did, store by store.
+    kind: alias
+    name: Erasure
+    underlying: iapp.Erasure
+  - alias: true
+    doc: PersonalData is a person's data as app.Export gives it.
+    kind: alias
+    name: PersonalData
+    underlying: iapp.PersonalData
+  - alias: true
+    doc: |-
+      Query reads and changes nothing: a typed input, a typed result, and one
+      handler — the one declared with it. Declare it with [Service].Query; ask it
+      with [Query].Ask from any building block, which draws an asks edge from
+      the caller; give it a route with [Query].Expose. The static analysis warns
+      of a query whose code writes a store, fires a workflow, publishes, sends a
+      mail or dispatches a command.
+
+      A question runs, in this order: the caller's user when the query asks for
+      one ([Auth], implied by [Query].Allow), the input's validate tags, the
+      policies, the authorization ([Query].Allow, then [Query].Authorize), then
+      the handler, on the caller's goroutine.
+    kind: alias
+    name: Query
+    typeParams: Q, R any
+    underlying: iapp.Query[Q, R]
+  - alias: true
+    doc: |-
+      QueryOption configures a query: the options every operation takes —
+      [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
+      [Bulkhead].
+    kind: alias
+    name: QueryOption
+    underlying: iapp.QueryConfigurer
+  - alias: true
+    doc: |-
+      Records is one store's records without their type. Get returns a record
+      without its secret members; Keys lists the records' keys, to a module that
+      watches the store; EraseFields and Delete take a reason and are refused on a
+      held record. Each call is a span on the store's node and an entry in the
+      privacy journal.
+    kind: alias
+    name: Records
+    underlying: iapp.RecordsService
+  - alias: true
+    doc: |-
+      Revision is one version of a record a store with [Revisions] keeps: its
+      number — from 1, never given twice while the record exists —, when the
+      write that made it ran, on the app's clock, zero for a record stored before
+      its store kept revisions; who made it — the caller's [UserID], empty for a
+      write with no user —; which command made it — its node ID, empty outside a
+      command —; and the record as it was, its secret members zeroed.
+    kind: alias
+    name: Revision
+    typeParams: T any
+    underlying: iapp.RevisionEvent[T]
+  - alias: true
+    doc: |-
+      Tombstone is one record in a store's trash: its key, when the product
+      deleted it, on the app's clock, and when the framework purges it — its trash's
+      length after the deletion, or sooner when its retention says so.
+    kind: alias
+    name: Tombstone
+    underlying: iapp.TombstoneEvent
+  - alias: true
+    doc: |-
+      Edit is one change between two versions of a record, in RFC 6902's words:
+      Op is add, remove or replace, Path the RFC 6901 JSON pointer of the member
+      it changes, From the value it had and To the value it has, as JSON. A
+      secret member says it changed, never what: its From and To are empty.
+    kind: alias
+    name: Edit
+    underlying: iapp.Edit
+  - alias: true
+    doc: |-
+      Binary is one executable the product ships, made of process roles: a
+      status line and its daemon are two roles of one binary, "statusline" and
+      "statusline daemon". Each role is an App — its own services, its own
+      profile — and two roles talk only through a declared, versioned contract
+      (D22): a listener one serves and the other dials, never each other's code.
+
+      	var Binary = app.NewBinary("statusline", "The status line of a Claude session.").
+      		Role("render", RenderApp).                // statusline ...
+      		Role("daemon", DaemonApp, "daemon").      // statusline daemon ...
+      		Talks("render", "daemon", "render/v1")
+
+      	func main() { os.Exit(Binary.Main(context.Background(), os.Args[1:])) }
+
+      The package that declares a binary and its roles is wiring, generated from
+      the design (D22).
+    kind: alias
+    name: Binary
+    underlying: iapp.Binary
+  - alias: true
+    doc: |-
+      Scope is one part of a path computed at the start: the user, the
+      executable, a configuration directory. Two processes share a singleton or
+      a socket when every scope gives them the same value.
+    kind: alias
+    name: Scope
+    underlying: iapp.ScopeValue
+  - alias: true
+    doc: |-
+      Secret is a secret the product declares: provided by the operator — an SMTP
+      URL, an API token — or generated by the framework — a signing or sealing key — and
+      rotated on its schedule.
+    kind: alias
+    name: Secret
+    underlying: iapp.Secret
+  - alias: true
+    doc: SecretOption configures a secret.
+    kind: alias
+    name: SecretOption
+    underlying: iapp.SecretConfigurer
+  - alias: true
+    doc: |-
+      Service is a bounded context of the product: it owns its building blocks —
+      endpoints, stores, topics, subscriptions, workflows, jobs, frontends — and
+      is the unit an App mounts. Declare one per package, as a package-level
+      variable, and declare its building blocks through its methods:
+
+      	var Service = app.NewService("todos", "The todo list.")
+      	var Todos = Service.Store("todos", func(t Todo) string { return t.ID })
+      	var _ = Service.Endpoint("GET /todos", List)
+
+      Declaring never fails: a mistake — a malformed route, a duplicate name — is
+      recorded with its source position and reported, all at once, when the App
+      starts. The diagram shows it too.
+    kind: alias
+    name: Service
+    underlying: iapp.Service
+  - alias: true
+    doc: |-
+      Setting is a value the environment gives a service, declared with
+      [Service].Setting.
+    kind: alias
+    name: Setting
+    typeParams: T SettingValue
+    underlying: iapp.SettingService[T]
+  - alias: true
+    doc: SettingValue is what a setting may hold.
+    kind: alias
+    name: SettingValue
+    underlying: iapp.SettingValue
+  - alias: true
+    doc: SettingOption configures a setting.
+    kind: alias
+    name: SettingOption
+    underlying: iapp.SettingConfigurer
+  - alias: true
+    doc: |-
+      Frontend is static assets the product serves: a single page application,
+      a documentation site. Requests the page makes to the product's endpoints
+      are attributed to it in the diagram.
+    kind: alias
+    name: Frontend
+    underlying: iapp.Frontend
+  - alias: true
+    doc: StaticOption configures a frontend.
+    kind: alias
+    name: StaticOption
+    underlying: iapp.StaticConfigurer
+  - alias: true
+    doc: |-
+      Store is a typed, keyed collection of entities. Every read returns a copy
+      and every write stores one: an entity is kept as its JSON encoding, so what
+      a handler holds can never alias what the store holds, and the memory and
+      file backends behave identically.
+
+      With a data directory (<PRODUCT>_DATA_DIR; ".app/data" in dev) the store persists
+      every write before returning, atomically — a crash never leaves a torn
+      file — and a write costs one entity, whatever the store holds. Without one,
+      it lives in memory. A store is a port (ADR 0004): what it runs on is its
+      engine (store_engine.go), today the SDK's document store (docstore); the framework
+      makes it a node of the graph, observes every call, and speaks for its
+      refusals.
+    kind: alias
+    name: Store
+    typeParams: T any
+    underlying: iapp.StoreService[T]
+  - alias: true
+    doc: StoreOption configures a store.
+    kind: alias
+    name: StoreOption
+    underlying: iapp.StoreConfigurer
+  - alias: true
+    doc: |-
+      Topic is an asynchronous channel of messages of type T. Every subscription
+      receives every message, at least once: a subscription's handler must
+      tolerate a redelivery.
+    kind: alias
+    name: Topic
+    typeParams: T any
+    underlying: iapp.TopicService[T]
+  - alias: true
+    doc: |-
+      Subscription consumes a topic: its handler runs once per message, at least
+      once, retried on error, and dead-lettered after MaxDeliveries attempts.
+    kind: alias
+    name: Subscription
+    typeParams: T any
+    underlying: iapp.SubscriptionWorker[T]
+  - alias: true
+    doc: SubscriptionOption configures a subscription.
+    kind: alias
+    name: SubscriptionOption
+    underlying: iapp.SubscriptionConfigurer
+  - alias: true
+    doc: |-
+      DeliveryOption configures a queue's deliveries: a subscription's, or a
+      queued command's ([MaxDeliveries], [Parallelism]).
+    kind: alias
+    name: DeliveryOption
+    underlying: iapp.DeliveryOption
+  - alias: true
+    doc: |-
+      Written is what a watch is told of a write: which store, which record, and
+      whether it was deleted — never a value. The watch reads the record itself
+      ([RecordsOf]): without its secret members, and journaled.
+    kind: alias
+    name: Written
+    underlying: iapp.WrittenEvent
+  - alias: true
+    doc: |-
+      Watch is a subscription fed by stores instead of a topic: its handler is
+      told of every write the framework confirms on a store whose entity holds a field
+      with its mark. [Service].Watch declares one.
+    kind: alias
+    name: Watch
+    underlying: iapp.Watch
+  - alias: true
+    doc: |-
+      Mark is what a module looks for in the product's fields: app.Personal,
+      app.Special or app.Moderated. There is no mark for public or secret:
+      there is nothing to find in the first, and nothing may watch the second.
+    kind: alias
+    name: Mark
+    underlying: iapp.Mark
+  - alias: true
+    doc: |-
+      FieldRef is one field of one store that carries a mark: where the field
+      is, and what its tag says of it.
+    kind: alias
+    name: FieldRef
+    underlying: iapp.FieldRefValue
+  - alias: true
+    doc: |-
+      Workflow is a state machine over the entities of one store: the states an
+      entity goes through, and the arrows between them. It is declared as data —
+      which is why the diagram can draw it exactly — and it runs four kinds of
+      transitions:
+
+        - event transitions ([Workflow].On), fired by code with [Workflow].Fire;
+        - timer transitions ([Workflow].After), fired by the workflow's own loop
+          once an entity has spent a duration in a state;
+        - timer transitions at an instant the entity carries ([Workflow].At) — a
+          due date, a deadline — fired by the same loop when it comes;
+        - guard transitions ([Workflow].When), fired by the same loop as soon as
+          a condition on the entity holds.
+
+      The SDK's state-machine engine runs it (statemachine). Its loop never
+      polls: it keeps an agenda of the transitions due, sleeps until the
+      earliest, and a write of the store — which may bring one forward — wakes
+      it. A workflow with nothing due does not run at all. Transitions of one
+      entity run one at a time, of different entities at once.
+
+      The entity's state lives in the entity itself (the state function returns
+      a pointer to it), so the store stays the single source of truth; the
+      engine keeps, beside it, when each entity entered its state and the
+      history of its transitions — in the workflow's file under the data
+      directory, so a timer keeps counting across a restart.
+    kind: alias
+    name: Workflow
+    typeParams: E any, S comparable
+    underlying: iapp.WorkflowService[E, S]
+  - alias: true
+    doc: |-
+      Delay is how long a timer transition waits: a duration, or a setting that
+      holds one — read when the delay is needed, so each environment can give
+      its own.
+    kind: alias
+    name: Delay
+    underlying: iapp.Delay
+  - alias: true
+    doc: |-
+      Change describes one transition, for [Workflow].OnTransition hooks: the
+      entity, the event, and the states it left and entered.
+    kind: alias
+    name: Change
+    typeParams: E any, S comparable
+    underlying: iapp.ChangeEvent[E, S]
+vars:
+  - doc: |-
+      Privacy is the framework's own service: the legal holds and the privacy journal of
+      an app that keeps personal data. The framework mounts a copy of it — named
+      app.privacy, a name no service of a product can take — in every app whose
+      stores keep personal data or declare a retention, before the product's
+      services. Its stores stay in the data directory unless the product places
+      them (ADR 0004). A product never mounts it itself.
+    items:
+      - name: Privacy
+        type: "*Service"
+        value: iapp.Privacy
+    name: Privacy
+  - grouped: true
+    items:
+      - doc: |-
+          PerUID is the current user: one process per user of the machine (its
+          UID on Unix, its SID on Windows).
+        name: PerUID
+        type: Scope
+        value: iapp.PerUID
+      - doc: |-
+          PerExecutable is the running executable's path, links resolved: one
+          process per installed copy of the binary.
+        name: PerExecutable
+        type: Scope
+        value: iapp.PerExecutable
+      - doc: |-
+          PerConfigDir is the user's configuration directory (os.UserConfigDir):
+          one process per configuration home.
+        name: PerConfigDir
+        type: Scope
+        value: iapp.PerConfigDir
+    name: PerUID

@@ -1,0 +1,47 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The common control signals as typed process.Signal values, so callers pass
+      process.SIGTERM to Stop/Signal without a syscall import. They equal any
+      Signal parsed from the same name (the underlying value is the platform number).
+    grouped: true
+    items:
+      - doc: SIGTERM is the polite termination request — the default Stop signal.
+        name: SIGTERM
+        value: Signal(syscall.SIGTERM)
+      - doc: SIGKILL is the unignorable kill Stop escalates to after the grace window.
+        name: SIGKILL
+        value: Signal(syscall.SIGKILL)
+      - doc: SIGINT is the interrupt signal (Ctrl-C analogue).
+        name: SIGINT
+        value: Signal(syscall.SIGINT)
+      - doc: SIGHUP is the hang-up / reload signal many daemons treat as "reconfigure".
+        name: SIGHUP
+        value: Signal(syscall.SIGHUP)
+      - doc: SIGQUIT is the quit-with-core signal.
+        name: SIGQUIT
+        value: Signal(syscall.SIGQUIT)
+    name: SIGTERM
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - MustStart
+    name: process.go
+  - decls:
+      - SIGTERM
+    name: signals.go
+functions:
+  - name: MustStart
+    params: ctx context.Context, spec Spec
+    results: Process
+imports:
+  context: context
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/process
+  name: process
+  purpose: "Package process is the public facade for the SDK's keystone process-spawn primitive: it starts a child process under explicit credentials, in its own process group and session, and returns a handle that can wait for exit, signal the leader or its whole group, and stop the group gracefully with a SIGTERM→SIGKILL escalation."
+types: []

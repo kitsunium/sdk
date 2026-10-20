@@ -1,0 +1,160 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      RootPath is the path of the value handed to a validator, before any descent.
+      A violation reported at RootPath is about the value as a whole — a
+      cross-field rule with no single culpable member.
+    items:
+      - name: RootPath
+        type: string
+        value: "\"\""
+    name: RootPath
+  - doc: fieldSeparator joins a parent path to a member name.
+    items:
+      - name: fieldSeparator
+        type: string
+        value: "\".\""
+    name: fieldSeparator
+  - doc: indexOpen and indexClose bracket an element position.
+    grouped: true
+    items:
+      - name: indexOpen
+        type: string
+        value: "\"[\""
+      - name: indexClose
+        type: string
+        value: "\"]\""
+    name: indexOpen
+  - doc: |-
+      maxPathEchoRunes caps how much of the joined path list Err copies into its
+      diagnostic field. Paths are field NAMES, never values, so echoing them is
+      safe — but a 400-field form would otherwise produce a log line nobody reads.
+    items:
+      - name: maxPathEchoRunes
+        type: int
+        value: "240"
+    name: maxPathEchoRunes
+  - doc: |-
+      pathSeparator joins the paths Err echoes; the grammar itself never produces
+      ", " inside a single path, so the join stays unambiguous.
+    items:
+      - name: pathSeparator
+        type: string
+        value: "\", \""
+    name: pathSeparator
+  - doc: |-
+      truncationMark is appended to a clipped echo so a reader can tell a short
+      list from a shortened one.
+    items:
+      - name: truncationMark
+        type: string
+        value: "\"…\""
+    name: truncationMark
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - RootPath
+      - fieldSeparator
+      - indexOpen
+      - JoinField
+      - JoinIndex
+    name: path.go
+  - decls:
+      - maxPathEchoRunes
+      - pathSeparator
+      - truncationMark
+      - ReportValue
+      - ReportValue.OK
+      - ReportValue.First
+      - ReportValue.Paths
+      - ReportValue.Err
+      - clipPaths
+    name: report.go
+  - decls:
+      - Constraint
+    name: validation.go
+  - decls:
+      - ViolationValue
+    name: violation.go
+functions:
+  - name: JoinField
+    params: base, name string
+    results: string
+  - name: JoinIndex
+    params: base string, index int
+    results: string
+  - doc: |-
+      clipPaths joins every violation path and shortens the result to
+      maxPathEchoRunes runes, marking a truncation so a reader can tell a short
+      list from a shortened one.
+    name: clipPaths
+    params: report ReportValue
+    results: string
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/validation
+  name: validation
+  purpose: Package validation — ranges 0.2.15.* (ADR 0046 core/app/validation block) and 0.3.47.* (ADR 0046 service/app/validation block, declared here since ADR 0160).
+types:
+  - kind: named
+    methods:
+      - name: OK
+        recv: r ReportValue
+        results: bool
+      - name: First
+        recv: r ReportValue
+        results: violation ViolationValue, ok bool
+      - name: Paths
+        recv: r ReportValue
+        results: "[]string"
+      - name: Err
+        recv: r ReportValue
+        results: error
+    name: ReportValue
+    underlying: "[]ViolationValue"
+  - kind: named
+    name: Constraint
+    typeParams: T any
+    underlying: func(path string, value T) ReportValue
+  - fields:
+      - doc: |-
+          Path locates the offending value inside the structure that was
+          validated, in the grammar of [JoinField] / [JoinIndex] —
+          "user.addresses[2].zip". [RootPath] (the empty string) means the value
+          as a whole, which is what a cross-field rule reports when no single
+          field is at fault.
+        name: Path
+        type: string
+      - doc: |-
+          Rule names the constraint that refused, in lower case —
+          "required", "between", "length", "one_of", "pattern". It is the stable
+          identifier a caller switches on when the Code granularity is too coarse,
+          and the key an application uses to look up its own translated message.
+        name: Rule
+        type: string
+      - doc: |-
+          Message explains the rule in one wire-safe line: no newline, no private
+          data, and — the part that is a security property rather than a style
+          choice — NEVER the rejected value itself. A validation message is the
+          one error message in a service designed to reach the end user, so a
+          message that echoed the value would exfiltrate whatever the caller was
+          unwise enough to validate: a password, a token, a card number. It names
+          the rule and the bound instead ("must be between 8 and 64 characters").
+        name: Message
+        type: string
+      - doc: |-
+          Code is the dotted-quad identity of the rule that refused, so a caller
+          routes on it with errs.HasCode / errs.NewPrefixMatcher instead of
+          string-matching Rule. The built-in constraints own 0.3.47.*; a
+          consumer-written Constraint SHOULD carry a Code in the third-party
+          Major range (ADR 0019, 0x40-0x7F).
+        name: Code
+        type: errs.Code
+    kind: struct
+    name: ViolationValue

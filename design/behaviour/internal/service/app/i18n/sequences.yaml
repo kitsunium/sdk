@@ -1,0 +1,1726 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: parseAcceptLanguage
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseAcceptLanguage
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseElement
+        kind: internal
+    steps:
+      - bind: position
+        eval: "0"
+      - bind: rest
+        eval: header
+      - loop:
+          cond: rest != ""
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: len(dst) == maxRanges
+            - bind: raw, tail, more
+              eval: strings.Cut(rest, ",")
+              to: strings
+            - alt:
+                - do:
+                    - set: rest
+                      value: tail
+                  when: more
+                - do:
+                    - set: rest
+                      value: "\"\""
+                  else: true
+            - bind: order
+              eval: position
+            - op: ++
+              set: position
+            - bind: elem, ok
+              eval: parseElement(raw, order)
+              to: parseElement
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - set: dst
+              value: append(dst, elem)
+      - return: dst
+  - of: parseElement
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseElement
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseWeight
+        kind: internal
+    steps:
+      - bind: head, params, hasParams
+        eval: strings.Cut(raw, ";")
+        to: strings
+      - bind: text
+        eval: strings.TrimSpace(head)
+        to: strings
+      - opt:
+          do:
+            - return: element{}, false
+          when: "!validRange(text)"
+      - opt:
+          do:
+            - return: "element{text: text, quality: defaultQuality, order: order}, true"
+          when: "!hasParams"
+      - bind: quality, valid
+        eval: parseWeight(params)
+        to: parseWeight
+      - opt:
+          do:
+            - return: element{}, false
+          when: "!valid"
+      - return: "element{text: text, quality: quality, order: order}, true"
+  - of: parseWeight
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseWeight
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseQuality
+        kind: internal
+    steps:
+      - bind: name, value, found
+        eval: strings.Cut(params, "=")
+        to: strings
+      - opt:
+          do:
+            - return: 0, false
+          when: strings.Contains(params, ";") || !found || !strings.EqualFold(strings.TrimSpace(name), qualityParam)
+      - return: parseQuality(strings.TrimSpace(value))
+        to: parseQuality
+  - of: parseQuality
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseQuality
+        kind: self
+      - id: wholeQuality
+        kind: internal
+      - id: fractionQuality
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: text == ""
+      - bind: whole
+        eval: text[0]
+      - opt:
+          do:
+            - return: 0, false
+          when: whole != '0' && whole != '1'
+      - opt:
+          do:
+            - return: wholeQuality(whole), true
+              to: wholeQuality
+          when: len(text) == integerPartLen
+      - opt:
+          do:
+            - return: 0, false
+          when: text[decimalPointOffset] != '.'
+      - return: fractionQuality(whole, text[fractionOffset:])
+        to: fractionQuality
+  - of: wholeQuality
+    steps:
+      - opt:
+          do:
+            - return: defaultQuality
+          when: whole == '1'
+      - return: "0"
+  - of: fractionQuality
+    participants:
+      - id: caller
+        kind: actor
+      - id: fractionQuality
+        kind: self
+      - id: fractionDigits
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(frac) > qualityScale
+      - bind: value, digitsOK
+        eval: fractionDigits(frac)
+        to: fractionDigits
+      - opt:
+          do:
+            - return: 0, false
+          when: "!digitsOK"
+      - opt:
+          do:
+            - return: defaultQuality, value == 0
+          when: whole == '1'
+      - return: value, true
+  - of: isRangeByte
+    steps:
+      - bind: letter
+        eval: (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+      - return: letter || (b >= '0' && b <= '9') || b == '-' || b == '*'
+  - of: Plain
+    steps:
+      - return: "EntryValue{Pattern: text}"
+  - of: PluralForms
+    steps:
+      - opt:
+          do:
+            - set: forms
+              value: map[string]string{}
+          when: forms == nil
+      - return: "EntryValue{Forms: forms}"
+  - of: failLoad
+    participants:
+      - id: caller
+        kind: actor
+      - id: failLoad
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     corei18n.CodeCatalogLoadFailed,
+          		Reason:   "CATALOG_LOAD_FAILED",
+          		Public:   "The message catalogue could not be read or decoded",
+          		Private:  "service/app/i18n: a listing, a file read or a codec decode failed; the cause is wrapped, not replaced, so errors.Is against fs.ErrNotExist still answers",
+          		ExitCode: exitConfig,
+          	}, fields...)
+        to: errs
+  - of: LoadFS
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadFS
+        kind: self
+      - id: codec
+        kind: package
+      - id: fs
+        kind: stdlib
+      - id: readCatalogues
+        kind: internal
+      - id: NewStore
+        kind: internal
+    steps:
+      - bind: decoder, ok
+        eval: codec.Lookup(format)
+        to: codec
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corei18n.CatalogLoadFailed, errs.WrapParams{},
+                			errs.String("format", string(format)), errs.String("detail", "no codec registered for this format — blank-import pkg/v1/data/codec"))
+          when: "!ok"
+      - bind: entries, err
+        eval: fs.ReadDir(fsys, dir)
+        to: fs
+      - opt:
+          do:
+            - return: nil, failLoad(err, errs.String("dir", dir))
+          when: err != nil
+      - bind: catalogues, err
+        eval: readCatalogues(fsys, dir, entries, decoder)
+        to: readCatalogues
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: NewStore(fallback, catalogues)
+        to: NewStore
+  - of: readCatalogues
+    participants:
+      - id: caller
+        kind: actor
+      - id: readCatalogues
+        kind: self
+      - id: tagFromFilename
+        kind: internal
+      - id: readCatalogue
+        kind: internal
+    steps:
+      - set: catalogues
+        value: make(map[corei18n.TagValue]Catalogue, len(entries))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: entry.IsDir()
+            - bind: tag, tagErr
+              eval: tagFromFilename(entry.Name())
+              to: tagFromFilename
+            - opt:
+                do:
+                  - return: nil, tagErr
+                when: tagErr != nil
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
+                      				errs.String("tag", tag.String()), errs.String("file", entry.Name()), errs.String("detail", "two files resolve to the same language tag"))
+                init:
+                  bind: _, duplicate
+                  eval: catalogues[tag]
+                when: duplicate
+            - bind: catalogue, fileErr
+              eval: readCatalogue(fsys, path.Join(dir, entry.Name()), decoder)
+              to: readCatalogue
+            - opt:
+                do:
+                  - return: nil, fileErr
+                when: fileErr != nil
+            - set: catalogues[tag]
+              value: catalogue
+          key: _
+          range: entries
+          value: entry
+      - return: catalogues, nil
+  - of: tagFromFilename
+    participants:
+      - id: caller
+        kind: actor
+      - id: tagFromFilename
+        kind: self
+      - id: ParseTag
+        kind: internal
+    steps:
+      - bind: base
+        eval: name[:len(name)-len(path.Ext(name))]
+      - set: tag, err
+        to: ParseTag
+        value: ParseTag(base)
+      - opt:
+          do:
+            - return: corei18n.TagValue{}, errs.Wrap(err, errs.WrapParams{}, errs.String("file", name))
+          when: err != nil
+      - return: tag, nil
+  - of: readCatalogue
+    participants:
+      - id: caller
+        kind: actor
+      - id: readCatalogue
+        kind: self
+      - id: fs
+        kind: stdlib
+      - id: decoder.Unmarshal
+        kind: value
+      - id: entriesFrom
+        kind: internal
+    steps:
+      - bind: data, err
+        eval: fs.ReadFile(fsys, name)
+        to: fs
+      - opt:
+          do:
+            - return: nil, failLoad(err, errs.String("file", name))
+          when: err != nil
+      - bind: raw
+        eval: make(map[string]any, expectedCatalogueKeys)
+      - opt:
+          do:
+            - return: nil, failLoad(decodeErr, errs.String("file", name))
+          init:
+            bind: decodeErr
+            eval: decoder.Unmarshal(data, &raw)
+            to: decoder.Unmarshal
+          when: decodeErr != nil
+      - return: entriesFrom(name, raw)
+        to: entriesFrom
+  - of: entriesFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: entriesFrom
+        kind: self
+      - id: entryFrom
+        kind: internal
+    steps:
+      - set: catalogue
+        value: make(Catalogue, len(raw))
+      - loop:
+          do:
+            - bind: entry, entryErr
+              eval: entryFrom(file, key, value)
+              to: entryFrom
+            - opt:
+                do:
+                  - return: nil, entryErr
+                when: entryErr != nil
+            - set: catalogue[corei18n.Key(key)]
+              value: entry
+          key: key
+          range: raw
+          value: value
+      - return: catalogue, nil
+  - of: entryFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: entryFrom
+        kind: self
+      - id: Plain
+        kind: internal
+      - id: countedEntry
+        kind: internal
+      - id: PluralForms
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: Plain(text), nil
+              to: Plain
+          init:
+            bind: text, ok
+            eval: value.(string)
+          when: ok
+      - opt:
+          do:
+            - return: countedEntry(file, key, forms)
+              to: countedEntry
+          init:
+            bind: forms, ok
+            eval: value.(map[string]any)
+          when: ok
+      - opt:
+          do:
+            - return: PluralForms(forms), nil
+              to: PluralForms
+          init:
+            bind: forms, ok
+            eval: value.(map[string]string)
+          when: ok
+      - return: |-
+          EntryValue{}, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
+          		errs.String("file", file), errs.String("key", key),
+          		errs.String("detail", "entry is neither a pattern nor a map of CLDR forms"))
+  - of: countedEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: countedEntry
+        kind: self
+      - id: PluralForms
+        kind: internal
+    steps:
+      - bind: out
+        eval: make(map[string]string, len(forms))
+      - loop:
+          do:
+            - bind: text, ok
+              eval: value.(string)
+            - opt:
+                do:
+                  - return: |-
+                      EntryValue{}, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
+                      				errs.String("file", file), errs.String("key", key), errs.String("form", name),
+                      				errs.String("detail", "a plural form must be a pattern string"))
+                when: "!ok"
+            - set: out[name]
+              value: text
+          key: name
+          range: forms
+          value: value
+      - return: PluralForms(out), nil
+        to: PluralForms
+  - of: NewMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMessage
+        kind: self
+      - id: compilePattern
+        kind: internal
+      - id: corei18n
+        kind: package
+    steps:
+      - bind: body, err
+        eval: compilePattern(text)
+        to: compilePattern
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, err
+          when: err != nil
+      - return: corei18n.NewCompiledMessage(body, nil)
+        to: corei18n
+  - of: NewPluralMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewPluralMessage
+        kind: self
+      - id: compilePattern
+        kind: internal
+      - id: compileForms
+        kind: internal
+      - id: corei18n
+        kind: package
+    steps:
+      - bind: text, ok
+        eval: forms[corei18n.FormOther]
+      - opt:
+          do:
+            - return: |-
+                corei18n.MessageValue{}, errs.Wrap(corei18n.PluralFormMissing, errs.WrapParams{},
+                			errs.String("form", corei18n.FormOther.String()), errs.String("detail", "a plural message must carry the other form"))
+          when: "!ok"
+      - bind: other, err
+        eval: compilePattern(text)
+        to: compilePattern
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, err
+          when: err != nil
+      - bind: plural, err
+        eval: compileForms(forms)
+        to: compileForms
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, err
+          when: err != nil
+      - return: corei18n.NewCompiledMessage(other, plural)
+        to: corei18n
+  - of: compileForms
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileForms
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: compileSorted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: len(forms) <= 1
+      - bind: kinds
+        eval: slices.Sorted(maps.Keys(forms))
+        to: slices
+      - return: compileSorted(kinds, forms)
+        to: compileSorted
+  - of: compileSorted
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileSorted
+        kind: self
+      - id: compilePattern
+        kind: internal
+    steps:
+      - set: compiled
+        value: make([]corei18n.FormPatternValue, 0, len(kinds)-1)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: kind == corei18n.FormOther
+            - opt:
+                do:
+                  - return: nil, errs.Wrap(corei18n.InvalidForm, errs.WrapParams{}, errs.String("form", kind.String()))
+                when: "!kind.Valid()"
+            - bind: body, compileErr
+              eval: compilePattern(forms[kind])
+              to: compilePattern
+            - opt:
+                do:
+                  - return: nil, compileErr
+                when: compileErr != nil
+            - set: compiled
+              value: "append(compiled, corei18n.FormPatternValue{Form: kind, Body: body})"
+          key: _
+          range: kinds
+          value: kind
+      - return: compiled, nil
+  - of: (*Negotiator).lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Negotiator).lookup
+        kind: self
+      - id: candidate.String
+        kind: value
+    steps:
+      - bind: longest
+        eval: "-1"
+      - loop:
+          do:
+            - bind: text
+              eval: candidate.String()
+              to: candidate.String
+            - opt:
+                do:
+                  - continue: true
+                when: len(text) <= longest
+            - opt:
+                do:
+                  - continue: true
+                when: "!subtagPrefixFold(rangeText, text)"
+            - set: best, longest
+              value: candidate, len(text)
+          key: _
+          range: n.supported
+          value: candidate
+      - return: best, longest >= 0
+  - of: refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: refused
+        kind: self
+      - id: tag.String
+        kind: value
+    steps:
+      - bind: text
+        eval: tag.String()
+        to: tag.String
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: elem.quality != 0
+            - opt:
+                do:
+                  - continue: true
+                when: elem.text == wildcardRange
+            - opt:
+                do:
+                  - return: "true"
+                when: subtagPrefixFold(text, elem.text)
+          key: _
+          range: elems
+          value: elem
+      - return: "false"
+  - of: subtagPrefixFold
+    participants:
+      - id: caller
+        kind: actor
+      - id: subtagPrefixFold
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(prefix) > len(whole) || (len(prefix) != len(whole) && whole[len(prefix)] != '-')
+      - return: strings.EqualFold(whole[:len(prefix)], prefix)
+        to: strings
+  - of: sortByQuality
+    steps:
+      - loop:
+          cond: i < len(elems)
+          do:
+            - bind: current
+              eval: elems[i]
+            - bind: j
+              eval: i - 1
+            - loop:
+                cond: j >= 0 && elems[j].quality < current.quality
+                do:
+                  - set: elems[j+1]
+                    value: elems[j]
+                  - op: "--"
+                    set: j
+            - set: elems[j+1]
+              value: current
+          init: i := 1
+          post: i++
+  - of: NewNegotiator
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corei18n.NegotiationEmpty, errs.WrapParams{})
+          when: len(supported) == 0
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the negotiation fallback tag is unset"))
+          when: fallback.IsZero()
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
+                			errs.String("tag", fallback.String()), errs.String("detail", "the negotiation fallback is not in the supported set"))
+          when: "!slices.Contains(supported, fallback)"
+      - return: "&Negotiator{supported: slices.Clone(supported), fallback: fallback}, nil"
+  - of: (*Negotiator).Supported
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Negotiator).Supported
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(n.supported)
+        to: slices
+  - of: (*Negotiator).Negotiate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Negotiator).Negotiate
+        kind: self
+      - id: parseAcceptLanguage
+        kind: internal
+      - id: sortByQuality
+        kind: internal
+      - id: n.selectTag
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: n.fallback
+          when: header == ""
+      - var:
+          name: buf
+          type: "[maxRanges]element"
+      - bind: elems
+        eval: parseAcceptLanguage(header, buf[:0])
+        to: parseAcceptLanguage
+      - opt:
+          do:
+            - return: n.fallback
+          when: len(elems) == 0
+      - eval: sortByQuality(elems)
+        to: sortByQuality
+      - return: n.selectTag(elems)
+        to: n.selectTag
+  - of: (*Negotiator).selectTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Negotiator).selectTag
+        kind: self
+      - id: n.lookup
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: elem.quality == 0
+            - opt:
+                do:
+                  - continue: true
+                when: elem.text == wildcardRange
+            - bind: best, ok
+              eval: n.lookup(elem.text)
+              to: n.lookup
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - continue: true
+                when: refused(elems, best)
+            - return: best
+          key: _
+          range: elems
+          value: elem
+      - return: n.fallback
+  - of: compilePattern
+    participants:
+      - id: caller
+        kind: actor
+      - id: compilePattern
+        kind: self
+      - id: corei18n
+        kind: package
+      - id: compileBraced
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: corei18n.NewPattern(nil)
+                    to: corei18n
+                when: text == ""
+            - return: "corei18n.NewPattern([]corei18n.PartValue{{Text: text}})"
+              to: corei18n
+          when: "!strings.ContainsAny(text, braces)"
+      - return: compileBraced(text)
+        to: compileBraced
+  - of: compileBraced
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileBraced
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: comp.lit.WriteString
+        kind: value
+      - id: comp.step
+        kind: internal
+      - id: comp.done
+        kind: internal
+    steps:
+      - var:
+          name: comp
+          type: patternCompiler
+      - bind: pos
+        eval: "0"
+      - loop:
+          cond: pos < len(text)
+          do:
+            - bind: next
+              eval: strings.IndexAny(text[pos:], braces)
+              to: strings
+            - opt:
+                do:
+                  - eval: comp.lit.WriteString(text[pos:])
+                    to: comp.lit.WriteString
+                  - break: true
+                when: next < 0
+            - eval: "comp.lit.WriteString(text[pos : pos+next])"
+              to: comp.lit.WriteString
+            - op: +=
+              set: pos
+              value: next
+            - bind: advance, stepErr
+              eval: comp.step(text, pos)
+              to: comp.step
+            - opt:
+                do:
+                  - return: corei18n.PatternValue{}, stepErr
+                when: stepErr != nil
+            - op: +=
+              set: pos
+              value: advance
+      - return: comp.done()
+        to: comp.done
+  - of: (*patternCompiler).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*patternCompiler).step
+        kind: self
+      - id: c.lit.WriteByte
+        kind: value
+      - id: c.placeholder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: c.lit.WriteByte('}')
+                    to: c.lit.WriteByte
+                  - return: escapeLen, nil
+                when: pos+1 < len(text) && text[pos+1] == '}'
+            - return: 0, errs.Wrap(corei18n.InvalidPattern, errs.WrapParams{}, errs.Int("offset", pos), errs.String("detail", "unmatched closing brace"))
+          when: text[pos] == '}'
+      - opt:
+          do:
+            - eval: c.lit.WriteByte('{')
+              to: c.lit.WriteByte
+            - return: escapeLen, nil
+          when: pos+1 < len(text) && text[pos+1] == '{'
+      - return: c.placeholder(text, pos)
+        to: c.placeholder
+  - of: (*patternCompiler).placeholder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*patternCompiler).placeholder
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: c.flush
+        kind: internal
+    steps:
+      - bind: end
+        eval: strings.IndexByte(text[pos+1:], '}')
+        to: strings
+      - opt:
+          do:
+            - return: 0, errs.Wrap(corei18n.InvalidPattern, errs.WrapParams{}, errs.Int("offset", pos), errs.String("detail", "unclosed placeholder"))
+          when: end < 0
+      - bind: name
+        eval: "text[pos+1 : pos+1+end]"
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(corei18n.InvalidPattern, errs.WrapParams{}, errs.Int("offset", pos), errs.String("placeholder", name),
+                			errs.String("detail", "placeholder name is empty or outside [A-Za-z_][A-Za-z0-9_]*"))
+          when: "!corei18n.ValidPlaceholder(name)"
+      - eval: c.flush()
+        to: c.flush
+      - set: c.parts
+        value: "append(c.parts, corei18n.PartValue{Name: name})"
+      - return: end + escapeLen, nil
+  - of: (*patternCompiler).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*patternCompiler).flush
+        kind: self
+      - id: c.lit.Reset
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.lit.Len() == 0
+      - set: c.parts
+        value: "append(c.parts, corei18n.PartValue{Text: c.lit.String()})"
+      - eval: c.lit.Reset()
+        to: c.lit.Reset
+  - of: (*patternCompiler).done
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*patternCompiler).done
+        kind: self
+      - id: c.flush
+        kind: internal
+      - id: corei18n
+        kind: package
+    steps:
+      - eval: c.flush()
+        to: c.flush
+      - return: corei18n.NewPattern(c.parts)
+        to: corei18n
+  - of: Rules
+    steps:
+      - opt:
+          do:
+            - return: PluralValue{}, false
+          when: tag.IsZero()
+      - opt:
+          do:
+            - return: exact, true
+          init:
+            bind: exact, found
+            eval: rulesByTag[tag.String()]
+          when: found
+      - bind: base, found
+        eval: rulesByTag[tag.Language()]
+      - return: base, found
+  - of: SupportedTags
+    participants:
+      - id: caller
+        kind: actor
+      - id: SupportedTags
+        kind: self
+      - id: ParseTag
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: tags
+        eval: make([]corei18n.TagValue, 0, len(rulesByTag))
+      - loop:
+          do:
+            - bind: tag, err
+              eval: ParseTag(key)
+              to: ParseTag
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil
+            - set: tags
+              value: append(tags, tag)
+          key: key
+          range: rulesByTag
+      - eval: slices.SortFunc(tags, compareTags)
+        to: slices
+      - return: tags
+  - of: supportedList
+    participants:
+      - id: caller
+        kind: actor
+      - id: supportedList
+        kind: self
+      - id: SupportedTags
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: tags
+        eval: SupportedTags()
+        to: SupportedTags
+      - bind: spellings
+        eval: make([]string, 0, len(tags))
+      - loop:
+          do:
+            - set: spellings
+              value: append(spellings, tag.String())
+          key: _
+          range: tags
+          value: tag
+      - return: strings.Join(spellings, chainSeparator)
+        to: strings
+  - of: requireRules
+    participants:
+      - id: caller
+        kind: actor
+      - id: requireRules
+        kind: self
+      - id: Rules
+        kind: internal
+    steps:
+      - bind: found, ok
+        eval: Rules(tag)
+        to: Rules
+      - opt:
+          do:
+            - return: |-
+                PluralValue{}, errs.Wrap(corei18n.UnsupportedLanguage, errs.WrapParams{},
+                			errs.String("tag", tag.String()), errs.String("supported", supportedList()))
+          when: "!ok"
+      - return: found, nil
+  - of: pluralGermanic
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IntegerPart() == 1 && count.VisibleFractionDigits() == 0
+      - return: corei18n.FormOther
+  - of: pluralFrench
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IntegerPart() <= 1
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: isRomanceMany(count)
+      - return: corei18n.FormOther
+  - of: pluralSpanish
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IsIntegerValued() && count.IntegerPart() == 1
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: isRomanceMany(count)
+      - return: corei18n.FormOther
+  - of: pluralItalian
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IntegerPart() == 1 && count.VisibleFractionDigits() == 0
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: isRomanceMany(count)
+      - return: corei18n.FormOther
+  - of: pluralPortuguese
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IntegerPart() <= 1
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: isRomanceMany(count)
+      - return: corei18n.FormOther
+  - of: pluralEuropeanPortuguese
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IntegerPart() == 1 && count.VisibleFractionDigits() == 0
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: isRomanceMany(count)
+      - return: corei18n.FormOther
+  - of: isRomanceMany
+    steps:
+      - return: |-
+          count.IntegerPart() != 0 &&
+          		count.IntegerPart()%million == 0 &&
+          		count.VisibleFractionDigits() == 0
+  - of: pluralPolish
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOther
+          when: count.VisibleFractionDigits() != 0
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: count.IntegerPart() == 1
+      - bind: mod10, mod100
+        eval: count.IntegerPart()%tenModulus, count.IntegerPart()%hundredModulus
+      - opt:
+          do:
+            - return: corei18n.FormFew
+          when: isSlavicFew(mod10, mod100, polishTeenLow)
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: mod10 < slavicFewLow || isSlavicManyTail(mod10, mod100, polishTeenLow)
+      - return: corei18n.FormOther
+  - of: isSlavicFew
+    steps:
+      - bind: inTeens
+        eval: mod100 >= teenLow && mod100 <= teenHigh
+      - return: mod10 >= slavicFewLow && mod10 <= slavicFewHigh && !inTeens
+  - of: isSlavicManyTail
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: mod10 >= slavicManyLow && mod10 <= slavicManyHigh
+      - return: mod100 >= teenLow && mod100 <= teenHigh
+  - of: pluralRussian
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOther
+          when: count.VisibleFractionDigits() != 0
+      - bind: mod10, mod100
+        eval: count.IntegerPart()%tenModulus, count.IntegerPart()%hundredModulus
+      - opt:
+          do:
+            - return: corei18n.FormOne
+          when: mod10 == singularValue && mod100 != russianTeenLow
+      - opt:
+          do:
+            - return: corei18n.FormFew
+          when: isSlavicFew(mod10, mod100, polishTeenLow)
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: mod10 == 0 || isSlavicManyTail(mod10, mod100, russianTeenLow)
+      - return: corei18n.FormOther
+  - of: pluralArabic
+    participants:
+      - id: caller
+        kind: actor
+      - id: pluralArabic
+        kind: self
+      - id: count.IntegerPart
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOther
+          when: "!count.IsIntegerValued()"
+      - bind: value
+        eval: count.IntegerPart()
+        to: count.IntegerPart
+      - switch:
+          cases:
+            - case: "0"
+              do:
+                - return: corei18n.FormZero
+            - case: singularValue
+              do:
+                - return: corei18n.FormOne
+            - case: dualValue
+              do:
+                - return: corei18n.FormTwo
+          "on": value
+      - bind: mod100
+        eval: value % hundredModulus
+      - opt:
+          do:
+            - return: corei18n.FormFew
+          when: mod100 >= arabicFewLow && mod100 <= arabicFewHigh
+      - opt:
+          do:
+            - return: corei18n.FormMany
+          when: mod100 >= arabicManyLow
+      - return: corei18n.FormOther
+  - of: PluralValue.Forms
+    steps:
+      - return: p.forms
+  - of: PluralValue.Select
+    steps:
+      - opt:
+          do:
+            - return: corei18n.FormOther
+          when: p.rule == nil
+      - return: p.rule(count)
+  - of: PluralValue.Valid
+    steps:
+      - return: len(p.forms) != 0
+  - of: NewPrinter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewPrinter
+        kind: self
+      - id: buildChain
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the printer tag is unset"))
+          when: tag.IsZero()
+      - bind: chain, err
+        eval: buildChain(catalog, tag)
+        to: buildChain
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Printer{catalog: catalog, tag: tag, chain: chain}, nil"
+  - of: (*Printer).Tag
+    steps:
+      - return: p.tag
+  - of: (*Printer).Render
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Printer).Render
+        kind: self
+      - id: p.resolve
+        kind: internal
+      - id: message.Format
+        kind: value
+    steps:
+      - bind: message, _, ok
+        eval: p.resolve(key)
+        to: p.resolve
+      - opt:
+          do:
+            - return: string(key), p.notFound(key)
+          when: "!ok"
+      - return: message.Format(corei18n.FormOther, args)
+        to: message.Format
+  - of: (*Printer).RenderCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Printer).RenderCount
+        kind: self
+      - id: p.resolve
+        kind: internal
+      - id: rules.Select
+        kind: internal
+      - id: message.Format
+        kind: value
+    steps:
+      - bind: message, rules, ok
+        eval: p.resolve(key)
+        to: p.resolve
+      - opt:
+          do:
+            - return: string(key), p.notFound(key)
+          when: "!ok"
+      - bind: form
+        eval: rules.Select(count)
+        to: rules.Select
+      - return: message.Format(form, args)
+        to: message.Format
+  - of: (*Printer).resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Printer).resolve
+        kind: self
+      - id: p.catalog.Lookup
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: found, hit
+              eval: p.catalog.Lookup(step.tag, key)
+              to: p.catalog.Lookup
+            - opt:
+                do:
+                  - continue: true
+                when: "!hit"
+            - return: found, step.rules, true
+          key: _
+          range: p.chain
+          value: step
+      - return: corei18n.MessageValue{}, PluralValue{}, false
+  - of: (*Printer).notFound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Printer).notFound
+        kind: self
+      - id: tried.WriteString
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - var:
+          name: tried
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: tried.WriteString(chainSeparator)
+                    to: tried.WriteString
+                when: i > 0
+            - eval: tried.WriteString(step.tag.String())
+              to: tried.WriteString
+          key: i
+          range: p.chain
+          value: step
+      - return: |-
+          errs.Wrap(corei18n.MessageNotFound, errs.WrapParams{},
+          		errs.String("key", string(key)), errs.String("tried", tried.String()))
+        to: errs
+  - of: buildChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildChain
+        kind: self
+      - id: appendLineage
+        kind: internal
+    steps:
+      - set: chain, err
+        to: appendLineage
+        value: appendLineage(nil, tag)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: fallbacker, ok
+        eval: catalog.(corei18n.Fallbacker)
+      - opt:
+          do:
+            - return: chain, nil
+          when: "!ok"
+      - return: appendLineage(chain, fallbacker.Fallback())
+        to: appendLineage
+  - of: appendLineage
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLineage
+        kind: self
+      - id: requireRules
+        kind: internal
+      - id: current.Parent
+        kind: value
+    steps:
+      - loop:
+          cond: "!current.IsZero()"
+          do:
+            - bind: rules, rulesErr
+              eval: requireRules(current)
+              to: requireRules
+            - opt:
+                do:
+                  - return: nil, rulesErr
+                when: rulesErr != nil
+            - opt:
+                do:
+                  - set: chain
+                    value: "append(chain, link{tag: current, rules: rules})"
+                when: "!hasLink(chain, current)"
+            - bind: parent, more
+              eval: current.Parent()
+              to: current.Parent
+            - opt:
+                do:
+                  - break: true
+                when: "!more"
+            - set: current
+              value: parent
+          init: current := tag
+      - return: chain, nil
+  - of: NewStore
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewStore
+        kind: self
+      - id: compileCatalogues
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the fallback tag is unset"))
+          when: fallback.IsZero()
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
+                			errs.String("tag", fallback.String()), errs.String("detail", "the fallback language has no catalogue"))
+          init:
+            bind: _, ok
+            eval: catalogues[fallback]
+          when: "!ok"
+      - bind: compiled, err
+        eval: compileCatalogues(catalogues)
+        to: compileCatalogues
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Store{fallback: fallback, byTag: compiled, tags: sortedTags(compiled)}, nil"
+  - of: compileCatalogues
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileCatalogues
+        kind: self
+      - id: compileCatalogue
+        kind: internal
+    steps:
+      - set: compiled
+        value: make(map[corei18n.TagValue]map[corei18n.Key]corei18n.MessageValue, len(catalogues))
+      - loop:
+          do:
+            - bind: messages, langErr
+              eval: compileCatalogue(tag, catalogues[tag])
+              to: compileCatalogue
+            - opt:
+                do:
+                  - return: nil, langErr
+                when: langErr != nil
+            - set: compiled[tag]
+              value: messages
+          key: _
+          range: sortedTagKeys(catalogues)
+          value: tag
+      - return: compiled, nil
+  - of: compileCatalogue
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileCatalogue
+        kind: self
+      - id: requireRules
+        kind: internal
+      - id: compileEntry
+        kind: internal
+    steps:
+      - bind: rules, err
+        eval: requireRules(tag)
+        to: requireRules
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - set: messages
+        value: make(map[corei18n.Key]corei18n.MessageValue, len(catalogue))
+      - loop:
+          do:
+            - bind: message, entryErr
+              eval: compileEntry(tag, key, catalogue[key], rules)
+              to: compileEntry
+            - opt:
+                do:
+                  - return: nil, entryErr
+                when: entryErr != nil
+            - set: messages[key]
+              value: message
+          key: _
+          range: slices.Sorted(maps.Keys(catalogue))
+          value: key
+      - return: messages, nil
+  - of: compileEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileEntry
+        kind: self
+      - id: corei18n
+        kind: package
+      - id: compilePlain
+        kind: internal
+      - id: compileCounted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, errs.Wrap(keyErr, errs.WrapParams{}, errs.String("tag", tag.String()))
+          init:
+            bind: keyErr
+            eval: corei18n.ValidateKey(key)
+            to: corei18n
+          when: keyErr != nil
+      - opt:
+          do:
+            - return: compilePlain(tag, key, entry.Pattern)
+              to: compilePlain
+          when: entry.Forms == nil
+      - return: compileCounted(tag, key, entry.Forms, rules)
+        to: compileCounted
+  - of: compilePlain
+    participants:
+      - id: caller
+        kind: actor
+      - id: compilePlain
+        kind: self
+      - id: NewMessage
+        kind: internal
+    steps:
+      - set: message, err
+        to: NewMessage
+        value: NewMessage(text)
+      - opt:
+          do:
+            - return: |-
+                corei18n.MessageValue{}, errs.Wrap(err, errs.WrapParams{},
+                			errs.String("tag", tag.String()), errs.String("key", string(key)))
+          when: err != nil
+      - return: message, nil
+  - of: compileCounted
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileCounted
+        kind: self
+      - id: parseForms
+        kind: internal
+      - id: NewPluralMessage
+        kind: internal
+      - id: requireComplete
+        kind: internal
+    steps:
+      - bind: byForm, err
+        eval: parseForms(tag, key, forms)
+        to: parseForms
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, err
+          when: err != nil
+      - set: message, err
+        to: NewPluralMessage
+        value: NewPluralMessage(byForm)
+      - opt:
+          do:
+            - return: |-
+                corei18n.MessageValue{}, errs.Wrap(err, errs.WrapParams{},
+                			errs.String("tag", tag.String()), errs.String("key", string(key)))
+          when: err != nil
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, missingErr
+          init:
+            bind: missingErr
+            eval: requireComplete(tag, key, message, rules)
+            to: requireComplete
+          when: missingErr != nil
+      - return: message, nil
+  - of: parseForms
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseForms
+        kind: self
+      - id: corei18n
+        kind: package
+    steps:
+      - set: byForm
+        value: make(map[corei18n.Form]string, len(forms))
+      - bind: keyText
+        eval: string(key)
+      - loop:
+          do:
+            - bind: form, formErr
+              eval: corei18n.ParseForm(name)
+              to: corei18n
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(formErr, errs.WrapParams{},
+                      				errs.String("tag", tag.String()), errs.String("key", keyText))
+                when: formErr != nil
+            - set: byForm[form]
+              value: forms[name]
+          key: _
+          range: slices.Sorted(maps.Keys(forms))
+          value: name
+      - return: byForm, nil
+  - of: requireComplete
+    participants:
+      - id: caller
+        kind: actor
+      - id: requireComplete
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: keyText
+        eval: string(key)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corei18n.TranslationIncomplete, errs.WrapParams{},
+                      				errs.String("tag", tag.String()), errs.String("key", keyText), errs.String("form", form.String()))
+                    to: errs
+                when: "!message.HasForm(form)"
+          key: _
+          range: rules.Forms()
+          value: form
+      - return: nil
+  - of: sortedTagKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortedTagKeys
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.SortedFunc(maps.Keys(catalogues), compareTags)
+        to: slices
+  - of: sortedTags
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortedTags
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.SortedFunc(maps.Keys(compiled), compareTags)
+        to: slices
+  - of: compareTags
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareTags
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: strings.Compare(a.String(), b.String())
+        to: strings
+  - of: (*Store).Lookup
+    steps:
+      - bind: messages, known
+        eval: s.byTag[tag]
+      - opt:
+          do:
+            - return: corei18n.MessageValue{}, false
+          when: "!known"
+      - set: message, ok
+        value: messages[key]
+      - return: message, ok
+  - of: (*Store).Tags
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Tags
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(s.tags)
+        to: slices
+  - of: (*Store).Keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Keys
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: messages, known
+        eval: s.byTag[tag]
+      - opt:
+          do:
+            - return: nil
+          when: "!known"
+      - return: slices.Sorted(maps.Keys(messages))
+        to: slices
+  - of: (*Store).Fallback
+    steps:
+      - return: s.fallback
+  - of: (*Store).Missing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Missing
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: reference
+        eval: s.byTag[s.fallback]
+      - bind: messages
+        eval: s.byTag[tag]
+      - var:
+          name: gaps
+          type: "[]corei18n.Key"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: gaps
+                    value: append(gaps, key)
+                init:
+                  bind: _, ok
+                  eval: messages[key]
+                when: "!ok"
+          key: key
+          range: reference
+      - eval: slices.Sort(gaps)
+        to: slices
+      - return: gaps
+  - of: ParseTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseTag
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: placeSubtags
+        kind: internal
+      - id: corei18n
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: corei18n.TagValue{}, errs.Wrap(corei18n.InvalidTag, errs.WrapParams{}, errs.String("tag", text), errs.String("detail", "empty"))
+          when: text == ""
+      - opt:
+          do:
+            - return: corei18n.TagValue{}, errs.Wrap(corei18n.InvalidTag, errs.WrapParams{}, errs.String("tag", text), errs.String("detail", "outside the language[-Script][-REGION] subset"))
+          when: len(text) > maxTagBytes
+      - bind: parts
+        eval: strings.Split(text, "-")
+        to: strings
+      - opt:
+          do:
+            - return: corei18n.TagValue{}, errs.Wrap(corei18n.InvalidTag, errs.WrapParams{}, errs.String("tag", text), errs.String("detail", "more than three subtags"))
+          when: len(parts) > maxSubtags
+      - bind: script, region, placed
+        eval: placeSubtags(parts[1:])
+        to: placeSubtags
+      - opt:
+          do:
+            - return: corei18n.TagValue{}, errs.Wrap(corei18n.InvalidTag, errs.WrapParams{}, errs.String("tag", text), errs.String("detail", "subtag is not a script or region in the subset"))
+          when: "!placed"
+      - set: tag, err
+        to: corei18n
+        value: corei18n.NewTag(parts[0], script, region)
+      - opt:
+          do:
+            - return: corei18n.TagValue{}, errs.Wrap(err, errs.WrapParams{}, errs.String("tag", text))
+          when: err != nil
+      - return: tag, nil

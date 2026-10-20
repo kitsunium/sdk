@@ -1,0 +1,22 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Unique
+    steps:
+      - opt:
+          do:
+            - return: "IndexSpec[T]{Name: name, Unique: true}"
+          when: key == nil
+      - return: |-
+          IndexSpec[T]{Name: name, Unique: true, Keys: func(v T) []string {
+          		//: the empty key is not a key.
+          		if k := key(v); k != "" {
+          			//: the one key.
+          			return []string{k}
+          		}
+          		//: nothing to file.
+          		return nil
+          	}}
+  - of: Index
+    steps:
+      - return: "IndexSpec[T]{Name: name, Keys: keys}"

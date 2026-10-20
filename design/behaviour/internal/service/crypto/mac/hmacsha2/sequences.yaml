@@ -1,0 +1,53 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: hmacSHA256.Algorithm
+    steps:
+      - return: algorithm
+  - of: hmacSHA256.Tag
+    participants:
+      - id: caller
+        kind: actor
+      - id: hmacSHA256.Tag
+        kind: self
+      - id: hmac
+        kind: stdlib
+      - id: mac.Write
+        kind: value
+      - id: mac.Sum
+        kind: value
+    steps:
+      - bind: mac
+        eval: hmac.New(sha256.New, key.Bytes())
+        to: hmac
+      - eval: mac.Write(message)
+        to: mac.Write
+      - return: mac.Sum(nil)
+        to: mac.Sum
+  - of: hmacSHA256.Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: hmacSHA256.Verify
+        kind: self
+      - id: h.Tag
+        kind: internal
+      - id: hmac
+        kind: stdlib
+    steps:
+      - bind: want
+        eval: h.Tag(key, message)
+        to: h.Tag
+      - return: hmac.Equal(want, tag)
+        to: hmac
+  - of: hmacSHA256.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: hmacSHA256.New
+        kind: self
+      - id: hmac
+        kind: stdlib
+    steps:
+      - return: hmac.New(sha256.New, key.Bytes())
+        to: hmac

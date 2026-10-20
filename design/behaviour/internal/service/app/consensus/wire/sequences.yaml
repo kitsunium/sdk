@@ -1,0 +1,1144 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AppendAdmin
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendAdmin
+        kind: self
+      - id: appendString
+        kind: internal
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: appendLogIdentity
+        kind: internal
+      - id: AppendMembership
+        kind: internal
+      - id: AppendTimingContract
+        kind: internal
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: appendString
+        value: appendString(dst, a.Operator)
+      - set: dst
+        value: append(dst, a.Change)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(a.Target))
+      - set: dst
+        to: appendLogIdentity
+        value: appendLogIdentity(dst, a.Pre.Log)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(a.Pre.Alarm))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, a.Pre.Generation)
+      - set: dst
+        to: AppendMembership
+        value: AppendMembership(dst, &a.Membership)
+      - set: dst
+        to: AppendTimingContract
+        value: AppendTimingContract(dst, a.Contract)
+      - return: binary.LittleEndian.AppendUint32(dst, a.ClusterVersion)
+        to: binary.LittleEndian.AppendUint32
+  - of: ParseAdmin
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseAdmin
+        kind: self
+      - id: r.str
+        kind: internal
+      - id: r.u8
+        kind: internal
+      - id: coreconsensus
+        kind: package
+      - id: r.logIdentity
+        kind: internal
+      - id: r.u64
+        kind: internal
+      - id: r.membership
+        kind: internal
+      - id: r.timing
+        kind: internal
+      - id: r.u32
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - bind: r
+        eval: "reader{b: b}"
+      - var:
+          name: a
+          type: AdminValue
+      - set: a.Operator
+        to: r.str
+        value: r.str()
+      - set: a.Change
+        to: r.u8
+        value: r.u8()
+      - set: a.Target
+        to: coreconsensus
+        value: coreconsensus.NodeID(r.u64())
+      - set: a.Pre.Log
+        to: r.logIdentity
+        value: r.logIdentity()
+      - set: a.Pre.Alarm
+        to: coreconsensus
+        value: coreconsensus.AlarmID(r.u64())
+      - set: a.Pre.Generation
+        to: r.u64
+        value: r.u64()
+      - set: a.Membership
+        to: r.membership
+        value: r.membership()
+      - set: a.Contract
+        to: r.timing
+        value: r.timing()
+      - set: a.ClusterVersion
+        to: r.u32
+        value: r.u32()
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("admin trailing bytes", len(b))
+          when: r.err == nil && len(r.b) != 0
+      - return: a, r.err
+  - of: BodySum
+    participants:
+      - id: caller
+        kind: actor
+      - id: BodySum
+        kind: self
+      - id: crc32
+        kind: stdlib
+    steps:
+      - return: crc32.Checksum(data, castagnoli)
+        to: crc32
+  - of: ChainSum
+    participants:
+      - id: caller
+        kind: actor
+      - id: ChainSum
+        kind: self
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+      - id: binary.LittleEndian.PutUint64
+        kind: value
+      - id: crc32
+        kind: stdlib
+    steps:
+      - var:
+          name: b
+          type: "[4 + 8 + 8 + 1 + 4 + 4]byte"
+      - eval: binary.LittleEndian.PutUint32(b[0:], prev)
+        to: binary.LittleEndian.PutUint32
+      - eval: binary.LittleEndian.PutUint64(b[4:], e.Position.Term)
+        to: binary.LittleEndian.PutUint64
+      - eval: binary.LittleEndian.PutUint64(b[12:], e.Position.Index)
+        to: binary.LittleEndian.PutUint64
+      - set: b[20]
+        value: byte(e.Kind)
+      - eval: binary.LittleEndian.PutUint32(b[21:], e.Version)
+        to: binary.LittleEndian.PutUint32
+      - eval: binary.LittleEndian.PutUint32(b[25:], e.BodySum)
+        to: binary.LittleEndian.PutUint32
+      - return: crc32.Checksum(b[:], castagnoli)
+        to: crc32
+  - of: Lane
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lane
+        kind: self
+      - id: coreconsensus
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: 0, frameInvalid("short header", len(frame))
+          when: len(frame) < frameHeaderLen
+      - return: coreconsensus.FrameLane(frame[5] >> 6), nil
+        to: coreconsensus
+  - of: AppendMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendMessage
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: appendEntry
+        kind: internal
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+    steps:
+      - bind: start
+        eval: len(dst)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, 0)
+      - set: dst
+        value: append(dst, frameVersion1, byte(m.Kind))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.Group))
+      - set: dst
+        value: append(dst, byte(m.Flags))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.From))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.To))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Term)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.LogTerm)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Index)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Commit)
+      - set: dst
+        value: append(dst, boolByte(m.Reject))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.RejectHint)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Context)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.TransferIssuer))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.TransferTerm)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Contract)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(m.Code))
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
+      - loop:
+          do:
+            - set: dst
+              to: appendEntry
+              value: appendEntry(dst, &m.Entries[i])
+          key: i
+          range: m.Entries
+      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
+        to: binary.LittleEndian.PutUint32
+      - return: dst
+  - of: appendEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEntry
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, e.Position.Term)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, e.Position.Index)
+      - set: dst
+        value: append(dst, byte(e.Kind))
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, e.Version)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, e.BodySum)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, e.ChainSum)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(e.Data)))
+      - return: append(dst, e.Data...)
+  - of: ParseMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseMessage
+        kind: self
+      - id: frameInvalid
+        kind: internal
+      - id: errs
+        kind: package
+      - id: coreconsensus
+        kind: package
+      - id: binary.LittleEndian.Uint32
+        kind: value
+      - id: parseEntry
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: frameInvalid("short header", len(frame))
+              to: frameInvalid
+          when: len(frame) < frameHeaderLen
+      - opt:
+          do:
+            - return: frameInvalid("length mismatch", len(frame))
+              to: frameInvalid
+          when: int(binary.LittleEndian.Uint32(frame)) != len(frame)-4
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
+                			errs.Int("frame_version", int(frame[4])))
+              to: errs
+          when: frame[4] != frameVersion1
+      - bind: kind
+        eval: coreconsensus.MessageKind(frame[5])
+        to: coreconsensus
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
+                			errs.Int("message_kind", int(kind)))
+              to: errs
+          when: "!kind.Known()"
+      - bind: body
+        eval: frame[frameHeaderLen:]
+      - opt:
+          do:
+            - return: frameInvalid("short body", len(frame))
+              to: frameInvalid
+          when: len(body) < messageFixedLen
+      - opt:
+          do:
+            - return: frameInvalid("reject flag", len(frame))
+              to: frameInvalid
+          when: body[49] > 1
+      - bind: entries
+        eval: m.Entries[:0]
+      - set: "*m"
+        value: |-
+          coreconsensus.MessageValue{
+          		Version:        frame[4],
+          		Kind:           kind,
+          		Group:          coreconsensus.GroupID(binary.LittleEndian.Uint64(frame[6:])),
+          		Flags:          coreconsensus.MessageFlags(body[0]),
+          		From:           coreconsensus.NodeID(binary.LittleEndian.Uint64(body[1:])),
+          		To:             coreconsensus.NodeID(binary.LittleEndian.Uint64(body[9:])),
+          		Term:           binary.LittleEndian.Uint64(body[17:]),
+          		LogTerm:        binary.LittleEndian.Uint64(body[25:]),
+          		Index:          binary.LittleEndian.Uint64(body[33:]),
+          		Commit:         binary.LittleEndian.Uint64(body[41:]),
+          		Reject:         body[49] != 0,
+          		RejectHint:     binary.LittleEndian.Uint64(body[50:]),
+          		Context:        binary.LittleEndian.Uint64(body[58:]),
+          		TransferIssuer: coreconsensus.NodeID(binary.LittleEndian.Uint64(body[66:])),
+          		TransferTerm:   binary.LittleEndian.Uint64(body[74:]),
+          		Contract:       binary.LittleEndian.Uint64(body[82:]),
+          		Code:           errs.Code(binary.LittleEndian.Uint32(body[90:])),
+          	}
+      - bind: "n"
+        eval: binary.LittleEndian.Uint32(body[94:])
+        to: binary.LittleEndian.Uint32
+      - set: body
+        value: body[messageFixedLen:]
+      - opt:
+          do:
+            - return: frameInvalid("entry count", len(frame))
+              to: frameInvalid
+          when: uint64(n)*entryFixedLen > uint64(len(body))
+      - loop:
+          do:
+            - var:
+                name: e
+                type: coreconsensus.EntryValue
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: body, err
+                  eval: parseEntry(body, &e)
+                  op: =
+                  to: parseEntry
+                when: err != nil
+            - set: entries
+              value: append(entries, e)
+          range: "n"
+      - opt:
+          do:
+            - return: frameInvalid("trailing bytes", len(frame))
+              to: frameInvalid
+          when: len(body) != 0
+      - set: m.Entries
+        value: entries
+      - return: nil
+  - of: parseEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseEntry
+        kind: self
+      - id: binary.LittleEndian.Uint64
+        kind: value
+      - id: coreconsensus
+        kind: package
+      - id: binary.LittleEndian.Uint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, frameInvalid("short entry", len(b))
+          when: len(b) < entryFixedLen
+      - set: e.Position.Term
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(b)
+      - set: e.Position.Index
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(b[8:])
+      - set: e.Kind
+        to: coreconsensus
+        value: coreconsensus.EntryKind(b[16])
+      - set: e.Version
+        to: binary.LittleEndian.Uint32
+        value: binary.LittleEndian.Uint32(b[17:])
+      - set: e.BodySum
+        to: binary.LittleEndian.Uint32
+        value: binary.LittleEndian.Uint32(b[21:])
+      - set: e.ChainSum
+        to: binary.LittleEndian.Uint32
+        value: binary.LittleEndian.Uint32(b[25:])
+      - bind: "n"
+        eval: binary.LittleEndian.Uint32(b[29:])
+        to: binary.LittleEndian.Uint32
+      - set: b
+        value: b[entryFixedLen:]
+      - opt:
+          do:
+            - return: nil, frameInvalid("entry data", len(b))
+          when: uint64(n) > uint64(len(b))
+      - set: e.Data
+        value: b[:n:n]
+      - return: b[n:], nil
+  - of: AppendToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendToken
+        kind: self
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, tokenVersion1)
+      - set: dst
+        value: append(dst, t.Cluster[:]...)
+      - set: dst
+        to: binary.BigEndian.AppendUint64
+        value: binary.BigEndian.AppendUint64(dst, t.Epoch)
+      - set: dst
+        to: binary.BigEndian.AppendUint64
+        value: binary.BigEndian.AppendUint64(dst, t.Term)
+      - return: binary.BigEndian.AppendUint64(dst, t.Index)
+        to: binary.BigEndian.AppendUint64
+  - of: ParseToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseToken
+        kind: self
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: coreconsensus.TokenValue{}, frameInvalid("token", len(b))
+          when: len(b) != tokenLen || b[0] != tokenVersion1
+      - var:
+          name: t
+          type: coreconsensus.TokenValue
+      - eval: copy(t.Cluster[:], b[1:17])
+      - set: t.Epoch
+        to: binary.BigEndian.Uint64
+        value: binary.BigEndian.Uint64(b[17:])
+      - set: t.Term
+        to: binary.BigEndian.Uint64
+        value: binary.BigEndian.Uint64(b[25:])
+      - set: t.Index
+        to: binary.BigEndian.Uint64
+        value: binary.BigEndian.Uint64(b[33:])
+      - return: t, nil
+  - of: AppendSnapshotMeta
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendSnapshotMeta
+        kind: self
+      - id: appendString
+        kind: internal
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: appendLogIdentity
+        kind: internal
+      - id: AppendMembership
+        kind: internal
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: AppendTimingContract
+        kind: internal
+      - id: appendBytes
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, metaVersion1)
+      - set: dst
+        to: appendString
+        value: appendString(dst, m.ID)
+      - set: dst
+        value: append(dst, m.Version)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Position.Term)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Position.Index)
+      - set: dst
+        to: appendLogIdentity
+        value: appendLogIdentity(dst, m.Log)
+      - set: dst
+        to: AppendMembership
+        value: AppendMembership(dst, &m.Membership)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, m.ChainTip)
+      - set: dst
+        to: appendString
+        value: appendString(dst, m.Codec)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.EncodedSize))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.DecodedSize))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.ChunkSize))
+      - set: dst
+        value: append(dst, m.SHA256[:]...)
+      - set: dst
+        to: AppendTimingContract
+        value: AppendTimingContract(dst, m.Timing)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, m.ClusterVersion)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.ClusterGeneration)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(m.NoSpace))
+      - return: appendBytes(dst, m.Reserved)
+        to: appendBytes
+  - of: ParseSnapshotMeta
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseSnapshotMeta
+        kind: self
+      - id: r.u8
+        kind: internal
+      - id: errs
+        kind: package
+      - id: r.str
+        kind: internal
+      - id: r.u64
+        kind: internal
+      - id: r.logIdentity
+        kind: internal
+      - id: r.membership
+        kind: internal
+      - id: r.u32
+        kind: internal
+      - id: r.timing
+        kind: internal
+      - id: coreconsensus
+        kind: package
+      - id: r.bytes
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - bind: r
+        eval: "reader{b: b}"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: r.err
+                when: r.err != nil
+            - return: |-
+                errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
+                			errs.Int("snapshot_meta_version", int(v)))
+              to: errs
+          init:
+            bind: v
+            eval: r.u8()
+            to: r.u8
+          when: v != metaVersion1
+      - var:
+          name: out
+          type: coreconsensus.SnapshotMetaValue
+      - set: out.ID
+        to: r.str
+        value: r.str()
+      - set: out.Version
+        to: r.u8
+        value: r.u8()
+      - set: out.Position.Term
+        to: r.u64
+        value: r.u64()
+      - set: out.Position.Index
+        to: r.u64
+        value: r.u64()
+      - set: out.Log
+        to: r.logIdentity
+        value: r.logIdentity()
+      - set: out.Membership
+        to: r.membership
+        value: r.membership()
+      - set: out.ChainTip
+        to: r.u32
+        value: r.u32()
+      - set: out.Codec
+        to: r.str
+        value: r.str()
+      - set: out.EncodedSize
+        value: int64(r.u64())
+      - set: out.DecodedSize
+        value: int64(r.u64())
+      - set: out.ChunkSize
+        value: int64(r.u64())
+      - eval: copy(out.SHA256[:], r.n(32))
+      - set: out.Timing
+        to: r.timing
+        value: r.timing()
+      - set: out.ClusterVersion
+        to: r.u32
+        value: r.u32()
+      - set: out.ClusterGeneration
+        to: r.u64
+        value: r.u64()
+      - set: out.NoSpace
+        to: coreconsensus
+        value: coreconsensus.AlarmID(r.u64())
+      - opt:
+          do:
+            - set: out.Reserved
+              to: slices
+              value: slices.Clone(reserved)
+          init:
+            bind: reserved
+            eval: r.bytes()
+            to: r.bytes
+          when: len(reserved) != 0
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("snapshot meta trailing bytes", len(b))
+          when: r.err == nil && len(r.b) != 0
+      - opt:
+          do:
+            - return: r.err
+          when: r.err != nil
+      - set: "*m"
+        value: out
+      - return: nil
+  - of: AppendMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendMembership
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: appendString
+        kind: internal
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, m.Index)
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Members)))
+      - loop:
+          do:
+            - bind: x
+              eval: "&m.Members[i]"
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, uint64(x.ID))
+            - set: dst
+              value: append(dst, x.Incarnation[:]...)
+            - set: dst
+              to: appendString
+              value: appendString(dst, x.Slot)
+            - set: dst
+              value: append(dst, x.SPKI[:]...)
+            - set: dst
+              to: appendString
+              value: appendString(dst, x.Address)
+            - set: dst
+              value: append(dst, boolByte(x.Voter), boolByte(x.Joining))
+            - set: dst
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(dst, x.PayloadMax)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, uint64(x.MaxSnapshotBytes))
+          key: i
+          range: m.Members
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Retired)))
+      - loop:
+          do:
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, uint64(id))
+          key: _
+          range: m.Retired
+          value: id
+      - return: dst
+  - of: ParseMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseMembership
+        kind: self
+      - id: r.membership
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - bind: r
+        eval: "reader{b: b}"
+      - bind: m
+        eval: r.membership()
+        to: r.membership
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("membership trailing bytes", len(b))
+          when: r.err == nil && len(r.b) != 0
+      - return: m, r.err
+  - of: AppendTimingContract
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendTimingContract
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, c.Generation)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(c.HeartbeatInterval))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(c.ElectionTimeoutMin))
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(c.ElectionTimeoutMax))
+      - return: binary.LittleEndian.AppendUint64(dst, math.Float64bits(c.MaxClockDrift))
+        to: binary.LittleEndian.AppendUint64
+  - of: ParseTimingContract
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseTimingContract
+        kind: self
+      - id: r.timing
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - bind: r
+        eval: "reader{b: b}"
+      - bind: c
+        eval: r.timing()
+        to: r.timing
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("contract trailing bytes", len(b))
+          when: r.err == nil && len(r.b) != 0
+      - return: c, r.err
+  - of: appendLogIdentity
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLogIdentity
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, l.Cluster[:]...)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, l.Epoch)
+      - set: dst
+        value: append(dst, l.Predecessor[:]...)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, l.PredecessorEpoch)
+      - return: binary.LittleEndian.AppendUint64(dst, l.KeptIndex)
+        to: binary.LittleEndian.AppendUint64
+  - of: appendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendString
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(s)))
+      - return: append(dst, s...)
+  - of: appendBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBytes
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(b)))
+      - return: append(dst, b...)
+  - of: boolByte
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: v
+      - return: "0"
+  - of: frameInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: frameInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coreconsensus.FrameInvalid, errs.WrapParams{},
+          		errs.String("what", what), errs.Int("length", n))
+        to: errs
+  - of: (*reader).n
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).n
+        kind: self
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: r.err != nil
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("short field", len(r.b))
+            - return: nil
+          when: k < 0 || len(r.b) < k
+      - bind: out
+        eval: r.b[:k:k]
+      - set: r.b
+        value: r.b[k:]
+      - return: out
+  - of: (*reader).u8
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).u8
+        kind: self
+      - id: r.n
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b[0]
+          init:
+            bind: b
+            eval: r.n(1)
+            to: r.n
+          when: b != nil
+      - return: "0"
+  - of: (*reader).flag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).flag
+        kind: self
+      - id: r.u8
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - bind: v
+        eval: r.u8()
+        to: r.u8
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("bool", int(v))
+          when: v > 1 && r.err == nil
+      - return: v == 1
+  - of: (*reader).u32
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).u32
+        kind: self
+      - id: r.n
+        kind: internal
+      - id: binary.LittleEndian.Uint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: binary.LittleEndian.Uint32(b)
+              to: binary.LittleEndian.Uint32
+          init:
+            bind: b
+            eval: r.n(4)
+            to: r.n
+          when: b != nil
+      - return: "0"
+  - of: (*reader).u64
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).u64
+        kind: self
+      - id: r.n
+        kind: internal
+      - id: binary.LittleEndian.Uint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: binary.LittleEndian.Uint64(b)
+              to: binary.LittleEndian.Uint64
+          init:
+            bind: b
+            eval: r.n(8)
+            to: r.n
+          when: b != nil
+      - return: "0"
+  - of: (*reader).bytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).bytes
+        kind: self
+      - id: r.u32
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+      - id: r.n
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: r.u32()
+        to: r.u32
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("short bytes", len(r.b))
+            - return: nil
+          when: uint64(n) > uint64(len(r.b))
+      - return: r.n(int(n))
+        to: r.n
+  - of: (*reader).str
+    steps:
+      - return: string(r.bytes())
+  - of: (*reader).logIdentity
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).logIdentity
+        kind: self
+      - id: r.u64
+        kind: internal
+    steps:
+      - var:
+          name: l
+          type: coreconsensus.LogIdentityValue
+      - eval: copy(l.Cluster[:], r.n(16))
+      - set: l.Epoch
+        to: r.u64
+        value: r.u64()
+      - eval: copy(l.Predecessor[:], r.n(16))
+      - set: l.PredecessorEpoch
+        to: r.u64
+        value: r.u64()
+      - set: l.KeptIndex
+        to: r.u64
+        value: r.u64()
+      - return: l
+  - of: (*reader).timing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).timing
+        kind: self
+      - id: r.u64
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: math
+        kind: stdlib
+    steps:
+      - var:
+          name: c
+          type: coreconsensus.TimingContractSpec
+      - set: c.Generation
+        to: r.u64
+        value: r.u64()
+      - set: c.HeartbeatInterval
+        to: time
+        value: time.Duration(r.u64())
+      - set: c.ElectionTimeoutMin
+        to: time
+        value: time.Duration(r.u64())
+      - set: c.ElectionTimeoutMax
+        to: time
+        value: time.Duration(r.u64())
+      - set: c.MaxClockDrift
+        to: math
+        value: math.Float64frombits(r.u64())
+      - return: c
+  - of: (*reader).membership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).membership
+        kind: self
+      - id: r.u64
+        kind: internal
+      - id: r.u32
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+      - id: coreconsensus
+        kind: package
+      - id: r.str
+        kind: internal
+      - id: r.flag
+        kind: internal
+    steps:
+      - var:
+          name: m
+          type: coreconsensus.MembershipValue
+      - set: m.Index
+        to: r.u64
+        value: r.u64()
+      - bind: "n"
+        eval: r.u32()
+        to: r.u32
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("member count", len(r.b))
+            - return: m
+          when: uint64(n) > uint64(len(r.b))
+      - loop:
+          cond: i < n && r.err == nil
+          do:
+            - var:
+                name: x
+                type: coreconsensus.MemberValue
+            - set: x.ID
+              to: coreconsensus
+              value: coreconsensus.NodeID(r.u64())
+            - eval: copy(x.Incarnation[:], r.n(16))
+            - set: x.Slot
+              to: r.str
+              value: r.str()
+            - eval: copy(x.SPKI[:], r.n(32))
+            - set: x.Address
+              to: r.str
+              value: r.str()
+            - set: x.Voter
+              to: r.flag
+              value: r.flag()
+            - set: x.Joining
+              to: r.flag
+              value: r.flag()
+            - set: x.PayloadMax
+              to: r.u32
+              value: r.u32()
+            - set: x.MaxSnapshotBytes
+              value: int64(r.u64())
+            - set: m.Members
+              value: append(m.Members, x)
+          init: i := uint32(0)
+          post: i++
+      - bind: k
+        eval: r.u32()
+        to: r.u32
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("retired count", len(r.b))
+            - return: m
+          when: uint64(k)*8 > uint64(len(r.b))
+      - loop:
+          do:
+            - set: m.Retired
+              value: append(m.Retired, coreconsensus.NodeID(r.u64()))
+          range: k
+      - return: m

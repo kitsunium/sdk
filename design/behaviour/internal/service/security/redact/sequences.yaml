@@ -1,0 +1,1210 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*Redactor).Attrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).Attrs
+        kind: self
+      - id: bound
+        kind: internal
+      - id: r.walk
+        kind: internal
+    steps:
+      - bind: limit
+        eval: bound(maxBytes)
+        to: bound
+      - return:
+          closure:
+            params: yield func(key, text string) bool
+            steps:
+              - eval: r.walk(attrs, "", limit, yield)
+                to: r.walk
+  - of: (*Redactor).walk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).walk
+        kind: self
+      - id: dotted
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: attr
+              eval: "&attrs[index]"
+            - bind: key
+              eval: dotted(prefix, attr.Key)
+              to: dotted
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: "false"
+                      when: "!yield(key, coreredact.Placeholder)"
+                  - continue: true
+                when: key != "" && r.Name(key)
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: "false"
+                      when: "!r.walk(attr.Value.Group(), key, limit, yield)"
+                  - continue: true
+                when: attr.Value.Kind() == corelogger.KindGroup
+            - opt:
+                do:
+                  - return: "false"
+                when: "!yield(key, r.render(attr, limit))"
+          key: index
+          range: attrs
+      - return: "true"
+  - of: dotted
+    steps:
+      - switch:
+          cases:
+            - case: prefix == ""
+              do:
+                - return: key
+            - case: key == ""
+              do:
+                - return: prefix
+            - default: true
+              do:
+                - return: prefix + "." + key
+  - of: (*Redactor).render
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).render
+        kind: self
+      - id: r.Text
+        kind: internal
+    steps:
+      - return: r.Text(r.format(attr, limit), limit)
+        to: r.Text
+  - of: (*Redactor).format
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).format
+        kind: self
+      - id: value.String
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: value.Duration().String
+        kind: value
+      - id: value.Time().UTC().Format
+        kind: value
+      - id: r.renderAny
+        kind: internal
+    steps:
+      - bind: value
+        eval: attr.Value
+      - switch:
+          cases:
+            - case: corelogger.KindString
+              do:
+                - return: value.String()
+                  to: value.String
+            - case: corelogger.KindInt64
+              do:
+                - return: strconv.FormatInt(value.Int64(), decimal)
+                  to: strconv
+            - case: corelogger.KindUint64
+              do:
+                - return: strconv.FormatUint(value.Uint64(), decimal)
+                  to: strconv
+            - case: corelogger.KindFloat64
+              do:
+                - return: strconv.FormatFloat(value.Float64(), floatFormat, floatShort, floatBits)
+                  to: strconv
+            - case: corelogger.KindBool
+              do:
+                - return: strconv.FormatBool(value.Bool())
+                  to: strconv
+            - case: corelogger.KindDuration
+              do:
+                - return: value.Duration().String()
+                  to: value.Duration().String
+            - case: corelogger.KindTime
+              do:
+                - return: value.Time().UTC().Format(time.RFC3339Nano)
+                  to: value.Time().UTC().Format
+            - default: true
+              do:
+                - return: r.renderAny(attr, limit)
+                  to: r.renderAny
+          "on": value.Kind()
+  - of: (*Redactor).renderAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).renderAny
+        kind: self
+      - id: attr.Value.Any
+        kind: value
+      - id: r.Text
+        kind: internal
+      - id: r.Value
+        kind: internal
+    steps:
+      - bind: opaque
+        eval: attr.Value.Any()
+        to: attr.Value.Any
+      - typeswitch:
+          bind: typed
+          cases:
+            - do:
+                - return: "\"null\""
+              types: nil
+            - do:
+                - return: r.Text(typed, limit)
+                  to: r.Text
+              types: string
+            - do:
+                - return: r.Text(r.errorText(typed), limit)
+                  to: r.Text
+              types: error
+            - do:
+                - return: r.Text(typed.String(), limit)
+                  to: r.Text
+              types: fmt.Stringer
+          "on": opaque
+      - bind: redacted, err
+        eval: r.Value(opaque, limit)
+        to: r.Value
+      - opt:
+          do:
+            - return: coreredact.Unencodable
+          when: err != nil
+      - return: string(redacted.JSON)
+  - of: (*Redactor).errorText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).errorText
+        kind: self
+      - id: err.Error
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: r.error(err)
+          when: r.error != nil
+      - return: err.Error()
+        to: err.Error
+  - of: writtenFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: writtenFields
+        kind: self
+      - id: scanLevel
+        kind: internal
+      - id: dominant
+        kind: internal
+    steps:
+      - var:
+          name: found
+          type: "[]candidate"
+      - bind: visited
+        eval: map[reflect.Type]bool{}
+      - bind: next
+        eval: "[]embedding{{typ: t}}"
+      - bind: queued, counted
+        eval: map[reflect.Type]int{}, map[reflect.Type]int{}
+      - loop:
+          cond: len(next) > 0
+          do:
+            - bind: current
+              eval: next
+            - set: next
+              value: nil
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - continue: true
+                      when: visited[level.typ]
+                  - set: visited[level.typ]
+                    value: "true"
+                  - set: found, next
+                    to: scanLevel
+                    value: scanLevel(level, queued[level.typ] > 1, found, next, counted)
+                key: _
+                range: current
+                value: level
+            - set: queued, counted
+              value: counted, queued
+            - eval: clear(counted)
+      - bind: winners
+        eval: dominant(found)
+        to: dominant
+      - bind: written
+        eval: make([]writtenField, len(winners))
+      - loop:
+          do:
+            - set: written[i]
+              value: "writtenField{name: winner.name, field: t.FieldByIndex(winner.index)}"
+          key: i
+          range: winners
+          value: winner
+      - return: written
+  - of: scanLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanLevel
+        kind: self
+      - id: level.typ.Field
+        kind: value
+      - id: jsonName
+        kind: internal
+      - id: unnamedElem
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: field
+              eval: level.typ.Field(i)
+              to: level.typ.Field
+            - bind: name, tagged, promoted, visible
+              eval: jsonName(field)
+              to: jsonName
+            - opt:
+                do:
+                  - continue: true
+                when: "!visible"
+            - bind: index
+              eval: append(slices.Clone(level.index), i)
+            - opt:
+                do:
+                  - bind: embedded
+                    eval: unnamedElem(field.Type)
+                    to: unnamedElem
+                  - op: ++
+                    set: counted[embedded]
+                  - opt:
+                      do:
+                        - set: next
+                          value: "append(next, embedding{typ: embedded, index: index})"
+                      when: counted[embedded] == 1
+                  - continue: true
+                when: promoted
+            - bind: member
+              eval: "candidate{name: name, index: index, tagged: tagged}"
+            - set: found
+              value: append(found, member)
+            - opt:
+                do:
+                  - set: found
+                    value: append(found, member)
+                when: twice
+          key: i
+          range: level.typ.NumField()
+      - return: found, next
+  - of: dominant
+    participants:
+      - id: caller
+        kind: actor
+      - id: dominant
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: slices.SortFunc(found, byPrecedence)
+        to: slices
+      - bind: written
+        eval: make([]candidate, 0, len(found))
+      - loop:
+          cond: start < len(found)
+          do:
+            - bind: end
+              eval: start + 1
+            - loop:
+                cond: end < len(found) && found[end].name == found[start].name
+                do:
+                  - op: ++
+                    set: end
+            - bind: first
+              eval: found[start]
+            - opt:
+                do:
+                  - set: written
+                    value: append(written, first)
+                when: end-start == 1 || len(found[start+1].index) != len(first.index) || found[start+1].tagged != first.tagged
+            - set: start
+              value: end
+          init: start := 0
+      - return: written
+  - of: byPrecedence
+    participants:
+      - id: caller
+        kind: actor
+      - id: byPrecedence
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: cmp
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: byName
+          init:
+            bind: byName
+            eval: strings.Compare(a.name, b.name)
+            to: strings
+          when: byName != 0
+      - opt:
+          do:
+            - return: byDepth
+          init:
+            bind: byDepth
+            eval: cmp.Compare(len(a.index), len(b.index))
+            to: cmp
+          when: byDepth != 0
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "-1"
+                when: a.tagged
+            - return: "1"
+          when: a.tagged != b.tagged
+      - return: slices.Compare(a.index, b.index)
+        to: slices
+  - of: jsonName
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonName
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: tag
+        eval: field.Tag.Get("json")
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: "\"\", false, false, false"
+          when: tag == "-" || (!field.IsExported() && (!field.Anonymous || unnamedElem(field.Type).Kind() != reflect.Struct))
+      - bind: tagName, _, _
+        eval: strings.Cut(tag, ",")
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false, true, true"
+          when: tagName == "" && field.Anonymous && unnamedElem(field.Type).Kind() == reflect.Struct
+      - opt:
+          do:
+            - return: field.Name, false, false, true
+          when: tagName == ""
+      - return: tagName, true, false, true
+  - of: unnamedElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: unnamedElem
+        kind: self
+      - id: t.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: t.Elem()
+              to: t.Elem
+          when: t.Name() == "" && t.Kind() == reflect.Pointer
+      - return: t
+  - of: (*Redactor).JSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).JSON
+        kind: self
+      - id: r.redact
+        kind: internal
+    steps:
+      - return: r.redact(document, nil, maxBytes)
+        to: r.redact
+  - of: (*Redactor).Value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).Value
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: r.planOf
+        kind: internal
+      - id: r.redact
+        kind: internal
+    steps:
+      - bind: encoded, encodeErr
+        eval: json.Marshal(v)
+        to: json
+      - opt:
+          do:
+            - return: |-
+                coreredact.DocumentValue{}, errs.Wrap(coreredact.ValueUnencodable, errs.WrapParams{},
+                			errs.String("type", reflect.TypeOf(v).String()))
+          when: encodeErr != nil
+      - var:
+          name: declared
+          type: "*plan"
+      - opt:
+          do:
+            - set: declared
+              to: r.planOf
+              value: r.planOf(reflect.TypeOf(v))
+          when: v != nil
+      - return: r.redact(encoded, declared, maxBytes)
+        to: r.redact
+  - of: (*Redactor).redact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).redact
+        kind: self
+      - id: bound
+        kind: internal
+      - id: c.value
+        kind: internal
+      - id: c.decoder.ReadToken
+        kind: value
+    steps:
+      - bind: limit
+        eval: bound(maxBytes)
+        to: bound
+      - bind: c
+        eval: |-
+          copier{
+          		redactor: r,
+          		decoder: jsontext.NewDecoder(bytes.NewReader(document),
+          			jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true)),
+          		bound: limit,
+          		out:   make([]byte, 0, min(len(document), limit)),
+          	}
+      - opt:
+          do:
+            - return: coreredact.DocumentValue{}, c.invalid()
+          init:
+            bind: copyErr
+            eval: c.value(declared, false)
+            to: c.value
+          when: copyErr != nil
+      - opt:
+          do:
+            - return: coreredact.DocumentValue{}, c.invalid()
+          init:
+            bind: _, trailingErr
+            eval: c.decoder.ReadToken()
+            to: c.decoder.ReadToken
+          when: "!errors.Is(trailingErr, io.EOF)"
+      - return: "coreredact.DocumentValue{JSON: c.out, Truncated: c.cut}, nil"
+  - of: (*copier).room
+    steps:
+      - return: c.bound - len(c.out) - c.depth
+  - of: (*copier).invalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).invalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coreredact.DocumentInvalid, errs.WrapParams{}, errs.Int64(fieldOffset, c.decoder.InputOffset()))
+        to: errs
+  - of: (*copier).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).value
+        kind: self
+      - id: c.decoder.SkipValue
+        kind: value
+      - id: c.scalar
+        kind: internal
+      - id: c.decoder.ReadToken
+        kind: value
+      - id: c.object
+        kind: internal
+      - id: c.array
+        kind: internal
+      - id: c.text
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: skipErr
+                init:
+                  bind: skipErr
+                  eval: c.decoder.SkipValue()
+                  to: c.decoder.SkipValue
+                when: skipErr != nil
+            - eval: c.scalar(quotedPlaceholder)
+              to: c.scalar
+            - return: nil
+          when: secretName || (declared != nil && declared.secret)
+      - bind: token, readErr
+        eval: c.decoder.ReadToken()
+        to: c.decoder.ReadToken
+      - opt:
+          do:
+            - return: readErr
+          when: readErr != nil
+      - switch:
+          cases:
+            - case: jsontext.KindBeginObject
+              do:
+                - return: c.object(declared)
+                  to: c.object
+            - case: jsontext.KindBeginArray
+              do:
+                - return: c.array(declared)
+                  to: c.array
+            - case: jsontext.KindString
+              do:
+                - eval: c.text(c.redactor.scrub(token.String()))
+                  to: c.text
+            - default: true
+              do:
+                - eval: c.scalar(token.String())
+                  to: c.scalar
+          "on": token.Kind()
+      - return: nil
+  - of: (*copier).object
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).object
+        kind: self
+      - id: c.open
+        kind: internal
+      - id: c.decoder.ReadToken
+        kind: value
+      - id: nameToken.String
+        kind: value
+      - id: c.decoder.SkipValue
+        kind: value
+      - id: c.member
+        kind: internal
+      - id: c.value
+        kind: internal
+      - id: c.close
+        kind: internal
+    steps:
+      - eval: c.open('{')
+        to: c.open
+      - bind: first
+        eval: "true"
+      - loop:
+          cond: c.decoder.PeekKind() != jsontext.KindEndObject
+          do:
+            - bind: nameToken, readErr
+              eval: c.decoder.ReadToken()
+              to: c.decoder.ReadToken
+            - opt:
+                do:
+                  - return: readErr
+                when: readErr != nil
+            - bind: name
+              eval: nameToken.String()
+              to: nameToken.String
+            - opt:
+                do:
+                  - set: c.cut
+                    value: "true"
+                  - opt:
+                      do:
+                        - return: skipErr
+                      init:
+                        bind: skipErr
+                        eval: c.decoder.SkipValue()
+                        to: c.decoder.SkipValue
+                      when: skipErr != nil
+                  - continue: true
+                when: c.cut || !c.fitsMember(first, name)
+            - eval: c.member(first, name)
+              to: c.member
+            - set: first
+              value: "false"
+            - opt:
+                do:
+                  - return: copyErr
+                init:
+                  bind: copyErr
+                  eval: c.value(declared.member(name), c.redactor.Name(name))
+                  to: c.value
+                when: copyErr != nil
+      - return: c.close('}')
+        to: c.close
+  - of: (*copier).array
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).array
+        kind: self
+      - id: c.open
+        kind: internal
+      - id: c.decoder.SkipValue
+        kind: value
+      - id: c.value
+        kind: internal
+      - id: c.close
+        kind: internal
+    steps:
+      - eval: c.open('[')
+        to: c.open
+      - bind: first
+        eval: "true"
+      - loop:
+          cond: c.decoder.PeekKind() != jsontext.KindEndArray
+          do:
+            - opt:
+                do:
+                  - set: c.cut
+                    value: "true"
+                  - opt:
+                      do:
+                        - return: skipErr
+                      init:
+                        bind: skipErr
+                        eval: c.decoder.SkipValue()
+                        to: c.decoder.SkipValue
+                      when: skipErr != nil
+                  - continue: true
+                when: c.cut || c.room() < c.separator(first)+minValueBytes
+            - opt:
+                do:
+                  - set: c.out
+                    value: append(c.out, ',')
+                when: "!first"
+            - set: first
+              value: "false"
+            - opt:
+                do:
+                  - return: copyErr
+                init:
+                  bind: copyErr
+                  eval: c.value(declared.item(), false)
+                  to: c.value
+                when: copyErr != nil
+      - return: c.close(']')
+        to: c.close
+  - of: (*copier).open
+    steps:
+      - set: c.out
+        value: append(c.out, opener)
+      - op: ++
+        set: c.depth
+  - of: (*copier).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).close
+        kind: self
+      - id: c.decoder.ReadToken
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: readErr
+          init:
+            bind: _, readErr
+            eval: c.decoder.ReadToken()
+            to: c.decoder.ReadToken
+          when: readErr != nil
+      - op: "--"
+        set: c.depth
+      - set: c.out
+        value: append(c.out, closer)
+      - return: nil
+  - of: (*copier).separator
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: first
+      - return: separatorBytes
+  - of: (*copier).fitsMember
+    steps:
+      - return: c.separator(first)+quotedLength(name)+separatorBytes+minValueBytes <= c.room()
+  - of: (*copier).member
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).member
+        kind: self
+      - id: appendQuoted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.out
+              value: append(c.out, ',')
+          when: "!first"
+      - set: c.out
+        to: appendQuoted
+        value: appendQuoted(c.out, name)
+      - set: c.out
+        value: append(c.out, ':')
+  - of: (*copier).scalar
+    steps:
+      - opt:
+          do:
+            - set: c.out
+              value: append(c.out, token...)
+            - return: ""
+          when: len(token) <= c.room()
+      - set: c.out
+        value: append(c.out, truncatedValue...)
+      - set: c.cut
+        value: "true"
+  - of: (*copier).text
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*copier).text
+        kind: self
+      - id: c.room
+        kind: internal
+      - id: appendQuoted
+        kind: internal
+      - id: escapedLength
+        kind: internal
+      - id: appendEscaped
+        kind: internal
+    steps:
+      - bind: room
+        eval: c.room()
+        to: c.room
+      - opt:
+          do:
+            - set: c.out
+              to: appendQuoted
+              value: appendQuoted(c.out, value)
+            - return: ""
+          when: quotedLength(value) <= room
+      - bind: budget
+        eval: room - quoteBytes - len(coreredact.Ellipsis)
+      - set: c.out
+        value: append(c.out, '"')
+      - loop:
+          do:
+            - bind: escaped
+              eval: escapedLength(character)
+              to: escapedLength
+            - opt:
+                do:
+                  - break: true
+                when: escaped > budget
+            - set: c.out
+              to: appendEscaped
+              value: appendEscaped(c.out, character)
+            - op: "-="
+              set: budget
+              value: escaped
+          key: _
+          range: value
+          value: character
+      - set: c.out
+        value: append(c.out, coreredact.Ellipsis...)
+      - set: c.out
+        value: append(c.out, '"')
+      - set: c.cut
+        value: "true"
+  - of: quotedLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: quotedLength
+        kind: self
+      - id: escapedLength
+        kind: internal
+    steps:
+      - bind: length
+        eval: quoteBytes
+      - loop:
+          do:
+            - op: +=
+              set: length
+              to: escapedLength
+              value: escapedLength(character)
+          key: _
+          range: value
+          value: character
+      - return: length
+  - of: appendQuoted
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendQuoted
+        kind: self
+      - id: appendEscaped
+        kind: internal
+    steps:
+      - set: out
+        value: append(out, '"')
+      - loop:
+          do:
+            - set: out
+              to: appendEscaped
+              value: appendEscaped(out, character)
+          key: _
+          range: value
+          value: character
+      - return: append(out, '"')
+  - of: escapedLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: escapedLength
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: len(`\n`)
+          init:
+            bind: _, short
+            eval: shortEscapes[character]
+          when: short
+      - opt:
+          do:
+            - return: len(`\u0000`)
+          when: needsUnicodeEscape(character)
+      - return: utf8.RuneLen(character)
+        to: utf8
+  - of: needsUnicodeEscape
+    steps:
+      - return: character < ' ' || character == lineSeparator || character == paragraphSeparator
+  - of: appendEscaped
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEscaped
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: append(out, '\\', letter)
+          init:
+            bind: letter, short
+            eval: shortEscapes[character]
+          when: short
+      - opt:
+          do:
+            - return: |-
+                append(out, '\\', 'u', hexDigits[character>>12&0xf], hexDigits[character>>8&0xf],
+                			hexDigits[character>>4&0xf], hexDigits[character&0xf])
+          when: needsUnicodeEscape(character)
+      - return: utf8.AppendRune(out, character)
+        to: utf8
+  - of: (*plan).member
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: p == nil
+      - opt:
+          do:
+            - return: p.items
+          when: p.members == nil
+      - return: p.members[name]
+  - of: (*plan).item
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: p == nil
+      - return: p.items
+  - of: (*Redactor).planOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).planOf
+        kind: self
+      - id: r.plans.Load
+        kind: value
+      - id: r.build
+        kind: internal
+      - id: r.plans.LoadOrStore
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: t == nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: known
+                init:
+                  bind: known, isPlan
+                  eval: cached.(*plan)
+                when: isPlan
+          init:
+            bind: cached, found
+            eval: r.plans.Load(t)
+            to: r.plans.Load
+          when: found
+      - bind: built
+        eval: r.build(t, map[reflect.Type]*plan{})
+        to: r.build
+      - bind: stored, _
+        eval: r.plans.LoadOrStore(t, built)
+        to: r.plans.LoadOrStore
+      - opt:
+          do:
+            - return: kept
+          init:
+            bind: kept, isPlan
+            eval: stored.(*plan)
+          when: isPlan
+      - return: built
+  - of: (*Redactor).build
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).build
+        kind: self
+      - id: t.Elem
+        kind: value
+      - id: r.fields
+        kind: internal
+      - id: r.below
+        kind: internal
+    steps:
+      - loop:
+          cond: t.Kind() == reflect.Pointer
+          do:
+            - set: t
+              to: t.Elem
+              value: t.Elem()
+      - opt:
+          do:
+            - return: nil
+          when: writesOwnJSON(t)
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - opt:
+                    do:
+                      - return: building
+                    init:
+                      bind: building, found
+                      eval: seen[t]
+                    when: found
+                - bind: built
+                  eval: "&plan{members: map[string]*plan{}}"
+                - set: seen[t]
+                  value: built
+                - eval: r.fields(built, t, seen)
+                  to: r.fields
+                - return: built
+            - case: reflect.Slice, reflect.Array
+              do:
+                - opt:
+                    do:
+                      - return: nil
+                    when: t.Elem().Kind() == reflect.Uint8
+                - return: r.below(t.Elem(), seen)
+                  to: r.below
+            - case: reflect.Map
+              do:
+                - return: r.below(t.Elem(), seen)
+                  to: r.below
+            - default: true
+              do:
+                - return: nil
+          "on": t.Kind()
+  - of: (*Redactor).below
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).below
+        kind: self
+      - id: r.build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "&plan{items: inner}"
+          init:
+            bind: inner
+            eval: r.build(element, seen)
+            to: r.build
+          when: inner != nil
+      - return: nil
+  - of: (*Redactor).fields
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).fields
+        kind: self
+      - id: r.memberPlan
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: p.members[written.name]
+                    value: member
+                init:
+                  bind: member
+                  eval: r.memberPlan(written.field, seen)
+                  to: r.memberPlan
+                when: member != nil
+          key: _
+          range: writtenFields(t)
+          value: written
+  - of: (*Redactor).memberPlan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).memberPlan
+        kind: self
+      - id: r.build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "&plan{secret: true}"
+          when: r.declared(field)
+      - return: r.build(field.Type, seen)
+        to: r.build
+  - of: DefaultWords
+    participants:
+      - id: caller
+        kind: actor
+      - id: DefaultWords
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(defaultWords)
+        to: slices
+  - of: NewRedactor
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRedactor
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: words
+        eval: cfg.Words
+      - opt:
+          do:
+            - set: words
+              value: defaultWords
+          when: len(words) == 0
+      - bind: lowered
+        eval: make([]string, 0, len(words))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: lowered
+                    value: append(lowered, word)
+                init:
+                  bind: word
+                  eval: strings.ToLower(strings.TrimSpace(word))
+                  op: =
+                  to: strings
+                when: word != ""
+          key: _
+          range: words
+          value: word
+      - bind: tag
+        eval: cfg.Tag
+      - opt:
+          do:
+            - set: tag
+              value: defaultTag
+          when: tag == ""
+      - return: "&Redactor{field: cfg.Field, error: cfg.Error, tag: tag, words: lowered}"
+  - of: (*Redactor).Name
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).Name
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: lowered
+        eval: strings.ToLower(name)
+        to: strings
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: strings.Contains(lowered, word)
+          key: _
+          range: r.words
+          value: word
+      - return: "false"
+  - of: bound
+    steps:
+      - return: max(maxBytes, coreredact.MinBytes)
+  - of: (*Redactor).Text
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).Text
+        kind: self
+      - id: clip
+        kind: internal
+    steps:
+      - return: clip(r.scrub(s), bound(maxBytes))
+        to: clip
+  - of: (*Redactor).scrub
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).scrub
+        kind: self
+      - id: credentials().ReplaceAllString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: s
+          when: "!strings.Contains(s, \"://\") || !strings.Contains(s, \"@\")"
+      - return: credentials().ReplaceAllString(s, "${1}"+coreredact.Placeholder+"@")
+        to: credentials().ReplaceAllString
+  - of: clip
+    steps:
+      - opt:
+          do:
+            - return: s
+          when: len(s) <= limit
+      - bind: cut
+        eval: limit - len(coreredact.Ellipsis)
+      - loop:
+          cond: cut > 0 && !utf8.RuneStart(s[cut])
+          do:
+            - op: "--"
+              set: cut
+      - return: s[:cut] + coreredact.Ellipsis

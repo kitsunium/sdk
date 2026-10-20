@@ -1,0 +1,249 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: NewWithEscape
+    steps:
+      - return: "&csvCodec{escapeFormulas: escape}"
+  - of: (*csvCodec).Name
+    steps:
+      - return: "\"csv\""
+  - of: (*csvCodec).MIMETypes
+    steps:
+      - return: "[]string{\"text/csv\"}"
+  - of: (*csvCodec).Extensions
+    steps:
+      - return: "[]string{\".csv\"}"
+  - of: (*csvCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvCodec).Marshal
+        kind: self
+      - id: extractRecords
+        kind: internal
+      - id: marshalPromotionShape
+        kind: internal
+      - id: escapeFormulaCells
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: stdcsv
+        kind: stdlib
+      - id: w.WriteAll
+        kind: value
+    steps:
+      - bind: records, ok
+        eval: extractRecords(v)
+        to: extractRecords
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    corecsv.CodeCSVValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "CSV codec requires a [][]string value",
+                			Private: "service/data/codec/csv.Marshal: argument is not [][]string",
+                		})
+          when: "!ok"
+      - opt:
+          do:
+            - return: marshalPromotionShape(records[1][0]), nil
+              to: marshalPromotionShape
+          when: "!c.escapeFormulas && isPromotionShape(records)"
+      - opt:
+          do:
+            - set: records
+              to: escapeFormulaCells
+              value: escapeFormulaCells(records)
+          when: c.escapeFormulas
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: w
+        eval: stdcsv.NewWriter(buf)
+        to: stdcsv
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                nil, errs.Wrap(werr, errs.WrapParams{
+                			Code:    corecsv.CodeCSVMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "CSV encoding failed",
+                			Private: "service/data/codec/csv.Marshal: WriteAll returned an error",
+                		})
+          init:
+            bind: werr
+            eval: w.WriteAll(records)
+            to: w.WriteAll
+          when: werr != nil
+      - bind: out
+        eval: scratch.DetachBuffer(buf)
+        to: scratch
+      - return: out, nil
+  - of: escapeFormulaCells
+    steps:
+      - bind: out
+        eval: make([][]string, 0, len(records))
+      - loop:
+          do:
+            - set: out
+              value: append(out, escapeFormulaRow(row))
+          key: _
+          range: records
+          value: row
+      - return: out
+  - of: escapeFormulaRow
+    steps:
+      - bind: out
+        eval: make([]string, 0, len(row))
+      - loop:
+          do:
+            - set: out
+              value: append(out, escapeIfFormulaCell(cell))
+          key: _
+          range: row
+          value: cell
+      - return: out
+  - of: isFormulaTrigger
+    steps:
+      - return: b == '=' || b == '+' || b == '-' || b == '@' || b == '\t' || b == '\r'
+  - of: escapeIfFormulaCell
+    steps:
+      - opt:
+          do:
+            - return: cell
+          when: cell == "" || !isFormulaTrigger(cell[0])
+      - return: "\"'\" + cell"
+  - of: (*csvCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvCodec).Append
+        kind: self
+      - id: c.Marshal
+        kind: internal
+    steps:
+      - bind: encoded, merr
+        eval: c.Marshal(v)
+        to: c.Marshal
+      - opt:
+          do:
+            - return: dst, merr
+          when: merr != nil
+      - return: append(dst, encoded...), nil
+  - of: isPromotionShape
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: |-
+            len(records) != promotionRowCount ||
+            		len(records[0]) != promotionColumnCount ||
+            		len(records[1]) != promotionColumnCount
+      - return: records[0][0] == promotionHeaderCell
+  - of: (*csvCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvCodec).Unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: scratch
+        kind: package
+      - id: readAllPreSized
+        kind: internal
+    steps:
+      - bind: dst, ok
+        eval: v.(*[][]string)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corecsv.CodeCSVValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "CSV codec requires a [][]string value",
+                			Private: "service/data/codec/csv.Unmarshal: target is not *[][]string",
+                		})
+              to: errs
+          when: "!ok"
+      - bind: br
+        eval: scratch.AcquireReader(data)
+        to: scratch
+      - bind: recs, rerr
+        eval: readAllPreSized(br, data)
+        to: readAllPreSized
+      - eval: scratch.ReleaseReader(br)
+        to: scratch
+      - opt:
+          do:
+            - set: "*dst"
+              value: recs
+            - return: nil
+          when: rerr == nil
+      - return: |-
+          errs.Wrap(rerr, errs.WrapParams{
+          		Code:    corecsv.CodeCSVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "CSV decoding failed",
+          		Private: "service/data/codec/csv.Unmarshal: ReadAll returned an error",
+          	})
+        to: errs
+  - of: readAllPreSized
+    participants:
+      - id: caller
+        kind: actor
+      - id: readAllPreSized
+        kind: self
+      - id: stdcsv
+        kind: stdlib
+      - id: r.Read
+        kind: value
+    steps:
+      - bind: r
+        eval: stdcsv.NewReader(br)
+        to: stdcsv
+      - set: r.ReuseRecord
+        value: "true"
+      - bind: hint
+        eval: bytes.Count(data, []byte{'\n'}) + 1
+      - set: records
+        value: make([][]string, 0, hint)
+      - loop:
+          do:
+            - bind: record, rerr
+              eval: r.Read()
+              to: r.Read
+            - opt:
+                do:
+                  - return: records, nil
+                when: errors.Is(rerr, io.EOF)
+            - opt:
+                do:
+                  - return: nil, rerr
+                when: rerr != nil
+            - set: records
+              value: append(records, slices.Clone(record))
+          forever: true
+  - of: extractRecords
+    steps:
+      - opt:
+          do:
+            - return: direct, true
+          init:
+            bind: direct, directOk
+            eval: v.([][]string)
+          when: directOk
+      - opt:
+          do:
+            - return: "*ptr, true"
+          init:
+            bind: ptr, ptrOk
+            eval: v.(*[][]string)
+          when: ptrOk && ptr != nil
+      - return: nil, false

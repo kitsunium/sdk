@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Format is the name YAML is registered under. It is an untyped constant, so
+      it goes wherever a format name is taken — config.FSSource's string,
+      i18n.LoadFS's codec.Format — without a conversion.
+    items:
+      - name: Format
+        value: "\"yaml\""
+    name: Format
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Format
+    name: yaml.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/yaml
+  name: yaml
+  purpose: "Package yaml registers the YAML codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/yaml\" Everything that dispatches through the registry by format name then reads and writes YAML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal."
+types: []

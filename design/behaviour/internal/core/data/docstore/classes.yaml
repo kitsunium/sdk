@@ -1,0 +1,133 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - IndexSpec
+      - Unique
+      - Index
+    name: index.go
+  - decls:
+      - EntryValue
+      - VersionValue
+      - StampValue
+      - TombstoneValue
+      - VersionWeightValue
+    name: value.go
+functions:
+  - name: Unique
+    params: name string, key func(T) string
+    results: IndexSpec[T]
+    typeParams: T any
+  - name: Index
+    params: name string, keys func(T) []string
+    results: IndexSpec[T]
+    typeParams: T any
+imports:
+  json: encoding/json
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/docstore
+  name: docstore
+  purpose: Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block; ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and ADR 0178 22, for a document written with its versions).
+types:
+  - fields:
+      - doc: |-
+          Keys returns a document's keys in the index. Empty keys are not
+          indexed, and a key listed twice is filed once.
+        name: Keys
+        type: func(T) []string
+      - doc: Name reads the index in Lookup and Find, and names it in a refusal.
+        name: Name
+        type: string
+      - doc: Unique refuses a write that would file two documents under one key.
+        name: Unique
+        type: bool
+    kind: struct
+    name: IndexSpec
+    typeParams: T any
+  - fields:
+      - doc: Key is the document's key.
+        name: Key
+        type: string
+      - doc: JSON is the document, a copy the caller owns.
+        name: JSON
+        type: json.RawMessage
+    kind: struct
+    name: EntryValue
+  - fields:
+      - doc: |-
+          At is when the write that made the version ran, in UTC, read from the
+          store's clock and kept to the nanosecond — by the file engine for the
+          years 0 to 9999, which RFC 3339 writes, and by the SQL engine for any
+          instant. It is zero for the first version of a document the store held
+          before it kept versions: when that one was written is not known.
+        name: At
+        type: time.Time
+      - doc: |-
+          Meta is what the write's caller said about it — who made it, which
+          command — as its [StampValue] gave it; nil when it said nothing. The
+          store keeps it and never reads it.
+        name: Meta
+        type: map[string]string
+      - doc: |-
+          JSON is the document as the version holds it, compact, a copy the
+          caller owns. The newest version's is the document itself.
+        name: JSON
+        type: json.RawMessage
+      - doc: |-
+          Number counts a document's versions from 1. No number is given twice
+          while the document exists or is in the trash, pruning included; a
+          document deleted, or purged from the trash, and written again is a new
+          document, and starts again at 1.
+        name: Number
+        type: uint64
+    kind: struct
+    name: VersionValue
+  - fields:
+      - doc: |-
+          Meta is kept with the version the write makes — who made it, which
+          command — and read back with it. The store copies it and never reads
+          it.
+        name: Meta
+        type: map[string]string
+      - doc: |-
+          InPlace makes the write change the document without making a version:
+          the current version keeps its number, its instant and its Meta, and
+          holds the new document. A framework stamps so a workflow's transition,
+          which its journal already records. A creation is version 1 all the
+          same.
+        name: InPlace
+        type: bool
+    kind: struct
+    name: StampValue
+  - fields:
+      - doc: Key is the trashed document's key.
+        name: Key
+        type: string
+      - doc: |-
+          At is when the document was trashed, in UTC, read from the store's
+          clock and kept to the nanosecond, as a version's instant is.
+        name: At
+        type: time.Time
+    kind: struct
+    name: TombstoneValue
+  - fields:
+      - doc: |-
+          Former is how many former versions the store keeps, every document's
+          — a trashed one's included.
+        name: Former
+        type: int
+      - doc: Trashed is how many documents are in the trash ([Trashable]).
+        name: Trashed
+        type: int
+      - doc: |-
+          Bytes is what the former versions and the trashed documents weigh:
+          the length of the JSON each holds, compact, as both engines keep it.
+          The instants and the metadata they carry are not counted.
+        name: Bytes
+        type: int64
+    kind: struct
+    name: VersionWeightValue

@@ -1,0 +1,11 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - forward: svcgit.Resolve
+    of: Resolve
+  - forward: svcgit.GitDir
+    of: GitDir
+  - forward: svcgit.Head
+    of: Head
+  - forward: svcgit.ShowFile
+    of: ShowFile

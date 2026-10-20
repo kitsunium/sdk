@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/statemachine
+  name: statemachine
+  purpose: "Package statemachine is a state-machine engine over stored entities (ADR 0120): declare the states an entity goes through and the transitions between them, hand the engine your store, and it moves entities along — on the events you fire, and by itself on timers, deadlines and guards."
+types: []

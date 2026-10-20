@@ -1,0 +1,640 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultStopTimeout is the per-component shutdown budget a non-positive
+      [Config.StopTimeout] clamps to.
+
+      The number is exported because a default nobody can name is a default
+      nobody can reason about: a caller sizing a container's termination grace
+      period needs it, and a test asserting the clamp needs to say what it
+      clamped TO without copying a literal. Thirty seconds is the conventional
+      floor of the surrounding ecosystem — Kubernetes' terminationGracePeriod
+      defaults to 30s — so it is a value a reader accepts without being told why,
+      which is exactly ADR 0031's test for clamping rather than refusing.
+    items:
+      - name: DefaultStopTimeout
+        type: time.Duration
+        value: 30 * time.Second
+    name: DefaultStopTimeout
+  - doc: |-
+      fixedAggregateParts is how many errors a failed Start's aggregate carries
+      before the per-component unwind failures: the SDK's verdict, the
+      component's own error, and — at most — the unwind verdict.
+    items:
+      - name: fixedAggregateParts
+        type: int
+        value: "3"
+    name: fixedAggregateParts
+  - doc: |-
+      DefaultRestartBase and DefaultRestartMax bound the restart backoff when
+      [SupervisorConfig].Backoff is the zero value: one second after the first
+      failure, doubling, never more than a minute.
+
+      A zero backoff.Value retries at once, which is what a retry around a single
+      call means by it — and for a supervised loop it is a hot loop: a function
+      that fails on entry would be restarted as fast as a core can run it. The
+      zero is therefore CLAMPED to a curve a reader accepts without being told
+      why (ADR 0031): fast enough that a transient failure costs a second, slow
+      enough that a permanent one costs a log line a minute.
+    grouped: true
+    items:
+      - name: DefaultRestartBase
+        type: time.Duration
+        value: time.Second
+      - name: DefaultRestartMax
+        type: time.Duration
+        value: time.Minute
+    name: DefaultRestartBase
+  - doc: |-
+      DefaultHealthyRun is how long a run must last, when
+      [SupervisorConfig].HealthyAfter is not positive, for its end to count as a
+      first failure again rather than one more in a row. A run that lasted a
+      minute was working, and punishing its next failure with the backoff of a
+      loop that has been crashing on entry would slow a recovery for nothing.
+    items:
+      - name: DefaultHealthyRun
+        type: time.Duration
+        value: time.Minute
+    name: DefaultHealthyRun
+  - doc: |-
+      The four phases of a supervision. The zero value is none of them, so an
+      event that was never filled in reads as "unknown".
+    grouped: true
+    items:
+      - doc: "SupervisionRunStarted: a run of the function began."
+        name: SupervisionRunStarted
+        type: SupervisionPhase
+        value: iota + 1
+      - doc: "SupervisionRunEnded: a run returned, or panicked."
+        name: SupervisionRunEnded
+      - doc: |-
+          SupervisionRestarting: a run ended early and the next one is
+          scheduled after Delay.
+        name: SupervisionRestarting
+      - doc: |-
+          SupervisionStopped: the supervision is over, and the goroutine
+          that ran it is returning.
+        name: SupervisionStopped
+    name: SupervisionRunStarted
+files:
+  - decls:
+      - DefaultStopTimeout
+      - Config
+      - Config.stopBudget
+      - Config.resolvedClock
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - lifecycle
+      - New
+      - (*lifecycle).Add
+      - validateComponent
+      - (*lifecycle).beginStart
+      - (*lifecycle).markStarted
+      - (*lifecycle).takeStarted
+      - (*lifecycle).release
+      - guard
+      - (*lifecycle).emit
+    name: lifecycle.go
+  - decls:
+      - RunConfig
+      - Run
+      - waitForStop
+      - announce
+    name: run.go
+  - decls:
+      - fixedAggregateParts
+      - (*lifecycle).Start
+      - (*lifecycle).callStart
+      - (*lifecycle).abort
+      - joinStartFailure
+    name: start.go
+  - decls:
+      - (*lifecycle).Stop
+      - (*lifecycle).stopEach
+      - (*lifecycle).callStop
+      - (*lifecycle).stopped
+      - (*lifecycle).abandoned
+    name: stop.go
+  - decls:
+      - Supervisor
+      - NewSupervisor
+      - (*Supervisor).Start
+      - (*Supervisor).Stop
+      - (*Supervisor).Component
+      - (*Supervisor).running
+      - (*Supervisor).supervise
+      - (*Supervisor).once
+      - (*Supervisor).wait
+      - (*Supervisor).emit
+      - wayOut
+    name: supervise.go
+  - decls:
+      - DefaultRestartBase
+      - DefaultHealthyRun
+      - SupervisorConfig
+      - validateSupervisor
+      - (*SupervisorConfig).resolved
+    name: supervise_config.go
+  - decls:
+      - SupervisionPhase
+      - SupervisionRunStarted
+      - SupervisionPhase.String
+      - SupervisionEventValue
+    name: supervise_event.go
+functions:
+  - name: New
+    params: cfg Config
+    results: corelc.Lifecycle
+  - doc: |-
+      validateComponent refuses a component that could never run, naming the
+      missing part.
+    name: validateComponent
+    params: component corelc.ComponentValue
+    results: error
+  - doc: |-
+      guard calls one half of a component's contract with the panic recovered.
+
+      A panic escaping a Start would skip the unwind entirely and leak every
+      component already up — the exact failure this domain exists to prevent — and
+      a panic escaping a Stop would abandon every component still to be stopped.
+
+      phase is the rendered label rather than a corelc.Phase: this function only
+      ever puts it in an error field, and taking the string keeps it from
+      depending on a domain type it does not otherwise use.
+    name: guard
+    params: ctx context.Context, name, phase string, fn func(context.Context) error
+    results: err error
+  - name: Run
+    params: ctx context.Context, lc corelc.Lifecycle, cfg RunConfig
+    results: error
+  - doc: |-
+      waitForStop blocks until the context is cancelled or a subscribed signal
+      arrives.
+    name: waitForStop
+    params: ctx context.Context, sigs []coreproc.Signal
+  - doc: announce delivers one opt-in sd_notify state.
+    name: announce
+    params: enabled bool, send func() error, state string
+    results: error
+  - doc: |-
+      joinStartFailure assembles the aggregate a failed Start returns.
+
+      It is an errors.Join and not a wrap chain on purpose. errs.Wrap would hit
+      the origin-wins rule (CLAUDE.md rule 6) and inherit the component's own
+      code, so a caller could no longer ask "did startup fail?" without knowing
+      every code every component might produce. Side by side, both
+      errs.HasCode(err, CodeStartFailed) and the caller's own errors.Is answer.
+    name: joinStartFailure
+    params: name string, index, unwound int, cause error, failures []error
+    results: error
+  - name: NewSupervisor
+    params: name string, run func(ctx context.Context) error, cfg SupervisorConfig
+    results: "*Supervisor, error"
+  - doc: |-
+      wayOut is the error a run that ended with its supervision reports: its
+      context's own error is the way out, not a failure, and anything else it
+      returned — a panic included — is kept.
+    name: wayOut
+    params: runErr error
+    results: error
+  - doc: validateSupervisor refuses a supervisor that could never run.
+    name: validateSupervisor
+    params: name string, run func(ctx context.Context) error
+    results: error
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  debug: runtime/debug
+  errors: errors
+  fmt: fmt
+  kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  notify: github.com/kitsunium/sdk/internal/service/proc/systemd/notify
+  signal: github.com/kitsunium/sdk/internal/service/proc/signal
+  slices: slices
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/lifecycle
+  name: lifecycle
+  purpose: Package lifecycle — hosts Config, the engine's construction parameters.
+types:
+  - fields:
+      - doc: |-
+          Clock is the time source the engine reads AND waits on. A nil Clock
+          falls back to clock.System.
+
+          It is clock.Timed rather than clock.Clock because this engine does both
+          halves: it stamps transitions and it waits out shutdown budgets.
+          Depending on package time directly instead would make every budget
+          assertion in the test suite a sleep, and a sleep a tolerance, and a
+          tolerance a flake somebody eventually deletes.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          StopTimeout is the budget ONE component's Stop gets. It is deliberately
+          per-component and not a budget for the whole shutdown: a shared budget
+          lets the first component that will not finish consume the budget of
+          every component after it, which is precisely the defect ADR 0043
+          removed from the HTTP drain.
+
+          The price is stated rather than hidden: a Stop of n components returns
+          in at most n × StopTimeout. That is the cost of not letting one
+          component spend everyone else's budget.
+
+          A non-positive value CLAMPS to [DefaultStopTimeout]. It is never read
+          as "stop immediately" — a zero here is what an unset field looks like,
+          and reading an unset field as "give every component no time at all"
+          would turn a forgotten line into a shutdown that reports a timeout for
+          components that were about to succeed (ADR 0031).
+        name: StopTimeout
+        type: time.Duration
+      - doc: |-
+          OnTransition observes every call the engine makes into a component —
+          each Start, each Stop, each Stop abandoned at its budget.
+
+          Calls are SERIALISED: the hook need not be safe for concurrent use, and
+          in exchange a hook that blocks blocks the lifecycle. Keep it short; hand
+          off to a logger or a channel rather than doing work in it.
+
+          A nil hook is a working configuration, not a refusal. It does mean the
+          transitions go NOWHERE — the SDK will not write them to stderr on the
+          caller's behalf (ADR 0030) — so a caller who wants a startup log must
+          wire this. The errors are still returned from Start and Stop either way.
+        name: OnTransition
+        type: func(corelc.TransitionValue)
+    kind: struct
+    methods:
+      - doc: stopBudget resolves the configured budget, applying the documented clamp.
+        name: stopBudget
+        recv: c Config
+        results: time.Duration
+      - doc: resolvedClock resolves the time source, applying the documented fallback.
+        name: resolvedClock
+        recv: c Config
+        results: clock.Timed
+    name: Config
+  - doc: |-
+      lifecycle is the concrete core/app/lifecycle.Lifecycle. It is unexported: there
+      is one canonical ordering discipline, so a registry would be
+      over-abstraction (the proc, resilience and scheduler precedents — ADR 0016 /
+      ADR 0026 / ADR 0041).
+    fields:
+      - doc: clk is the injected time source; never package time.
+        name: clk
+        type: clock.Timed
+      - doc: budget is the per-component stop budget, already clamped.
+        name: budget
+        type: time.Duration
+      - doc: onTransition is the caller's observation hook, or nil.
+        name: onTransition
+        type: func(corelc.TransitionValue)
+      - doc: hookMu serialises onTransition so the hook need not be concurrency-safe.
+        name: hookMu
+        type: sync.Mutex
+      - doc: |-
+          opMu serialises Start and Stop as WHOLE operations. Without it a Stop
+          arriving mid-Start would take a snapshot of the components that are up
+          so far, stop those, and leave Start still starting the rest — a torn
+          shutdown that no amount of per-field locking prevents.
+        name: opMu
+        type: sync.Mutex
+      - doc: mu guards the registration set and the run state below.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          running reports that Start has begun and Stop has not finished; it
+          freezes the component order.
+        name: running
+        type: bool
+      - doc: |-
+          components holds the registrations in Add order, which IS the start
+          order and the reverse of the stop order.
+        name: components
+        type: "[]corelc.ComponentValue"
+      - doc: names is the duplicate-name index.
+        name: names
+        type: map[string]bool
+      - doc: |-
+          started holds the components whose Start returned nil, in the order
+          they returned. It is appended to BEFORE the next Start is attempted, so
+          there is no instant at which a component is up and unrecorded — which
+          is the whole guarantee behind the partial-start unwind.
+        name: started
+        type: "[]corelc.ComponentValue"
+    kind: struct
+    methods:
+      - doc: |-
+          Add registers a component at the end of the order, refusing anything that
+          could not run.
+        name: Add
+        params: component corelc.ComponentValue
+        recv: l *lifecycle
+        results: error
+      - doc: beginStart claims the running flag and snapshots the component order.
+        name: beginStart
+        recv: l *lifecycle
+        results: order []corelc.ComponentValue, err error
+      - doc: |-
+          markStarted records one component as up. It runs BEFORE the next Start is
+          attempted, which is what makes the unwind total: every component that is up
+          is in this list by the time anything can fail.
+        name: markStarted
+        params: component corelc.ComponentValue
+        recv: l *lifecycle
+      - doc: |-
+          takeStarted hands back the components that are up, ALREADY REVERSED, and
+          clears the record so nothing can be stopped twice.
+
+          Reversing here rather than at each call site is deliberate: the reverse
+          order is the domain's central promise, and there is exactly one place that
+          can get it wrong.
+        name: takeStarted
+        recv: l *lifecycle
+        results: "[]corelc.ComponentValue"
+      - doc: |-
+          release drops the running flag so the Lifecycle can be added to and started
+          again.
+        name: release
+        recv: l *lifecycle
+      - doc: |-
+          emit stamps Ended and publishes one transition through the caller's hook.
+
+          The caller fills everything except Ended, which only this function can read
+          honestly: it is the instant the engine STOPPED WAITING, which on an
+          abandoned stop is when the budget expired and not when the component
+          eventually returned.
+        name: emit
+        params: transition corelc.TransitionValue
+        recv: l *lifecycle
+      - doc: |-
+          Start brings every registered component up, in registration order.
+
+          There is deliberately NO SDK-owned start budget. The caller's context is the
+          budget: a start deadline is an operational decision the SDK cannot make, and
+          a component that ignores its context could not be bounded by one anyway.
+          Cancelling ctx therefore aborts the startup through the components
+          themselves — and the unwind that follows does NOT inherit that
+          cancellation, because a cleanup driven by the context that just failed is a
+          cleanup that does nothing.
+        name: Start
+        params: ctx context.Context
+        recv: l *lifecycle
+        results: error
+      - doc: callStart runs one component's Start and reports the transition.
+        name: callStart
+        params: ctx context.Context, component corelc.ComponentValue
+        recv: l *lifecycle
+        results: error
+      - doc: |-
+          abort cleans up after a failed start and reports both halves.
+
+          The failing component is NOT stopped: its Start returned an error, so it
+          never handed back a running thing, and calling Stop on a half-constructed
+          component is how a double-close panic gets written. A Start that fails owns
+          what it acquired, exactly as a Go constructor does — which is the only rule
+          under which every other Stop may assume its Start succeeded.
+        name: abort
+        params: ctx context.Context, name string, index int, cause error
+        recv: l *lifecycle
+        results: error
+      - doc: |-
+          Stop takes every started component down, in reverse of the order they
+          started in.
+
+          ctx is read for its VALUES and never for its cancellation. A shutdown is
+          normally driven BY a cancelled context — the one that told the process to
+          go is the one that was cancelled — so honouring it here would make every
+          real shutdown a no-op, and would hand each component's Stop a context that
+          is already dead before it has closed anything. Each Stop instead receives a
+          context derived with context.WithoutCancel, cancelled only when that
+          component's own budget expires.
+        name: Stop
+        params: ctx context.Context
+        recv: l *lifecycle
+        results: error
+      - doc: |-
+          stopEach takes down every component in the order given — which is already
+          the reverse of the start order — and collects what failed.
+
+          It is the SINGLE unwind path: an ordinary Stop and the cleanup after a
+          partial start both come through here, so the two can never drift apart. A
+          failure never short-circuits: a component that cannot close cleanly must not
+          prevent the ones before it in the order from being asked.
+        name: stopEach
+        params: ctx context.Context, order []corelc.ComponentValue
+        recv: l *lifecycle
+        results: "[]error"
+      - doc: |-
+          callStop runs one component's Stop under its own budget.
+
+          Goroutine lifecycle: exactly one goroutine per call, carrying the
+          component's Stop. It ends when that Stop returns — which may be after this
+          function has already given up on it, and is why `done` is buffered: an
+          abandoned Stop's eventual return must not park a goroutine forever on a
+          receiver that has moved on. The engine deliberately does NOT wait for it:
+          Go cannot kill a goroutine, and waiting would make the budget a suggestion.
+        name: callStop
+        params: parent context.Context, component corelc.ComponentValue
+        recv: l *lifecycle
+        results: error
+      - doc: stopped reports a component that returned within its budget.
+        name: stopped
+        params: name string, begun time.Time, err error
+        recv: l *lifecycle
+        results: error
+      - doc: |-
+          abandoned reports a component whose Stop outlived its budget.
+
+          The engine cancels the context it handed that Stop — an ANNOUNCEMENT, the
+          one piece of information the component cannot otherwise have — and then
+          stops waiting. It does not kill the goroutine, which Go cannot do, and it
+          closes nothing on the component's behalf: severing a resource under live
+          work is precisely what ADR 0043 removed from the HTTP drain. Every
+          component before this one in the reverse order still gets its own full
+          budget, which is why the budget is per-component and not shared.
+        name: abandoned
+        params: cancel context.CancelFunc, name string, begun time.Time
+        recv: l *lifecycle
+        results: error
+    name: lifecycle
+  - fields:
+      - doc: |-
+          Signals is the set of OS signals that end the wait. An empty slice
+          installs no handler at all: the caller's context stays the only way to
+          end the wait, which is what a process whose main already owns signal
+          handling needs.
+
+          The subscription is torn down before Run returns, so a caller that runs
+          two lifecycles in sequence does not accumulate handlers.
+        name: Signals
+        type: "[]coreproc.Signal"
+      - doc: |-
+          Notify asks for the systemd sd_notify(3) readiness protocol: READY=1
+          once every component is up, STOPPING=1 before the shutdown begins.
+
+          It is safe to set unconditionally on a process that may not be
+          supervised: with $NOTIFY_SOCKET unset every notifier call is a
+          documented no-op that returns nil, so an unsupervised binary stays
+          silent rather than failing.
+        name: Notify
+        type: bool
+    kind: struct
+    name: RunConfig
+  - fields:
+      - doc: run is the supervised function.
+        name: run
+        type: func(ctx context.Context) error
+      - doc: clock stamps the events and paces the backoff.
+        name: clock
+        type: clock.Timed
+      - doc: observe is told about every event; nil tells nobody.
+        name: observe
+        type: func(SupervisionEventValue)
+      - doc: |-
+          cancel ends the current supervision; done closes when it has ended.
+          Both are nil before the first Start. Guarded by mu.
+        name: cancel
+        type: context.CancelFunc
+      - name: done
+        type: chan struct{}
+      - doc: name identifies the supervisor.
+        name: name
+        type: string
+      - doc: backoff is the restart curve.
+        name: backoff
+        type: kbackoff.Value
+      - doc: healthy is how long a run lasts before its end is a first failure.
+        name: healthy
+        type: time.Duration
+      - doc: mu guards cancel and done.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - name: Start
+        params: ctx context.Context
+        recv: s *Supervisor
+        results: error
+      - name: Stop
+        params: ctx context.Context
+        recv: s *Supervisor
+        results: error
+      - name: Component
+        recv: s *Supervisor
+        results: corelc.ComponentValue
+      - doc: |-
+          running reports whether a supervision started and has not ended. The
+          caller holds mu.
+        name: running
+        recv: s *Supervisor
+        results: bool
+      - doc: |-
+          supervise is the supervision: run, and after every early end, back off and
+          run again, until ctx ends.
+        name: supervise
+        params: ctx context.Context, done chan struct{}
+        recv: s *Supervisor
+      - doc: once runs the function once and turns a panic into RunPanicked.
+        name: once
+        params: ctx context.Context
+        recv: s *Supervisor
+        results: err error
+      - doc: |-
+          wait waits delay on the supervisor's clock, and reports whether the
+          supervision should carry on — false when ctx ended first.
+        name: wait
+        params: ctx context.Context, delay time.Duration
+        recv: s *Supervisor
+        results: bool
+      - doc: emit tells the observer, when there is one.
+        name: emit
+        params: event SupervisionEventValue
+        recv: s *Supervisor
+    name: Supervisor
+  - fields:
+      - doc: |-
+          Clock is the time source the supervisor stamps events with and waits
+          its backoff on. Nil means clock.System; a clock.ManualClock drives
+          every restart of a test without a sleep.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          Observe is told about every run started, every run ended, every
+          restart scheduled and the end of the supervision, on the supervisor's
+          goroutine, one call at a time. It must be short and must not panic. Nil
+          observes nothing: the supervisor writes nothing anywhere itself.
+        name: Observe
+        type: func(SupervisionEventValue)
+      - doc: |-
+          Backoff is the wait before the n-th consecutive restart. The zero
+          value is the [DefaultRestartBase]–[DefaultRestartMax] curve, and a curve
+          without a positive BaseDelay starts from [DefaultRestartBase] under its
+          own ceiling: a supervisor never restarts at once.
+        name: Backoff
+        type: kbackoff.Value
+      - doc: |-
+          HealthyAfter is how long a run must last for its end to reset the
+          consecutive-failure count. Not positive means [DefaultHealthyRun].
+        name: HealthyAfter
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: resolved applies the documented clamps.
+        name: resolved
+        recv: c *SupervisorConfig
+        results: clk clock.Timed, backoff kbackoff.Value, healthy time.Duration
+    name: SupervisorConfig
+  - kind: named
+    methods:
+      - name: String
+        recv: p SupervisionPhase
+        results: string
+    name: SupervisionPhase
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Err is what an ended run returned: nil when it returned nil before its
+          context ended, RunPanicked for a panic, and nil too when it ended
+          because the supervision was stopping and it returned its context's
+          error — the way out, not a failure.
+        name: Err
+        type: error
+      - doc: At is when the event happened, on the supervisor's clock.
+        name: At
+        type: time.Time
+      - doc: Name is the supervisor's.
+        name: Name
+        type: string
+      - doc: Duration is how long an ended run lasted.
+        name: Duration
+        type: time.Duration
+      - doc: Delay is how long a restart waits before the next run.
+        name: Delay
+        type: time.Duration
+      - doc: |-
+          Run numbers the run the event is about, from 1; the Stopped event
+          carries the last one.
+        name: Run
+        type: int
+      - doc: |-
+          Failures is how many runs in a row have ended early, counting this
+          one — the attempt the backoff is computed for.
+        name: Failures
+        type: int
+      - doc: Phase says what happened.
+        name: Phase
+        type: SupervisionPhase
+      - doc: |-
+          Stopping reports that an ended run ended because the supervision was
+          stopping. Such a run is never restarted.
+        name: Stopping
+        type: bool
+    kind: struct
+    name: SupervisionEventValue

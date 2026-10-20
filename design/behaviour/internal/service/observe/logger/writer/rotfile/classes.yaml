@@ -1,0 +1,441 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      defaultRotateRetentionDays is the retention floor applied when interval
+      rotation is enabled (rotate_every > 0) but no explicit max_age_days is given:
+      the "archive every 24h, keep 7 days" default. Without it an enabled archive
+      policy would silently keep every rotated sibling forever.
+    items:
+      - name: defaultRotateRetentionDays
+        type: int
+        value: "7"
+    name: defaultRotateRetentionDays
+  - doc: |-
+      defaultFilePerm is the permission bitmask for the active file and every
+      rotated sibling. 0600 restricts reads to the owning UID so diagnostic
+      content is never world-readable; a gzip sibling is chmod'd to the same value
+      rather than inheriting gzip's default.
+    items:
+      - name: defaultFilePerm
+        type: os.FileMode
+        value: "0o600"
+    name: defaultFilePerm
+files:
+  - decls:
+      - (*rotatingSink).backupName
+      - (*rotatingSink).highestSlot
+      - (*rotatingSink).shiftExisting
+      - (*rotatingSink).promoteActive
+      - (*rotatingSink).gzipActive
+      - compressInto
+    name: backups.go
+  - decls:
+      - defaultRotateRetentionDays
+      - (*rotFileFactory).Decode
+      - decodeRotScalars
+      - decodeReqString
+      - decodeInt64
+      - decodeInt
+      - decodeBool
+      - decodeRotMinLevel
+      - decodeRotateEvery
+      - asInt64
+      - decodeInvalid
+    name: decode.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - (*rotatingSink).pruneByAge
+      - (*rotatingSink).pruneSlotByAge
+    name: prune.go
+  - decls:
+      - (*rotatingSink).maybeRotate
+      - (*rotatingSink).rotate
+      - (*rotatingSink).reopenAfterFailure
+      - (*rotatingSink).shiftBackups
+    name: rotate.go
+  - decls:
+      - (*rotatingSink).tickRotate
+    name: rotate_interval.go
+  - decls:
+      - (*rotatingSink).Rotate
+    name: rotate_manual.go
+  - decls:
+      - defaultFilePerm
+      - openRefusals
+      - rotatingSink
+      - openHardened
+      - newRotatingSink
+      - (*rotatingSink).Write
+      - (*rotatingSink).Flush
+      - (*rotatingSink).Close
+    name: rotating_sink.go
+  - decls:
+      - Config
+    name: rotating_sink_config.go
+  - decls:
+      - Writer
+      - rotFileFactory
+      - (*rotFileFactory).Name
+      - (*rotFileFactory).Open
+    name: rotfile.go
+  - decls:
+      - wrapRotate
+    name: wrap.go
+functions:
+  - doc: |-
+      compressInto streams the file at srcPath through gzip into dst. Factored out
+      so gzipActive stays under KTN-FUNC-MAXLOC.
+    name: compressInto
+    params: dst io.Writer, srcPath string
+    results: err error
+  - doc: |-
+      decodeRotScalars maps the optional scalar knobs (max_bytes, max_backups,
+      max_age_days, compress, min_level) onto c, returning the redacted sentinel on
+      the first malformed shape. Split from Decode so each stays within the
+      cyclomatic-complexity cap.
+    name: decodeRotScalars
+    params: raw map[string]any, c *Config
+    results: error
+  - doc: |-
+      decodeReqString maps a mandatory non-empty string key onto dst. An absent
+      key, a non-string value, or an empty string all yield the redacted sentinel.
+    name: decodeReqString
+    params: raw map[string]any, key string, dst *string
+    results: error
+  - doc: |-
+      decodeInt64 maps an optional integer key onto dst, accepting the numeric
+      shapes a config codec yields (int / int64 / uint64 / float64). An absent key
+      leaves dst untouched; a present non-numeric value yields the redacted sentinel.
+    name: decodeInt64
+    params: raw map[string]any, key string, dst *int64
+    results: error
+  - doc: |-
+      decodeInt maps an optional integer key onto an int dst, reusing the int64
+      coercion and narrowing. An absent key leaves dst untouched.
+    name: decodeInt
+    params: raw map[string]any, key string, dst *int
+    results: error
+  - doc: |-
+      decodeBool maps an optional bool key onto dst. An absent key leaves dst
+      untouched; a present non-bool value yields the redacted sentinel.
+    name: decodeBool
+    params: raw map[string]any, key string, dst *bool
+    results: error
+  - doc: |-
+      decodeRotMinLevel maps the optional "min_level" name onto dst. An absent key
+      inherits the handler-global floor; a non-string or unknown name is redacted.
+    name: decodeRotMinLevel
+    params: raw map[string]any, dst *level.Level
+    results: error
+  - doc: |-
+      decodeRotateEvery maps the optional "rotate_every" duration onto dst. It is
+      deliberately TOLERANT: an absent key, a non-string value, an unparsable
+      duration, or a non-positive duration all leave dst at zero (interval rotation
+      disabled) — a misconfigured archive cadence must not panic worker.Every nor
+      fail the entire logging topology. It therefore returns no error.
+    name: decodeRotateEvery
+    params: raw map[string]any, dst *time.Duration
+  - doc: |-
+      asInt64 coerces the numeric shapes a config codec may yield (int, int64,
+      uint64, float64) to int64, reporting false for any other type. Centralising
+      the coercion keeps every numeric decoder consistent across codecs (YAML emits
+      int, JSON float64, CBOR int64/uint64).
+    name: asInt64
+    params: v any
+    results: n int64, ok bool
+  - doc: |-
+      decodeInvalid returns the shared, redacted RotFileDecodeFailed sentinel tagged
+      with the writer name only — never a decoded option value (secret gate).
+      Origin-wins keeps errors.Is matching RotFileDecodeFailed through the wrap.
+    name: decodeInvalid
+    results: error
+  - doc: |-
+      openHardened opens path with 0600 through the hardened open both file sinks
+      share: a pre-existing symlink is refused, and O_NOFOLLOW makes the kernel
+      refuse one planted after that check, on every platform that has it. It is
+      this sink's single entry point, so the checks re-run identically at
+      construction AND on every reopen after a rotation (CWE-59) — the rotation
+      cycle never reopens through a weaker path.
+    name: openHardened
+    params: path string
+    results: file *os.File, err error
+  - doc: |-
+      newRotatingSink validates cfg, opens the active file through the hardened
+      path, and seeds the size counter from the existing file so a restart does not
+      reset the rotation threshold. cfg is taken by pointer so the grown Config
+      value (path + caps + clock, >64 bytes) is not copied onto the stack.
+    name: newRotatingSink
+    params: cfg *Config
+    results: sink corelogger.Sink, err error
+  - doc: |-
+      wrapRotate wraps cause under the RotFileRotateFailed sentinel with a private
+      diagnostic, keeping the rotation call sites terse. The cause never carries
+      key bytes or path-derived secrets; only the supplied private string is added.
+    name: wrapRotate
+    params: cause error, private string
+    results: error
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  corerotfile: github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile
+  corewriter: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  gzip: compress/gzip
+  io: io
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  logfile: github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile
+  logger: github.com/kitsunium/sdk/internal/core/observe/logger
+  os: os
+  strconv: strconv
+  sync: sync
+  time: time
+  worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
+  writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/rotfile
+  name: rotfile
+  purpose: Package rotfile — backup-name arithmetic and the per-slot move/gzip helpers split out of rotate.go so each function stays under KTN-FUNC-MAXLOC.
+types:
+  - doc: |-
+      rotatingSink is the unexported Sink that appends formatted records to Path
+      and rotates the file when a write would exceed cfg.MaxBytes. It owns the
+      descriptor directly so it can close + rename + reopen across a rotation.
+    fields:
+      - doc: cfg is the immutable rotation policy (path, cap, backups, compress).
+        name: cfg
+        type: Config
+      - doc: |-
+          mu serialises Write + rotation so the size accounting, rename shift, and
+          reopen are atomic against concurrent producers.
+        name: mu
+        type: sync.Mutex
+      - doc: f is the currently open active file at cfg.Path.
+        name: f
+        type: "*os.File"
+      - doc: |-
+          size tracks bytes written to the active file since the last open, so the
+          threshold check needs no per-write stat syscall.
+        name: size
+        type: int64
+      - doc: |-
+          clk is the time source for MaxAgeDays calendar pruning; never nil after
+          newRotatingSink resolves cfg.Clock (defaulting to clock.System).
+        name: clk
+        type: clock.Clock
+      - doc: |-
+          daemon is the interval-rotation ticker, non-nil only when cfg.RotateEvery
+          is positive. Close joins it before locking mu so the ticker goroutine
+          (which itself locks mu via Rotate) cannot deadlock the join.
+        name: daemon
+        type: "*worker.LoopDaemon"
+      - doc: |-
+          tickErr stashes a typed error from an interval-driven Rotate so the next
+          Write surfaces it exactly once (genuine propagation, never discarded);
+          guarded by mu.
+        name: tickErr
+        type: error
+    kind: struct
+    methods:
+      - doc: |-
+          backupName returns the rotated sibling path for slot n (Path.n), or its
+          gzip form (Path.n.gz) when Compress is set — the canonical on-disk name for
+          that slot so removal and shifting agree.
+        name: backupName
+        params: n int
+        recv: s *rotatingSink
+        results: string
+      - doc: |-
+          highestSlot reports the highest backup index to shift: MaxBackups-1 when a
+          finite cap is set (the cap slot was already evicted), else a bounded probe
+          that stops at the first missing slot so MaxBackups == 0 keeps all backups.
+        name: highestSlot
+        recv: s *rotatingSink
+        results: int
+      - doc: |-
+          shiftExisting renames each existing backup down by one, highest index first
+          so a lower slot never clobbers a higher one before it has moved. The caller
+          holds s.mu.
+        name: shiftExisting
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          promoteActive moves the just-closed active file into the .1 slot, gzipping it
+          to Path.1.gz (0600) when Compress is set. The caller holds s.mu.
+        name: promoteActive
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          gzipActive compresses the just-closed Path into Path.1.gz with mode 0600,
+          then removes the uncompressed original. It runs while the sink is between
+          descriptors (the active file is closed) so producers stall only for the
+          duration of the compaction — documented as the producer-stall window.
+        name: gzipActive
+        recv: s *rotatingSink
+        results: err error
+      - doc: |-
+          pruneByAge removes rotated siblings whose modification time is older than the
+          MaxAgeDays cutoff, evaluated against the injected clock. It is a no-op when
+          MaxAgeDays is non-positive. The numeric .N naming is unchanged; the cutoff is
+          derived from each sibling's on-disk mtime rather than a name-embedded stamp.
+          The caller holds s.mu.
+        name: pruneByAge
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          pruneSlotByAge removes slot n when its mtime predates cutoff. It reports
+          whether the sweep should continue: false once a slot is absent (the
+          contiguous backup history has ended). The caller holds s.mu.
+        name: pruneSlotByAge
+        params: n int, cutoff time.Time
+        recv: s *rotatingSink
+        results: more bool, err error
+      - doc: |-
+          maybeRotate rotates the active file when appending incoming bytes would push
+          it past cfg.MaxBytes. It is a no-op when rotation is disabled (MaxBytes <= 0),
+          when the file is still empty (a single record larger than the cap is written
+          rather than spun into an empty backup), or when the threshold is not reached.
+          The caller holds s.mu.
+        name: maybeRotate
+        params: incoming int64
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          rotate closes the active file, shifts the .N backups, optionally gzips the
+          freshly rotated Path.1, then reopens Path through the hardened path so the
+          symlink + O_NOFOLLOW + 0600 checks re-run. The caller holds s.mu.
+        name: rotate
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          reopenAfterFailure best-effort reopens Path through openHardened after a
+          rotation step failed with the active descriptor already closed, so the sink
+          self-heals on the next Write instead of latching into a permanently-closed
+          state (V45). It re-seeds s.size from the reopened file; on a still-failing
+          reopen it resets s.size to 0 so the next maybeRotate does not immediately
+          re-enter rotate() on the dead descriptor — the next Write retries the open.
+          The caller holds s.mu and returns the original (more informative) error.
+        name: reopenAfterFailure
+        recv: s *rotatingSink
+      - doc: |-
+          shiftBackups renames the rotated siblings down by one (dropping the oldest
+          when MaxBackups is reached) and moves the active Path into the .1 slot,
+          gzipping it when Compress is set. The caller holds s.mu.
+        name: shiftBackups
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          tickRotate is the interval-rotation tick body run on the daemon goroutine. It
+          forces a Rotate and, on failure, stashes the typed error under mu so the next
+          Write surfaces it exactly once through Config.OnError — the tick never logs or
+          discards (a silent drop would violate KTN-ERROR-DISCARD and hide a failing
+          archive policy), and the next record is still written, not sacrificed.
+        name: tickRotate
+        recv: s *rotatingSink
+      - doc: |-
+          Rotate forces an immediate rotation of the active file.
+
+          It applies the MaxBackups and MaxAgeDays retention policies after the cut and
+          is meant for SIGHUP / logrotate integration where the caller wires the signal
+          to this method. Rotate is a no-op on an empty active file (calendar pruning of
+          existing siblings still runs) and is safe for concurrent use, serialising
+          against Write through the same mutex.
+        name: Rotate
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          Write appends p to the active file under the local mutex, rotating first when
+          the write would push the file past MaxBytes.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *rotatingSink
+        results: n int, err error
+      - doc: |-
+          Flush calls fsync on the active file so kernel page cache contents reach
+          durable storage.
+        name: Flush
+        params: ctx context.Context
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          Close closes the active file. Subsequent Writes fail with the kernel's "file
+          already closed" error, which we wrap as WriteFailed.
+        name: Close
+        recv: s *rotatingSink
+        results: error
+    name: rotatingSink
+  - alias: true
+    doc: |-
+      Config configures the "rotfile" writer. It is an alias of
+      core/observe/logger/writer.RotFileConfig — see that type for the full field documentation
+      (Path / MaxBytes / MaxBackups / Compress / MaxAgeDays / Clock / RotateEvery /
+      OnError / MinLevel).
+    kind: alias
+    name: Config
+    underlying: corewriter.RotFileConfig
+  - doc: rotFileFactory builds a rotating file Sink from a Config.
+    kind: struct
+    methods:
+      - doc: |-
+          Decode builds a rotfile Config from a raw config map decoded from a config
+          file, satisfying core/observe/logger/writer.Decoder. "path" is mandatory; every other key is
+          optional and inherits the Config zero value. A present scalar of the wrong
+          shape yields the redacted RotFileDecodeFailed sentinel. "rotate_every" is
+          tolerant by contract: an unset, non-positive, or unparsable duration disables
+          interval rotation (RotateEvery stays 0, never reaching worker.Every) rather
+          than failing the whole topology; when it IS enabled and max_age_days is unset,
+          retention defaults to defaultRotateRetentionDays.
+        name: Decode
+        params: raw map[string]any
+        recv: "*rotFileFactory"
+        results: cfg writer.Config, err error
+      - doc: Name reports the canonical key "rotfile".
+        name: Name
+        recv: "*rotFileFactory"
+        results: writer.Name
+      - doc: |-
+          Open builds the rotating sink from cfg and wraps it in the per-writer level
+          gate. A Config of the wrong concrete type yields the shared
+          WriterConfigInvalid sentinel; an empty Path or a symlink target surfaces the
+          rotfile sink's own RotFileOpenFailed sentinel (origin wins).
+        name: Open
+        params: cfg writer.Config
+        recv: "*rotFileFactory"
+        results: sink logger.Sink, err error
+    name: rotFileFactory
+vars:
+  - doc: |-
+      openRefusals is this sink's vocabulary for the hardened open both file sinks
+      share (internal/service/observe/logger/internal/logfile): one sentinel,
+      CodeRotFileOpenFailed, for the policy refusal of a planted link and for every
+      failed open — the kernel's refusal of a link planted after the check among
+      them — told apart by the "kind" field the shared open adds.
+    items:
+      - name: openRefusals
+        value: |-
+          logfile.RefusalSpec{
+          	Symlink: errs.WrapParams{
+          		Code:    corerotfile.CodeRotFileOpenFailed,
+          		Reason:  "ROT_FILE_OPEN_FAILED",
+          		Public:  "Rotating file sink refuses to open a symlink",
+          		Private: "service/observe/logger/writer/rotfile.refuseSymlink: path is a symlink; refusing per hardening policy",
+          	},
+          	Open: errs.WrapParams{
+          		Code:    corerotfile.CodeRotFileOpenFailed,
+          		Reason:  "ROT_FILE_OPEN_FAILED",
+          		Public:  "Rotating file sink could not open the destination file",
+          		Private: "service/observe/logger/writer/rotfile.openHardened: os.OpenFile returned an error",
+          	},
+          }
+    name: openRefusals
+  - doc: |-
+      Writer is the registered rotfile factory singleton. The blank assignment runs
+      writer.Register at package load (no init()), mirroring the codec convention.
+    items:
+      - name: Writer
+        value: writer.Register(&rotFileFactory{})
+    name: Writer

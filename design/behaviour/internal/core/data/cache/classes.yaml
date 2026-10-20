@@ -1,0 +1,68 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      NoExpiry is the [EntryValue.TTL] that stores an entry with no deadline.
+
+      It is a distinct value from the zero TTL, which means "use the store's
+      default". A cache with a one-minute default holding one entry that must
+      never expire is a real combination, and reading both meanings out of 0 would
+      make it unspellable — the caller would have to know the default and restate
+      it, which stops being true the day the default changes.
+    items:
+      - name: NoExpiry
+        type: time.Duration
+        value: "-1"
+    name: NoExpiry
+files:
+  - decls:
+      - Fill
+    name: cache_interface.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - NoExpiry
+      - EntryValue
+    name: entry.go
+imports:
+  context: context
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/cache
+  name: cache
+  purpose: "Package cache declares the SDK's cache DOMAIN: the [Store] port that owns a set of keyed entries, the [EntryValue] a caller hands it, and the three sibling interfaces through which a store advertises what else it can do."
+types:
+  - kind: named
+    name: Fill
+    typeParams: V any
+    underlying: func(ctx context.Context) (EntryValue[V], error)
+  - fields:
+      - doc: Value is the payload.
+        name: Value
+        type: V
+      - doc: |-
+          TTL is how long the entry stays fetchable.
+
+            > 0        this exact lifetime
+            0          the store's configured default
+            [NoExpiry] no deadline at all
+
+          Any other negative value is a mistake, not a third meaning, and is
+          refused with [CacheEntryRejected] rather than reinterpreted.
+        name: TTL
+        type: time.Duration
+      - doc: |-
+          Tags label the entry for bulk invalidation. Order is not significant and
+          duplicates are collapsed. An empty tag is refused: it names a set nobody
+          can ask for, so accepting it would index the entry under a key that can
+          only ever be reached by accident.
+
+          Tags cost memory in the store's reverse index — see
+          internal/service/data/cache/CLAUDE.md, which states the per-pair cost and
+          measures it.
+        name: Tags
+        type: "[]string"
+    kind: struct
+    name: EntryValue
+    typeParams: V any

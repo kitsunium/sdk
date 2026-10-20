@@ -1,0 +1,490 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      LimitInfinity is the soft/hard value meaning "no limit" (RLIM_INFINITY). Use
+      it in a LimitValue to lift a resource ceiling rather than setting a number.
+    items:
+      - name: LimitInfinity
+        type: uint64
+        value: ^uint64(0)
+    name: LimitInfinity
+  - grouped: true
+    items:
+      - doc: |-
+          MemorySourceOperator reports that GOMEMLIMIT carried a non-empty value.
+          The Go runtime has already applied it and the derivation stands aside:
+          overriding an operator's explicit decision would contradict them silently.
+
+          The run starts at iota+1 so the zero stays unminted — see the type comment.
+        name: MemorySourceOperator
+        type: MemorySource
+        value: iota + 1
+      - doc: |-
+          MemorySourceUnconstrained reports that no control group governing this
+          process declares a memory cap: not containerised, capped at "max", or not
+          Linux at all. There is nothing to derive a limit from.
+        name: MemorySourceUnconstrained
+      - doc: |-
+          MemorySourceBelowFloor reports that a cap was found but the limit derived
+          from it fell under the usable floor. Holding the runtime beneath it would
+          spin the collector continuously without averting the kill, so the
+          derivation declines rather than applying a limit it expects to hurt.
+        name: MemorySourceBelowFloor
+      - doc: |-
+          MemorySourceCgroup reports the only outcome that yields a limit: a real
+          cap was read from the control-group hierarchy and the derived value is
+          usable.
+        name: MemorySourceCgroup
+    name: MemorySourceOperator
+  - grouped: true
+    items:
+      - doc: "ResourceUnknown is the reserved zero value: no resource selected."
+        name: ResourceUnknown
+        type: Resource
+        value: iota
+      - doc: |-
+          ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE),
+          mapping systemd's LimitNOFILE=.
+        name: ResourceNoFile
+      - doc: |-
+          ResourceNProc limits the number of processes for the real user id
+          (RLIMIT_NPROC), mapping systemd's LimitNPROC=.
+        name: ResourceNProc
+      - doc: |-
+          ResourceCore limits the size of a core dump in bytes (RLIMIT_CORE),
+          mapping systemd's LimitCORE=.
+        name: ResourceCore
+      - doc: |-
+          ResourceAS limits the process virtual address-space size (RLIMIT_AS),
+          mapping systemd's LimitAS=.
+        name: ResourceAS
+      - doc: |-
+          ResourceCPU limits CPU time in seconds (RLIMIT_CPU), mapping systemd's
+          LimitCPU=.
+        name: ResourceCPU
+      - doc: |-
+          ResourceFSize limits the largest file the process may create in bytes
+          (RLIMIT_FSIZE), mapping systemd's LimitFSIZE=.
+        name: ResourceFSize
+      - doc: |-
+          ResourceData limits the process data-segment size (RLIMIT_DATA), mapping
+          systemd's LimitDATA=.
+        name: ResourceData
+      - doc: |-
+          ResourceStack limits the process stack size (RLIMIT_STACK), mapping
+          systemd's LimitSTACK=.
+        name: ResourceStack
+      - doc: |-
+          ResourceMemLock limits bytes that may be locked into RAM (RLIMIT_MEMLOCK),
+          mapping systemd's LimitMEMLOCK=.
+        name: ResourceMemLock
+    name: ResourceUnknown
+  - grouped: true
+    items:
+      - doc: |-
+          StdioInherit shares the parent's stdin/stdout/stderr with the child — the
+          default, and the only behaviour that existed before per-process wiring.
+        name: StdioInherit
+        type: StdioMode
+        value: iota
+      - doc: |-
+          StdioNull connects every stream to the platform null device: the child's
+          output is discarded and its stdin returns EOF immediately.
+        name: StdioNull
+      - doc: |-
+          StdioCapture connects the child to the Spec's Stdout/Stderr writers and
+          Stdin reader; a nil writer or reader for a given stream falls back to the
+          null device for that one stream.
+        name: StdioCapture
+    name: StdioInherit
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - ExitValue
+      - ExitValue.Success
+    name: exit.go
+  - decls:
+      - LimitInfinity
+      - LimitValue
+    name: limit.go
+  - decls:
+      - MemorySource
+      - MemorySourceOperator
+      - MemorySource.String
+      - MemoryLimitValue
+      - MemoryLimitValue.Applied
+    name: memory.go
+  - decls:
+      - NotificationValue
+      - NotificationValue.Ready
+      - NotificationValue.Reloading
+      - NotificationValue.Stopping
+      - NotificationValue.Watchdog
+    name: notification.go
+  - decls:
+      - Resource
+      - ResourceUnknown
+      - resourceNames
+      - Resource.String
+      - Resource.Known
+    name: proc.go
+  - decls:
+      - Signal
+      - Signal.OS
+      - Signal.Int
+      - Signal.String
+      - Signal.Known
+      - Parse
+    name: signal.go
+  - decls:
+      - signalNames
+    name: signal_unix.go
+  - decls:
+      - Spec
+    name: spec.go
+  - decls:
+      - StdioMode
+      - StdioInherit
+      - stdioModeNames
+      - StdioMode.String
+      - StdioMode.Known
+    name: stdio.go
+functions:
+  - name: Parse
+    params: name string
+    results: sig Signal, err error
+imports:
+  io: io
+  os: os
+  strconv: strconv
+  strings: strings
+  syscall: syscall
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/proc
+  name: proc
+  purpose: Package proc — range 0.2.6.* (ADR 0016 core/proc block).
+types:
+  - fields:
+      - doc: |-
+          Code is the exit status (0–255) when the process exited normally; it is -1
+          when the process was terminated by a signal.
+        name: Code
+        type: int
+      - doc: |-
+          Signal is the signal that terminated the process, or the zero Signal when
+          it exited normally.
+        name: Signal
+        type: Signal
+      - doc: |-
+          Signaled reports whether the process was terminated by a signal rather
+          than exiting on its own.
+        name: Signaled
+        type: bool
+      - doc: UserTime is the CPU time spent in user mode.
+        name: UserTime
+        type: time.Duration
+      - doc: SystemTime is the CPU time spent in kernel mode on the process's behalf.
+        name: SystemTime
+        type: time.Duration
+      - doc: |-
+          MaxRSS is the peak resident set size in KiB on every platform, read from
+          wait4's rusage: darwin and ios report bytes, which are converted to KiB
+          rounding up; Linux and the BSDs report KiB, passed through. It is 0 when
+          the platform does not supply it (illumos, Solaris and Windows).
+        name: MaxRSS
+        type: int64
+    kind: struct
+    methods:
+      - name: Success
+        recv: e ExitValue
+        results: bool
+    name: ExitValue
+  - fields:
+      - doc: Soft is the enforced limit; it must not exceed Hard.
+        name: Soft
+        type: uint64
+      - doc: Hard is the ceiling for Soft; raising it typically requires privilege.
+        name: Hard
+        type: uint64
+    kind: struct
+    name: LimitValue
+  - kind: named
+    methods:
+      - name: String
+        recv: s MemorySource
+        results: string
+    name: MemorySource
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Allowance is the tightest cgroup memory cap governing this process, in
+          bytes, or zero when none was read.
+        name: Allowance
+        type: int64
+      - doc: |-
+          Limit is the Go soft memory limit derived from Allowance, in bytes, or
+          zero when no limit was applied.
+        name: Limit
+        type: int64
+      - doc: Source names what decided the outcome.
+        name: Source
+        type: MemorySource
+    kind: struct
+    methods:
+      - name: Applied
+        recv: m MemoryLimitValue
+        results: bool
+    name: MemoryLimitValue
+  - fields:
+      - doc: |-
+          State is the raw NAME=value field set from the datagram (READY, STATUS,
+          MAINPID, WATCHDOG, RELOADING, STOPPING, …), preserved verbatim.
+        name: State
+        type: map[string]string
+      - doc: Status is the free-text STATUS= line, empty when absent.
+        name: Status
+        type: string
+      - doc: MainPID is the PID advertised by MAINPID=, or 0 when absent.
+        name: MainPID
+        type: int
+      - doc: |-
+          SenderPID is the sending process's PID as verified by the kernel via
+          SO_PASSCRED, not a value the sender can forge; 0 when credentials were
+          unavailable.
+        name: SenderPID
+        type: int
+    kind: struct
+    methods:
+      - name: Ready
+        recv: n NotificationValue
+        results: bool
+      - name: Reloading
+        recv: n NotificationValue
+        results: bool
+      - name: Stopping
+        recv: n NotificationValue
+        results: bool
+      - name: Watchdog
+        recv: n NotificationValue
+        results: bool
+    name: NotificationValue
+  - kind: named
+    methods:
+      - name: String
+        recv: r Resource
+        results: string
+      - name: Known
+        recv: r Resource
+        results: bool
+    name: Resource
+    underlying: int
+  - kind: named
+    methods:
+      - name: OS
+        recv: s Signal
+        results: os.Signal
+      - name: Int
+        recv: s Signal
+        results: int
+      - name: String
+        recv: s Signal
+        results: string
+      - name: Known
+        recv: s Signal
+        results: bool
+    name: Signal
+    underlying: int
+  - fields:
+      - doc: |-
+          Path is the executable to run. Required. A value containing a path
+          separator is a file path, taken as written (a relative one is resolved
+          against Dir). A bare name — "go", "sh" — is searched in the PATH the
+          CHILD will see: the PATH entry of Env whenever Env names one (an
+          explicitly empty PATH= searches nothing), the parent's only when Env
+          names none (including when Env is nil). os/exec's rules apply: the first
+          executable in PATH order wins, and a match found only through a relative
+          entry ("." or an empty one) is refused with exec.ErrDot.
+        name: Path
+        type: string
+      - doc: |-
+          Args is the full argv including argv[0]; when empty the service uses
+          [Spec.Path] — the name as written, not the resolved file — as the sole
+          argument.
+        name: Args
+        type: "[]string"
+      - doc: Dir is the working directory; empty means inherit the parent's.
+        name: Dir
+        type: string
+      - doc: |-
+          Env is the explicit environment; nil yields an empty environment, never
+          implicit inheritance, so a spawned service starts from a known state.
+        name: Env
+        type: "[]string"
+      - doc: User is the name or numeric uid to setuid to; empty leaves the parent's.
+        name: User
+        type: string
+      - doc: Group is the name or numeric gid to setgid to; empty leaves the parent's.
+        name: Group
+        type: string
+      - doc: Groups are supplementary group names or gids (systemd SupplementaryGroups=).
+        name: Groups
+        type: "[]string"
+      - doc: |-
+          Setpgid places the child in its own process group, enabling group-kill of
+          the whole tree (systemd KillMode=control-group without cgroups).
+        name: Setpgid
+        type: bool
+      - doc: Setsid starts the child in a new session detached from the controlling tty.
+        name: Setsid
+        type: bool
+      - doc: |-
+          Umask, when non-nil, is the file-creation mask applied to the child
+          (systemd UMask=).
+        name: Umask
+        type: "*int"
+      - doc: |-
+          Nice, when non-nil, is the scheduling-priority adjustment applied to the
+          child (systemd Nice=).
+        name: Nice
+        type: "*int"
+      - doc: |-
+          OOMScoreAdj, when non-nil, is the /proc/<pid>/oom_score_adj value applied
+          to the child (systemd OOMScoreAdjust=).
+        name: OOMScoreAdj
+        type: "*int"
+      - doc: |-
+          Rlimits are per-resource soft/hard limits applied post-fork, pre-exec
+          (systemd Limit*=); resources unsupported on the platform surface a typed
+          error rather than silently no-op.
+        name: Rlimits
+        type: map[Resource]LimitValue
+      - doc: |-
+          CgroupPath, when non-empty, is an already-created cgroup v2 directory the
+          child is placed into BEFORE exec, so controller limits (MemoryMax/TasksMax/
+          …) apply from its first instruction — closing the unconfined window that a
+          post-spawn Group.Add(pid) leaves open (systemd places the unit's payload in
+          its cgroup the same way). The service writes the child's pid to
+          <CgroupPath>/cgroup.procs in the pre-exec trampoline. Linux-only: a non-empty
+          value on any other GOOS surfaces UnsupportedPlatform; a path that is missing,
+          not a cgroup v2 directory, or not delegated surfaces a typed cgroup error
+          rather than spawning unconfined.
+        name: CgroupPath
+        type: string
+      - doc: |-
+          Stdio selects how the child's standard streams are wired: StdioInherit
+          (default — share the parent's), StdioNull (discard to the null device), or
+          StdioCapture (use the Stdout/Stderr/Stdin members below). systemd
+          StandardOutput=/StandardError=/StandardInput= is the analogue.
+        name: Stdio
+        type: StdioMode
+      - doc: |-
+          Stdout, when Stdio is StdioCapture, receives the child's standard output;
+          a nil writer discards that stream to the null device.
+        name: Stdout
+        type: io.Writer
+      - doc: |-
+          Stderr, when Stdio is StdioCapture, receives the child's standard error;
+          a nil writer discards that stream to the null device.
+        name: Stderr
+        type: io.Writer
+      - doc: |-
+          Stdin, when Stdio is StdioCapture, is copied to the child's standard input;
+          a nil reader gives the child an immediate-EOF stdin. The reader should be
+          EOF-terminating (a buffer, file, or strings.Reader); the copier closes the
+          child's stdin at EOF and never blocks Wait.
+        name: Stdin
+        type: io.Reader
+      - doc: |-
+          ExtraFiles are additional open files inherited by the child, in order,
+          starting at file descriptor 3 (after stdin/stdout/stderr). This is the
+          mechanism behind socket activation (sd_listen_fds): an activator binds
+          listening sockets and passes them here, then sets LISTEN_FDS/LISTEN_PID in
+          Env so the child finds them at fd 3..3+len-1. nil means no extra fds.
+        name: ExtraFiles
+        type: "[]*os.File"
+    kind: struct
+    name: Spec
+  - kind: named
+    methods:
+      - name: String
+        recv: m StdioMode
+        results: string
+      - name: Known
+        recv: m StdioMode
+        results: bool
+    name: StdioMode
+    underlying: uint8
+vars:
+  - doc: |-
+      resourceNames maps each Resource to the lowercase suffix of its systemd
+      Limit* directive. Declared as a literal (no init) so String stays a flat
+      lookup rather than a high-complexity switch.
+    items:
+      - name: resourceNames
+        value: |-
+          map[Resource]string{
+          	ResourceNoFile:  "nofile",
+          	ResourceNProc:   "nproc",
+          	ResourceCore:    "core",
+          	ResourceAS:      "as",
+          	ResourceCPU:     "cpu",
+          	ResourceFSize:   "fsize",
+          	ResourceData:    "data",
+          	ResourceStack:   "stack",
+          	ResourceMemLock: "memlock",
+          }
+    name: resourceNames
+  - doc: |-
+      signalNames maps each known Signal to its canonical SIG* name on Unix
+      platforms (linux/darwin/bsd). Only POSIX-common signals are listed so the
+      table compiles identically across every Unix target; String falls back to a
+      numeric form for anything absent, and Parse scans this table for the reverse
+      lookup. Declared as a literal (no init) per KTN-FUNC-NOINIT.
+    items:
+      - name: signalNames
+        value: |-
+          map[Signal]string{
+          	Signal(syscall.SIGHUP):    "SIGHUP",
+          	Signal(syscall.SIGINT):    "SIGINT",
+          	Signal(syscall.SIGQUIT):   "SIGQUIT",
+          	Signal(syscall.SIGILL):    "SIGILL",
+          	Signal(syscall.SIGTRAP):   "SIGTRAP",
+          	Signal(syscall.SIGABRT):   "SIGABRT",
+          	Signal(syscall.SIGBUS):    "SIGBUS",
+          	Signal(syscall.SIGFPE):    "SIGFPE",
+          	Signal(syscall.SIGKILL):   "SIGKILL",
+          	Signal(syscall.SIGUSR1):   "SIGUSR1",
+          	Signal(syscall.SIGSEGV):   "SIGSEGV",
+          	Signal(syscall.SIGUSR2):   "SIGUSR2",
+          	Signal(syscall.SIGPIPE):   "SIGPIPE",
+          	Signal(syscall.SIGALRM):   "SIGALRM",
+          	Signal(syscall.SIGTERM):   "SIGTERM",
+          	Signal(syscall.SIGCHLD):   "SIGCHLD",
+          	Signal(syscall.SIGCONT):   "SIGCONT",
+          	Signal(syscall.SIGSTOP):   "SIGSTOP",
+          	Signal(syscall.SIGTSTP):   "SIGTSTP",
+          	Signal(syscall.SIGTTIN):   "SIGTTIN",
+          	Signal(syscall.SIGTTOU):   "SIGTTOU",
+          	Signal(syscall.SIGURG):    "SIGURG",
+          	Signal(syscall.SIGXCPU):   "SIGXCPU",
+          	Signal(syscall.SIGXFSZ):   "SIGXFSZ",
+          	Signal(syscall.SIGVTALRM): "SIGVTALRM",
+          	Signal(syscall.SIGPROF):   "SIGPROF",
+          	Signal(syscall.SIGWINCH):  "SIGWINCH",
+          	Signal(syscall.SIGSYS):    "SIGSYS",
+          }
+    name: signalNames
+  - doc: stdioModeNames maps each defined mode to its canonical lowercase name.
+    items:
+      - name: stdioModeNames
+        value: |-
+          map[StdioMode]string{
+          	StdioInherit: "inherit",
+          	StdioNull:    "null",
+          	StdioCapture: "capture",
+          }
+    name: stdioModeNames

@@ -1,0 +1,281 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The membership changes an EntryMembership records.
+    grouped: true
+    items:
+      - doc: ChangeFounding is the founding configuration Bootstrap writes.
+        name: ChangeFounding
+        type: uint8
+        value: iota + 1
+      - doc: ChangeAddLearner adds a learner.
+        name: ChangeAddLearner
+      - doc: ChangePromote makes a learner a voter.
+        name: ChangePromote
+      - doc: ChangeRemove removes a member and retires its id.
+        name: ChangeRemove
+      - doc: ChangeUpdateAddress changes a member's address.
+        name: ChangeUpdateAddress
+      - doc: ChangeDenyPin withdraws a member's SPKI pin.
+        name: ChangeDenyPin
+      - doc: ChangeForced is the configuration Recover or RestoreSnapshot forces.
+        name: ChangeForced
+    name: ChangeFounding
+  - doc: |-
+      The frame header is frozen in every protocol version (ADR 0152 D18):
+      length (u32) | version (u8) | type (u8) | group (u64), little-endian. length
+      counts the bytes AFTER the length field. The two high bits of type are the
+      lane.
+    grouped: true
+    items:
+      - doc: "frameHeaderLen is the frozen header: length, version, type, group."
+        name: frameHeaderLen
+        type: int
+        value: "14"
+      - doc: frameVersion1 is the only frame version this node writes and parses.
+        name: frameVersion1
+        type: byte
+        value: "1"
+      - doc: tokenVersion1 is the leading byte of every token this node mints.
+        name: tokenVersion1
+        type: byte
+        value: "1"
+      - doc: "tokenLen is a token's whole length: version, ClusterID, three uint64."
+        name: tokenLen
+        type: int
+        value: "41"
+      - doc: metaVersion1 is the leading byte of an encoded SnapshotMeta.
+        name: metaVersion1
+        type: byte
+        value: "1"
+      - doc: |-
+          entryFixedLen is an entry's header before its data: term, index,
+          kind, version, body sum, chain sum and data length.
+        name: entryFixedLen
+        value: 8 + 8 + 1 + 4 + 4 + 4 + 4
+      - doc: |-
+          messageFixedLen is a message body's fixed part after the frame
+          header, up to and including its entry count.
+        name: messageFixedLen
+        type: int
+        value: 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
+    name: frameHeaderLen
+files:
+  - decls:
+      - ChangeFounding
+      - AdminValue
+      - AppendAdmin
+      - ParseAdmin
+    name: admin.go
+  - decls:
+      - frameHeaderLen
+      - castagnoli
+      - BodySum
+      - ChainSum
+      - Lane
+      - AppendMessage
+      - appendEntry
+      - ParseMessage
+      - parseEntry
+      - AppendToken
+      - ParseToken
+      - AppendSnapshotMeta
+      - ParseSnapshotMeta
+      - AppendMembership
+      - ParseMembership
+      - AppendTimingContract
+      - ParseTimingContract
+      - appendLogIdentity
+      - appendString
+      - appendBytes
+      - boolByte
+      - frameInvalid
+      - reader
+      - (*reader).n
+      - (*reader).u8
+      - (*reader).flag
+      - (*reader).u32
+      - (*reader).u64
+      - (*reader).bytes
+      - (*reader).str
+      - (*reader).logIdentity
+      - (*reader).timing
+      - (*reader).membership
+    name: codec.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: AppendAdmin
+    params: dst []byte, a *AdminValue
+    results: "[]byte"
+  - name: ParseAdmin
+    params: b []byte
+    results: AdminValue, error
+  - name: BodySum
+    params: data []byte
+    results: uint32
+  - name: ChainSum
+    params: prev uint32, e *coreconsensus.EntryValue
+    results: uint32
+  - name: Lane
+    params: frame []byte
+    results: coreconsensus.FrameLane, error
+  - name: AppendMessage
+    params: dst []byte, m *coreconsensus.MessageValue
+    results: "[]byte"
+  - doc: appendEntry appends one entry's wire form.
+    name: appendEntry
+    params: dst []byte, e *coreconsensus.EntryValue
+    results: "[]byte"
+  - name: ParseMessage
+    params: frame []byte, m *coreconsensus.MessageValue
+    results: error
+  - doc: parseEntry decodes one entry from the head of b and returns the rest.
+    name: parseEntry
+    params: b []byte, e *coreconsensus.EntryValue
+    results: "[]byte, error"
+  - name: AppendToken
+    params: dst []byte, t coreconsensus.TokenValue
+    results: "[]byte"
+  - name: ParseToken
+    params: b []byte
+    results: coreconsensus.TokenValue, error
+  - name: AppendSnapshotMeta
+    params: dst []byte, m *coreconsensus.SnapshotMetaValue
+    results: "[]byte"
+  - name: ParseSnapshotMeta
+    params: b []byte, m *coreconsensus.SnapshotMetaValue
+    results: error
+  - name: AppendMembership
+    params: dst []byte, m *coreconsensus.MembershipValue
+    results: "[]byte"
+  - name: ParseMembership
+    params: b []byte
+    results: coreconsensus.MembershipValue, error
+  - name: AppendTimingContract
+    params: dst []byte, c coreconsensus.TimingContractSpec
+    results: "[]byte"
+  - name: ParseTimingContract
+    params: b []byte
+    results: coreconsensus.TimingContractSpec, error
+  - doc: appendLogIdentity appends the encoding of a log identity.
+    name: appendLogIdentity
+    params: dst []byte, l coreconsensus.LogIdentityValue
+    results: "[]byte"
+  - doc: appendString appends a u32-length-prefixed string.
+    name: appendString
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: appendBytes appends u32-length-prefixed bytes.
+    name: appendBytes
+    params: dst, b []byte
+    results: "[]byte"
+  - doc: boolByte encodes a bool as one byte.
+    name: boolByte
+    params: v bool
+    results: byte
+  - doc: frameInvalid builds a FRAME_INVALID naming what failed.
+    name: frameInvalid
+    params: what string, n int
+    results: error
+imports:
+  binary: encoding/binary
+  coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+  crc32: hash/crc32
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  slices: slices
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/consensus/wire
+  name: wire
+  purpose: "Package wire holds the consensus domain's hand-written fixed layouts: the frame of a Message, the 41-byte Token, SnapshotMeta, Membership and the timing contract, and the CRC-32C checksums of an entry's body and chain (ADR 0152 D4, D18)."
+types:
+  - fields:
+      - doc: Operator is the identity the caller vouched for.
+        name: Operator
+        type: string
+      - doc: Change is the membership change of an EntryMembership.
+        name: Change
+        type: uint8
+      - doc: Target is the node a change or a transfer names.
+        name: Target
+        type: coreconsensus.NodeID
+      - doc: Pre is the precondition of a clearing or raising operation.
+        name: Pre
+        type: coreconsensus.PreconditionSpec
+      - doc: Membership is the whole configuration after a membership change.
+        name: Membership
+        type: coreconsensus.MembershipValue
+      - doc: Contract is the timing contract of an EntryTimingContract.
+        name: Contract
+        type: coreconsensus.TimingContractSpec
+      - doc: ClusterVersion is the version an EntryClusterVersion raises to.
+        name: ClusterVersion
+        type: uint32
+    kind: struct
+    name: AdminValue
+  - doc: |-
+      reader decodes little-endian fields, remembering the first failure so that
+      a decoder reads straight through and checks once.
+    fields:
+      - name: b
+        type: "[]byte"
+      - name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: n returns the next k bytes, or nil once a read failed.
+        name: "n"
+        params: k int
+        recv: r *reader
+        results: "[]byte"
+      - doc: u8 reads one byte, 0 once a read failed.
+        name: u8
+        recv: r *reader
+        results: uint8
+      - doc: "flag reads a canonical bool: 0 or 1, anything else a failure."
+        name: flag
+        recv: r *reader
+        results: bool
+      - doc: u32 reads a little-endian uint32, 0 once a read failed.
+        name: u32
+        recv: r *reader
+        results: uint32
+      - doc: u64 reads a little-endian uint64, 0 once a read failed.
+        name: u64
+        recv: r *reader
+        results: uint64
+      - doc: |-
+          bytes reads a u32-length-prefixed field; the result aliases the input,
+          and a length past the end fails the reader rather than allocating.
+        name: bytes
+        recv: r *reader
+        results: "[]byte"
+      - doc: str reads a u32-length-prefixed string, copying it out of the input.
+        name: str
+        recv: r *reader
+        results: string
+      - doc: logIdentity reads the layout appendLogIdentity writes.
+        name: logIdentity
+        recv: r *reader
+        results: coreconsensus.LogIdentityValue
+      - doc: timing reads the layout AppendTimingContract writes.
+        name: timing
+        recv: r *reader
+        results: coreconsensus.TimingContractSpec
+      - doc: |-
+          membership reads the layout AppendMembership writes. Both counts are
+          bounded by the bytes left before anything is allocated, so a forged count
+          fails the frame instead of reserving memory for it.
+        name: membership
+        recv: r *reader
+        results: coreconsensus.MembershipValue
+    name: reader
+vars:
+  - doc: castagnoli is the CRC-32C table every checksum of the domain uses.
+    items:
+      - name: castagnoli
+        value: crc32.MakeTable(crc32.Castagnoli)
+    name: castagnoli

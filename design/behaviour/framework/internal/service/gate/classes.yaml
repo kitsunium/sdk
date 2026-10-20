@@ -1,0 +1,31 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Decide
+      - floorDecision
+    name: gate.go
+functions:
+  - name: Decide
+    params: policy *coregate.PolicyValue, path []string, verify func() error
+    results: coregate.DecisionValue
+  - doc: |-
+      floorDecision applies the policy's UpdateAction to a build below the floor.
+
+      It takes the policy and the floor refusal — which names the required version
+      — and returns what the caller should do, with FloorUnmet set in every branch.
+    name: floorDecision
+    params: policy *coregate.PolicyValue, cause error
+    results: coregate.DecisionValue
+imports:
+  coreent: github.com/kitsunium/sdk/framework/internal/core/entitlement
+  coregate: github.com/kitsunium/sdk/framework/internal/core/gate
+  errors: errors
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/service/gate
+  name: gate
+  purpose: Package gate — the classifier behind framework/gate.
+types: []

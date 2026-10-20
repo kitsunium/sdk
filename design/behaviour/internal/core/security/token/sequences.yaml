@@ -1,0 +1,197 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: IsRegisteredClaim
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsRegisteredClaim
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(registeredClaims, name)
+        to: slices
+  - of: NewClaimsValue
+    steps:
+      - return: ClaimsValue{}
+  - of: ClaimsValue.Issuer
+    steps:
+      - return: c.issuer
+  - of: ClaimsValue.Subject
+    steps:
+      - return: c.subject
+  - of: ClaimsValue.ID
+    steps:
+      - return: c.id
+  - of: ClaimsValue.Audience
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsValue.Audience
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(c.audience)
+        to: slices
+  - of: ClaimsValue.Expiry
+    steps:
+      - return: c.expiry
+  - of: ClaimsValue.NotBefore
+    steps:
+      - return: c.notBefore
+  - of: ClaimsValue.IssuedAt
+    steps:
+      - return: c.issuedAt
+  - of: ClaimsValue.PrivateNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsValue.PrivateNames
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Sorted(maps.Keys(c.private))
+        to: slices
+  - of: ClaimsValue.PrivateRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsValue.PrivateRaw
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: stored, ok
+        eval: c.private[name]
+      - opt:
+          do:
+            - return: nil, false
+          when: "!ok"
+      - return: slices.Clone(stored), true
+        to: slices
+  - of: ClaimsValue.IsZero
+    steps:
+      - return: |-
+          c.issuer == "" && c.subject == "" && c.id == "" &&
+          		len(c.audience) == 0 && len(c.private) == 0 &&
+          		c.expiry.IsZero() && c.notBefore.IsZero() && c.issuedAt.IsZero()
+  - of: ClaimsValue.String
+    steps:
+      - return: |-
+          "token.Claims{registered:" + strconv.Itoa(c.registeredCount()) +
+          		" aud:" + strconv.Itoa(len(c.audience)) +
+          		" private:" + strconv.Itoa(len(c.private)) + "}"
+  - of: ClaimsValue.GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsValue.GoString
+        kind: self
+      - id: c.String
+        kind: internal
+    steps:
+      - return: c.String()
+        to: c.String
+  - of: ClaimsValue.WithIssuer
+    steps:
+      - set: c.issuer
+        value: iss
+      - return: c
+  - of: ClaimsValue.WithSubject
+    steps:
+      - set: c.subject
+        value: sub
+      - return: c
+  - of: ClaimsValue.WithID
+    steps:
+      - set: c.id
+        value: jti
+      - return: c
+  - of: ClaimsValue.WithAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsValue.WithAudience
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - set: c.audience
+        to: slices
+        value: slices.Clone(aud)
+      - return: c
+  - of: ClaimsValue.WithExpiry
+    steps:
+      - set: c.expiry
+        value: exp
+      - return: c
+  - of: ClaimsValue.WithNotBefore
+    steps:
+      - set: c.notBefore
+        value: nbf
+      - return: c
+  - of: ClaimsValue.WithIssuedAt
+    steps:
+      - set: c.issuedAt
+        value: iat
+      - return: c
+  - of: ClaimsValue.WithPrivateRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsValue.WithPrivateRaw
+        kind: self
+      - id: maps
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ClaimsValue{}, ClaimNameInvalid
+          when: name == "" || IsRegisteredClaim(name)
+      - opt:
+          do:
+            - return: ClaimsValue{}, TooLarge
+          init:
+            bind: _, exists
+            eval: c.private[name]
+          when: "!exists && len(c.private) >= MaxPrivateClaims"
+      - set: c.private
+        to: maps
+        value: maps.Clone(c.private)
+      - opt:
+          do:
+            - set: c.private
+              value: make(map[string][]byte, 1)
+          when: c.private == nil
+      - set: c.private[name]
+        to: slices
+        value: slices.Clone(raw)
+      - return: c, nil
+  - of: Algorithm.String
+    steps:
+      - switch:
+          cases:
+            - case: AlgorithmHS256
+              do:
+                - return: "\"HS256\""
+            - case: AlgorithmES256
+              do:
+                - return: "\"ES256\""
+            - case: AlgorithmEdDSA
+              do:
+                - return: "\"EdDSA\""
+            - case: AlgorithmPasetoV4Public
+              do:
+                - return: "\"v4.public\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": a
+  - of: Algorithm.Known
+    steps:
+      - return: a >= AlgorithmHS256 && a <= AlgorithmPasetoV4Public

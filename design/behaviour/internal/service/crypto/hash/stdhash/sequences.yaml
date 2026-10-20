@@ -1,0 +1,202 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: crc32cHasher.Algorithm
+    steps:
+      - return: "\"crc32c\""
+  - of: crc32cHasher.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: crc32cHasher.New
+        kind: self
+      - id: crc32
+        kind: stdlib
+    steps:
+      - return: crc32.New(castagnoli())
+        to: crc32
+  - of: NewDigestWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDigestWriter
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: hsh, lookupErr
+        eval: corecrypto.NewHash(a)
+        to: corecrypto
+      - opt:
+          do:
+            - return: nil, lookupErr
+          when: lookupErr != nil
+      - return: "&DigestWriter{dst: dst, hsh: hsh}, nil"
+  - of: (*DigestWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*DigestWriter).Write
+        kind: self
+      - id: w.dst.Write
+        kind: value
+      - id: w.hsh.Write
+        kind: value
+    steps:
+      - set: n, err
+        to: w.dst.Write
+        value: w.dst.Write(p)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: n, hErr
+                init:
+                  bind: _, hErr
+                  eval: w.hsh.Write(p[:n])
+                  to: w.hsh.Write
+                when: hErr != nil
+          when: n > 0
+      - return: n, err
+  - of: (*DigestWriter).Sum
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*DigestWriter).Sum
+        kind: self
+      - id: w.hsh.Sum
+        kind: value
+    steps:
+      - return: w.hsh.Sum(nil)
+        to: w.hsh.Sum
+  - of: (*DigestWriter).SumHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*DigestWriter).SumHex
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - return: hex.EncodeToString(w.Sum())
+        to: hex
+  - of: fnvHasher.Algorithm
+    steps:
+      - return: "\"fnv1a-64\""
+  - of: fnvHasher.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: fnvHasher.New
+        kind: self
+      - id: fnv
+        kind: stdlib
+    steps:
+      - return: fnv.New64a()
+        to: fnv
+  - of: sha256Hasher.Algorithm
+    steps:
+      - return: "\"sha256\""
+  - of: sha256Hasher.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: sha256Hasher.New
+        kind: self
+      - id: sha256
+        kind: stdlib
+    steps:
+      - return: sha256.New()
+        to: sha256
+  - of: sha3Hasher.Algorithm
+    steps:
+      - return: "\"sha3-256\""
+  - of: sha3Hasher.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: sha3Hasher.New
+        kind: self
+      - id: sha3
+        kind: stdlib
+    steps:
+      - return: sha3.New256()
+        to: sha3
+  - of: sha512Hasher.Algorithm
+    steps:
+      - return: "\"sha512\""
+  - of: sha512Hasher.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: sha512Hasher.New
+        kind: self
+      - id: sha512
+        kind: stdlib
+    steps:
+      - return: sha512.New()
+        to: sha512
+  - of: NewVerifyingReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewVerifyingReader
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: hsh, lookupErr
+        eval: corecrypto.NewHash(a)
+        to: corecrypto
+      - opt:
+          do:
+            - return: nil, lookupErr
+          when: lookupErr != nil
+      - return: "&VerifyingReader{src: src, hsh: hsh, wantHex: wantHex}, nil"
+  - of: (*VerifyingReader).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*VerifyingReader).Read
+        kind: self
+      - id: r.src.Read
+        kind: value
+      - id: r.hsh.Write
+        kind: value
+    steps:
+      - set: n, err
+        to: r.src.Read
+        value: r.src.Read(p)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: n, hErr
+                init:
+                  bind: _, hErr
+                  eval: r.hsh.Write(p[:n])
+                  to: r.hsh.Write
+                when: hErr != nil
+          when: n > 0
+      - opt:
+          do:
+            - return: n, err
+          when: err != io.EOF
+      - return: n, r.verify()
+  - of: (*VerifyingReader).verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*VerifyingReader).verify
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - bind: got
+        eval: hex.EncodeToString(r.hsh.Sum(nil))
+        to: hex
+      - opt:
+          do:
+            - return: corecrypto.DigestMismatch
+          when: got != r.wantHex
+      - return: io.EOF

@@ -1,0 +1,29 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Listen
+      - NewDialer
+      - Dial
+    name: ipc.go
+functions:
+  - name: Listen
+    params: cfg Config
+    results: Listener, error
+  - name: NewDialer
+    params: cfg Config
+    results: Dialer, error
+  - name: Dial
+    params: ctx context.Context, cfg Config
+    results: "*Conn, error"
+imports:
+  context: context
+  svcipc: github.com/kitsunium/sdk/internal/service/proc/ipc
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/ipc
+  name: ipc
+  purpose: Package ipc is a private socket between processes of one machine — a daemon and the short-lived clients that talk to it, a product and the tool that attaches to it (ADR 0148).
+types: []

@@ -1,0 +1,981 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      jsonTagName is the tag the compiler reads to name a field in a PATH.
+
+      It is json rather than the Go field name because of a fact about this SDK,
+      not a preference: internal/service/app/config.Load decodes every format — TOML,
+      YAML, env, JSON — through a json.Marshal/json.Unmarshal round trip, so the
+      json tag is literally the key the operator wrote in their file. A path built
+      from Go field names would name something the operator never typed.
+    items:
+      - name: jsonTagName
+        type: string
+        value: "\"json\""
+    name: jsonTagName
+  - doc: tagSeparator splits the rules inside one validate tag.
+    items:
+      - name: tagSeparator
+        type: string
+        value: "\",\""
+    name: tagSeparator
+  - doc: diveRule descends into a nested struct, or into the elements of a slice.
+    items:
+      - name: diveRule
+        type: string
+        value: "\"dive\""
+    name: diveRule
+  - doc: |-
+      ruleField and ruleEach name the descent combinators in a construction
+      refusal. They never appear on a ViolationValue — a descent does not fail,
+      it relocates.
+    grouped: true
+    items:
+      - name: ruleField
+        type: string
+        value: "\"field\""
+      - name: ruleEach
+        type: string
+        value: "\"each\""
+    name: ruleField
+  - doc: |-
+      jsonTagPunctuation is the punctuation encoding/json accepts in a tag name;
+      any other non-letter, non-digit rune makes it ignore the name.
+    items:
+      - name: jsonTagPunctuation
+        type: string
+        value: "\"!#$%&()*+-./:;<=>?@[]^_{|}~ \""
+    name: jsonTagPunctuation
+  - doc: requiredMessage is the fixed, value-free explanation of a presence failure.
+    items:
+      - name: requiredMessage
+        type: string
+        value: "\"is required\""
+    name: requiredMessage
+  - doc: |-
+      maxEchoRunes caps how much of the caller's own text a refusal echoes into a
+      field. A tag and a field name are the caller's source, not untrusted input,
+      so echoing them is what makes the refusal actionable — but an unbounded echo
+      turns one bad tag into a log entry nobody can read.
+    items:
+      - name: maxEchoRunes
+        type: int
+        value: "64"
+    name: maxEchoRunes
+  - doc: ellipsis marks a clipped echo.
+    items:
+      - name: ellipsis
+        type: string
+        value: "\"…\""
+    name: ellipsis
+  - grouped: true
+    items:
+      - doc: ruleRequired names the presence rule.
+        name: ruleRequired
+        type: string
+        value: "\"required\""
+      - doc: ruleMin names the lower numeric bound.
+        name: ruleMin
+        type: string
+        value: "\"min\""
+      - doc: ruleMax names the upper numeric bound.
+        name: ruleMax
+        type: string
+        value: "\"max\""
+      - doc: ruleBetween names the closed numeric interval.
+        name: ruleBetween
+        type: string
+        value: "\"between\""
+      - doc: ruleLength names the rune-count rule on a string.
+        name: ruleLength
+        type: string
+        value: "\"length\""
+      - doc: ruleCount names the element-count rule on a slice or array.
+        name: ruleCount
+        type: string
+        value: "\"count\""
+      - doc: ruleOneOf names set membership.
+        name: ruleOneOf
+        type: string
+        value: "\"one_of\""
+      - doc: rulePattern names the regular-expression rule.
+        name: rulePattern
+        type: string
+        value: "\"pattern\""
+    name: ruleRequired
+  - doc: argSeparator splits a rule from its argument inside one tag item.
+    items:
+      - name: argSeparator
+        type: string
+        value: "\"=\""
+    name: argSeparator
+  - doc: |-
+      The accepted rule names. This list is the dialect; it is closed on purpose,
+      and every entry is a rule the SDK undertakes to maintain forever.
+    grouped: true
+    items:
+      - name: tagRequired
+        type: string
+        value: "\"required\""
+      - name: tagMin
+        type: string
+        value: "\"min\""
+      - name: tagMax
+        type: string
+        value: "\"max\""
+      - name: tagMinLen
+        type: string
+        value: "\"minlen\""
+      - name: tagMaxLen
+        type: string
+        value: "\"maxlen\""
+      - name: tagMinCount
+        type: string
+        value: "\"mincount\""
+      - name: tagMaxCount
+        type: string
+        value: "\"maxcount\""
+      - name: tagOneOf
+        type: string
+        value: "\"oneof\""
+    name: tagRequired
+  - doc: decimalBase is the radix every tag argument is parsed in.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: |-
+      oneOfSeparator splits the allowed values of a oneof rule. It is '|' rather
+      than ',' because ',' already separates the rules of the tag itself, and a
+      list that could be cut in half by the outer separator is a list that will be.
+    items:
+      - name: oneOfSeparator
+        type: string
+        value: "\"|\""
+    name: oneOfSeparator
+  - doc: |-
+      maxListedValues caps how many allowed values a OneOf message enumerates. The
+      allowed set is the caller's own schema, so echoing it is safe and is what
+      makes the message actionable — but a 500-entry enum in a message helps
+      nobody.
+    items:
+      - name: maxListedValues
+        type: int
+        value: "12"
+    name: maxListedValues
+  - doc: listSeparator joins the enumerated allowed values.
+    items:
+      - name: listSeparator
+        type: string
+        value: "\", \""
+    name: listSeparator
+  - doc: |-
+      Unbounded is the upper bound that means "no ceiling". It is spelled rather
+      than implied by a negative number so a reader of Length(8, Unbounded) does
+      not have to know the convention to understand the line.
+    items:
+      - name: Unbounded
+        type: int
+        value: "-1"
+    name: Unbounded
+  - doc: unboundedSuffix renders the upper half of an open-ended interval.
+    items:
+      - name: unboundedSuffix
+        type: string
+        value: "\"or more\""
+    name: unboundedSuffix
+  - doc: tagName is the struct tag the compiler reads.
+    items:
+      - name: tagName
+        type: string
+        value: "\"validate\""
+    name: tagName
+files:
+  - decls:
+      - AtLeast
+      - AtMost
+      - Between
+    name: bounds.go
+  - decls:
+      - jsonTagName
+      - tagSeparator
+      - diveRule
+      - compileStruct
+      - compileField
+      - compileChecks
+      - fieldStep
+      - pathName
+      - promotedEmbedding
+      - parseTag
+      - splitDive
+      - splitPresence
+    name: compile.go
+  - decls:
+      - ruleField
+      - Field
+      - Each
+      - Must
+    name: descend.go
+  - decls:
+      - diveSpec
+      - compileDive
+      - compileElements
+      - structDiveStep
+      - elementsStep
+      - derefType
+    name: dive.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - elementPlan
+      - elementPlan.check
+      - elementPlan.apply
+    name: element_plan.go
+  - decls:
+      - jsonLevel
+    name: json_level.go
+  - decls:
+      - jsonTagPunctuation
+      - jsonCandidate
+      - checkJSONReach
+      - directKeysDistinct
+      - constrainedMembers
+      - jsonCandidates
+      - scanJSONLevel
+      - jsonCandidateOf
+      - jsonKeyOf
+      - jsonDominant
+      - compareJSONCandidates
+      - validJSONTagName
+      - indexKey
+    name: json_reach.go
+  - decls:
+      - Matches
+    name: pattern.go
+  - decls:
+      - planStep
+      - fieldCheck
+      - planCache
+      - structPlan
+      - (*structPlan).run
+      - planFor
+    name: plan.go
+  - decls:
+      - planKey
+    name: plan_key.go
+  - decls:
+      - requiredMessage
+      - Required
+    name: presence.go
+  - decls:
+      - reachMember
+    name: reach_member.go
+  - decls:
+      - maxEchoRunes
+      - ellipsis
+      - rejectConstraint
+      - rejectRule
+      - rejectTarget
+      - clip
+    name: reject.go
+  - decls:
+      - ruleRequired
+    name: rule_names.go
+  - decls:
+      - argSeparator
+      - tagRequired
+      - refusedRules
+      - compileRule
+      - requiredCheck
+    name: rules.go
+  - decls:
+      - decimalBase
+      - oneOfSeparator
+      - buildNumeric
+      - boundSpec
+      - signedBound
+      - unsignedBound
+      - floatBound
+      - literalClause
+      - withinBound
+      - boundVerb
+      - countVerb
+      - boundRule
+      - buildLength
+      - buildCount
+      - parseSize
+    name: rules_kind.go
+  - decls:
+      - buildOneOf
+      - splitAllowed
+      - stringOneOf
+      - signedOneOf
+      - unsignedOneOf
+    name: rules_oneof.go
+  - decls:
+      - maxListedValues
+      - listSeparator
+      - OneOf
+      - oneOfMessage
+    name: set.go
+  - decls:
+      - Unbounded
+      - unboundedSuffix
+      - Length
+      - Count
+      - checkSizeBounds
+      - withinSize
+      - sizeMessage
+    name: size.go
+  - decls:
+      - tagName
+      - StructConfig
+      - Struct
+    name: struct.go
+  - decls:
+      - All
+      - First
+      - Check
+    name: validation.go
+  - decls:
+      - one
+    name: violate.go
+functions:
+  - name: AtLeast
+    params: lo T
+    results: corevalidation.Constraint[T]
+    typeParams: T cmp.Ordered
+  - name: AtMost
+    params: hi T
+    results: corevalidation.Constraint[T]
+    typeParams: T cmp.Ordered
+  - name: Between
+    params: lo, hi T
+    results: constraint corevalidation.Constraint[T], err error
+    typeParams: T cmp.Ordered
+  - doc: |-
+      compileStruct builds the plan for one struct type. visiting carries the
+      types currently being compiled so a self-referential type is refused rather
+      than compiled forever.
+    name: compileStruct
+    params: typ reflect.Type, stopAtFirst bool, visiting map[reflect.Type]bool
+    results: plan *structPlan, err error
+  - doc: |-
+      compileField turns one field's validate tag into zero, one or two steps: the
+      field's own rules, and its descent.
+    name: compileField
+    params: field reflect.StructField, index int, raw string, stopAtFirst bool, visiting map[reflect.Type]bool
+    results: steps []planStep, err error
+  - doc: compileChecks compiles a list of rule items against one static type.
+    name: compileChecks
+    params: name string, typ reflect.Type, items []string
+    results: checks []fieldCheck, err error
+  - doc: |-
+      fieldStep runs one field's compiled checks, located under base extended by
+      segment.
+    name: fieldStep
+    params: index int, segment string, checks []fieldCheck, stopAtFirst bool
+    results: planStep
+  - doc: |-
+      pathName is the name this field carries in a violation path: its json tag
+      when it has one, else its Go name. See jsonTagName for why.
+    name: pathName
+    params: field reflect.StructField
+    results: string
+  - doc: |-
+      promotedEmbedding reports whether field is an embedding JSON PROMOTES: its
+      members become members of the enclosing object and the embedding itself has
+      no key, so a path that named it would name something no input contains.
+
+      It is encoding/json's own rule, because JSON is what decides the keys an
+      operator writes (see jsonTagName): an anonymous field is promoted when its
+      json tag gives it no name and its type is a struct or a pointer to one. A
+      json name makes it an ordinary member; json:"-" takes it off the wire
+      altogether, so there is no promoted key to follow either; and an embedded
+      non-struct is keyed by its type name. pathName already names all three.
+    name: promotedEmbedding
+    params: field reflect.StructField
+    results: bool
+  - doc: |-
+      parseTag splits a validate tag into its rule items, dropping empties so a
+      trailing comma is a typo rather than a failure.
+    name: parseTag
+    params: raw string
+    results: "[]string"
+  - doc: |-
+      splitDive divides the rule items at the dive marker. Items before it apply
+      to the field; items after it apply to what the descent reaches.
+    name: splitDive
+    params: items []string
+    results: head, tail []string, hasDive bool
+  - doc: |-
+      splitPresence divides the rule items that follow dive into the presence rule
+      and everything else — but only for a POINTER element, where the two ask about
+      different values: presence about the pointer, which is exactly what a nil
+      element lacks, and the rest about the value behind it. For any other element
+      both ask about the same value, so the items stay one list, in tag order.
+    name: splitPresence
+    params: items []string, pointer bool
+    results: presence, rest []string
+  - name: Field
+    params: name string, get func(T) F, constraints ...corevalidation.Constraint[F]
+    results: constraint corevalidation.Constraint[T], err error
+    typeParams: T, F any
+  - name: Each
+    params: name string, get func(T) []E, constraints ...corevalidation.Constraint[E]
+    results: constraint corevalidation.Constraint[T], err error
+    typeParams: T, E any
+  - name: Must
+    params: constraint corevalidation.Constraint[T], err error
+    results: corevalidation.Constraint[T]
+    typeParams: T any
+  - doc: |-
+      compileDive builds the descent step for one field.
+
+      name identifies the field in a refusal, where "the field" is what a
+      developer is looking for; segment is what the field adds to a violation
+      path, which is not always its name — an embedding JSON promotes adds nothing
+      (see promotedEmbedding).
+    name: compileDive
+    params: typ reflect.Type, name, segment string, index int, spec diveSpec
+    results: step planStep, err error
+  - doc: |-
+      compileElements compiles the rule set every element of a slice or array type
+      is checked against.
+
+      When the ELEMENT is a pointer, presence is compiled apart from the other
+      element rules and asked of the pointer itself. `required` then means what it
+      means on a pointer field and what Each(…, Required[*T]()) means in code: the
+      element is there, i.e. not nil — while a nil element gives every other rule
+      nothing to be wrong about.
+    name: compileElements
+    params: typ reflect.Type, name string, spec diveSpec
+    results: plan elementPlan, err error
+  - doc: |-
+      structDiveStep descends into a struct (or non-nil *struct) field, located
+      under base extended by segment.
+    name: structDiveStep
+    params: index int, segment string, nested *structPlan, deref bool
+    results: planStep
+  - doc: |-
+      elementsStep descends into every element of a slice or array field, located
+      under base extended by segment. With deref set the field is a POINTER to the
+      collection, and it follows the one-level pointer rule structDiveStep does.
+    name: elementsStep
+    params: index int, segment string, plan elementPlan, deref bool
+    results: planStep
+  - doc: derefType resolves one level of pointer, reporting whether it did.
+    name: derefType
+    params: typ reflect.Type
+    results: target reflect.Type, deref bool
+  - doc: |-
+      checkJSONReach refuses a type in which a field carrying rules is one that
+      encoding/json considers for a key and then decodes that key into another
+      field, or into none.
+
+      A path names a key, and config.Load decodes every format through a JSON
+      round trip, so a rule is only meaningful on the field that key reaches. Two
+      cases break that, both from encoding/json's own resolution of promoted
+      fields: a shallower field of the same name HIDES a deeper one, and two
+      fields at the same depth, both tagged or both not, make the key AMBIGUOUS,
+      in which case JSON decodes it into neither and says nothing. A rule on the
+      hidden or the ambiguous field judges a value no input can set, and reports
+      it at a path whose key belongs to someone else — so an operator can neither
+      satisfy it nor tell which field failed. A field JSON ignores outright
+      (unexported, or json:"-") is not a candidate and is not judged here.
+    name: checkJSONReach
+    params: typ reflect.Type
+    results: error
+  - doc: |-
+      directKeysDistinct reports whether typ embeds nothing and no two of its
+      fields answer to the same JSON key. Either way round, a false sends the type
+      through the full resolution, which is correct for every type; this only
+      spares it the types where competition cannot exist.
+    name: directKeysDistinct
+    params: typ reflect.Type
+    results: bool
+  - doc: |-
+      constrainedMembers lists the fields of typ that carry rules and belong to
+      typ's own JSON object: its tagged fields, and the tagged fields of every
+      promoted embedding it dives into, whose members are keys of the same
+      object. visiting stops a self-embedding type from recursing forever; the
+      plan's own compile refuses the cycle.
+    name: constrainedMembers
+    params: typ reflect.Type, prefix []int, visiting map[reflect.Type]bool
+    results: "[]reachMember"
+  - doc: |-
+      jsonCandidates gathers the fields encoding/json considers for the keys of
+      typ's object, breadth-first through untagged embedded structs — typeFields
+      in encoding/json/encode.go, re-derived because the package does not export
+      it. A struct type queued twice at one depth contributes each of its fields
+      twice, as there, so that the resolution sees the tie and annihilates it.
+    name: jsonCandidates
+    params: typ reflect.Type
+    results: "[]jsonCandidate"
+  - doc: |-
+      scanJSONLevel adds one embedded struct's fields to candidates, duplicating
+      each when the type was queued more than once, and queues onto next the
+      untagged embedded structs to explore at the following depth.
+    name: scanJSONLevel
+    params: |2
+
+      	level jsonLevel, twice bool, candidates []jsonCandidate, next []jsonLevel, nextCount map[reflect.Type]int,
+    results: grown []jsonCandidate, queued []jsonLevel
+  - doc: |-
+      jsonCandidateOf decides what encoding/json does with one field: ignore it
+      (keep false), explore it as an untagged embedded struct (embedded set), or
+      weigh it for a key (candidate).
+    name: jsonCandidateOf
+    params: field reflect.StructField, parent []int, index int
+    results: candidate jsonCandidate, embedded reflect.Type, keep bool
+  - doc: |-
+      jsonKeyOf returns the name field's json tag gives it — "" when encoding/json
+      would use none — and whether encoding/json ignores the field outright: an
+      unexported field that is not an embedded struct, or the json:"-" opt-out.
+    name: jsonKeyOf
+    params: field reflect.StructField
+    results: name string, ignored bool
+  - doc: |-
+      jsonDominant resolves every key to the one candidate encoding/json decodes
+      it into — dominantField in encoding/json/encode.go: the shallowest wins, a
+      tagged one breaks a tie at that depth, and a tie that remains annihilates
+      the key. It returns the winners' index paths.
+    name: jsonDominant
+    params: candidates []jsonCandidate
+    results: map[string]bool
+  - doc: |-
+      compareJSONCandidates is encoding/json's order: by name, then depth, then
+      tagged before untagged, then index path.
+    name: compareJSONCandidates
+    params: left, right jsonCandidate
+    results: int
+  - doc: |-
+      validJSONTagName is encoding/json's isValidTag: a name made of letters,
+      digits and the punctuation it allows.
+    name: validJSONTagName
+    params: name string
+    results: bool
+  - doc: indexKey renders an index path as a map key.
+    name: indexKey
+    params: index []int
+    results: string
+  - name: Matches
+    params: pattern string
+    results: constraint corevalidation.Constraint[string], err error
+  - doc: |-
+      planFor returns the compiled plan for typ, compiling it on first sight.
+      A compile FAILURE is deliberately not cached: it is a source defect that
+      fails the same way every time, and caching it would only make the second
+      error message harder to trace back to its cause.
+    name: planFor
+    params: typ reflect.Type, stopAtFirst bool
+    results: plan *structPlan, err error
+  - name: Required
+    results: corevalidation.Constraint[T]
+    typeParams: T comparable
+  - doc: |-
+      rejectConstraint refuses a constraint at CONSTRUCTION, which is the whole
+      point: a bound that cannot be honoured must never become a validator that
+      quietly rejects — or quietly accepts — everything it is shown (ADR 0031).
+    name: rejectConstraint
+    params: rule, clause string
+    results: error
+  - doc: rejectRule refuses a validate struct tag at COMPILE time.
+    name: rejectRule
+    params: field, rule, clause string
+    results: error
+  - doc: rejectTarget refuses a Struct[T] whose T has no fields to walk.
+    name: rejectTarget
+    params: kind string
+    results: error
+  - doc: |-
+      clip shortens text to maxEchoRunes runes, marking the truncation. It counts
+      RUNES, not bytes, so a multi-byte identifier is never cut mid-character.
+    name: clip
+    params: text string
+    results: string
+  - doc: |-
+      compileRule compiles one rule item against one field's static type. It runs
+      at COMPILE time only: a rule the field's kind cannot answer is refused here,
+      never discovered at the first request.
+    name: compileRule
+    params: name string, typ reflect.Type, item string
+    results: check fieldCheck, err error
+  - doc: |-
+      requiredCheck is the compiled presence rule. reflect.Value.IsZero answers it
+      for every kind — a nil pointer, a nil slice, an empty string, a zero number.
+
+      It therefore cannot distinguish "not supplied" from "supplied as zero", for
+      the reason [Required] documents: a Go value type has no representation for
+      the difference. Declare the field as a pointer when the difference matters.
+    name: requiredCheck
+    results: fieldCheck
+  - doc: |-
+      buildNumeric compiles min= / max= against a numeric field.
+
+      The argument is read as a value of the FIELD's type — its width, not 64 bits.
+      Read wider, min=200 on an int8 compiles to a floor no int8 reaches and
+      refuses every value it is ever shown, while max=300 on a uint8 compiles to a
+      ceiling every uint8 is already under and never fires: two constraints that
+      cannot be honoured, looking like two that can (ADR 0031). A literal that
+      does not fit is refused here. One that fits is rounded as Go rounds a
+      constant of that type, which is also what keeps an inclusive float32 bound
+      inclusive: max=0.1 admits the float32 its own literal spells.
+    name: buildNumeric
+    params: name string, typ reflect.Type, rule, arg string, hasArg bool
+    results: check fieldCheck, err error
+  - doc: signedBound compiles a bound over a signed integer field of type typ.
+    name: signedBound
+    params: name, rule, arg string, typ reflect.Type, spec boundSpec
+    results: check fieldCheck, err error
+  - doc: unsignedBound compiles a bound over an unsigned integer field of type typ.
+    name: unsignedBound
+    params: name, rule, arg string, typ reflect.Type, spec boundSpec
+    results: check fieldCheck, err error
+  - doc: floatBound compiles a bound over a floating-point field of type typ.
+    name: floatBound
+    params: name, rule, arg string, typ reflect.Type, spec boundSpec
+    results: check fieldCheck, err error
+  - doc: |-
+      literalClause explains why a numeric tag literal was refused. A literal the
+      field's width cannot hold is a different mistake from one that is not a
+      number at all — the fix is the literal, or the field's type — so it gets its
+      own clause, naming the field's KIND: the name of a defined type such as
+      Level would hide the width that decided it.
+    name: literalClause
+    params: parseErr error, subject, malformed string, typ reflect.Type
+    results: string
+  - doc: withinBound picks the half of the comparison the rule asked for.
+    name: withinBound
+    params: atLeast, atMost, upper bool
+    results: bool
+  - doc: boundVerb renders the half of a bound message that does not carry the limit.
+    name: boundVerb
+    params: upper bool
+    results: string
+  - doc: |-
+      countVerb renders the half of an element-count message that does not carry
+      the limit. It is spelled out rather than derived from boundVerb because a
+      message built by slicing another message breaks silently the day either is
+      reworded.
+    name: countVerb
+    params: upper bool
+    results: string
+  - doc: |-
+      boundRule maps a bound to the rule name it reports, which is the same name
+      the programmatic AtLeast / AtMost constraints report — the tag spelling, so
+      one rule reads the same whichever front end produced it.
+    name: boundRule
+    params: upper bool
+    results: string
+  - doc: buildLength compiles minlen= / maxlen= against a string field.
+    name: buildLength
+    params: name string, typ reflect.Type, rule, arg string, hasArg bool
+    results: check fieldCheck, err error
+  - doc: buildCount compiles mincount= / maxcount= against a slice or array field.
+    name: buildCount
+    params: name string, typ reflect.Type, rule, arg string, hasArg bool
+    results: check fieldCheck, err error
+  - doc: |-
+      parseSize parses a size argument and refuses a negative one: every size is
+      non-negative, so a negative bound is a typo rather than a looser rule.
+    name: parseSize
+    params: name, rule, arg string
+    results: size int, err error
+  - doc: buildOneOf compiles oneof=a|b|c against a string or integer field.
+    name: buildOneOf
+    params: name string, typ reflect.Type, arg string, hasArg bool
+    results: check fieldCheck, err error
+  - doc: splitAllowed splits and trims the allowed list, dropping empty entries.
+    name: splitAllowed
+    params: arg string
+    results: "[]string"
+  - doc: stringOneOf compiles membership over a string field.
+    name: stringOneOf
+    params: values []string
+    results: fieldCheck
+  - doc: signedOneOf compiles membership over a signed integer field of type typ.
+    name: signedOneOf
+    params: name string, values []string, typ reflect.Type
+    results: check fieldCheck, err error
+  - doc: unsignedOneOf compiles membership over an unsigned integer field of type typ.
+    name: unsignedOneOf
+    params: name string, values []string, typ reflect.Type
+    results: check fieldCheck, err error
+  - name: OneOf
+    params: allowed ...T
+    results: constraint corevalidation.Constraint[T], err error
+    typeParams: T comparable
+  - doc: oneOfMessage enumerates the allowed values, clipping a long list.
+    name: oneOfMessage
+    params: allowed []T
+    results: string
+    typeParams: T comparable
+  - name: Length
+    params: minRunes, maxRunes int
+    results: constraint corevalidation.Constraint[string], err error
+  - name: Count
+    params: minLen, maxLen int
+    results: constraint corevalidation.Constraint[[]E], err error
+    typeParams: E any
+  - doc: checkSizeBounds refuses a size interval nothing could satisfy.
+    name: checkSizeBounds
+    params: rule string, low, high int
+    results: error
+  - doc: |-
+      withinSize reports whether size sits in [low, high], with Unbounded meaning
+      no ceiling.
+    name: withinSize
+    params: size, low, high int
+    results: bool
+  - doc: |-
+      sizeMessage renders a bounds message, collapsing the open-ended form so
+      "must be 8 or more characters long" does not read as "8 to -1".
+    name: sizeMessage
+    params: verb, noun string, low, high int
+    results: string
+  - name: Struct
+    params: cfg StructConfig
+    results: constraint corevalidation.Constraint[T], err error
+    typeParams: T any
+  - name: All
+    params: constraints ...corevalidation.Constraint[T]
+    results: corevalidation.Constraint[T]
+    typeParams: T any
+  - name: First
+    params: constraints ...corevalidation.Constraint[T]
+    results: corevalidation.Constraint[T]
+    typeParams: T any
+  - name: Check
+    params: value T, constraints ...corevalidation.Constraint[T]
+    results: error
+    typeParams: T any
+  - doc: |-
+      one builds a single-violation report. Every built-in constraint reports at
+      most one violation per value: "too short AND not in the set" is two rules,
+      and the caller composed both, so the composition — not the constraint —
+      is what accumulates.
+
+      The message NEVER contains the rejected value. That is a security property,
+      not a style rule: a validation message is the one error message in a service
+      designed to reach the end user, so echoing the value would exfiltrate
+      whatever was validated — a password, a token, a card number.
+    name: one
+    params: path, rule, message string, code errs.Code
+    results: corevalidation.ReportValue
+imports:
+  cmp: cmp
+  corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  reflect: reflect
+  regexp: regexp
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  unicode: unicode
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/validation
+  name: validation
+  purpose: Package validation — the ordered-value bounds constraints.
+types:
+  - doc: |-
+      diveSpec groups what compileDive needs beyond the field itself, keeping the
+      function under the SDK's 5-parameter ceiling.
+
+      Nothing in it may flow into a step closure. Go's escape analysis is
+      field-insensitive on a struct parameter, so one field captured by the
+      closure a step returns makes the whole spec leak — visiting included, which
+      then moves the caller's map to the heap: two allocations per compiled type,
+      measured. What a step keeps travels as its own parameter instead.
+    fields:
+      - name: tail
+        type: "[]string"
+      - name: stopAtFirst
+        type: bool
+      - name: visiting
+        type: map[reflect.Type]bool
+    kind: struct
+    name: diveSpec
+  - doc: |-
+      elementPlan is the compiled rule set applied to each element of a slice or
+      array: the element's own rules, and — when the element is a struct — its
+      nested plan. It carries the mode too, so a stop-at-first descent stops
+      inside an element rather than only between elements.
+
+      presence holds the presence rule of a POINTER element, kept apart from
+      checks because it asks about a different value: the pointer, where every
+      other rule asks about what it points at. It is empty for any other element,
+      whose presence rule sits in checks in tag order.
+    fields:
+      - name: presence
+        type: "[]fieldCheck"
+      - name: checks
+        type: "[]fieldCheck"
+      - name: nested
+        type: "*structPlan"
+      - name: deref
+        type: bool
+      - name: stopAtFirst
+        type: bool
+    kind: struct
+    methods:
+      - doc: check runs one element's rules and its nested plan.
+        name: check
+        params: path string, element reflect.Value
+        recv: p elementPlan
+        results: corevalidation.ReportValue
+      - doc: |-
+          apply runs checks against value at path, appending what they report to
+          sofar. stopped reports that a stop-at-first plan found its violation, in
+          which case report is exactly that one violation: nothing was found before
+          it, or the plan would already have stopped.
+        name: apply
+        params: sofar corevalidation.ReportValue, checks []fieldCheck, path string, value reflect.Value
+        recv: p elementPlan
+        results: report corevalidation.ReportValue, stopped bool
+    name: elementPlan
+  - doc: |-
+      jsonLevel is an embedded struct encoding/json descends into, with the index
+      path that reaches it.
+    fields:
+      - name: typ
+        type: reflect.Type
+      - name: index
+        type: "[]int"
+    kind: struct
+    name: jsonLevel
+  - doc: |-
+      jsonCandidate is one field encoding/json considers for a key of an object:
+      the key, the index path from the struct that owns the object, and whether
+      the key came from a json tag rather than the Go name.
+    fields:
+      - name: name
+        type: string
+      - name: index
+        type: "[]int"
+      - name: tagged
+        type: bool
+    kind: struct
+    name: jsonCandidate
+  - doc: |-
+      planStep checks one aspect of a struct value — one field's rules, or one
+      descent into a nested value — and reports what it found, located under base.
+    kind: named
+    name: planStep
+    underlying: func(base string, structValue reflect.Value) corevalidation.ReportValue
+  - doc: |-
+      fieldCheck is one compiled rule bound to one field's static type. It reads
+      the field through the kind-specific accessor chosen at COMPILE time, so a
+      validation performs no type dispatch of its own.
+    kind: named
+    name: fieldCheck
+    underlying: func(path string, fieldValue reflect.Value) corevalidation.ReportValue
+  - doc: structPlan is the compiled rule set of one struct type.
+    fields:
+      - name: steps
+        type: "[]planStep"
+      - name: stopAtFirst
+        type: bool
+    kind: struct
+    methods:
+      - doc: run executes the plan against a struct value located at base.
+        name: run
+        params: base string, structValue reflect.Value
+        recv: p *structPlan
+        results: corevalidation.ReportValue
+    name: structPlan
+  - doc: |-
+      planKey identifies a compiled plan. The MODE is part of the key because
+      stop-at-first is compiled INTO the plan — including into its nested plans —
+      rather than applied as a truncation afterwards, which would claim a saving
+      it did not make. Two modes of one type are therefore two plans, which is
+      the honest arrangement: they really do different work.
+    fields:
+      - name: typ
+        type: reflect.Type
+      - name: stopAtFirst
+        type: bool
+    kind: struct
+    name: planKey
+  - doc: |-
+      reachMember is a field the plan puts rules on at one object's level: its
+      path name, for the refusal, and its index path from that object's struct.
+    fields:
+      - name: name
+        type: string
+      - name: index
+        type: "[]int"
+    kind: struct
+    name: reachMember
+  - doc: boundSpec groups what a bound closure needs beyond its parsed limit.
+    fields:
+      - name: upper
+        type: bool
+      - name: rule
+        type: string
+      - name: message
+        type: string
+    kind: struct
+    name: boundSpec
+  - fields:
+      - doc: |-
+          StopAtFirst compiles a plan that stops at the first violation instead of
+          collecting every one. The zero value collects everything, because a form
+          that reports one error at a time makes the user submit it five times.
+
+          It is compiled INTO the plan, nested plans included, so a stop-at-first
+          validator really does stop: the later fields are never read and the
+          later rules never run. It is not a filter applied to a full report.
+        name: StopAtFirst
+        type: bool
+    kind: struct
+    name: StructConfig
+vars:
+  - doc: |-
+      planCache maps a planKey to its *structPlan. sync.Map is the right shape
+      here: the entry set is written once per type at start-up and read on every
+      validation forever after.
+    items:
+      - name: planCache
+        type: sync.Map
+    name: planCache
+  - doc: |-
+      refusedRules maps a construct this dialect refuses to the reason, phrased as
+      what to do instead. A refusal BY NAME costs one line here and saves an
+      investigation: "unknown rule" would leave the caller unsure whether they
+      mistyped or asked for something that does not exist.
+    items:
+      - name: refusedRules
+        value: |-
+          map[string]string{
+          	//: a regexp contains commas far more often than not, and this tag is
+          	//: comma-separated. Accepting it would mean inventing an escape dialect —
+          	//: and a SILENTLY TRUNCATED pattern is precisely the class of failure that
+          	//: makes a validator worse than no validator.
+          	"pattern": "a regular expression cannot be written in a comma-separated tag; compose validation.Matches in code",
+          	"regex":   "a regular expression cannot be written in a comma-separated tag; compose validation.Matches in code",
+          	"regexp":  "a regular expression cannot be written in a comma-separated tag; compose validation.Matches in code",
+          	//: RFC 5322 addresses are not a regular language: quoted local parts,
+          	//: comments, domain literals and IDN all fall outside anything a pattern
+          	//: can decide. Every "email" rule in every library is a guess that rejects
+          	//: valid addresses and accepts unroutable ones. Deliverability is decided
+          	//: by sending mail to it, not by parsing it.
+          	"email": "the SDK does not claim to validate an email address; check that it is non-empty and send a confirmation, or compose validation.Matches with a pattern you own",
+          	//: a URL that parses is not a URL that is acceptable — scheme allow-lists,
+          	//: host resolution and SSRF are application decisions, and net/url already
+          	//: answers the parse question.
+          	"url": "the SDK does not claim to validate a URL; use net/url.Parse and decide the scheme and host policy in the application",
+          	//: a UUID is one of six versions with different shapes; pkg/v1/app/id already
+          	//: mints and parses the ones this SDK supports.
+          	"uuid": "use pkg/v1/app/id to mint and parse identifiers; a shape check on an opaque identifier belongs to whoever defines it",
+          	//: splitDive only consumes the first marker.
+          	diveRule: "only one dive is allowed per field; the rules after it apply to what the descent reaches",
+          }
+    name: refusedRules

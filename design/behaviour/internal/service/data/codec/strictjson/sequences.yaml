@@ -1,0 +1,257 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*boundedReader).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundedReader).Read
+        kind: self
+      - id: b.source.Read
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, io.EOF
+          when: b.remaining <= 0
+      - opt:
+          do:
+            - set: buffer
+              value: buffer[:b.remaining]
+          when: int64(len(buffer)) > b.remaining
+      - bind: count, err
+        eval: b.source.Read(buffer)
+        to: b.source.Read
+      - op: "-="
+        set: b.remaining
+        value: int64(count)
+      - op: +=
+        set: b.delivered
+        value: int64(count)
+      - opt:
+          do:
+            - set: b.failure
+              value: err
+          when: err != nil && !errors.Is(err, io.EOF) && b.failure == nil
+      - return: count, err
+  - of: (*boundedReader).verdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundedReader).verdict
+        kind: self
+      - id: errs
+        kind: package
+      - id: Unreadable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corestrictjson.DocumentTooLarge, errs.WrapParams{}, errs.Int64(fieldLimit, maxBytes))
+              to: errs
+          when: b.delivered > maxBytes || (b.failure != nil && oversize != nil && oversize(b.failure))
+      - opt:
+          do:
+            - return: Unreadable(b.failure)
+              to: Unreadable
+          when: b.failure != nil
+      - opt:
+          do:
+            - return: corestrictjson.DocumentEmpty
+          when: b.delivered == 0
+      - return: nil
+  - of: Unreadable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Unreadable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestrictjson.DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(failure)))
+        to: errs
+  - of: causeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: causeOf
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: fmt.Sprintf("%T", failure)
+        to: fmt
+  - of: Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: Decode
+        kind: self
+      - id: CheckArguments
+        kind: internal
+      - id: Misconfigured
+        kind: internal
+      - id: DecodeChecked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: invalid
+          init:
+            bind: invalid
+            eval: CheckArguments(v, maxBytes)
+            to: CheckArguments
+          when: invalid != nil
+      - opt:
+          do:
+            - return: Misconfigured("r")
+              to: Misconfigured
+          when: r == nil
+      - return: DecodeChecked(r, v, maxBytes, nil)
+        to: DecodeChecked
+  - of: CheckArguments
+    participants:
+      - id: caller
+        kind: actor
+      - id: CheckArguments
+        kind: self
+      - id: Misconfigured
+        kind: internal
+      - id: reflect
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: Misconfigured("maxBytes")
+              to: Misconfigured
+          when: maxBytes <= 0
+      - opt:
+          do:
+            - return: Misconfigured("v")
+              to: Misconfigured
+          init:
+            bind: target
+            eval: reflect.ValueOf(v)
+            to: reflect
+          when: target.Kind() != reflect.Pointer || target.IsNil()
+      - return: nil
+  - of: DecodeChecked
+    participants:
+      - id: caller
+        kind: actor
+      - id: DecodeChecked
+        kind: self
+      - id: jsonv2
+        kind: stdlib
+      - id: counted.verdict
+        kind: internal
+      - id: classify
+        kind: internal
+    steps:
+      - bind: budget
+        eval: maxBytes
+      - opt:
+          do:
+            - op: ++
+              set: budget
+          when: budget < math.MaxInt64
+      - bind: counted
+        eval: "&boundedReader{source: r, remaining: budget}"
+      - bind: decodeErr
+        eval: jsonv2.UnmarshalRead(counted, v, jsonv2.RejectUnknownMembers(true))
+        to: jsonv2
+      - opt:
+          do:
+            - return: readErr
+          init:
+            bind: readErr
+            eval: counted.verdict(maxBytes, oversize)
+            to: counted.verdict
+          when: readErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: decodeErr == nil
+      - return: classify(decodeErr)
+        to: classify
+  - of: PointerOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: PointerOf
+        kind: self
+      - id: field.StringValue
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: field.StringValue(), true
+                    to: field.StringValue
+                when: field.Key() == fieldPointer
+          key: _
+          range: errs.FieldsOf(err)
+          value: field
+      - return: "\"\", false"
+  - of: classify
+    participants:
+      - id: caller
+        kind: actor
+      - id: classify
+        kind: self
+      - id: located
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - bind: sentinel
+              eval: corestrictjson.ValueMismatched
+            - opt:
+                do:
+                  - set: sentinel
+                    value: corestrictjson.MemberUnknown
+                when: errors.Is(decodeErr, jsonv2.ErrUnknownName)
+            - return: located(sentinel, semantic.JSONPointer, semantic.ByteOffset)
+              to: located
+          init:
+            bind: semantic, isSemantic
+            eval: errors.AsType[*jsonv2.SemanticError](decodeErr)
+          when: isSemantic
+      - opt:
+          do:
+            - return: located(corestrictjson.DocumentMalformed, syntactic.JSONPointer, syntactic.ByteOffset)
+              to: located
+          init:
+            bind: syntactic, isSyntactic
+            eval: errors.AsType[*jsontext.SyntacticError](decodeErr)
+          when: isSyntactic
+      - return: errs.Wrap(corestrictjson.DocumentMalformed, errs.WrapParams{})
+        to: errs
+  - of: located
+    participants:
+      - id: caller
+        kind: actor
+      - id: located
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(sentinel, errs.WrapParams{},
+          		errs.String(fieldPointer, boundPointer(string(pointer))), errs.Int64(fieldOffset, offset))
+        to: errs
+  - of: Misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: Misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestrictjson.DecodeMisconfigured, errs.WrapParams{}, errs.String(fieldArgument, argument))
+        to: errs

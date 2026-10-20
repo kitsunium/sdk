@@ -1,0 +1,1269 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: studio.mountDevTools
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.mountDevTools
+        kind: self
+      - id: s.mountStoreTools
+        kind: internal
+    steps:
+      - eval: api("GET /_app/api/process", s.serveProcess)
+      - eval: api("GET /_app/api/goroutines", s.serveGoroutines)
+      - eval: api("GET /_app/api/profile/heap", s.serveHeapProfile)
+      - eval: api("GET /_app/api/logs", s.serveLogs)
+      - eval: api("GET /_app/api/mail", s.serveMails)
+      - eval: api("GET /_app/api/mail/{id}", s.serveMail)
+      - eval: s.mountStoreTools(api)
+        to: s.mountStoreTools
+  - of: studio.mountStoreTools
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!s.host.Stores()"
+      - eval: |-
+          api("GET /_app/api/databases", func(w http.ResponseWriter, r *http.Request) {
+          		answer(s, w, r, s.host.Databases(r.Context()), nil)
+          	})
+      - eval: |-
+          api("GET /_app/api/former", func(w http.ResponseWriter, r *http.Request) {
+          		q := r.URL.Query()
+          		out, err := s.host.Former(r.Context(), q.Get("store"), q.Get("key"))
+          		answer(s, w, r, out, err)
+          	})
+      - eval: |-
+          api("GET /_app/api/revisions", func(w http.ResponseWriter, r *http.Request) {
+          		q := r.URL.Query()
+          		out, err := s.host.Revisions(r.Context(), q.Get("store"), q.Get("key"), q.Get("from"), q.Get("to"))
+          		answer(s, w, r, out, err)
+          	})
+      - eval: |-
+          api("GET /_app/api/trash", func(w http.ResponseWriter, r *http.Request) {
+          		q := r.URL.Query()
+          		out, err := s.host.Trash(r.Context(), q.Get("store"), q.Get("offset"), q.Get("limit"))
+          		answer(s, w, r, out, err)
+          	})
+      - eval: |-
+          api("GET /_app/api/privacy", func(w http.ResponseWriter, r *http.Request) {
+          		out, err := s.host.Privacy(r.Context())
+          		answer(s, w, r, out, err)
+          	})
+  - of: studio.serveProcess
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveProcess
+        kind: self
+      - id: plug.SampleProcess.Load
+        kind: value
+      - id: http
+        kind: stdlib
+      - id: answer
+        kind: internal
+    steps:
+      - bind: sample
+        eval: plug.SampleProcess.Load()
+        to: plug.SampleProcess.Load
+      - opt:
+          do:
+            - eval: http.NotFound(w, r)
+              to: http
+            - return: ""
+          when: sample == nil
+      - bind: p
+        eval: (*sample)()
+      - opt:
+          do:
+            - eval: http.NotFound(w, r)
+              to: http
+            - return: ""
+          when: p == nil
+      - eval: answer(s, w, r, p, nil)
+        to: answer
+  - of: studio.serveHeapProfile
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveHeapProfile
+        kind: self
+      - id: heap
+        kind: internal
+      - id: s.host.Reply
+        kind: value
+      - id: s.host.Now().UTC
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: heap(s.host.Graph(), s.host.Locate)
+        to: heap
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, s.host.ProfileUnreadable("the heap profile could not be read", err))
+              to: s.host.Reply
+            - return: ""
+          when: err != nil
+      - set: out.At
+        to: s.host.Now().UTC
+        value: s.host.Now().UTC()
+      - eval: answer(s, w, r, out, nil)
+        to: answer
+  - of: studio.serveGoroutines
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveGoroutines
+        kind: self
+      - id: goroutines
+        kind: internal
+      - id: s.host.Reply
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: goroutines(s.host.Now().UTC())
+        to: goroutines
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, s.host.ProfileUnreadable("the goroutines could not be listed", err))
+              to: s.host.Reply
+            - return: ""
+          when: err != nil
+      - eval: answer(s, w, r, out, nil)
+        to: answer
+  - of: studio.serveLogs
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveLogs
+        kind: self
+      - id: r.URL.Query
+        kind: value
+      - id: s.host.Logs
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: q
+        eval: r.URL.Query()
+        to: r.URL.Query
+      - bind: out, err
+        eval: s.host.Logs(q.Get("trace"), q.Get("node"), q.Get("level"), q.Get("limit"))
+        to: s.host.Logs
+      - eval: answer(s, w, r, out, err)
+        to: answer
+  - of: studio.serveMails
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveMails
+        kind: self
+      - id: r.URL.Query().Get
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: s.host.Reply
+        kind: value
+      - id: s.host.Mails
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: answer
+        kind: internal
+    steps:
+      - bind: limit
+        eval: defaultMails
+      - opt:
+          do:
+            - bind: n, err
+              eval: strconv.Atoi(raw)
+              to: strconv
+            - opt:
+                do:
+                  - eval: s.host.Reply(w, r, nil, s.host.Invalid("limit must be a number from 1 to "+strconv.Itoa(maxMails)))
+                    to: s.host.Reply
+                  - return: ""
+                when: err != nil || n < 1 || n > maxMails
+            - set: limit
+              value: "n"
+          init:
+            bind: raw
+            eval: r.URL.Query().Get("limit")
+            to: r.URL.Query().Get
+          when: raw != ""
+      - bind: out
+        eval: s.host.Mails(limit)
+        to: s.host.Mails
+      - eval: |-
+          slices.SortStableFunc(out, func(x, y model.MailSummary) int {
+          		return cmp.Or(y.QueuedAt.Compare(x.QueuedAt), cmp.Compare(y.ID, x.ID))
+          	})
+        to: slices
+      - eval: answer(s, w, r, out[:min(limit, len(out))], nil)
+        to: answer
+  - of: studio.serveMail
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveMail
+        kind: self
+      - id: s.host.Mail
+        kind: value
+      - id: s.host.Reply
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: m, ok
+        eval: s.host.Mail(r.PathValue("id"))
+        to: s.host.Mail
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, s.host.NotFound("no such mail, or it left the mailbox"))
+              to: s.host.Reply
+            - return: ""
+          when: "!ok"
+      - eval: answer(s, w, r, m, nil)
+        to: answer
+  - of: studioEnv
+    steps:
+      - bind: studio
+        eval: getenv(model.VarStudio)
+      - opt:
+          do:
+            - set: studio
+              value: "\"\""
+          when: studio != "on" && studio != "off"
+      - return: |-
+          plug.StudioEnvValue{
+          		Studio:     studio,
+          		Remote:     getenv(model.VarStudioRemote) == "on",
+          		NoAnalysis: getenv(model.VarAnalyze) == "off",
+          	}
+  - of: studioSettings
+    steps:
+      - return: |-
+          []model.Setting{
+          		{Name: model.VarStudio, Value: s.Studio, From: settingFrom(getenv, s.StudioOption != nil, model.VarStudio), Option: "app.Studio"},
+          		{Name: model.VarStudioRemote, Value: s.Remote, From: settingFrom(getenv, false, model.VarStudioRemote)},
+          		{Name: model.VarAnalyze, Value: s.Analyze, From: settingFrom(getenv, s.AnalyzeOption != nil, model.VarAnalyze), Option: "app.Analyze"},
+          	}
+  - of: settingFrom
+    steps:
+      - switch:
+          cases:
+            - case: option
+              do:
+                - return: model.SettingOption
+            - case: getenv(name) != ""
+              do:
+                - return: model.SettingEnv
+            - default: true
+              do:
+                - return: model.SettingDefault
+  - of: devForced
+    participants:
+      - id: caller
+        kind: actor
+      - id: devForced
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: out
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, name)
+                init:
+                  bind: name
+                  eval: strings.TrimSpace(name)
+                  op: =
+                  to: strings
+                when: name != ""
+          key: name
+          range: strings.SplitSeq(getenv(model.VarDevForced), ",")
+      - return: out
+  - of: devBuildOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: devBuildOf
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: round2
+        kind: internal
+    steps:
+      - bind: at, err
+        eval: time.Parse(time.RFC3339Nano, getenv(envDevBuiltAt))
+        to: time
+      - opt:
+          do:
+            - return: nil
+          when: err != nil
+      - bind: d
+        eval: "&model.DevBuild{BuiltAt: new(at.UTC()), Changed: changedFiles(getenv(envDevChanged))}"
+      - opt:
+          do:
+            - set: d.BuildMs
+              to: round2
+              value: round2(ms)
+          init:
+            bind: ms, err
+            eval: strconv.ParseFloat(getenv(envDevBuildMs), 64)
+            to: strconv
+          when: err == nil && ms >= 0
+      - set: d.Rebuilds, d.More
+        value: positiveInt(getenv(envDevBuilds)), positiveInt(getenv(envDevMore))
+      - return: d
+  - of: changedFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: changedFiles
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: out
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, f)
+                init:
+                  bind: f
+                  eval: strings.TrimSpace(f)
+                  op: =
+                  to: strings
+                when: f != "" && filepath.IsLocal(filepath.FromSlash(f)) && len(out) < maxDevChanged
+          key: f
+          range: strings.SplitSeq(raw, "\n")
+      - return: out
+  - of: positiveInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: positiveInt
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "n"
+          init:
+            bind: n, err
+            eval: strconv.Atoi(raw)
+            to: strconv
+          when: err == nil && n > 0
+      - return: "0"
+  - of: serveEvents
+    participants:
+      - id: caller
+        kind: actor
+      - id: serveEvents
+        kind: self
+      - id: w.Header().Set
+        kind: value
+      - id: sse
+        kind: package
+      - id: host.Fail
+        kind: value
+      - id: relay
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: w http.ResponseWriter, r *http.Request
+            steps:
+              - eval: w.Header().Set("Cache-Control", "no-store")
+                to: w.Header().Set
+              - bind: stream, err
+                eval: sse.New(w, r)
+                to: sse
+              - opt:
+                  do:
+                    - eval: host.Fail(w, "internal error")
+                      to: host.Fail
+                    - return: ""
+                  when: err != nil
+              - defer: |-
+                  func() {
+                  			if err := stream.Close(); err != nil {
+                  				host.Debug(r.Context(), "the Studio's event stream did not close cleanly", err)
+                  			}
+                  		}()
+              - eval: relay(host, stream)
+                to: relay
+  - of: relay
+    participants:
+      - id: caller
+        kind: actor
+      - id: relay
+        kind: self
+      - id: host.Subscribe
+        kind: value
+      - id: json
+        kind: stdlib
+      - id: stream.Send
+        kind: value
+      - id: host.Graph
+        kind: value
+    steps:
+      - bind: events, cancel
+        eval: host.Subscribe()
+        to: host.Subscribe
+      - defer: cancel()
+      - bind: send
+        eval:
+          closure:
+            params: e model.Event
+            results: error
+            steps:
+              - bind: raw, err
+                eval: json.Marshal(e)
+                to: json
+              - opt:
+                  do:
+                    - return: nil
+                  when: err != nil
+              - return: "stream.Send(sse.Event{Data: string(raw)})"
+                to: stream.Send
+      - bind: g
+        eval: host.Graph()
+        to: host.Graph
+      - opt:
+          do:
+            - return: ""
+          when: "send(model.Event{Type: model.EventHello, Time: host.Now().UTC(), Revision: g.Revision, StartedAt: g.App.StartedAt, Phase: host.Phase()}) != nil"
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-stream.Done()
+                    do:
+                      - return: ""
+                  - comm: <-host.Stopping()
+                    do:
+                      - return: ""
+                  - comm: e := <-events
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: send(e) != nil
+          forever: true
+  - of: foldProfile
+    participants:
+      - id: caller
+        kind: actor
+      - id: foldProfile
+        kind: self
+      - id: profiling
+        kind: package
+      - id: slices
+        kind: stdlib
+      - id: funcCosts
+        kind: internal
+      - id: flameOf
+        kind: internal
+    steps:
+      - bind: cfg
+        eval: |-
+          profiling.FoldConfig{
+          		SampleType: "cpu", TopFunctions: topFuncs, TopPerOwner: topNodeFuncs, FlameMinShare: flameMinShare, FlameMaxDepth: flameMaxDepth,
+          		Attribute: func(s profiling.Sample) string {
+          			if l := s.Labels[plug.LabelNode]; len(l) > 0 {
+          				return l[0]
+          			}
+          			return ""
+          		},
+          	}
+      - bind: unit, round
+        eval: "\"ms\", func(v int64) float64 { return round2(float64(v) / float64(time.Millisecond)) }"
+      - opt:
+          do:
+            - set: cfg.SampleType, cfg.Attribute
+              value: "\"inuse_space\", func(s profiling.Sample) string { return owners.attribute(s.Stack) }"
+            - set: unit, round
+              value: "\"bytes\", func(v int64) float64 { return float64(v) }"
+          when: kind == model.ProfileHeap
+      - bind: f, err
+        eval: profiling.Fold(p, cfg)
+        to: profiling
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: "&model.Profile{Kind: kind, Unit: unit, Total: round(f.Total), Unattributed: round(f.Unattributed), Nodes: []model.NodeCost{}}"
+      - loop:
+          do:
+            - bind: nc
+              eval: "model.NodeCost{Node: o.Owner, Value: round(o.Value), Top: funcCosts(o.Top, owners, o.Owner, round, source)}"
+            - opt:
+                do:
+                  - set: nc.Share
+                    value: math.Round(float64(o.Value)/float64(f.Total)*10000) / 10000
+                when: f.Total > 0
+            - set: out.Nodes
+              value: append(out.Nodes, nc)
+          key: _
+          range: f.Owners
+          value: o
+      - eval: |-
+          slices.SortFunc(out.Nodes, func(x, y model.NodeCost) int {
+          		return cmp.Or(cmp.Compare(y.Value, x.Value), cmp.Compare(x.Node, y.Node))
+          	})
+        to: slices
+      - set: out.Top
+        to: funcCosts
+        value: funcCosts(f.Top, owners, "", round, source)
+      - opt:
+          do:
+            - set: out.Flame
+              to: flameOf
+              value: flameOf(f.Flame, owners, round)
+          when: f.Flame != nil
+      - return: out, nil
+  - of: funcCosts
+    participants:
+      - id: caller
+        kind: actor
+      - id: funcCosts
+        kind: self
+      - id: owners.owner
+        kind: internal
+      - id: owners.source
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]model.FuncCost, 0, len(top))
+      - loop:
+          do:
+            - bind: fc
+              eval: "model.FuncCost{Func: fn.Function, Flat: round(fn.Flat), Cum: round(fn.Cum), Node: node}"
+            - opt:
+                do:
+                  - set: fc.Node, _
+                    to: owners.owner
+                    value: owners.owner(fn.Function)
+                when: fc.Node == ""
+            - set: fc.Source
+              to: owners.source
+              value: owners.source(fn.Function)
+            - opt:
+                do:
+                  - set: fc.Source
+                    value: source(fn.File, fn.StartLine, fn.Function)
+                when: fc.Source == nil && source != nil
+            - set: out
+              value: append(out, fc)
+          key: _
+          range: top
+          value: fn
+      - return: out
+  - of: flameOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: flameOf
+        kind: self
+      - id: owners.owner
+        kind: internal
+    steps:
+      - bind: out
+        eval: "&model.FlameNode{Name: n.Name, Value: round(n.Value)}"
+      - opt:
+          do:
+            - set: out.Node, _
+              to: owners.owner
+              value: owners.owner(n.Name)
+          when: n.Name != profiling.FlameRoot
+      - loop:
+          do:
+            - set: out.Children
+              value: append(out.Children, flameOf(c, owners, round))
+          key: _
+          range: n.Children
+          value: c
+      - return: out
+  - of: ownersOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ownersOf
+        kind: self
+      - id: o.addNode
+        kind: internal
+    steps:
+      - bind: o
+        eval: "&funcOwners{entries: map[string][]string{}, code: map[string][]string{}, sources: map[string]*model.Source{}}"
+      - loop:
+          do:
+            - eval: o.addNode(&g.Nodes[i])
+              to: o.addNode
+          key: i
+          range: g.Nodes
+      - return: o
+  - of: (*funcOwners).addNode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*funcOwners).addNode
+        kind: self
+      - id: ownFunc
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: ownFunc(o.entries, n.Handler.Func, n.ID)
+              to: ownFunc
+            - set: o.sources[profiling.CanonicalName(n.Handler.Func)]
+              value: n.Handler
+          when: n.Handler != nil && n.Handler.Func != ""
+      - opt:
+          do:
+            - return: ""
+          when: n.Code == nil
+      - opt:
+          do:
+            - eval: ownFunc(o.entries, n.Code.Entry, n.ID)
+              to: ownFunc
+          when: n.Code.Entry != ""
+      - loop:
+          do:
+            - eval: ownFunc(o.code, fn.Func, n.ID)
+              to: ownFunc
+            - opt:
+                do:
+                  - set: o.sources[profiling.CanonicalName(fn.Func)]
+                    value: fn.Source
+                when: fn.Source != nil
+          key: _
+          range: n.Code.Funcs
+          value: fn
+  - of: (*funcOwners).attribute
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*funcOwners).attribute
+        kind: self
+      - id: o.owner
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: node
+                init:
+                  bind: node, ok
+                  eval: o.owner(f.Function)
+                  to: o.owner
+                when: ok
+          key: _
+          range: stack
+          value: f
+      - return: "\"\""
+  - of: (*funcOwners).source
+    steps:
+      - opt:
+          do:
+            - bind: cp
+              eval: "*s"
+            - set: cp.Func
+              value: fn
+            - return: "&cp"
+          init:
+            bind: s, ok
+            eval: o.sources[profiling.CanonicalName(fn)]
+          when: ok
+      - return: nil
+  - of: goroutinesOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: goroutinesOf
+        kind: self
+      - id: profiling
+        kind: package
+    steps:
+      - bind: groups
+        eval: |-
+          profiling.GroupGoroutines(gs, profiling.GroupConfig{
+          		Labels: []string{plug.LabelNode, plug.LabelLoop}, MaxGroups: maxGoroutineGroups, MaxStack: maxGroupStack,
+          	})
+        to: profiling
+      - bind: out
+        eval: "&model.Goroutines{At: at, Total: len(gs), Groups: make([]model.GoroutineGroup, 0, len(groups))}"
+      - loop:
+          do:
+            - set: out.Groups
+              value: |-
+                append(out.Groups, model.GoroutineGroup{
+                			Node: g.Labels[plug.LabelNode], Loop: g.Labels[plug.LabelLoop], State: g.State, Top: g.Top,
+                			Stack: functionsOf(g.Stack), Count: g.Count,
+                		})
+          key: _
+          range: groups
+          value: g
+      - return: out
+  - of: functionsOf
+    steps:
+      - bind: out
+        eval: make([]string, len(stack))
+      - loop:
+          do:
+            - set: out[i]
+              value: f.Function
+          key: i
+          range: stack
+          value: f
+      - return: out
+  - of: heap
+    participants:
+      - id: caller
+        kind: actor
+      - id: heap
+        kind: self
+      - id: profiling
+        kind: package
+      - id: foldProfile
+        kind: internal
+    steps:
+      - bind: p, err
+        eval: profiling.CaptureHeap()
+        to: profiling
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: foldProfile(p, model.ProfileHeap, ownersOf(g), source)
+        to: foldProfile
+  - of: goroutines
+    participants:
+      - id: caller
+        kind: actor
+      - id: goroutines
+        kind: self
+      - id: profiling
+        kind: package
+      - id: goroutinesOf
+        kind: internal
+    steps:
+      - bind: gs, err
+        eval: profiling.Goroutines()
+        to: profiling
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: goroutinesOf(gs, at), nil
+        to: goroutinesOf
+  - of: round2
+    steps:
+      - return: math.Round(v*100) / 100
+  - of: mount
+    participants:
+      - id: caller
+        kind: actor
+      - id: mount
+        kind: self
+      - id: mux.Handle
+        kind: value
+      - id: s.mountDevTools
+        kind: internal
+      - id: s.mountNotFound
+        kind: internal
+    steps:
+      - bind: s
+        eval: "studio{host: host}"
+      - bind: api
+        eval:
+          closure:
+            params: pattern string, h http.HandlerFunc
+            steps:
+              - eval: mux.Handle(pattern, s.guard(h))
+                to: mux.Handle
+      - eval: |-
+          api("GET /_app/api/graph", func(w http.ResponseWriter, r *http.Request) {
+          		answer(s, w, r, s.host.Graph(), nil)
+          	})
+      - eval: api("GET /_app/api/events", serveEvents(host))
+      - eval: |-
+          api("GET /_app/api/traces", func(w http.ResponseWriter, r *http.Request) {
+          		q := r.URL.Query()
+          		answer(s, w, r, s.host.Traces(tracesShown, q.Get("root"), q.Get("node")), nil)
+          	})
+      - eval: api("GET /_app/api/traces/{id}", s.serveTrace)
+      - eval: api("GET /_app/api/source", s.serveSource)
+      - eval: api("GET /_app/api/instances", s.serveInstances)
+      - eval: api("GET /_app/api/items", s.serveItems)
+      - eval: s.mountDevTools(api)
+        to: s.mountDevTools
+      - eval: s.mountNotFound(api, "/_app/api/", "no such Studio API")
+        to: s.mountNotFound
+      - eval: "s.mountNotFound(api, \"/_app/\", \"the Studio is the kit tool's, not the product's: run kit dev\")"
+        to: s.mountNotFound
+  - of: studio.mountNotFound
+    steps:
+      - loop:
+          do:
+            - eval: |-
+                api(method+" "+prefix, func(w http.ResponseWriter, r *http.Request) {
+                			s.host.Reply(w, r, nil, s.host.NotFound(message))
+                		})
+          key: _
+          range: methods
+          value: method
+  - of: studio.serveTrace
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveTrace
+        kind: self
+      - id: s.host.Trace
+        kind: value
+      - id: s.host.Reply
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: t, ok
+        eval: s.host.Trace(r.PathValue("id"))
+        to: s.host.Trace
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, s.host.NotFound("no such trace, or it was evicted"))
+              to: s.host.Reply
+            - return: ""
+          when: "!ok"
+      - eval: answer(s, w, r, t, nil)
+        to: answer
+  - of: studio.serveInstances
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveInstances
+        kind: self
+      - id: s.host.Instances
+        kind: value
+      - id: s.host.Reply
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: list, ok
+        eval: s.host.Instances(r.URL.Query().Get("workflow"))
+        to: s.host.Instances
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, s.host.NotFound("no such workflow"))
+              to: s.host.Reply
+            - return: ""
+          when: "!ok"
+      - eval: answer(s, w, r, list, nil)
+        to: answer
+  - of: studio.serveItems
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveItems
+        kind: self
+      - id: s.host.Items
+        kind: value
+      - id: s.host.Reply
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - bind: items, ok
+        eval: s.host.Items(r.URL.Query().Get("store"))
+        to: s.host.Items
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, s.host.NotFound("no such store"))
+              to: s.host.Reply
+            - return: ""
+          when: "!ok"
+      - eval: answer(s, w, r, items, nil)
+        to: answer
+  - of: studio.guard
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.guard
+        kind: self
+      - id: http
+        kind: stdlib
+    steps:
+      - return: |-
+          http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+          		if !s.host.Remote() && !loopback(r.RemoteAddr) {
+          			s.host.Forbid(w, "the Studio answers this machine only; set KIT_STUDIO_REMOTE=on to reach it through a forwarded port")
+          			return
+          		}
+          		host := r.Host
+          		if hh, _, err := net.SplitHostPort(host); err == nil {
+          			host = hh
+          		}
+          		host = strings.ToLower(strings.Trim(host, "[]"))
+          		if !s.host.AllowedHost(host) {
+          			s.host.Forbid(w, "this host may not reach the Studio; add it to <PRODUCT>_ALLOWED_HOSTS")
+          			return
+          		}
+          		w.Header().Set("Content-Security-Policy", studioCSP)
+          		w.Header().Set("X-Content-Type-Options", "nosniff")
+          		w.Header().Set("Referrer-Policy", "no-referrer")
+          		h.ServeHTTP(w, r)
+          	})
+        to: http
+  - of: answer
+    participants:
+      - id: caller
+        kind: actor
+      - id: answer
+        kind: self
+      - id: s.host.Reply
+        kind: value
+      - id: json
+        kind: stdlib
+      - id: s.host.Fail
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: s.host.Reply(w, r, nil, err)
+              to: s.host.Reply
+            - return: ""
+          when: err != nil
+      - bind: raw, err
+        eval: json.Marshal(v)
+        to: json
+      - opt:
+          do:
+            - eval: s.host.Fail(w, "the response could not be encoded")
+              to: s.host.Fail
+            - return: ""
+          when: err != nil
+      - eval: s.host.Reply(w, r, raw, nil)
+        to: s.host.Reply
+  - of: loopback
+    participants:
+      - id: caller
+        kind: actor
+      - id: loopback
+        kind: self
+      - id: net
+        kind: stdlib
+    steps:
+      - bind: host, _, err
+        eval: net.SplitHostPort(remote)
+        to: net
+      - opt:
+          do:
+            - set: host
+              value: remote
+          when: err != nil
+      - bind: ip
+        eval: net.ParseIP(host)
+        to: net
+      - return: ip != nil && ip.IsLoopback()
+  - of: studio.serveSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: studio.serveSource
+        kind: self
+      - id: r.URL.Query
+        kind: value
+      - id: s.host.Reply
+        kind: value
+      - id: s.host.Source
+        kind: value
+      - id: strings
+        kind: stdlib
+      - id: atoiOr
+        kind: internal
+      - id: answer
+        kind: internal
+    steps:
+      - bind: q
+        eval: r.URL.Query()
+        to: r.URL.Query
+      - bind: file, module
+        eval: q.Get("file"), q.Get("module")
+      - bind: notFound
+        eval:
+          closure:
+            steps:
+              - eval: s.host.Reply(w, r, nil, s.host.NotFound("no such source in this product's graph"))
+                to: s.host.Reply
+      - bind: lang, ok
+        eval: sourceLanguages[path.Ext(file)]
+      - opt:
+          do:
+            - eval: notFound()
+            - return: ""
+          when: file == "" || !ok || !filepath.IsLocal(filepath.FromSlash(file))
+      - bind: raw, ok
+        eval: s.host.Source(r.Context(), module, file)
+        to: s.host.Source
+      - opt:
+          do:
+            - eval: notFound()
+            - return: ""
+          when: "!ok"
+      - bind: lines
+        eval: strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+        to: strings
+      - bind: line
+        eval: atoiOr(q.Get("line"), 1)
+        to: atoiOr
+      - bind: end
+        eval: atoiOr(q.Get("end"), line)
+        to: atoiOr
+      - set: line
+        value: min(max(line, 1), len(lines))
+      - set: end
+        value: min(max(end, line), len(lines), line+sourceMaxLines)
+      - bind: first
+        eval: max(1, line-sourceContext)
+      - bind: last
+        eval: min(len(lines), end+sourceContext)
+      - eval: |-
+          answer(s, w, r, model.Snippet{
+          		File: file, StartLine: first, Focus: line, FocusEnd: end, Lines: lines[first-1 : last], Language: lang,
+          	}, nil)
+        to: answer
+  - of: atoiOr
+    participants:
+      - id: caller
+        kind: actor
+      - id: atoiOr
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: n, err
+        eval: strconv.Atoi(text)
+        to: strconv
+      - opt:
+          do:
+            - return: fallback
+          when: err != nil
+      - return: "n"
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Studio.Store
+        kind: value
+      - id: plug.Words.Store
+        kind: value
+    steps:
+      - eval: plug.Studio.Store(&driver)
+        to: plug.Studio.Store
+      - eval: plug.Words.Store(&words)
+        to: plug.Words.Store
+  - of: openWords
+    participants:
+      - id: caller
+        kind: actor
+      - id: openWords
+        kind: self
+      - id: i18n
+        kind: package
+      - id: catalogueFile
+        kind: internal
+      - id: catalogueOf
+        kind: internal
+    steps:
+      - bind: fallback, err
+        eval: i18n.ParseTag("en")
+        to: i18n
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: catalogues
+        eval: "map[i18n.Tag]i18n.Catalogue{fallback: catalogueOf(english)}"
+      - bind: tr
+        eval: "&translator{tags: make(map[string]i18n.Tag, len(languages)), printers: make(map[string]*i18n.Printer, len(languages))}"
+      - loop:
+          do:
+            - bind: tag, tagErr
+              eval: i18n.ParseTag(lang)
+              to: i18n
+            - opt:
+                do:
+                  - return: nil, tagErr
+                when: tagErr != nil
+            - bind: sentences, readErr
+              eval: catalogueFile(lang)
+              to: catalogueFile
+            - opt:
+                do:
+                  - return: nil, readErr
+                when: readErr != nil
+            - set: catalogues[tag]
+              to: catalogueOf
+              value: catalogueOf(sentences)
+            - set: tr.tags[lang]
+              value: tag
+          key: _
+          range: languages
+          value: lang
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: tr.store, err
+            eval: i18n.NewStore(fallback, catalogues)
+            op: =
+            to: i18n
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: tr.printers[lang], err
+                  eval: i18n.NewPrinter(tr.store, tr.tags[lang])
+                  op: =
+                  to: i18n
+                when: err != nil
+          key: _
+          range: languages
+          value: lang
+      - return: tr, nil
+  - of: catalogueFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: catalogueFile
+        kind: self
+      - id: localeFiles.ReadFile
+        kind: value
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: raw, err
+        eval: localeFiles.ReadFile("locales/" + lang + ".json")
+        to: localeFiles.ReadFile
+      - opt:
+          do:
+            - return: nil, errs.Wrap(i18n.CatalogLoadFailed, errs.WrapParams{}, errs.String("language", lang), errs.String("detail", err.Error()))
+          when: err != nil
+      - var:
+          name: sentences
+          type: map[string]string
+      - opt:
+          do:
+            - return: nil, errs.Wrap(i18n.CatalogLoadFailed, errs.WrapParams{}, errs.String("language", lang), errs.String("detail", err.Error()))
+          init:
+            bind: err
+            eval: json.Unmarshal(raw, &sentences)
+            to: json
+          when: err != nil
+      - return: sentences, nil
+  - of: catalogueOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: catalogueOf
+        kind: self
+      - id: i18n
+        kind: package
+    steps:
+      - bind: c
+        eval: make(i18n.Catalogue, len(sentences))
+      - loop:
+          do:
+            - set: c[i18n.Key(key)]
+              to: i18n
+              value: i18n.Plain(text)
+          key: key
+          range: sentences
+          value: text
+      - return: c
+  - of: (*translator).Languages
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*translator).Languages
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(languages)
+        to: slices
+  - of: (*translator).Keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*translator).Keys
+        kind: self
+      - id: t.store.Keys
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: tag, ok
+        eval: t.tags[lang]
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - bind: keys
+        eval: t.store.Keys(tag)
+        to: t.store.Keys
+      - bind: out
+        eval: make([]string, len(keys))
+      - loop:
+          do:
+            - set: out[i]
+              value: string(k)
+          key: i
+          range: keys
+          value: k
+      - eval: slices.Sort(out)
+        to: slices
+      - return: out
+  - of: (*translator).Render
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*translator).Render
+        kind: self
+      - id: p.Render
+        kind: value
+    steps:
+      - bind: p, ok
+        eval: t.printers[lang]
+      - opt:
+          do:
+            - return: key, errs.Wrap(i18n.UnsupportedLanguage, errs.WrapParams{}, errs.String("language", lang))
+          when: "!ok"
+      - return: p.Render(i18n.Key(key), i18n.Args(args))
+        to: p.Render

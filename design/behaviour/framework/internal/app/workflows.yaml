@@ -1,0 +1,1642 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: firstError
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: step()
+                when: err != nil
+          key: _
+          range: steps
+          value: step
+      - return: nil
+  - of: (*App).timerLoops
+    steps:
+      - loop:
+          do:
+            - bind: w, ok
+              eval: n.(autoLoop)
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok || !w.hasAuto()"
+            - bind: id
+              eval: n.base().id
+            - set: autos
+              value: append(autos, w)
+            - set: states
+              value: append(states, a.loop(id+" timers", id, model.LoopTimer, autoSchedule))
+          key: _
+          range: workflows
+          value: "n"
+      - return: autos, states
+  - of: storesOn
+    steps:
+      - var:
+          name: "on"
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: "on"
+                    value: append(on, n.ID)
+                init:
+                  bind: "n"
+                  eval: "&g.Nodes[i]"
+                when: n.Store != nil && n.Store.Database == d.name && model.IsEngine(n.Store.Backend)
+          key: i
+          range: g.Nodes
+      - return: "on"
+  - of: connectorsOn
+    steps:
+      - var:
+          name: out
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: c.ID == model.ConnectorDatabase
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, c.ID)
+                when: slices.ContainsFunc(c.Nodes, func(n string) bool { return slices.Contains(nodes, n) })
+          key: _
+          range: g.Connectors
+          value: c
+      - return: out
+  - of: (*App).dataNodes
+    steps:
+      - loop:
+          do:
+            - bind: "n"
+              eval: "&g.Nodes[i]"
+            - switch:
+                cases:
+                  - case: "!keepsData(n)"
+                  - case: n.Store != nil && model.IsEngine(n.Store.Backend)
+                  - case: a.onDisk(n)
+                    do:
+                      - set: volume
+                        value: append(volume, n.ID)
+                  - default: true
+                    do:
+                      - set: memory
+                        value: append(memory, n.ID)
+          key: i
+          range: g.Nodes
+      - return: volume, memory
+  - of: redactedByTag
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: model.ClassPersonal, model.ClassSpecial, model.ClassSecret, optSubject
+                    do:
+                      - return: "true"
+                "on": strings.TrimSpace(word)
+          key: word
+          range: strings.SplitSeq(raw, ",")
+      - return: "false"
+  - of: (*typeJudge).warn
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: j.seenWarning[w.field]
+                    value: "true"
+                  - set: j.out
+                    value: append(j.out, diagnosticOf("warning", b.id, j.a.source(&b.decl), w.said))
+                when: "!j.seenWarning[w.field]"
+          key: _
+          range: warnings
+          value: w
+  - of: opaque
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: t.Implements(m) || reflect.PointerTo(t).Implements(m)
+          key: _
+          range: "[]reflect.Type{jsonMarshaler, textMarshaler}"
+          value: m
+      - return: "false"
+  - of: (*flattener).flatten
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r == nil || f.stack[r]
+      - set: f.stack[r]
+        value: "true"
+      - defer: delete(f.stack, r)
+      - set: f.warnings
+        value: append(f.warnings, r.warnings...)
+      - set: f.renamed
+        value: append(f.renamed, r.renamed...)
+      - opt:
+          do:
+            - eval: "f.flatten(r.elem, prefix+\"/*\", append(slices.Clone(path), step{each: true}))"
+          when: r.elem != nil
+      - loop:
+          do:
+            - bind: pointer
+              eval: prefix + "/" + escapePointer(fr.name)
+            - bind: p
+              eval: "append(slices.Clone(path), step{index: fr.index})"
+            - opt:
+                do:
+                  - set: f.members
+                    value: "append(f.members, member{pointer: pointer, path: p, tag: fr.tag, typ: fr.typ, field: fieldLabel(fr.owner, fr.goName)})"
+                when: fr.tag.any()
+            - eval: f.flatten(fr.sub, pointer, p)
+          key: _
+          range: r.fields
+          value: fr
+  - of: (*classPlan).member
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "&p.members[i]"
+                when: p.members[i].pointer == pointer
+          key: i
+          range: p.members
+      - return: nil
+  - of: normalName
+    steps:
+      - bind: b
+        eval: make([]byte, 0, len(name))
+      - loop:
+          do:
+            - bind: c
+              eval: name[i]
+            - switch:
+                cases:
+                  - case: c >= 'A' && c <= 'Z'
+                    do:
+                      - set: b
+                        value: append(b, c+'a'-'A')
+                  - case: c >= 'a' && c <= 'z', c >= '0' && c <= '9'
+                    do:
+                      - set: b
+                        value: append(b, c)
+          key: i
+          range: len(name)
+      - return: string(b)
+  - of: uniqueWarnings
+    steps:
+      - bind: seen
+        eval: map[declaredField]bool{}
+      - bind: out
+        eval: in[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: seen[w.field]
+                    value: "true"
+                  - set: out
+                    value: append(out, w)
+                when: "!seen[w.field]"
+          key: _
+          range: in
+          value: w
+      - return: out
+  - of: (*App).cliCommand
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: c
+                init:
+                  bind: c, ok
+                  eval: n.(*CLI)
+                when: ok && c.name == name
+          key: _
+          range: a.mountedNodes()
+          value: "n"
+      - return: nil
+  - of: (*App).defaultCLI
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: c
+                init:
+                  bind: c, ok
+                  eval: n.(*CLI)
+                when: ok && c.opts.isDefault
+          key: _
+          range: a.mountedNodes()
+          value: "n"
+      - return: nil
+  - of: (*App).defaultProblems
+    steps:
+      - var:
+          name: first
+          type: "*CLI"
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - bind: c, ok
+              eval: n.(*CLI)
+            - switch:
+                cases:
+                  - case: "!ok || !c.opts.isDefault"
+                  - case: first == nil
+                    do:
+                      - set: first
+                        value: c
+                  - default: true
+                    do:
+                      - set: out
+                        value: append(out, diagnosticOf("error", c.id, a.source(&c.decl), say("cli.default-twice", "node", first.id, "other", c.id)))
+          key: _
+          range: a.mountedNodes()
+          value: "n"
+      - return: out
+  - of: (*App).failReason
+    steps:
+      - opt:
+          do:
+            - return: "\"the declarations have errors\""
+          when: isDiagnostics(err)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "\"component \" + c.Name + \" failed\""
+                when: c.State == model.ComponentFailed
+          key: _
+          range: a.componentsCopy()
+          value: c
+      - switch:
+          cases:
+            - case: errs.HasCode(err, CodeAppConfig)
+              do:
+                - return: "\"the configuration cannot be applied\""
+            - case: errs.HasCode(err, CodeAppRunning)
+              do:
+                - return: "\"a service of the app is already running in another app\""
+      - return: "\"the start failed\""
+  - of: (*App).loopNamed
+    steps:
+      - lock:
+          mutex: a.mu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: l
+                when: l.Name == name
+          key: _
+          range: a.loops
+          value: l
+      - return: nil
+  - of: serverVersion.below
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: v[i] < floor[i]
+                when: v[i] != floor[i]
+          key: i
+          range: v
+      - return: "false"
+  - of: (*App).runOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: r
+                when: r.d == d
+          key: _
+          range: a.databaseRuns()
+          value: r
+      - return: nil
+  - of: (*App).copyTarget
+    steps:
+      - var:
+          name: target
+          type: "*database"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: target
+                    value: db
+                when: db.name == to
+          key: _
+          range: a.opts.databases
+          value: db
+      - switch:
+          cases:
+            - case: target == nil
+              do:
+                - return: nil, failure(CodeDataCopy, "DATA_COPY_REFUSED", "the product declares no database of that name", nil, errs.String("database", clip(to)))
+            - case: a.opts.memory
+              do:
+                - return: "nil, failure(CodeDataCopy, \"DATA_COPY_REFUSED\", \"the app keeps its data in memory (app.InMemory): it has no data directory to copy\", nil)"
+            - case: target.engine == nil
+              do:
+                - return: "nil, failure(CodeDataCopy, \"DATA_COPY_REFUSED\", \"the database has no engine: the product's main imports none for it\", nil, errs.String(\"database\", target.name))"
+      - return: target, a.dataReady(ctx)
+  - of: yieldTrashedBefore
+    steps:
+      - loop:
+          cond: len(tombs) > 0 && tombs[0].Key < key
+          do:
+            - opt:
+                do:
+                  - return: tombs, false
+                when: "!yield(tombs[0], nil)"
+            - set: tombs
+              value: tombs[1:]
+      - return: tombs, true
+  - of: (*decoder).present
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: len(p.values(r)) > 0
+          key: _
+          range: d.params
+          value: p
+      - return: "false"
+  - of: firstNonEmpty
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: v
+                when: v != ""
+          key: _
+          range: values
+          value: v
+      - return: "\"\""
+  - of: goModuleOf
+    steps:
+      - bind: mods
+        eval: buildModules()
+      - opt:
+          do:
+            - return: goModule{}, false
+          when: pkg == "" || len(mods) == 0
+      - opt:
+          do:
+            - return: mods[0], true
+          when: pkg == "main"
+      - bind: best, found
+        eval: goModule{}, false
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: best, found
+                    value: m, true
+                when: (pkg == m.path || strings.HasPrefix(pkg, m.path+"/")) && len(m.path) > len(best.path)
+          key: _
+          range: mods
+          value: m
+      - return: best, found
+  - of: (*classPlan).historyFields
+    steps:
+      - bind: out
+        eval: map[string]int{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[m.pointer]
+                    value: m.tag.history
+                when: m.tag.history > 0 && !m.inCollection()
+          key: _
+          range: p.members
+          value: m
+      - return: out
+  - of: (*historied).prune
+    steps:
+      - bind: over
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(doc.Fields, p)
+                  - continue: true
+                when: len(list) == 0
+            - set: over
+              value: over || len(list) > h.keeps[p]
+          key: p
+          range: doc.Fields
+          value: list
+      - opt:
+          do:
+            - return: ""
+          when: "!over || h.held(ctx, key, v)"
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: n == 0
+                    do:
+                      - eval: delete(doc.Fields, p)
+                  - case: len(list) > n
+                    do:
+                      - set: doc.Fields[p]
+                        value: list[:n:n]
+                init:
+                  bind: "n"
+                  eval: h.keeps[p]
+          key: p
+          range: doc.Fields
+          value: list
+  - of: holds
+    steps:
+      - loop:
+          cond: h != nil
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: h.cmd == cmd && h.key == key
+          init: h, _ := ctx.Value(heldKeys{}).(*heldKey)
+          post: h = h.next
+      - return: "false"
+  - of: shownAttrs
+    steps:
+      - var:
+          name: out
+          type: map[string]string
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: len(out) >= maxLogAttrs
+            - opt:
+                do:
+                  - set: out
+                    value: map[string]string{}
+                when: out == nil
+            - set: out[key]
+              value: text
+          key: key
+          range: redactor.Attrs(attrs, maxLogText)
+          value: text
+      - return: out
+  - of: (*hub).recentLogs
+    steps:
+      - lock:
+          mutex: h.mu
+      - bind: "n"
+        eval: len(h.logs)
+      - bind: out
+        eval: make([]model.LogRecord, 0, min(limit, n))
+      - loop:
+          cond: j >= 0 && len(out) < limit
+          do:
+            - bind: r
+              eval: "&h.logs[(h.logNext+j)%n]"
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, *r)
+                when: f.match(r)
+          init: j := n - 1
+          post: j--
+      - loop:
+          cond: i < j
+          do:
+            - set: out[i], out[j]
+              value: out[j], out[i]
+          init: i, j := 0, len(out)-1
+          post: i, j = i+1, j-1
+      - return: out
+  - of: WakeEvent.gather
+    steps:
+      - set: w.Reasons, w.Topics
+        value: slices.Clone(w.Reasons), slices.Clone(w.Topics)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: w.Reasons
+                    value: append(w.Reasons, r)
+                when: "!slices.Contains(w.Reasons, r)"
+          key: _
+          range: later.Reasons
+          value: r
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: w.Topics
+                    value: append(w.Topics, t)
+                when: "!slices.Contains(w.Topics, t)"
+          key: _
+          range: later.Topics
+          value: t
+      - opt:
+          do:
+            - set: w.Topic
+              value: later.Topic
+          when: w.Topic == ""
+      - opt:
+          do:
+            - set: w.Reason
+              value: model.WakeManual
+          when: slices.Contains(w.Reasons, model.WakeManual)
+      - return: w
+  - of: (*Mailer).Captured
+    steps:
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: nil
+          when: "!m.ring.full"
+      - bind: out
+        eval: make([]model.MailMessage, 0, len(m.ring.order))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, cloneMail(rec))
+                init:
+                  bind: rec
+                  eval: m.ring.mails[id]
+                when: rec.Status == model.MailSent
+          key: _
+          range: m.ring.order
+          value: id
+      - return: out
+  - of: (*migrateRun).sets
+    steps:
+      - bind: ok
+        eval: "true"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: r.target != nil && r.target.set.name != set.name
+            - opt:
+                do:
+                  - set: ok
+                    value: "false"
+                when: "!r.set(ctx, d, set, o)"
+          key: _
+          range: r.a.migrationSets(d)
+          value: set
+      - return: ok
+  - of: (*App).moduleProblems
+    steps:
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, diagnosticOf("error", "", a.source(&d.at), say("mount.nil")))
+                when: d.module == nil
+          key: _
+          range: a.opts.mounts
+          value: d
+      - bind: names
+        eval: map[string]*Module{}
+      - loop:
+          do:
+            - bind: m
+              eval: mm.module
+            - loop:
+                do:
+                  - set: out
+                    value: append(out, diagnosticOf(d.severity, d.node, a.source(&d.at), d.message))
+                key: _
+                range: m.diags
+                value: d
+            - opt:
+                do:
+                  - set: out
+                    value: |-
+                      append(out, diagnosticOf("error", "", a.source(&m.decl),
+                      				say("module.twice", "module", m.name, "first", a.where(&first.decl), "second", a.where(&m.decl))))
+                init:
+                  bind: first, dup
+                  eval: names[m.name]
+                when: dup
+            - set: names[m.name]
+              value: m
+            - set: out
+              value: append(out, a.prefixProblems(mm)...)
+            - set: out
+              value: append(out, a.foreignDeclarations(m)...)
+            - set: out
+              value: append(out, a.secretNameProblems(m)...)
+          key: _
+          range: a.modules
+          value: mm
+      - set: out
+        value: append(out, a.moduleMigrationProblems()...)
+      - set: out
+        value: append(out, a.onlyProblems()...)
+      - return: append(out, a.ownProblems(names)...)
+  - of: (*App).ownProblems
+    steps:
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: s == nil
+                  - case: s.module != nil
+                    do:
+                      - set: out
+                        value: |-
+                          append(out, diagnosticOf("error", s.name, a.source(&a.decl),
+                          				say("module.service-own", "service", s.name, "module", s.module.name, "at", a.where(&s.module.decl))))
+                  - case: modules[s.name] != nil
+                    do:
+                      - set: out
+                        value: |-
+                          append(out, diagnosticOf("error", s.name, a.source(&s.decl),
+                          				say("module.name-service", "service", s.name, "at", a.where(&modules[s.name].decl))))
+                  - default: true
+                    do:
+                      - set: out
+                        value: append(out, a.settingNamedLikeAModule(s, modules)...)
+          key: _
+          range: a.own
+          value: s
+      - return: out
+  - of: (*database).keepsModule
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: safeKept(k).module == m
+          key: _
+          range: d.opts.keeps
+          value: k
+      - return: "false"
+  - of: mountsIn
+    steps:
+      - bind: out
+        eval: make([]mountDecl, 0, len(decls))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, d)
+                when: holdsIn(d.limited, d.only, env)
+          key: _
+          range: decls
+          value: d
+      - return: out
+  - of: explicitMounts
+    steps:
+      - bind: byModule
+        eval: map[*Module]*mountedModule{}
+      - var:
+          name: explicit
+          type: "[]*mountedModule"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: d.module == nil
+            - bind: mm, seen
+              eval: byModule[d.module]
+            - opt:
+                do:
+                  - set: mm
+                    value: "&mountedModule{module: d.module, prefix: model.ModulePrefix(d.module.name)}"
+                  - set: byModule[d.module]
+                    value: mm
+                  - set: explicit
+                    value: append(explicit, mm)
+                when: "!seen"
+            - opt:
+                do:
+                  - set: mm.prefix, mm.prefixAt
+                    value: d.prefix, d.prefixAt
+                when: d.prefix != ""
+            - bind: at
+              eval: d.at
+            - set: mm.at
+              value: "&at"
+          key: _
+          range: decls
+          value: d
+      - return: explicit, byModule
+  - of: (*App).moduleOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: mm
+                when: mm.module == m
+          key: _
+          range: a.modules
+          value: mm
+      - return: nil
+  - of: (*hub).recentTraces
+    steps:
+      - lock:
+          mutex: h.mu
+      - bind: ids
+        eval: h.order
+      - opt:
+          do:
+            - set: ids
+              value: h.byRoot[root]
+          when: root != ""
+      - bind: out
+        eval: make([]model.Trace, 0, min(limit, len(ids)))
+      - loop:
+          cond: i >= 0 && len(out) < limit
+          do:
+            - bind: t, ok
+              eval: h.traces[ids[i]]
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok || node != \"\" && !slices.ContainsFunc(t.spans, func(s model.Span) bool { return s.Node == node })"
+            - set: out
+              value: append(out, assemble(ids[i], t.spans))
+          init: i := len(ids) - 1
+          post: i--
+      - return: out
+  - of: (*storeCore).policyOn
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: p
+                when: p.member != nil && p.member.pointer == pointer
+          key: _
+          range: s.passwords
+          value: p
+      - return: nil
+  - of: (*App).heldBinds
+    steps:
+      - bind: out
+        eval: make([]bindDecl, 0, len(a.opts.binds))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, b)
+                when: holdsIn(b.limited, b.only, a.mountEnv)
+          key: _
+          range: a.opts.binds
+          value: b
+      - return: out
+  - of: (*App).keepsPersonalData
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: st.plan().personal() || st.privacyDeclared()
+          key: _
+          range: a.productStores()
+          value: st
+      - return: "false"
+  - of: (*App).settingFoundIn
+    steps:
+      - lock:
+          mutex: a.mu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: a.rt.config[i].From
+                    value: from
+                when: a.rt.config[i].Name == name
+          key: i
+          range: a.rt.config
+  - of: identities
+    steps:
+      - var:
+          name: out
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, id)
+                when: id != "" && !slices.Contains(out, id)
+          key: _
+          range: ids
+          value: id
+      - return: out
+  - of: (*App).storeWarnings
+    steps:
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, a.storeWarningsOf(st)...)
+                when: st.plan().personal()
+          key: _
+          range: a.productStores()
+          value: st
+      - return: out
+  - of: yieldKeys
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!yield(key, nil)"
+          key: _
+          range: keys
+          value: key
+      - opt:
+          do:
+            - return: "true"
+          when: failure == nil
+      - return: yield("", failure) && failure == nil
+  - of: (*storeCore).keysTo
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - return: nil
+                when: "!yield(key, nil)"
+          key: key
+          range: s.keys(ctx)
+          value: err
+      - return: nil
+  - of: mailersOf
+    steps:
+      - bind: out
+        eval: map[string][]string{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[e.From]
+                    value: append(out[e.From], e.To)
+                when: e.Kind == model.EdgeSends
+          key: _
+          range: g.Edges
+          value: e
+      - return: out
+  - of: reservedPath
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: p == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(p, prefix)
+          key: _
+          range: "[]string{reservedPrefix, formerReserved}"
+          value: prefix
+      - return: "false"
+  - of: renamedVariables
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: appPrefix(name) == formerPrefix
+      - var:
+          name: out
+          type: "[]renamedName"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, renamedName{old: old, now: productVariable(name, stem)})"
+                init:
+                  bind: old
+                  eval: formerPrefix + "_" + stem
+                when: getenv(old) != ""
+          key: _
+          range: operatorStems
+          value: stem
+      - return: out
+  - of: uniqueRenamed
+    steps:
+      - bind: seen
+        eval: map[declaredField]bool{}
+      - bind: out
+        eval: in[:0:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: seen[r.field]
+                    value: "true"
+                  - set: out
+                    value: append(out, r)
+                when: "!seen[r.field]"
+          key: _
+          range: in
+          value: r
+      - return: out
+  - of: renamedIn
+    steps:
+      - var:
+          name: out
+          type: "[]renamedName"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: d.typ == nil || seen[d.typ]
+            - set: seen[d.typ]
+              value: "true"
+            - loop:
+                do:
+                  - set: out
+                    value: append(out, r.name)
+                key: _
+                range: planOf(d.typ).renamed
+                value: r
+          key: _
+          range: types
+          value: d
+      - return: out
+  - of: distinct
+    steps:
+      - bind: out
+        eval: make([]string, 0, len(refs))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, r)
+                when: "!slices.Contains(out, r)"
+          key: _
+          range: refs
+          value: r
+      - return: out
+  - of: reservedPrefixOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: prefix
+                when: strings.HasPrefix(name, prefix)
+          key: _
+          range: "[]string{ownSecretPrefix, formerSecretPrefix}"
+          value: prefix
+      - return: "\"\""
+  - of: (*retentionRun).earliest
+    steps:
+      - lock:
+          mutex: r.mu
+      - var:
+          name: first
+          type: time.Time
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: at
+                when: first.IsZero() || at.Before(first)
+          key: _
+          range: r.agenda
+          value: at
+      - return: first
+  - of: fieldType
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: opaque(t)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: t.FieldByIndex(f.Index).Type, true
+                when: f.Name == name
+          key: _
+          range: jsonshape.Of(t).Fields
+          value: f
+      - return: nil, false
+  - of: matchSegs
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: pattern[i] != "*" && pattern[i] != segs[i]
+          key: i
+          range: pattern
+      - return: "true"
+  - of: (*Binary).roleNamed
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: r
+                when: r.name == name
+          key: _
+          range: b.roles
+          value: r
+      - return: nil
+  - of: (*Binary).selectRole
+    steps:
+      - var:
+          name: best
+          type: "*role"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: best
+                    value: r
+                when: len(r.args) <= len(args) && slices.Equal(r.args, args[:len(r.args)]) && (best == nil || len(r.args) > len(best.args))
+          key: _
+          range: b.roles
+          value: r
+      - opt:
+          do:
+            - return: nil, args
+          when: best == nil
+      - return: best, args[len(best.args):]
+  - of: (*App).sealingStores
+    steps:
+      - var:
+          name: sealed
+          type: "[]placementSource"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: sealed
+                    value: append(sealed, st)
+                init:
+                  bind: s, ok
+                  eval: st.(sealingSource)
+                when: ok && !frameworkOwn(st.base().svc) && s.sealsAtRest(a)
+          key: _
+          range: a.placedStores()
+          value: st
+      - return: sealed
+  - of: scanString
+    steps:
+      - loop:
+          cond: j < len(b)
+          do:
+            - switch:
+                cases:
+                  - case: "'\\\\'"
+                    do:
+                      - op: ++
+                        set: j
+                  - case: "'\"'"
+                    do:
+                      - return: j + 1, true
+                "on": b[j]
+          init: j := i + 1
+          post: j++
+      - return: len(b), false
+  - of: writeObject
+    steps:
+      - bind: "n"
+        eval: 2 + len(members)*2
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              value: len(m.rawName) + len(m.value)
+          key: _
+          range: members
+          value: m
+      - bind: b
+        eval: make([]byte, 0, n)
+      - set: b
+        value: append(b, '{')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: b
+                    value: append(b, ',')
+                when: i > 0
+            - set: b
+              value: append(append(append(b, m.rawName...), ':'), m.value...)
+          key: i
+          range: members
+          value: m
+      - return: append(b, '}')
+  - of: appPrefix
+    steps:
+      - bind: b
+        eval: "[]byte(strings.ToUpper(name))"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: b[i]
+                    value: "'_'"
+                when: (c < 'A' || c > 'Z') && (c < '0' || c > '9')
+          key: i
+          range: b
+          value: c
+      - return: string(b)
+  - of: (*App).distinctSecrets
+    steps:
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - var:
+          name: secrets
+          type: "[]*Secret"
+      - bind: owner
+        eval: map[string]string{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: |-
+                      append(out, diagnosticOf("error", s.id, a.source(&s.decl),
+                      				say("secret.twice", "name", s.key(), "first", first, "second", s.id, "variable", s.variable(a))))
+                  - continue: true
+                init:
+                  bind: first, dup
+                  eval: owner[s.keptName()]
+                when: dup
+            - set: owner[s.keptName()]
+              value: s.id
+            - set: secrets
+              value: append(secrets, s)
+          key: _
+          range: a.declaredSecrets()
+          value: s
+      - return: secrets, out
+  - of: fileList
+    steps:
+      - bind: items, ok
+        eval: v.raw.([]any)
+      - opt:
+          do:
+            - return: settingValue{}, valueProblem("value.list")
+          when: "!ok"
+      - bind: list
+        eval: make([]string, 0, len(items))
+      - loop:
+          do:
+            - bind: text, ok
+              eval: item.(string)
+            - opt:
+                do:
+                  - return: settingValue{}, valueProblem("value.list")
+                when: "!ok"
+            - set: list
+              value: append(list, text)
+          key: _
+          range: items
+          value: item
+      - return: settingValue{list}, nil
+  - of: (*App).moduleSections
+    steps:
+      - opt:
+          do:
+            - return: values
+          when: len(a.modules) == 0
+      - bind: out
+        eval: make(map[string]any, len(values))
+      - loop:
+          do:
+            - bind: section, isMap
+              eval: v.(map[string]any)
+            - switch:
+                cases:
+                  - case: a.mountsModule(key) && isMap
+                    do:
+                      - loop:
+                          do:
+                            - set: out[key+"."+name]
+                              value: value
+                          key: name
+                          range: section
+                          value: value
+                  - case: a.mountsModule(key)
+                    do:
+                      - eval: problem("", nil, "setting.file-section", "file", file, "module", key)
+                  - case: strings.Contains(key, ".")
+                    do:
+                      - eval: problem("", nil, "setting.file-unknown", "file", file, "key", key)
+                  - default: true
+                    do:
+                      - set: out[key]
+                        value: v
+          key: key
+          range: values
+          value: v
+      - return: out
+  - of: (*App).mountsModule
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: mm.module.name == name
+          key: _
+          range: a.modules
+          value: mm
+      - return: "false"
+  - of: (*App).frameworkTables
+    steps:
+      - var:
+          name: out
+          type: "[]frameworkTable"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, storeTables(t, st.base())...)
+                init:
+                  bind: t, ok
+                  eval: st.(tabled)
+                when: ok && a.keptOn(st, d)
+          key: _
+          range: a.placedStores()
+          value: st
+      - loop:
+          do:
+            - set: out
+              value: append(out, a.nodeTables(n, d)...)
+          key: _
+          range: a.mountedNodes()
+          value: "n"
+      - return: out
+  - of: unlinkedSubsystems
+    steps:
+      - var:
+          name: out
+          type: "[]subsystem"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, s)
+                when: "!s.linked()"
+          key: _
+          range: subsystems
+          value: s
+      - return: out
+  - of: (*unit).held
+    steps:
+      - lock:
+          mutex: u.tx.mu
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: "!e.inside"
+          key: _
+          range: u.tx.held[min(u.heldMark, len(u.tx.held)):]
+          value: e
+      - return: "n"
+  - of: writtenHomes
+    steps:
+      - bind: written
+        eval: map[string]map[string]bool{}
+      - loop:
+          do:
+            - bind: home, stored
+              eval: homes[e.To]
+            - opt:
+                do:
+                  - continue: true
+                when: "!stored || !writesStore(e.Kind) || !transactional(g.Node(e.From))"
+            - opt:
+                do:
+                  - set: written[e.From]
+                    value: map[string]bool{}
+                when: written[e.From] == nil
+            - set: written[e.From][home]
+              value: "true"
+          key: _
+          range: edges
+          value: e
+      - return: written
+  - of: transactBlockWarnings
+    steps:
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: n.Code == nil
+            - loop:
+                do:
+                  - set: out
+                    value: append(out, funcBlockWarnings(n.ID, f, homes)...)
+                key: _
+                range: n.Code.Funcs
+                value: f
+          key: _
+          range: static.Nodes
+          value: "n"
+      - return: out
+  - of: blockHomes
+    steps:
+      - bind: dbs
+        eval: map[string]bool{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: st.Effect == 0 || !under(f, st.Block, block)
+            - bind: e
+              eval: f.Effects[st.Effect-1]
+            - opt:
+                do:
+                  - set: dbs[home]
+                    value: "true"
+                init:
+                  bind: home, stored
+                  eval: homes[e.Target]
+                when: stored && writesStore(e.Kind)
+          key: _
+          range: f.Steps
+          value: st
+      - return: dbs
+  - of: under
+    steps:
+      - loop:
+          cond: b > 0 && b <= len(f.Blocks)
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: b == target
+          init: b := block
+          post: b = f.Blocks[b-1].Parent
+      - return: "false"
+  - of: (*App).storeHomes
+    steps:
+      - bind: out
+        eval: map[string]string{}
+      - loop:
+          do:
+            - bind: "n"
+              eval: "&g.Nodes[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: n.Kind != model.KindStore || n.Store == nil
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: s, ok
+                  eval: a.findNode(n.ID).(interface{ memoryOnly() bool })
+                when: ok && s.memoryOnly()
+            - set: out[n.ID]
+              value: localName
+            - opt:
+                do:
+                  - set: out[n.ID]
+                    value: "\"database \" + n.Store.Database"
+                when: n.Store.Database != ""
+          key: i
+          range: g.Nodes
+      - return: out
+  - of: (*trashRun).earliest
+    steps:
+      - lock:
+          mutex: r.mu
+      - var:
+          name: first
+          type: time.Time
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: e.due
+                when: first.IsZero() || e.due.Before(first)
+          key: _
+          range: r.agenda
+          value: e
+      - return: first
+  - of: (*Watch).feeders
+    steps:
+      - var:
+          name: out
+          type: "[]feeder"
+      - loop:
+          do:
+            - bind: ws, ok
+              eval: st.(feeder)
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, ws)
+                when: ok && (w.ownStores || st.base().svc.module != w.svc.module) && len(markedFields(st, w.mark)) > 0
+          key: _
+          range: a.productStores()
+          value: st
+      - return: out
+  - of: placeholderName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: name == ""
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: c == '_', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z'
+                  - case: i > 0 && c >= '0' && c <= '9'
+                  - default: true
+                    do:
+                      - return: "false"
+          key: i
+          range: name
+          value: c
+      - return: "true"
+  - of: (*WorkflowService).see
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: w.order
+                    value: append(w.order, st)
+                when: "!slices.Contains(w.order, st)"
+          key: _
+          range: states
+          value: st
+  - of: (*WorkflowService).hasAuto
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: x.trigger != model.TriggerEvent
+          key: _
+          range: w.arrows
+          value: x
+      - return: "false"
+  - of: (*WorkflowService).Can
+    steps:
+      - bind: cur
+        eval: "*w.state(&e)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: x.event == event && x.from == cur && x.trigger == model.TriggerEvent
+          key: _
+          range: w.arrows
+          value: x
+      - return: "false"
+  - of: recordOf
+    steps:
+      - opt:
+          do:
+            - return: plug.WorkflowRecordValue{}, false
+          when: "!declared[inst.State]"
+      - bind: rec
+        eval: "plug.WorkflowRecordValue{Key: key, State: inst.State, Entered: inst.EnteredAt}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!declared[s.To] || (!declared[s.From] && s.Trigger != model.TriggerCreate)"
+            - bind: from
+              eval: s.From
+            - opt:
+                do:
+                  - set: from
+                    value: "\"\""
+                when: "!declared[from]"
+            - set: rec.History
+              value: |-
+                append(rec.History, plug.WorkflowStepValue{
+                			Event: s.Event, From: from, To: s.To, Trigger: engineTrigger(s.Trigger), Actor: s.Caller, At: s.At,
+                		})
+          key: _
+          range: inst.History
+          value: s
+      - return: rec, true
+  - of: instanceOf
+    steps:
+      - bind: inst
+        eval: "model.Instance{ID: rec.Key, State: rec.State, EnteredAt: rec.Entered.UTC()}"
+      - loop:
+          do:
+            - bind: step
+              eval: "model.Step{Event: s.Event, From: s.From, To: s.To, At: s.At.UTC(), Trigger: frameworkTrigger(s.Trigger), Caller: s.Actor}"
+            - opt:
+                do:
+                  - set: step.From
+                    value: "\"\""
+                when: s.Trigger == plug.WorkflowTriggerStart
+            - set: inst.History
+              value: append(inst.History, step)
+          key: _
+          range: rec.History
+          value: s
+      - return: inst
+  - of: instancesOf
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]model.Instance, 0, len(ds))
+      - loop:
+          do:
+            - bind: inst, ok
+              eval: d.Value.(model.Instance)
+            - opt:
+                do:
+                  - bind: v, err
+                    eval: instanceConfig.decode(d.JSON)
+                  - opt:
+                      do:
+                        - return: nil, err
+                      when: err != nil
+                  - set: inst, _
+                    value: v.(model.Instance)
+                when: "!ok"
+            - set: out
+              value: append(out, inst)
+          key: _
+          range: ds
+          value: d
+      - return: out, nil

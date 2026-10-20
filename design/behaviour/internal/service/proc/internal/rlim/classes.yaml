@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Make
+    name: value_default.go
+functions:
+  - doc: |-
+      Make builds a syscall.Rlimit from a uint64 soft/hard pair. On these targets
+      Cur/Max are uint64, so the pair maps verbatim and LimitInfinity
+      (^uint64(0)) lands as the kernel's RLIM_INFINITY.
+    name: Make
+    params: soft, hard uint64
+    results: syscall.Rlimit
+imports:
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/internal/rlim
+  name: rlim
+  purpose: "Package rlim builds the kernel's resource-limit struct from a soft/hard pair: the one place the proc family turns a coreproc.LimitValue into the syscall.Rlimit that setrlimit(2) and prlimit64(2) read."
+types: []

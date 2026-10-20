@@ -1,0 +1,159 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: panicValue.Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: panicValue.Error
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: fmt.Sprintf("panic of type %T", p.v)
+        to: fmt
+  - of: safeString
+    participants:
+      - id: caller
+        kind: actor
+      - id: safeString
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - defer: |-
+          func() {
+          		//: substitute a diagnostic marker when rendering itself panics.
+          		if r := recover(); r != nil {
+          			//: expose the meta-panic type only; never its verbatim value.
+          			s = fmt.Sprintf("<panic in String(): %T>", r)
+          		}
+          	}()
+      - return: fmt.Sprintf("%v", v)
+        to: fmt
+  - of: safeTypeName
+    participants:
+      - id: caller
+        kind: actor
+      - id: safeTypeName
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: fmt.Sprintf("%T", v)
+        to: fmt
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: NewWithConfig
+        kind: internal
+    steps:
+      - return: NewWithConfig(downstream, Config{})
+        to: NewWithConfig
+  - of: NewWithConfig
+    steps:
+      - opt:
+          do:
+            - return: nil, corerecover.DownstreamNil
+          when: downstream == nil
+      - bind: observer
+        eval: cfg.OnPanic
+      - opt:
+          do:
+            - set: observer
+              value: noopOnPanic
+          when: observer == nil
+      - return: "&recoverSink{downstream: downstream, onPanic: observer}, nil"
+  - of: noopOnPanic
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: (*recoverSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recoverSink).Write
+        kind: self
+      - id: s.downstream.Write
+        kind: value
+    steps:
+      - defer: |-
+          func() {
+          		//: capture the recover() return value as a Panicked error.
+          		if rv := recover(); rv != nil {
+          			//: rich rendering stays in Private (log-only); Source() chain
+          			//: carries only the type via panicValue.Error() to prevent leak.
+          			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
+          				Code:    corerecover.CodeRecoverPanicked,
+          				Reason:  "RECOVER_PANICKED",
+          				Public:  "Wrapped sink panicked",
+          				Private: "service/observe/logger/middleware/recover.Write caught panic: " + safeString(rv),
+          			}, errs.Int("level", int(rec.Level)), errs.String("panic_type", safeTypeName(rv)))
+          			//: surface the absorbed panic so a Logger that swallows handler
+          			//: errors does not render this runtime bug invisible (V34).
+          			s.onPanic(err)
+          		}
+          	}()
+      - return: s.downstream.Write(ctx, rec, p)
+        to: s.downstream.Write
+  - of: (*recoverSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recoverSink).Flush
+        kind: self
+      - id: s.downstream.Flush
+        kind: value
+    steps:
+      - defer: |-
+          func() {
+          		//: capture the recover() return value as a Panicked error.
+          		if rv := recover(); rv != nil {
+          			//: rich rendering stays in Private (log-only); Source() chain
+          			//: carries only the type via panicValue.Error() to prevent leak.
+          			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
+          				Code:    corerecover.CodeRecoverPanicked,
+          				Reason:  "RECOVER_PANICKED",
+          				Public:  "Wrapped sink panicked",
+          				Private: "service/observe/logger/middleware/recover.Flush caught panic: " + safeString(rv),
+          			}, errs.String("panic_type", safeTypeName(rv)))
+          			//: surface the absorbed panic so a Logger that swallows handler
+          			//: errors does not render this runtime bug invisible (V34).
+          			s.onPanic(err)
+          		}
+          	}()
+      - return: s.downstream.Flush(ctx)
+        to: s.downstream.Flush
+  - of: (*recoverSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recoverSink).Close
+        kind: self
+      - id: s.downstream.Close
+        kind: value
+    steps:
+      - defer: |-
+          func() {
+          		//: capture the recover() return value as a Panicked error.
+          		if rv := recover(); rv != nil {
+          			//: rich rendering stays in Private (log-only); Source() chain
+          			//: carries only the type via panicValue.Error() to prevent leak.
+          			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
+          				Code:    corerecover.CodeRecoverPanicked,
+          				Reason:  "RECOVER_PANICKED",
+          				Public:  "Wrapped sink panicked",
+          				Private: "service/observe/logger/middleware/recover.Close caught panic: " + safeString(rv),
+          			}, errs.String("panic_type", safeTypeName(rv)))
+          			//: surface the absorbed panic so a Logger that swallows handler
+          			//: errors does not render this runtime bug invisible (V34).
+          			s.onPanic(err)
+          		}
+          	}()
+      - return: s.downstream.Close()
+        to: s.downstream.Close

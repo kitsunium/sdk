@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/mail/spool
+  name: spool
+  purpose: "Package spool is the public facade for the durable mail outbox: the place a mail waits between the call that wants it sent and the relay that takes it."
+types: []

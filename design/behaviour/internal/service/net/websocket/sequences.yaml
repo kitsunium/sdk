@@ -1,0 +1,1957 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: AppendClosePayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendClosePayload
+        kind: self
+      - id: ValidateText
+        kind: internal
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                dst, errs.Wrap(corenet.WSInvalidPayload, errs.WrapParams{},
+                			errs.Int("close_code", int(code)),
+                			errs.String("why", "the close code must not be sent on the wire"))
+          when: "!code.Sendable()"
+      - opt:
+          do:
+            - return: dst, verr
+          init:
+            bind: verr
+            eval: ValidateText([]byte(reason))
+            to: ValidateText
+          when: verr != nil
+      - opt:
+          do:
+            - return: |-
+                dst, errs.Wrap(corenet.WSInvalidPayload, errs.WrapParams{},
+                			errs.Int("length", CloseCodeLen+len(reason)),
+                			errs.String("why", "the close payload exceeds the 125-byte control-frame ceiling"))
+          when: CloseCodeLen+len(reason) > corenet.WSMaxControlPayload
+      - set: dst
+        to: binary.BigEndian.AppendUint16
+        value: binary.BigEndian.AppendUint16(dst, uint16(code))
+      - return: append(dst, reason...), nil
+  - of: ParseClosePayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseClosePayload
+        kind: self
+      - id: corenet
+        kind: package
+      - id: ValidateText
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corenet.WSCloseNoStatus, "", nil
+          when: len(b) == 0
+      - opt:
+          do:
+            - return: |-
+                0, "", errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int("length", len(b)),
+                			errs.String("why", "a close payload carrying a status code must be at least two bytes"))
+          when: len(b) < CloseCodeLen
+      - bind: received
+        eval: corenet.WSCloseCode(binary.BigEndian.Uint16(b))
+        to: corenet
+      - opt:
+          do:
+            - return: |-
+                0, "", errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int("close_code", int(received)),
+                			errs.String("why", "the close code is reserved or must not be sent"))
+          when: "!received.Sendable()"
+      - bind: text
+        eval: b[CloseCodeLen:]
+      - opt:
+          do:
+            - return: 0, "", verr
+          init:
+            bind: verr
+            eval: ValidateText(text)
+            to: ValidateText
+          when: verr != nil
+      - return: received, string(text), nil
+  - of: FrameHeaderValue.ValidateFromClient
+    participants:
+      - id: caller
+        kind: actor
+      - id: FrameHeaderValue.ValidateFromClient
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.String("opcode", h.OpCode.String()),
+                			errs.String("why", "a client-to-server frame must be masked"))
+              to: errs
+          when: "!h.Masked"
+      - return: nil
+  - of: FrameHeaderLen
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(b) < MinHeaderLen
+      - bind: length
+        eval: MinHeaderLen
+      - switch:
+          cases:
+            - case: length16Marker
+              do:
+                - op: +=
+                  set: length
+                  value: length16Width
+            - case: length64Marker
+              do:
+                - op: +=
+                  set: length
+                  value: length64Width
+          "on": b[1] & lengthBits
+      - opt:
+          do:
+            - op: +=
+              set: length
+              value: MaskLen
+          when: b[1]&maskBit != 0
+      - return: length
+  - of: ParseFrameHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseFrameHeader
+        kind: self
+      - id: FrameHeaderLen
+        kind: internal
+      - id: parseLength
+        kind: internal
+      - id: validateControlShape
+        kind: internal
+    steps:
+      - bind: want
+        eval: FrameHeaderLen(b)
+        to: FrameHeaderLen
+      - opt:
+          do:
+            - return: |-
+                FrameHeaderValue{}, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int("have", len(b)),
+                			errs.Int("want", want),
+                			errs.String("why", "the frame header is not complete"))
+          when: want == 0 || len(b) != want
+      - opt:
+          do:
+            - return: |-
+                FrameHeaderValue{}, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int("rsv", int(b[0]&reservedBits)),
+                			errs.String("why", "a reserved bit is set but no extension was negotiated"))
+          when: b[0]&reservedBits != 0
+      - bind: parsed
+        eval: |-
+          FrameHeaderValue{
+          		Final:  b[0]&finBit != 0,
+          		OpCode: corenet.WSOpCode(b[0] & opCodeBits),
+          		Masked: b[1]&maskBit != 0,
+          	}
+      - opt:
+          do:
+            - return: |-
+                FrameHeaderValue{}, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int("opcode", int(parsed.OpCode)),
+                			errs.String("why", "the opcode is reserved"))
+          when: "!parsed.OpCode.Defined()"
+      - bind: length, lerr
+        eval: parseLength(b)
+        to: parseLength
+      - opt:
+          do:
+            - return: FrameHeaderValue{}, lerr
+          when: lerr != nil
+      - set: parsed.Length
+        value: length
+      - opt:
+          do:
+            - return: FrameHeaderValue{}, cerr
+          init:
+            bind: cerr
+            eval: validateControlShape(parsed)
+            to: validateControlShape
+          when: cerr != nil
+      - opt:
+          do:
+            - eval: copy(parsed.MaskKey[:], b[want-MaskLen:want])
+          when: parsed.Masked
+      - return: parsed, nil
+  - of: ApplyMask
+    participants:
+      - id: caller
+        kind: actor
+      - id: ApplyMask
+        kind: self
+      - id: binary.LittleEndian.Uint32
+        kind: value
+      - id: binary.LittleEndian.PutUint64
+        kind: value
+    steps:
+      - bind: quad
+        eval: binary.LittleEndian.Uint32(key[:])
+        to: binary.LittleEndian.Uint32
+      - bind: word
+        eval: uint64(quad) | uint64(quad)<<maskQuadBits
+      - bind: index
+        eval: "0"
+      - loop:
+          cond: index+maskBlockWidth <= len(payload)
+          do:
+            - bind: block
+              eval: "payload[index : index+maskBlockWidth : index+maskBlockWidth]"
+            - eval: binary.LittleEndian.PutUint64(block[maskWordAt0:], binary.LittleEndian.Uint64(block[maskWordAt0:])^word)
+              to: binary.LittleEndian.PutUint64
+            - eval: binary.LittleEndian.PutUint64(block[maskWordAt1:], binary.LittleEndian.Uint64(block[maskWordAt1:])^word)
+              to: binary.LittleEndian.PutUint64
+            - eval: binary.LittleEndian.PutUint64(block[maskWordAt2:], binary.LittleEndian.Uint64(block[maskWordAt2:])^word)
+              to: binary.LittleEndian.PutUint64
+            - eval: binary.LittleEndian.PutUint64(block[maskWordAt3:], binary.LittleEndian.Uint64(block[maskWordAt3:])^word)
+              to: binary.LittleEndian.PutUint64
+          post: index += maskBlockWidth
+      - loop:
+          cond: index+maskWordWidth <= len(payload)
+          do:
+            - eval: binary.LittleEndian.PutUint64(payload[index:], binary.LittleEndian.Uint64(payload[index:])^word)
+              to: binary.LittleEndian.PutUint64
+          post: index += maskWordWidth
+      - loop:
+          cond: index < len(payload)
+          do:
+            - op: ^=
+              set: payload[index]
+              value: key[index&(MaskLen-1)]
+          post: index++
+  - of: AppendFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendFrame
+        kind: self
+      - id: validateOutbound
+        kind: internal
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: dst, verr
+          init:
+            bind: verr
+            eval: validateOutbound(op, final, len(payload))
+            to: validateOutbound
+          when: verr != nil
+      - bind: first
+        eval: byte(op)
+      - opt:
+          do:
+            - op: "|="
+              set: first
+              value: finBit
+          when: final
+      - set: dst
+        value: append(dst, first)
+      - switch:
+          cases:
+            - case: size < int(length16Marker)
+              do:
+                - set: dst
+                  value: append(dst, byte(size))
+            - case: size <= math.MaxUint16
+              do:
+                - set: dst
+                  value: append(dst, length16Marker)
+                - set: dst
+                  to: binary.BigEndian.AppendUint16
+                  value: binary.BigEndian.AppendUint16(dst, uint16(size))
+            - default: true
+              do:
+                - set: dst
+                  value: append(dst, length64Marker)
+                - set: dst
+                  to: binary.BigEndian.AppendUint64
+                  value: binary.BigEndian.AppendUint64(dst, uint64(size))
+          init:
+            bind: size
+            eval: len(payload)
+      - return: append(dst, payload...), nil
+  - of: parseLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseLength
+        kind: self
+      - id: parseLength16
+        kind: internal
+      - id: parseLength64
+        kind: internal
+    steps:
+      - bind: marker
+        eval: b[1] & lengthBits
+      - opt:
+          do:
+            - return: uint64(marker), nil
+          when: marker < length16Marker
+      - opt:
+          do:
+            - return: parseLength16(b)
+              to: parseLength16
+          when: marker == length16Marker
+      - return: parseLength64(b)
+        to: parseLength64
+  - of: parseLength16
+    steps:
+      - bind: value
+        eval: uint64(binary.BigEndian.Uint16(b[MinHeaderLen:]))
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int64("length", int64(value)),
+                			errs.String("why", "a 16-bit length below 126 is not the minimal encoding"))
+          when: value < uint64(length16Marker)
+      - return: value, nil
+  - of: parseLength64
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseLength64
+        kind: self
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - bind: value
+        eval: binary.BigEndian.Uint64(b[MinHeaderLen:])
+        to: binary.BigEndian.Uint64
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.String("why", "the 64-bit length has its most significant bit set"))
+          when: value > math.MaxInt64
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int64("length", int64(value)),
+                			errs.String("why", "a 64-bit length that fits in 16 bits is not the minimal encoding"))
+          when: value <= math.MaxUint16
+      - return: value, nil
+  - of: validateControlShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateControlShape
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!header.OpCode.IsControl()"
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.String("opcode", header.OpCode.String()),
+                			errs.String("why", "a control frame must not be fragmented"))
+              to: errs
+          when: "!header.Final"
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.String("opcode", header.OpCode.String()),
+                			errs.Int64("length", int64(header.Length)),
+                			errs.String("why", "a control frame payload must not exceed 125 bytes"))
+              to: errs
+          when: header.Length > uint64(corenet.WSMaxControlPayload)
+      - return: nil
+  - of: validateOutbound
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateOutbound
+        kind: self
+      - id: errs
+        kind: package
+      - id: validateControlShape
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                			errs.Int("opcode", int(op)),
+                			errs.String("why", "the opcode is reserved"))
+              to: errs
+          when: "!op.Defined()"
+      - return: |-
+          validateControlShape(FrameHeaderValue{
+          		Final:  final,
+          		OpCode: op,
+          		Length: uint64(size),
+          	})
+        to: validateControlShape
+  - of: Upgrade
+    participants:
+      - id: caller
+        kind: actor
+      - id: Upgrade
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: http
+        kind: stdlib
+      - id: verifyHandshake
+        kind: internal
+      - id: chooseSubprotocol
+        kind: internal
+      - id: hijack
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: writeAccept
+        kind: internal
+      - id: NewConn
+        kind: internal
+    steps:
+      - bind: cfg, cerr
+        eval: resolve(opts)
+        to: resolve
+      - opt:
+          do:
+            - eval: http.Error(w, "websocket unavailable", http.StatusInternalServerError)
+              to: http
+            - return: nil, cerr
+          when: cerr != nil
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: verifyHandshake(w, r, &cfg)
+            to: verifyHandshake
+          when: verr != nil
+      - opt:
+          do:
+            - eval: http.Error(w, "websocket unavailable", http.StatusInternalServerError)
+              to: http
+            - return: |-
+                nil, errs.Wrap(corenet.WSUpgradeUnsupported, errs.WrapParams{},
+                			errs.String("why", "the ResponseWriter exposes no http.Hijacker"))
+          when: "!canHijack(w)"
+      - bind: subprotocol, _
+        eval: chooseSubprotocol(cfg.subprotocols, r)
+        to: chooseSubprotocol
+      - bind: socket, buffered, herr
+        eval: hijack(w)
+        to: hijack
+      - opt:
+          do:
+            - eval: http.Error(w, "websocket unavailable", http.StatusInternalServerError)
+              to: http
+            - return: nil, herr
+          when: herr != nil
+      - opt:
+          do:
+            - eval: swallowErr(socket.Close())
+              to: swallowErr
+            - return: |-
+                nil, errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.Int("buffered", buffered.Buffered()),
+                			errs.String("why", "the client sent data before the handshake completed"))
+          when: buffered.Buffered() > 0
+      - opt:
+          do:
+            - eval: swallowErr(socket.Close())
+              to: swallowErr
+            - return: nil, werr
+          init:
+            bind: werr
+            eval: writeAccept(socket, r.Header.Get(corenet.WSKeyHeader), subprotocol)
+            to: writeAccept
+          when: werr != nil
+      - return: NewConn(socket, buffered, subprotocol, &cfg, corenet.DrainSignal(r.Context())), nil
+        to: NewConn
+  - of: verifyHandshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifyHandshake
+        kind: self
+      - id: refuse
+        kind: internal
+      - id: w.Header().Set
+        kind: value
+      - id: http
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: r.Header.Get
+        kind: value
+      - id: ValidateKey
+        kind: internal
+      - id: verifyOrigin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                refuse(w, http.StatusMethodNotAllowed, "method", r.Method,
+                			"the opening handshake must be a GET")
+              to: refuse
+          when: r.Method != http.MethodGet
+      - opt:
+          do:
+            - eval: w.Header().Set(corenet.WSVersionHeader, corenet.WSVersion)
+              to: w.Header().Set
+            - eval: http.Error(w, "websocket requires HTTP/1.1", http.StatusUpgradeRequired)
+              to: http
+            - return: |-
+                errs.Wrap(corenet.WSUpgradeUnsupported, errs.WrapParams{},
+                			errs.String("proto", r.Proto),
+                			errs.String("why", "the opening handshake requires HTTP/1.1; RFC 8441 is not implemented"))
+              to: errs
+          when: r.ProtoMajor != 1 || r.ProtoMinor < 1
+      - opt:
+          do:
+            - return: |-
+                refuse(w, http.StatusBadRequest, "header", "Upgrade",
+                			"the request does not offer the websocket upgrade")
+              to: refuse
+          when: "!hasToken(r.Header.Values(\"Upgrade\"), corenet.WSUpgradeToken)"
+      - opt:
+          do:
+            - return: |-
+                refuse(w, http.StatusBadRequest, "header", "Connection",
+                			"the Connection header does not carry the Upgrade token")
+              to: refuse
+          when: "!hasToken(r.Header.Values(\"Connection\"), \"upgrade\")"
+      - opt:
+          do:
+            - eval: w.Header().Set(corenet.WSVersionHeader, corenet.WSVersion)
+              to: w.Header().Set
+            - eval: http.Error(w, "unsupported websocket version", http.StatusUpgradeRequired)
+              to: http
+            - return: |-
+                errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("header", corenet.WSVersionHeader),
+                			errs.String("offered", version),
+                			errs.String("why", "this server speaks only version 13"))
+              to: errs
+          init:
+            bind: version
+            eval: r.Header.Get(corenet.WSVersionHeader)
+            to: r.Header.Get
+          when: version != corenet.WSVersion
+      - opt:
+          do:
+            - eval: http.Error(w, "bad websocket handshake", http.StatusBadRequest)
+              to: http
+            - return: kerr
+          init:
+            bind: kerr
+            eval: ValidateKey(r.Header.Get(corenet.WSKeyHeader))
+            to: ValidateKey
+          when: kerr != nil
+      - return: verifyOrigin(w, r, cfg)
+        to: verifyOrigin
+  - of: verifyOrigin
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifyOrigin
+        kind: self
+      - id: r.Header.Get
+        kind: value
+      - id: refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cfg.anyOrigin
+      - bind: origin
+        eval: r.Header.Get("Origin")
+        to: r.Header.Get
+      - opt:
+          do:
+            - return: nil
+          when: origin == ""
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: slicesContainsFold(cfg.allowedOrigins, origin)
+            - return: |-
+                refuse(w, http.StatusForbidden, "origin", origin,
+                			"the origin is not in the allowlist")
+              to: refuse
+          when: len(cfg.allowedOrigins) > 0
+      - opt:
+          do:
+            - return: |-
+                refuse(w, http.StatusForbidden, "origin", origin,
+                			"a proxy forwarded this request, so the scheme the browser used is not visible here "+
+                				"and the default same-origin rule cannot see a downgrade; "+
+                				"use AllowOrigins to name the origins, or AllowAnyOrigin")
+              to: refuse
+          when: forwardedScheme(r)
+      - opt:
+          do:
+            - return: nil
+          when: sameOrigin(origin, r)
+      - return: |-
+          refuse(w, http.StatusForbidden, "origin", origin,
+          		"the origin names another host, or plain http on a connection this server encrypted; "+
+          			"use AllowOrigins or AllowAnyOrigin to permit it")
+        to: refuse
+  - of: sameOrigin
+    participants:
+      - id: caller
+        kind: actor
+      - id: sameOrigin
+        kind: self
+      - id: url
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: strings.EqualFold(origin, nullOrigin)
+      - bind: parsed, perr
+        eval: url.Parse(origin)
+        to: url
+      - opt:
+          do:
+            - return: "false"
+          when: perr != nil || parsed.Host == ""
+      - return: strings.EqualFold(parsed.Host, r.Host) && schemeConsistent(parsed.Scheme, r)
+  - of: schemeConsistent
+    participants:
+      - id: caller
+        kind: actor
+      - id: schemeConsistent
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: r.TLS == nil
+      - return: strings.EqualFold(scheme, httpsScheme)
+        to: strings
+  - of: refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuse
+        kind: self
+      - id: http
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - eval: http.Error(w, http.StatusText(status), status)
+        to: http
+      - return: |-
+          errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+          		errs.String(key, value),
+          		errs.Int("status", status),
+          		errs.String("why", why))
+        to: errs
+  - of: hasToken
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: "true"
+                      when: strings.EqualFold(strings.TrimSpace(entry), token)
+                key: entry
+                range: strings.SplitSeq(value, ",")
+          key: _
+          range: values
+          value: value
+      - return: "false"
+  - of: chooseSubprotocol
+    participants:
+      - id: caller
+        kind: actor
+      - id: chooseSubprotocol
+        kind: self
+      - id: r.Header.Values
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(preferred) == 0
+      - bind: offered
+        eval: r.Header.Values(corenet.WSProtocolHeader)
+        to: r.Header.Values
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: want, true
+                when: hasExactToken(offered, want)
+          key: _
+          range: preferred
+          value: want
+      - return: "\"\", false"
+  - of: hasExactToken
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: "true"
+                      when: strings.TrimSpace(entry) == token
+                key: entry
+                range: strings.SplitSeq(value, ",")
+          key: _
+          range: values
+          value: value
+      - return: "false"
+  - of: canHijack
+    participants:
+      - id: caller
+        kind: actor
+      - id: canHijack
+        kind: self
+      - id: unwrapped.Unwrap
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - typeswitch:
+                bind: unwrapped
+                cases:
+                  - do:
+                      - return: "true"
+                    types: http.Hijacker
+                  - do:
+                      - set: w
+                        to: unwrapped.Unwrap
+                        value: unwrapped.Unwrap()
+                    types: interface{ Unwrap() http.ResponseWriter }
+                  - default: true
+                    do:
+                      - return: "false"
+                "on": w
+          forever: true
+  - of: hijack
+    participants:
+      - id: caller
+        kind: actor
+      - id: hijack
+        kind: self
+      - id: http.NewResponseController(w).Hijack
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: socket, rw, herr
+        eval: http.NewResponseController(w).Hijack()
+        to: http.NewResponseController(w).Hijack
+      - opt:
+          do:
+            - return: |-
+                nil, nil, errs.Wrap(corenet.WSUpgradeUnsupported, errs.WrapParams{},
+                			errs.String("cause", herr.Error()))
+          when: herr != nil
+      - eval: swallowErr(rw.Flush())
+        to: swallowErr
+      - return: socket, rw.Reader, nil
+  - of: writeAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeAccept
+        kind: self
+      - id: socket.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - var:
+          name: response
+          type: "[]byte"
+      - set: response
+        value: append(response, switchingProtocols...)
+      - set: response
+        value: "append(response, \"Upgrade: \"+corenet.WSUpgradeToken+crlf...)"
+      - set: response
+        value: "append(response, \"Connection: Upgrade\"+crlf...)"
+      - set: response
+        value: "append(response, corenet.WSAcceptHeader+\": \"+AcceptKey(key)+crlf...)"
+      - opt:
+          do:
+            - set: response
+              value: "append(response, corenet.WSProtocolHeader+\": \"+subprotocol+crlf...)"
+          when: subprotocol != ""
+      - set: response
+        value: append(response, crlf...)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("cause", werr.Error()),
+                			errs.String("why", "the 101 response could not be written"))
+              to: errs
+          init:
+            bind: _, werr
+            eval: socket.Write(response)
+            to: socket.Write
+          when: werr != nil
+      - return: nil
+  - of: AcceptKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: AcceptKey
+        kind: self
+      - id: sha1
+        kind: stdlib
+      - id: base64.StdEncoding.EncodeToString
+        kind: value
+    steps:
+      - bind: sum
+        eval: sha1.Sum([]byte(key + corenet.WSGUID))
+        to: sha1
+      - return: base64.StdEncoding.EncodeToString(sum[:])
+        to: base64.StdEncoding.EncodeToString
+  - of: ValidateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateKey
+        kind: self
+      - id: errs
+        kind: package
+      - id: base64.StdEncoding.DecodeString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("header", corenet.WSKeyHeader),
+                			errs.String("why", "the header is missing"))
+              to: errs
+          when: key == ""
+      - bind: raw, derr
+        eval: base64.StdEncoding.DecodeString(key)
+        to: base64.StdEncoding.DecodeString
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("header", corenet.WSKeyHeader),
+                			errs.String("why", "the value is not base64"))
+              to: errs
+          when: derr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("header", corenet.WSKeyHeader),
+                			errs.Int("decoded_length", len(raw)),
+                			errs.String("why", "the key must decode to exactly sixteen bytes"))
+              to: errs
+          when: len(raw) != corenet.WSKeyLen
+      - return: nil
+  - of: Subprotocols
+    participants:
+      - id: caller
+        kind: actor
+      - id: Subprotocols
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: snapshot
+        eval: slices.Clone(names)
+        to: slices
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.subprotocols
+                value: snapshot
+  - of: MaxMessageSize
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.maxMessageSize
+                value: "n"
+  - of: MaxFrameSize
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.maxFrameSize
+                value: "n"
+  - of: PingInterval
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.pingInterval
+                value: d
+              - set: c.noPing
+                value: "false"
+  - of: WithoutPing
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.noPing
+                value: "true"
+  - of: WriteTimeout
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.writeTimeout
+                value: d
+  - of: AllowOrigins
+    participants:
+      - id: caller
+        kind: actor
+      - id: AllowOrigins
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: snapshot
+        eval: slices.Clone(origins)
+        to: slices
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.allowedOrigins
+                value: snapshot
+              - set: c.anyOrigin
+                value: "false"
+  - of: AllowAnyOrigin
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.anyOrigin
+                value: "true"
+  - of: resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolve
+        kind: self
+      - id: refuseUninterpretable
+        kind: internal
+      - id: clampToDefaults
+        kind: internal
+    steps:
+      - var:
+          name: cfg
+          type: config
+      - loop:
+          do:
+            - eval: opt(&cfg)
+          key: _
+          range: opts
+          value: opt
+      - opt:
+          do:
+            - return: config{}, verr
+          init:
+            bind: verr
+            eval: refuseUninterpretable(&cfg)
+            to: refuseUninterpretable
+          when: verr != nil
+      - eval: clampToDefaults(&cfg)
+        to: clampToDefaults
+      - opt:
+          do:
+            - return: |-
+                config{}, misconfigured("MaxFrameSize", cfg.maxFrameSize,
+                			"the frame ceiling is above the message ceiling, so it can never be reached")
+          when: cfg.maxFrameSize > cfg.maxMessageSize
+      - return: cfg, nil
+  - of: refuseUninterpretable
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseUninterpretable
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      misconfigured("Subprotocols", int64(index),
+                      				"a subprotocol name must be a non-empty RFC 7230 token")
+                    to: misconfigured
+                when: "!isToken(name)"
+          key: index
+          range: cfg.subprotocols
+          value: name
+      - opt:
+          do:
+            - return: |-
+                misconfigured("PingInterval", int64(cfg.pingInterval),
+                			"a negative interval has no meaning; use WithoutPing to disable it")
+              to: misconfigured
+          when: cfg.pingInterval < 0
+      - opt:
+          do:
+            - return: |-
+                misconfigured("WriteTimeout", int64(cfg.writeTimeout),
+                			"a negative write budget has no meaning")
+              to: misconfigured
+          when: cfg.writeTimeout < 0
+      - opt:
+          do:
+            - return: |-
+                misconfigured("MaxMessageSize", cfg.maxMessageSize,
+                			"a negative ceiling has no meaning, and there is no unbounded setting")
+              to: misconfigured
+          when: cfg.maxMessageSize < 0
+      - opt:
+          do:
+            - return: |-
+                misconfigured("MaxFrameSize", cfg.maxFrameSize,
+                			"a negative ceiling has no meaning, and there is no unbounded setting")
+              to: misconfigured
+          when: cfg.maxFrameSize < 0
+      - opt:
+          do:
+            - return: |-
+                misconfigured("MaxMessageSize", cfg.maxMessageSize,
+                			"the ceiling exceeds the largest slice this platform can index")
+              to: misconfigured
+          when: cfg.maxMessageSize > math.MaxInt
+      - return: nil
+  - of: clampToDefaults
+    steps:
+      - opt:
+          do:
+            - set: cfg.pingInterval
+              value: DefaultPingInterval
+          when: cfg.pingInterval == 0
+      - opt:
+          do:
+            - set: cfg.writeTimeout
+              value: DefaultWriteTimeout
+          when: cfg.writeTimeout == 0
+      - opt:
+          do:
+            - set: cfg.maxMessageSize
+              value: DefaultMaxMessageSize
+          when: cfg.maxMessageSize == 0
+      - opt:
+          do:
+            - set: cfg.maxFrameSize
+              value: DefaultMaxFrameSize
+          when: cfg.maxFrameSize == 0
+      - opt:
+          do:
+            - set: cfg.clock
+              value: clock.System
+          when: cfg.clock == nil
+  - of: isTokenChar
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
+      - return: strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.WSConnMisconfigured, errs.WrapParams{},
+          		errs.String("option", option),
+          		errs.Int64("value", value),
+          		errs.String("why", why))
+        to: errs
+  - of: ValidateText
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateText
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSInvalidPayload, errs.WrapParams{},
+                			errs.Int("length", len(b)),
+                			errs.String("why", "the text payload is not valid UTF-8"))
+              to: errs
+          when: "!utf8.Valid(b)"
+      - return: nil
+  - of: NewConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewConn
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: c.watch
+        kind: internal
+      - id: c.startHeartbeat
+        kind: internal
+    steps:
+      - bind: c
+        eval: |-
+          &Conn{
+          		raw:         socket,
+          		br:          buffered,
+          		subprotocol: subprotocol,
+          		cfg:         *cfg,
+          		wbuf:        make([]byte, 0, initialWriteCapacity),
+          		done:        make(chan struct{}),
+          	}
+      - eval: swallowErr(socket.SetDeadline(time.Time{}))
+        to: swallowErr
+      - eval: c.watch(draining)
+        to: c.watch
+      - eval: c.startHeartbeat()
+        to: c.startHeartbeat
+      - return: c
+  - of: (*Conn).Subprotocol
+    steps:
+      - return: c.subprotocol
+  - of: (*Conn).Done
+    steps:
+      - return: c.done
+  - of: (*Conn).PeerCloseCode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).PeerCloseCode
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - return: corenet.WSCloseCode(c.peerCode.Load())
+        to: corenet
+  - of: (*Conn).Receive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).Receive
+        kind: self
+      - id: c.ended
+        kind: internal
+      - id: c.nextHeader
+        kind: internal
+      - id: c.rx.Add
+        kind: value
+      - id: c.serveControl
+        kind: internal
+      - id: c.assemble
+        kind: internal
+      - id: c.completeMessage
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corenet.WSMessageValue{}, eerr
+          init:
+            bind: eerr
+            eval: c.ended()
+            to: c.ended
+          when: eerr != nil
+      - loop:
+          do:
+            - bind: header, herr
+              eval: c.nextHeader()
+              to: c.nextHeader
+            - opt:
+                do:
+                  - return: corenet.WSMessageValue{}, herr
+                when: herr != nil
+            - eval: c.rx.Add(1)
+              to: c.rx.Add
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: corenet.WSMessageValue{}, cerr
+                      init:
+                        bind: cerr
+                        eval: c.serveControl(header)
+                        to: c.serveControl
+                      when: cerr != nil
+                  - continue: true
+                when: header.OpCode.IsControl()
+            - bind: complete, derr
+              eval: c.assemble(header)
+              to: c.assemble
+            - opt:
+                do:
+                  - return: corenet.WSMessageValue{}, derr
+                when: derr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!complete"
+            - return: c.completeMessage()
+              to: c.completeMessage
+          forever: true
+  - of: (*Conn).assemble
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).assemble
+        kind: self
+      - id: c.trackFragment
+        kind: internal
+      - id: c.readDataPayload
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, ferr
+          init:
+            bind: ferr
+            eval: c.trackFragment(header)
+            to: c.trackFragment
+          when: ferr != nil
+      - opt:
+          do:
+            - return: false, derr
+          init:
+            bind: derr
+            eval: c.readDataPayload(header)
+            to: c.readDataPayload
+          when: derr != nil
+      - return: header.Final, nil
+  - of: (*Conn).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).Send
+        kind: self
+      - id: ValidateText
+        kind: internal
+      - id: c.sendFrame
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: verr
+                init:
+                  bind: verr
+                  eval: ValidateText(message.Data)
+                  to: ValidateText
+                when: verr != nil
+          when: "!message.Binary"
+      - return: c.sendFrame(message.OpCode(), message.Data)
+        to: c.sendFrame
+  - of: (*Conn).SendText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).SendText
+        kind: self
+      - id: c.Send
+        kind: internal
+    steps:
+      - return: "c.Send(corenet.WSMessageValue{Data: []byte(text)})"
+        to: c.Send
+  - of: (*Conn).SendBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).SendBinary
+        kind: self
+      - id: c.Send
+        kind: internal
+    steps:
+      - return: "c.Send(corenet.WSMessageValue{Binary: true, Data: data})"
+        to: c.Send
+  - of: (*Conn).Ping
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).Ping
+        kind: self
+      - id: c.sendFrame
+        kind: internal
+    steps:
+      - return: c.sendFrame(corenet.WSPing, payload)
+        to: c.sendFrame
+  - of: (*Conn).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).Close
+        kind: self
+      - id: c.CloseWith
+        kind: internal
+    steps:
+      - return: c.CloseWith(corenet.WSCloseNormal, "")
+        to: c.CloseWith
+  - of: (*Conn).CloseWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).CloseWith
+        kind: self
+      - id: AppendClosePayload
+        kind: internal
+      - id: c.terminate
+        kind: internal
+      - id: c.join
+        kind: internal
+      - id: errs
+        kind: package
+      - id: swallowErr
+        kind: internal
+    steps:
+      - var:
+          name: scratch
+          type: "[corenet.WSMaxControlPayload]byte"
+      - opt:
+          do:
+            - eval: c.terminate()
+              to: c.terminate
+            - eval: c.join()
+              to: c.join
+            - return: verr
+          init:
+            bind: _, verr
+            eval: AppendClosePayload(scratch[:0], code, reason)
+            to: AppendClosePayload
+          when: verr != nil
+      - opt:
+          do:
+            - eval: c.terminate()
+              to: c.terminate
+            - eval: c.join()
+              to: c.join
+            - return: |-
+                errs.Wrap(corenet.WSInvalidPayload, errs.WrapParams{},
+                			errs.Int("close_code", int(code)),
+                			errs.String("why", "1010 is a client's code; a server never initiates a close with it"))
+              to: errs
+          when: code == corenet.WSCloseExtensionRequired
+      - eval: swallowErr(c.sendClose(code, reason))
+        to: swallowErr
+      - eval: c.terminate()
+        to: c.terminate
+      - eval: c.join()
+        to: c.join
+      - return: nil
+  - of: (*Conn).nextHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).nextHeader
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: FrameHeaderLen
+        kind: internal
+      - id: ParseFrameHeader
+        kind: internal
+      - id: parsed.ValidateFromClient
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: FrameHeaderValue{}, c.socketGone(rerr)
+          init:
+            bind: _, rerr
+            eval: io.ReadFull(c.br, c.hdr[:MinHeaderLen])
+            to: io
+          when: rerr != nil
+      - bind: want
+        eval: FrameHeaderLen(c.hdr[:MinHeaderLen])
+        to: FrameHeaderLen
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: FrameHeaderValue{}, c.socketGone(rerr)
+                init:
+                  bind: _, rerr
+                  eval: io.ReadFull(c.br, c.hdr[MinHeaderLen:want])
+                  to: io
+                when: rerr != nil
+          when: want > MinHeaderLen
+      - bind: parsed, perr
+        eval: ParseFrameHeader(c.hdr[:want])
+        to: ParseFrameHeader
+      - opt:
+          do:
+            - return: FrameHeaderValue{}, c.failConnection(corenet.WSCloseProtocolError, perr)
+          when: perr != nil
+      - opt:
+          do:
+            - return: FrameHeaderValue{}, c.failConnection(corenet.WSCloseProtocolError, merr)
+          init:
+            bind: merr
+            eval: parsed.ValidateFromClient()
+            to: parsed.ValidateFromClient
+          when: merr != nil
+      - opt:
+          do:
+            - return: |-
+                FrameHeaderValue{}, c.failConnection(corenet.WSCloseTooLarge,
+                			errs.Wrap(corenet.WSMessageTooLarge, errs.WrapParams{},
+                				errs.Int64("announced", int64(parsed.Length)),
+                				errs.Int64("ceiling", c.cfg.maxFrameSize),
+                				errs.String("why", "the frame announces more than the frame ceiling")))
+          when: "!parsed.OpCode.IsControl() && parsed.Length > uint64(c.cfg.maxFrameSize)"
+      - return: parsed, nil
+  - of: (*Conn).trackFragment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).trackFragment
+        kind: self
+      - id: c.failConnection
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      c.failConnection(corenet.WSCloseProtocolError,
+                      				errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                      					errs.String("why", "a continuation frame arrived with no message in progress")))
+                    to: c.failConnection
+                when: "!c.assembling"
+            - return: nil
+          when: header.OpCode == corenet.WSContinuation
+      - opt:
+          do:
+            - return: |-
+                c.failConnection(corenet.WSCloseProtocolError,
+                			errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+                				errs.String("opcode", header.OpCode.String()),
+                				errs.String("why", "a new data frame interrupted a fragmented message")))
+              to: c.failConnection
+          when: c.assembling
+      - set: c.assembling
+        value: "true"
+      - set: c.msgOp
+        value: header.OpCode
+      - set: c.msg
+        value: c.msg[:0]
+      - return: nil
+  - of: (*Conn).readDataPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).readDataPayload
+        kind: self
+      - id: c.failConnection
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: c.socketGone
+        kind: internal
+      - id: ApplyMask
+        kind: internal
+    steps:
+      - bind: start
+        eval: len(c.msg)
+      - opt:
+          do:
+            - return: |-
+                c.failConnection(corenet.WSCloseTooLarge,
+                			errs.Wrap(corenet.WSMessageTooLarge, errs.WrapParams{},
+                				errs.Int64("accumulated", int64(start)+int64(header.Length)),
+                				errs.Int64("ceiling", c.cfg.maxMessageSize),
+                				errs.String("why", "the reassembled message exceeds the message ceiling")))
+              to: c.failConnection
+          when: int64(start)+int64(header.Length) > c.cfg.maxMessageSize
+      - bind: size
+        eval: int(header.Length)
+      - set: c.msg
+        value: slices.Grow(c.msg, size)[:start+size]
+      - opt:
+          do:
+            - return: c.socketGone(rerr)
+              to: c.socketGone
+          init:
+            bind: _, rerr
+            eval: io.ReadFull(c.br, c.msg[start:])
+            to: io
+          when: rerr != nil
+      - eval: ApplyMask(c.msg[start:], header.MaskKey)
+        to: ApplyMask
+      - return: nil
+  - of: (*Conn).completeMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).completeMessage
+        kind: self
+      - id: ValidateText
+        kind: internal
+    steps:
+      - set: c.assembling
+        value: "false"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: corenet.WSMessageValue{}, c.failConnection(corenet.WSCloseInvalidPayload, verr)
+                init:
+                  bind: verr
+                  eval: ValidateText(c.msg)
+                  to: ValidateText
+                when: verr != nil
+          when: c.msgOp == corenet.WSText
+      - return: "corenet.WSMessageValue{Binary: c.msgOp == corenet.WSBinary, Data: c.msg}, nil"
+  - of: (*Conn).serveControl
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).serveControl
+        kind: self
+      - id: c.readControlPayload
+        kind: internal
+      - id: c.sendFrame
+        kind: internal
+      - id: c.serveClose
+        kind: internal
+    steps:
+      - bind: size
+        eval: int(header.Length)
+      - bind: payload
+        eval: c.ctl[:size]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: rerr
+                init:
+                  bind: rerr
+                  eval: c.readControlPayload(payload, header.MaskKey)
+                  to: c.readControlPayload
+                when: rerr != nil
+          when: size > 0
+      - switch:
+          cases:
+            - case: corenet.WSPing
+              do:
+                - return: c.sendFrame(corenet.WSPong, payload)
+                  to: c.sendFrame
+            - case: corenet.WSPong
+              do:
+                - return: nil
+            - default: true
+              do:
+                - return: c.serveClose(payload)
+                  to: c.serveClose
+          "on": header.OpCode
+  - of: (*Conn).readControlPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).readControlPayload
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: c.socketGone
+        kind: internal
+      - id: ApplyMask
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: c.socketGone(rerr)
+              to: c.socketGone
+          init:
+            bind: _, rerr
+            eval: io.ReadFull(c.br, payload)
+            to: io
+          when: rerr != nil
+      - eval: ApplyMask(payload, key)
+        to: ApplyMask
+      - return: nil
+  - of: (*Conn).serveClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).serveClose
+        kind: self
+      - id: ParseClosePayload
+        kind: internal
+      - id: c.failConnection
+        kind: internal
+      - id: c.peerCode.Store
+        kind: value
+      - id: swallowErr
+        kind: internal
+      - id: c.terminate
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: code, reason, perr
+        eval: ParseClosePayload(payload)
+        to: ParseClosePayload
+      - opt:
+          do:
+            - return: c.failConnection(closeCodeFor(perr), perr)
+              to: c.failConnection
+          when: perr != nil
+      - eval: c.peerCode.Store(uint32(code))
+        to: c.peerCode.Store
+      - eval: swallowErr(c.sendClose(code.Echoable(), ""))
+        to: swallowErr
+      - eval: c.terminate()
+        to: c.terminate
+      - return: |-
+          errs.Wrap(corenet.WSConnClosed, errs.WrapParams{},
+          		errs.Int("close_code", int(code)),
+          		errs.String("reason", reason))
+        to: errs
+  - of: (*Conn).sendFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).sendFrame
+        kind: self
+      - id: c.ended
+        kind: internal
+      - id: errs
+        kind: package
+      - id: c.writeLocked
+        kind: internal
+    steps:
+      - lock:
+          mutex: c.wmu
+      - opt:
+          do:
+            - return: eerr
+          init:
+            bind: eerr
+            eval: c.ended()
+            to: c.ended
+          when: eerr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.WSConnClosed, errs.WrapParams{},
+                			errs.String("why", "a Close frame has already been sent"))
+              to: errs
+          when: c.closeSent
+      - return: c.writeLocked(op, payload)
+        to: c.writeLocked
+  - of: (*Conn).sendClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).sendClose
+        kind: self
+      - id: AppendClosePayload
+        kind: internal
+      - id: c.writeLocked
+        kind: internal
+    steps:
+      - lock:
+          mutex: c.wmu
+      - opt:
+          do:
+            - return: nil
+          when: c.closeSent
+      - var:
+          name: scratch
+          type: "[corenet.WSMaxControlPayload]byte"
+      - bind: payload, perr
+        eval: AppendClosePayload(scratch[:0], code, reason)
+        to: AppendClosePayload
+      - opt:
+          do:
+            - return: perr
+          when: perr != nil
+      - set: c.closeSent
+        value: "true"
+      - return: c.writeLocked(corenet.WSClose, payload)
+        to: c.writeLocked
+  - of: (*Conn).writeLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).writeLocked
+        kind: self
+      - id: AppendFrame
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: c.raw.Write
+        kind: value
+      - id: c.terminate
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: frame, eerr
+        eval: AppendFrame(c.wbuf[:0], op, true, payload)
+        to: AppendFrame
+      - opt:
+          do:
+            - return: eerr
+          when: eerr != nil
+      - set: c.wbuf
+        value: frame
+      - eval: swallowErr(c.raw.SetWriteDeadline(time.Now().Add(c.cfg.writeTimeout)))
+        to: swallowErr
+      - opt:
+          do:
+            - eval: c.terminate()
+              to: c.terminate
+            - return: |-
+                errs.Wrap(corenet.WSConnClosed, errs.WrapParams{},
+                			errs.String("cause", werr.Error()))
+              to: errs
+          init:
+            bind: _, werr
+            eval: c.raw.Write(frame)
+            to: c.raw.Write
+          when: werr != nil
+      - return: nil
+  - of: (*Conn).failConnection
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).failConnection
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: c.terminate
+        kind: internal
+    steps:
+      - eval: swallowErr(c.sendClose(code, ""))
+        to: swallowErr
+      - eval: c.terminate()
+        to: c.terminate
+      - return: cause
+  - of: (*Conn).socketGone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).socketGone
+        kind: self
+      - id: c.terminate
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - eval: c.terminate()
+        to: c.terminate
+      - return: |-
+          errs.Wrap(corenet.WSConnClosed, errs.WrapParams{},
+          		errs.String("cause", cause.Error()))
+        to: errs
+  - of: (*Conn).ended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).ended
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - select:
+          cases:
+            - comm: <-c.done
+              do:
+                - return: errs.Wrap(corenet.WSConnClosed, errs.WrapParams{})
+                  to: errs
+            - default: true
+      - return: nil
+  - of: (*Conn).end
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).end
+        kind: self
+      - id: c.endOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          c.endOnce.Do(func() {
+          		//: every observer — Receive, Send, Done, the heartbeat — sees this.
+          		close(c.done)
+          	})
+        to: c.endOnce.Do
+  - of: (*Conn).terminate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).terminate
+        kind: self
+      - id: c.end
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: c.end()
+        to: c.end
+      - eval: swallowErr(c.raw.Close())
+        to: swallowErr
+  - of: (*Conn).join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).join
+        kind: self
+      - id: c.pinger.Stop
+        kind: value
+      - id: c.watcher.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: c.pinger.Stop()
+              to: c.pinger.Stop
+          when: c.pinger != nil
+      - eval: c.watcher.Stop()
+        to: c.watcher.Stop
+  - of: (*Conn).watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).watch
+        kind: self
+      - id: worker
+        kind: package
+    steps:
+      - set: c.watcher
+        to: worker
+        value: |-
+          worker.Start(func(stop <-chan struct{}) {
+          		select {
+          		//: Close is joining us.
+          		case <-stop:
+          		//: the connection already ended some other way.
+          		case <-c.done:
+          		//: the server began draining. §7.4.1 has a code that says exactly
+          		//: this, and a peer told "going away" reconnects somewhere else
+          		//: instead of discovering a severed socket and guessing why.
+          		case <-draining:
+          			swallowErr(c.sendClose(corenet.WSCloseGoingAway, "server shutting down"))
+          			c.terminate()
+          		}
+          	})
+  - of: (*Conn).startHeartbeat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).startHeartbeat
+        kind: self
+      - id: c.rx.Load
+        kind: value
+      - id: worker
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.cfg.noPing
+      - set: c.hb.seen
+        to: c.rx.Load
+        value: c.rx.Load()
+      - set: c.pinger
+        to: worker
+        value: |-
+          worker.Every(c.cfg.pingInterval, c.heartbeat,
+          		worker.WithClock(c.cfg.clock), worker.WithDone(c.done))
+  - of: (*Conn).heartbeat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).heartbeat
+        kind: self
+      - id: c.rx.Load
+        kind: value
+      - id: c.terminate
+        kind: internal
+    steps:
+      - bind: current
+        eval: c.rx.Load()
+        to: c.rx.Load
+      - opt:
+          do:
+            - eval: c.terminate()
+              to: c.terminate
+            - return: ""
+          when: c.hb.probed && current == c.hb.seen
+      - set: c.hb.seen
+        value: current
+      - set: c.hb.probed
+        value: c.Ping(nil) == nil
+  - of: closeCodeFor
+    steps:
+      - opt:
+          do:
+            - return: corenet.WSCloseInvalidPayload
+          when: errs.HasCode(cause, corenet.CodeWSInvalidPayload)
+      - return: corenet.WSCloseProtocolError
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil

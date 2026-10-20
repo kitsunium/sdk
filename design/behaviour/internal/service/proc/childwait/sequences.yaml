@@ -1,0 +1,177 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: newLedger
+    steps:
+      - return: "&ledger{claims: make(map[int]*Claim)}"
+  - of: Spawn
+    participants:
+      - id: caller
+        kind: actor
+      - id: Spawn
+        kind: self
+      - id: book.spawn
+        kind: internal
+    steps:
+      - return: book.spawn(start)
+        to: book.spawn
+  - of: (*ledger).spawn
+    steps:
+      - lock:
+          mutex: l.spawning
+          read: true
+      - set: proc, err
+        value: start()
+      - opt:
+          do:
+            - return: nil, nil, err
+          when: err != nil
+      - return: proc, l.track(proc.Pid), nil
+  - of: (*ledger).track
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ledger).track
+        kind: self
+      - id: l.mu.Lock
+        kind: value
+      - id: l.mu.Unlock
+        kind: value
+    steps:
+      - bind: claim
+        eval: "&Claim{book: l, pid: pid}"
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - set: l.claims[pid]
+        value: claim
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+      - return: claim
+  - of: (*ledger).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ledger).deliver
+        kind: self
+      - id: l.handOver
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.spawning
+      - eval: l.handOver(pid, status)
+        to: l.handOver
+  - of: (*ledger).handOver
+    steps:
+      - lock:
+          mutex: l.mu
+      - bind: claim, ok
+        eval: l.claims[pid]
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - set: claim.collected
+        value: "true"
+      - set: claim.status
+        value: "*status"
+      - eval: delete(l.claims, pid)
+      - return: "true"
+  - of: (*Claim).Collected
+    steps:
+      - opt:
+          do:
+            - return: StatusValue{}, false
+          when: c == nil
+      - lock:
+          mutex: c.book.mu
+      - return: c.status, c.collected
+  - of: (*Claim).Reclaim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Claim).Reclaim
+        kind: self
+      - id: c.book.forget
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: StatusValue{}, false
+          when: c == nil
+      - lock:
+          mutex: c.book.sweeping
+      - lock:
+          mutex: c.book.mu
+      - eval: c.book.forget(c)
+        to: c.book.forget
+      - return: c.status, c.collected
+  - of: (*Claim).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Claim).Release
+        kind: self
+      - id: c.book.mu.Lock
+        kind: value
+      - id: c.book.forget
+        kind: internal
+      - id: c.book.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c == nil
+      - eval: c.book.mu.Lock()
+        to: c.book.mu.Lock
+      - eval: c.book.forget(c)
+        to: c.book.forget
+      - eval: c.book.mu.Unlock()
+        to: c.book.mu.Unlock
+  - of: (*ledger).forget
+    steps:
+      - opt:
+          do:
+            - eval: delete(l.claims, c.pid)
+          when: l.claims[c.pid] == c
+  - of: ReapAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReapAny
+        kind: self
+      - id: book.reapAny
+        kind: internal
+    steps:
+      - return: book.reapAny()
+        to: book.reapAny
+  - of: (*ledger).reapAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ledger).reapAny
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: l.deliver
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.sweeping
+      - var:
+          name: status
+          type: StatusValue
+      - set: pid, err
+        to: syscall
+        value: syscall.Wait4(anyChildPID, &status.WaitStatus, syscall.WNOHANG, &status.Rusage)
+      - opt:
+          do:
+            - return: "-1, err"
+          when: int32(pid) == -1
+      - opt:
+          do:
+            - return: 0, nil
+          when: pid == 0
+      - eval: l.deliver(pid, &status)
+        to: l.deliver
+      - return: pid, nil

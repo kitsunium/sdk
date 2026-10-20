@@ -1,0 +1,136 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: newDBSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: newDBSink
+        kind: self
+      - id: serializeErrorHook
+        kind: internal
+      - id: batcher
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: maxRows
+              value: defaultMaxRows
+          when: maxRows <= 0
+      - bind: onError
+        eval: cfg.OnError
+      - alt:
+          - do:
+              - set: onError
+                value:
+                  closure:
+                    params: error
+                    steps: null
+            when: onError == nil
+          - do:
+              - set: onError
+                to: serializeErrorHook
+                value: serializeErrorHook(onError)
+            else: true
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - bind: s
+        eval: "&dbSink{exec: exec, onError: onError, clk: clk}"
+      - set: s.batch
+        to: batcher
+        value: |-
+          batcher.NewBatcher(s.deliver, batcher.Config[corelogger.RecordEvent]{
+          		MaxItems:   maxRows,
+          		FlushEvery: cfg.FlushEvery,
+          		OnError:    onError,
+          	})
+      - return: s
+  - of: serializeErrorHook
+    steps:
+      - var:
+          name: mu
+          type: sync.Mutex
+      - return:
+          closure:
+            params: err error
+            steps:
+              - lock:
+                  mutex: mu
+              - eval: hook(err)
+  - of: (*dbSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dbSink).Write
+        kind: self
+      - id: s.clk.Now
+        kind: value
+      - id: s.batch.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: r.Time
+              to: s.clk.Now
+              value: s.clk.Now()
+          when: r.Time.IsZero()
+      - opt:
+          do:
+            - eval: s.onError(aerr)
+          init:
+            bind: aerr
+            eval: s.batch.Add(ctx, r)
+            to: s.batch.Add
+          when: aerr != nil
+      - return: len(p), nil
+  - of: (*dbSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dbSink).Flush
+        kind: self
+      - id: s.batch.Flush
+        kind: value
+    steps:
+      - return: s.batch.Flush(ctx)
+        to: s.batch.Flush
+  - of: (*dbSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dbSink).Close
+        kind: self
+      - id: s.batch.Close
+        kind: value
+    steps:
+      - return: s.batch.Close(context.Background())
+        to: s.batch.Close
+  - of: (*dbSink).deliver
+    steps:
+      - return: s.exec(ctx, items)
+  - of: Compose
+    participants:
+      - id: caller
+        kind: actor
+      - id: Compose
+        kind: self
+      - id: newDBSink
+        kind: internal
+      - id: async
+        kind: package
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: base
+        eval: newDBSink(exec, cfg.MaxRows, cfg)
+        to: newDBSink
+      - bind: nonblocking
+        eval: "async.New(base, async.Config{BufferSize: cfg.BufferSize, OnDrop: cfg.OnDrop})"
+        to: async
+      - return: levelgate.New(nonblocking, cfg.MinLevel)
+        to: levelgate

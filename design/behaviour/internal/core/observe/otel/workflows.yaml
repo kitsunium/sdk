@@ -1,0 +1,22 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: ValidateAttrs
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - panic: refusal.Error()
+                when: attr.Key == ""
+            - opt:
+                do:
+                  - panic: refusal.Error()
+                when: attr.kind == AttrKindInvalid
+            - opt:
+                do:
+                  - panic: refusal.Error()
+                when: i > 0 && sorted[i-1].Key == attr.Key
+          key: i
+          range: sorted
+          value: attr

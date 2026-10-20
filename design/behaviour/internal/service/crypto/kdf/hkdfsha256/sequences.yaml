@@ -1,0 +1,23 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: hkdfSHA256.Algorithm
+    steps:
+      - return: algorithm
+  - of: hkdfSHA256.Derive
+    participants:
+      - id: caller
+        kind: actor
+      - id: hkdfSHA256.Derive
+        kind: self
+      - id: hkdf
+        kind: stdlib
+    steps:
+      - bind: out, kerr
+        eval: hkdf.Key(sha256.New, secret, salt, info, length)
+        to: hkdf
+      - opt:
+          do:
+            - return: nil, corecrypto.DerivationFailed
+          when: kerr != nil
+      - return: out, nil

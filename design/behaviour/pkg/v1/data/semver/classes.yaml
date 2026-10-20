@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/semver
+  name: semver
+  purpose: Package semver orders and reads version strings under Semantic Versioning 2.0.0, written the way Go writes them — with a leading "v" — and recognises Go pseudo-versions.
+types: []

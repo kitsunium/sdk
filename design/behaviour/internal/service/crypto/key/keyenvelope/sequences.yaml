@@ -1,0 +1,221 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: WrapKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: WrapKey
+        kind: self
+      - id: wrapKey
+        kind: internal
+    steps:
+      - return: wrapKey(passphrase, dek, iterations)
+        to: wrapKey
+  - of: wrapKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapKey
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: deriveKEK
+        kind: internal
+      - id: kek.Zeroize
+        kind: value
+      - id: header
+        kind: internal
+      - id: corecrypto
+        kind: package
+    steps:
+      - var:
+          name: salt
+          type: "[saltLen]byte"
+      - opt:
+          do:
+            - return: |-
+                "", errs.Wrap(rerr, errs.WrapParams{
+                			Code:    corecrypto.CodeEntropyFailed,
+                			Reason:  "ENTROPY_FAILED",
+                			Public:  "Could not gather entropy for encryption",
+                			Private: "service/crypto/key/keyenvelope.WrapKey: crypto/rand.Read failed while generating a salt",
+                		})
+          init:
+            bind: _, rerr
+            eval: rand.Read(salt[:])
+            to: rand
+          when: rerr != nil
+      - bind: kek, err
+        eval: deriveKEK(passphrase, salt[:], iters)
+        to: deriveKEK
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - defer: kek.Zeroize()
+        to: kek.Zeroize
+      - bind: aad
+        eval: header(base64.RawStdEncoding.EncodeToString(salt[:]))
+        to: header
+      - bind: box, err
+        eval: corecrypto.Seal(aeadID, kek, dek.Bytes(), aad)
+        to: corecrypto
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - return: string(aad) + base64.RawStdEncoding.EncodeToString(box), nil
+  - of: UnwrapKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: UnwrapKey
+        kind: self
+      - id: unwrapKey
+        kind: internal
+    steps:
+      - return: unwrapKey(passphrase, envelope, iterations)
+        to: unwrapKey
+  - of: unwrapKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: unwrapKey
+        kind: self
+      - id: parseEnvelope
+        kind: internal
+      - id: deriveKEK
+        kind: internal
+      - id: kek.Zeroize
+        kind: value
+      - id: header
+        kind: internal
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: salt, box, err
+        eval: parseEnvelope(envelope)
+        to: parseEnvelope
+      - opt:
+          do:
+            - return: corecrypto.Key{}, err
+          when: err != nil
+      - bind: kek, err
+        eval: deriveKEK(passphrase, salt, iters)
+        to: deriveKEK
+      - opt:
+          do:
+            - return: corecrypto.Key{}, err
+          when: err != nil
+      - defer: kek.Zeroize()
+        to: kek.Zeroize
+      - bind: aad
+        eval: header(base64.RawStdEncoding.EncodeToString(salt))
+        to: header
+      - bind: raw, err
+        eval: corecrypto.Open(kek, box, aad)
+        to: corecrypto
+      - opt:
+          do:
+            - return: corecrypto.Key{}, err
+          when: err != nil
+      - defer: clear(raw)
+      - return: corecrypto.NewKey(raw)
+        to: corecrypto
+  - of: deriveKEK
+    participants:
+      - id: caller
+        kind: actor
+      - id: deriveKEK
+        kind: self
+      - id: pbkdf2
+        kind: stdlib
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: raw, kerr
+        eval: pbkdf2.Key(sha256.New, string(passphrase), salt, iters, corecrypto.KeyLen)
+        to: pbkdf2
+      - opt:
+          do:
+            - return: corecrypto.Key{}, corecrypto.EntropyFailed
+          when: kerr != nil
+      - defer: clear(raw)
+      - return: corecrypto.NewKey(raw)
+        to: corecrypto
+  - of: header
+    participants:
+      - id: caller
+        kind: actor
+      - id: header
+        kind: self
+      - id: b.WriteString
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString("$")
+        to: b.WriteString
+      - eval: b.WriteString(magic)
+        to: b.WriteString
+      - eval: b.WriteString("$")
+        to: b.WriteString
+      - eval: b.WriteString(version)
+        to: b.WriteString
+      - eval: b.WriteString("$kdf=")
+        to: b.WriteString
+      - eval: b.WriteString(kdfID)
+        to: b.WriteString
+      - eval: b.WriteString("$")
+        to: b.WriteString
+      - eval: b.WriteString(b64salt)
+        to: b.WriteString
+      - eval: b.WriteString("$aead=")
+        to: b.WriteString
+      - eval: b.WriteString(string(aeadID))
+        to: b.WriteString
+      - eval: b.WriteString("$")
+        to: b.WriteString
+      - return: "[]byte(b.String())"
+  - of: parseEnvelope
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseEnvelope
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: base64.RawStdEncoding.DecodeString
+        kind: value
+    steps:
+      - bind: parts
+        eval: strings.Split(envelope, "$")
+        to: strings
+      - opt:
+          do:
+            - return: nil, nil, corecrypto.InvalidKeyEnvelope
+          when: "!validFraming(parts)"
+      - bind: salt, serr
+        eval: base64.RawStdEncoding.DecodeString(parts[fieldSalt])
+        to: base64.RawStdEncoding.DecodeString
+      - opt:
+          do:
+            - return: nil, nil, corecrypto.InvalidKeyEnvelope
+          when: serr != nil || len(salt) != saltLen
+      - bind: box, berr
+        eval: base64.RawStdEncoding.DecodeString(parts[fieldBox])
+        to: base64.RawStdEncoding.DecodeString
+      - opt:
+          do:
+            - return: nil, nil, corecrypto.InvalidKeyEnvelope
+          when: berr != nil
+      - return: salt, box, nil
+  - of: validFraming
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(parts) != fieldCount || parts[0] != "" || parts[fieldMagic] != magic || parts[fieldVer] != version
+      - return: parts[fieldKDF] == "kdf="+kdfID && parts[fieldAEAD] == "aead="+string(aeadID)

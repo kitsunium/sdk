@@ -1,0 +1,89 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewKeyTree
+    steps:
+      - return: "KeyTree{algo: algo, master: master, path: nil}"
+  - of: KeyTree.Child
+    steps:
+      - bind: next
+        eval: make([]string, len(t.path), len(t.path)+1)
+      - eval: copy(next, t.path)
+      - set: next
+        value: append(next, segment)
+      - return: "KeyTree{algo: t.algo, master: t.master, path: next}"
+  - of: KeyTree.DeriveKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyTree.DeriveKey
+        kind: self
+      - id: encodePath
+        kind: internal
+      - id: t.withMasterBytes
+        kind: internal
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: info
+        eval: encodePath(t.path)
+        to: encodePath
+      - var:
+          name: raw
+          type: "[]byte"
+      - var:
+          name: derr
+          type: error
+      - eval: |-
+          t.withMasterBytes(func(master []byte) {
+          		raw, derr = corecrypto.Subkey(t.algo, master, nil, info, corecrypto.KeyLen)
+          	})
+        to: t.withMasterBytes
+      - opt:
+          do:
+            - return: corecrypto.Key{}, derr
+          when: derr != nil
+      - defer: clear(raw)
+      - return: corecrypto.NewKey(raw)
+        to: corecrypto
+  - of: KeyTree.withMasterBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyTree.withMasterBytes
+        kind: self
+      - id: t.master.Bytes
+        kind: value
+    steps:
+      - bind: master
+        eval: t.master.Bytes()
+        to: t.master.Bytes
+      - defer: clear(master)
+      - eval: fn(master)
+  - of: encodePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodePath
+        kind: self
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - var:
+          name: buf
+          type: "[]byte"
+      - loop:
+          do:
+            - var:
+                name: lp
+                type: "[lenPrefixBytes]byte"
+            - eval: binary.BigEndian.PutUint32(lp[:], uint32(len(seg)))
+              to: binary.BigEndian.PutUint32
+            - set: buf
+              value: append(buf, lp[:]...)
+            - set: buf
+              value: append(buf, seg...)
+          key: _
+          range: path
+          value: seg
+      - return: string(buf)

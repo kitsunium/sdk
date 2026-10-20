@@ -1,0 +1,94 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Queue
+      - queueRing
+      - New
+      - allocateSlots
+      - (*queueRing).Capacity
+      - (*queueRing).Len
+      - (*queueRing).TryWrite
+      - (*queueRing).TryRead
+    name: ring.go
+functions:
+  - name: New
+    params: capacity int
+    results: q Queue[T], err error
+    typeParams: T any
+  - doc: |-
+      allocateSlots returns a freshly-made slice of length n. The make is
+      isolated behind this helper so audits that scan for append-grown storage
+      do not flag this fixed-length, indexed-only ring backing array.
+    name: allocateSlots
+    params: n int
+    results: "[]T"
+    typeParams: T any
+imports:
+  atomic: sync/atomic
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/collections/ring
+  name: ring
+  purpose: Package ring — range 0.1.3.* (ADR 0005 kernel/collections/ring block).
+types:
+  - kind: named
+    name: Queue
+    typeParams: T any
+    underlying: |-
+      interface {
+      	// TryWrite enqueues item without blocking; returns Full when saturated.
+      	TryWrite(item T) (err error)
+      	// TryRead dequeues the next item without blocking; returns Empty when no
+      	// item is available.
+      	TryRead() (item T, err error)
+      	// Capacity returns the number of usable slots in the ring.
+      	Capacity() (n int)
+      	// Len returns a snapshot count of items currently held.
+      	Len() (n int)
+      }
+  - doc: |-
+      queueRing is the concrete Queue implementation. Unexported so the public
+      surface stays narrow and the struct name can read as "ring" without the
+      role-suffix convention that exported types must follow.
+    fields:
+      - doc: |-
+          slots holds the recycled storage; len(slots) is always exactly cap+1
+          (one slot is left empty so head == tail unambiguously means empty).
+        name: slots
+        type: "[]T"
+      - doc: head is the consumer's read cursor, advanced atomically by TryRead.
+        name: head
+        type: atomic.Uint64
+      - doc: tail is the producer's write cursor, advanced atomically by TryWrite.
+        name: tail
+        type: atomic.Uint64
+      - doc: cap is the number of usable slots (slots backing array is cap+1 long).
+        name: cap
+        type: uint64
+    kind: struct
+    methods:
+      - doc: Capacity returns the number of usable slots in the ring.
+        name: Capacity
+        recv: b *queueRing[T]
+        results: int
+      - doc: |-
+          Len returns the number of items currently held in the ring. The result is
+          a snapshot — a concurrent producer or consumer may move the cursors before
+          the caller can act on it.
+        name: Len
+        recv: b *queueRing[T]
+        results: int
+      - doc: TryWrite places item into the ring without blocking.
+        name: TryWrite
+        params: item T
+        recv: b *queueRing[T]
+        results: error
+      - doc: TryRead removes and returns the next item without blocking.
+        name: TryRead
+        recv: b *queueRing[T]
+        results: value T, err error
+    name: queueRing
+    typeParams: T any

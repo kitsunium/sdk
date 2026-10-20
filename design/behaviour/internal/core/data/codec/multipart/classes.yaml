@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/multipart
+  name: multipart
+  purpose: Package multipart declares the error codes and the sentinels of the multipart/form-data codec, internal/service/data/codec/multipart — range 0.3.41.* (ADR 0005 service/data/codec/multipart block).
+types: []

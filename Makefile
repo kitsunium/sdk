@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check lint-ktn-install ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage
+.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check lint-ktn-install ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage models models-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -39,6 +39,8 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "regen"        "$(DIM)delete every kit-generated file, kit gen + make api, require zero diff (local: needs the pinned kit)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "from-zero"    "$(DIM)in a temporary copy: delete every kit-generated file, kit gen -stubs + compile, kit gen + make api, require zero diff (local)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "kit-coverage" "$(DIM)per package, the exported declarations kit writes vs written by hand (a report, not a gate; local)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "models"       "$(DIM)derive design/behaviour's models from the code again, after a body changed (local: needs the pinned kit)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "models-check" "$(DIM)fail when a behaviour model is missing, not the current code's, or left over (local)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -331,6 +333,19 @@ from-zero:
 # whatever it counts. Local only: it needs the pinned kit.
 kit-coverage:
 	bash scripts/kit-coverage.sh
+
+# `models` derives the behaviour models of design/behaviour — what each body
+# does, as a sequence, from the code (the Studio's ADR 0013) — again for every
+# package already modelled, after a body changed; `models-check` writes nothing
+# and fails on a model missing, not what the current code derives, or left
+# over, which `kit check`'s behaviour rule holds too. A model is never edited
+# by hand, and the bodies stay the code's (ADR 0168). Local only: both need
+# the pinned kit (scripts/models.sh).
+models:
+	bash scripts/models.sh
+
+models-check:
+	bash scripts/models.sh -check
 
 # `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #

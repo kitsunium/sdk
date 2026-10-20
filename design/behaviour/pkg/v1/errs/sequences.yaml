@@ -1,0 +1,7 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - forward: kerrs.NewRuntime
+    of: New
+  - forward: kerrs.Wrap
+    of: Wrap

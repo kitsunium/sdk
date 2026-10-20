@@ -1,0 +1,58 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - gateSink
+      - New
+      - Floor
+      - (*gateSink).Write
+      - (*gateSink).Flush
+      - (*gateSink).Close
+    name: gate.go
+functions:
+  - name: New
+    params: inner corelogger.Sink, min level.Level
+    results: corelogger.Sink
+  - name: Floor
+    params: inner corelogger.Sink, min level.Level
+    results: corelogger.Sink
+imports:
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  name: levelgate
+  purpose: Package levelgate provides a Sink decorator that forwards records at or above a minimum severity and silently drops the rest.
+types:
+  - doc: gateSink forwards Write to inner only when the record meets the floor.
+    fields:
+      - doc: inner is the wrapped terminal/middleware sink.
+        name: inner
+        type: corelogger.Sink
+      - doc: min is the inclusive severity floor; records below it are dropped.
+        name: min
+        type: level.Level
+    kind: struct
+    methods:
+      - doc: |-
+          Write forwards records at or above the floor and silently drops the rest,
+          reporting a successful (len(p), nil) for drops so fan-out callers never see a
+          spurious failure.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *gateSink
+        results: n int, err error
+      - doc: Flush delegates to the wrapped sink.
+        name: Flush
+        params: ctx context.Context
+        recv: s *gateSink
+        results: error
+      - doc: Close delegates to the wrapped sink.
+        name: Close
+        recv: s *gateSink
+        results: error
+    name: gateSink

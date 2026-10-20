@@ -1,0 +1,81 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*asn1Codec).Name
+    steps:
+      - return: "\"asn1-der\""
+  - of: (*asn1Codec).MIMETypes
+    steps:
+      - return: "[]string{\"application/pkix-cert\"}"
+  - of: (*asn1Codec).Extensions
+    steps:
+      - return: "[]string{\".der\", \".cer\"}"
+  - of: (*asn1Codec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asn1Codec).Marshal
+        kind: self
+      - id: stdasn1
+        kind: stdlib
+    steps:
+      - bind: out, merr
+        eval: stdasn1.Marshal(v)
+        to: stdasn1
+      - opt:
+          do:
+            - return: out, nil
+          when: merr == nil
+      - return: |-
+          nil, errs.Wrap(merr, errs.WrapParams{
+          		Code:    coreasn1.CodeASN1MarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "ASN.1 DER encoding failed",
+          		Private: "service/data/codec/asn1.Marshal: encoding/asn1 returned an error",
+          	})
+  - of: (*asn1Codec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asn1Codec).Append
+        kind: self
+      - id: c.Marshal
+        kind: internal
+    steps:
+      - bind: encoded, merr
+        eval: c.Marshal(v)
+        to: c.Marshal
+      - opt:
+          do:
+            - return: dst, merr
+          when: merr != nil
+      - return: append(dst, encoded...), nil
+  - of: (*asn1Codec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asn1Codec).Unmarshal
+        kind: self
+      - id: stdasn1
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: _, uerr
+        eval: stdasn1.Unmarshal(data, v)
+        to: stdasn1
+      - opt:
+          do:
+            - return: nil
+          when: uerr == nil
+      - return: |-
+          errs.Wrap(uerr, errs.WrapParams{
+          		Code:    coreasn1.CodeASN1UnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "ASN.1 DER decoding failed",
+          		Private: "service/data/codec/asn1.Unmarshal: encoding/asn1 returned an error",
+          	})
+        to: errs

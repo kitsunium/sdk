@@ -1,0 +1,525 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Attrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: Attrs
+        kind: self
+      - id: KeyValueOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(attrs) == 0
+      - bind: pairs
+        eval: make([]KeyValue, len(attrs))
+      - loop:
+          do:
+            - set: pairs[i]
+              to: KeyValueOf
+              value: KeyValueOf(attr)
+          key: i
+          range: attrs
+          value: attr
+      - return: pairs
+  - of: KeyValueOf
+    steps:
+      - switch:
+          cases:
+            - case: coreotel.AttrKindString
+              do:
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{StringValue: new(attr.Str())}}"
+            - case: coreotel.AttrKindBool
+              do:
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{BoolValue: new(attr.Bool())}}"
+            - case: coreotel.AttrKindInt64
+              do:
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{IntValue: new(Int64(attr.Int64()))}}"
+            - case: coreotel.AttrKindFloat64
+              do:
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{DoubleValue: new(Double(attr.Float64()))}}"
+            - default: true
+              do:
+                - return: "KeyValue{Key: attr.Key}"
+          "on": attr.Kind()
+  - of: Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Marshal
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: encoder.SetEscapeHTML
+        kind: value
+      - id: encoder.Encode
+        kind: value
+      - id: bytes
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - bind: encoder
+        eval: json.NewEncoder(&buf)
+        to: json
+      - eval: encoder.SetEscapeHTML(false)
+        to: encoder.SetEscapeHTML
+      - opt:
+          do:
+            - return: nil, errs.Wrap(encodeErr, *failure)
+          init:
+            bind: encodeErr
+            eval: encoder.Encode(request)
+            to: encoder.Encode
+          when: encodeErr != nil
+      - return: bytes.TrimSuffix(buf.Bytes(), []byte{DocumentTerminator}), nil
+        to: bytes
+  - of: UnixNano
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: instant.IsZero() || instant.UnixNano() < 0
+      - return: Uint64(instant.UnixNano())
+  - of: ResourceOf
+    steps:
+      - return: "ResourceMessage{Attributes: Attrs(resource.Attrs)}"
+  - of: (*LenientInt64).UnmarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LenientInt64).UnmarshalJSON
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: text
+        eval: string(bytes.TrimSpace(data))
+      - opt:
+          do:
+            - return: nil
+          when: text == jsonNull
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: json.Unmarshal(data, &text)
+                  to: json
+                when: err != nil
+          when: strings.HasPrefix(text, `"`)
+      - bind: parsed, err
+        eval: strconv.ParseInt(text, decimalBase, floatBitSize)
+        to: strconv
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: "*v"
+        value: LenientInt64(parsed)
+      - return: nil
+  - of: DecodeRejected
+    participants:
+      - id: caller
+        kind: actor
+      - id: DecodeRejected
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: into.RejectedCount
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(payload) == 0
+      - opt:
+          do:
+            - return: "0"
+          init:
+            bind: err
+            eval: "json.Unmarshal(payload, new(exportResponse{PartialSuccess: into}))"
+            to: json
+          when: err != nil
+      - return: into.RejectedCount()
+        to: into.RejectedCount
+  - of: Int64.MarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Int64.MarshalJSON
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]byte, 0, intBufferSize)
+      - set: out
+        value: append(out, '"')
+      - set: out
+        to: strconv
+        value: strconv.AppendInt(out, int64(v), decimalBase)
+      - return: append(out, '"'), nil
+  - of: Uint64.MarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Uint64.MarshalJSON
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]byte, 0, intBufferSize)
+      - set: out
+        value: append(out, '"')
+      - set: out
+        to: strconv
+        value: strconv.AppendUint(out, uint64(v), decimalBase)
+      - return: append(out, '"'), nil
+  - of: Double.MarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Double.MarshalJSON
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: value
+        eval: float64(v)
+      - opt:
+          do:
+            - return: "[]byte(jsonNaN), nil"
+          when: math.IsNaN(value)
+      - opt:
+          do:
+            - return: "[]byte(jsonPosInfinity), nil"
+          when: math.IsInf(value, 1)
+      - opt:
+          do:
+            - return: "[]byte(jsonNegInfinity), nil"
+          when: math.IsInf(value, -1)
+      - return: strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
+        to: strconv
+  - of: ScopeOf
+    steps:
+      - return: "ScopeMessage{Name: scope.Name, Version: scope.Version}"
+  - of: NewSender
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSender
+        kind: self
+      - id: checkEndpoint
+        kind: internal
+      - id: newClient
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, endpointErr
+          init:
+            bind: endpointErr
+            eval: checkEndpoint(cfg.Endpoint, signal)
+            to: checkEndpoint
+          when: endpointErr != nil
+      - bind: timeout
+        eval: cfg.Timeout
+      - opt:
+          do:
+            - set: timeout
+              value: DefaultTimeout
+          when: timeout <= 0
+      - bind: maxResponse
+        eval: cfg.MaxResponseBytes
+      - opt:
+          do:
+            - set: maxResponse
+              value: DefaultMaxResponseBytes
+          when: maxResponse <= 0
+      - bind: client
+        eval: cfg.Client
+      - opt:
+          do:
+            - set: client
+              to: newClient
+              value: newClient(timeout)
+          when: client == nil
+      - return: |-
+          &Sender{
+          		endpoint:    cfg.Endpoint,
+          		client:      client,
+          		headers:     maps.Clone(cfg.Headers),
+          		maxResponse: maxResponse,
+          		signal:      signal,
+          	}, nil
+  - of: checkEndpoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkEndpoint
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: signal.EndpointInvalid
+          when: endpoint == ""
+      - bind: parsed, err
+        eval: url.Parse(endpoint)
+        to: url
+      - opt:
+          do:
+            - return: errs.Wrap(err, signal.EndpointUnparsable)
+              to: errs
+          when: err != nil
+      - opt:
+          do:
+            - return: signal.EndpointInvalid
+          when: |-
+            (parsed.Scheme != schemeHTTP && parsed.Scheme != schemeHTTPS) ||
+            		parsed.Host == "" ||
+            		parsed.Path == "" || parsed.Path == rootPath
+      - return: nil
+  - of: newClient
+    steps:
+      - return: |-
+          &http.Client{
+          		Timeout: timeout,
+          		//: this sender's own pool, which nothing else in the process can empty.
+          		Transport: newTransport(),
+          		//: stop at the first redirect and return that response.
+          		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+          			//: the stdlib signal for "hand it back", not an error verdict.
+          			return http.ErrUseLastResponse
+          		},
+          	}
+  - of: newTransport
+    participants:
+      - id: caller
+        kind: actor
+      - id: newTransport
+        kind: self
+      - id: base.Clone
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: base.Clone()
+              to: base.Clone
+          init:
+            bind: base, isTransport
+            eval: http.DefaultTransport.(*http.Transport)
+          when: isTransport
+      - return: "&http.Transport{Proxy: http.ProxyFromEnvironment, IdleConnTimeout: fallbackIdleTimeout}"
+  - of: (*Sender).Post
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Sender).Post
+        kind: self
+      - id: http
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: request.Header.Set
+        kind: value
+      - id: s.client.Do
+        kind: value
+      - id: closeResponse
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: s.classify
+        kind: internal
+    steps:
+      - bind: request, buildErr
+        eval: http.NewRequest(http.MethodPost, s.endpoint, bytes.NewReader(body))
+        to: http
+      - opt:
+          do:
+            - return: errs.Wrap(buildErr, s.signal.RequestUnbuildable)
+              to: errs
+          when: buildErr != nil
+      - loop:
+          do:
+            - eval: request.Header.Set(key, value)
+              to: request.Header.Set
+          key: key
+          range: s.headers
+          value: value
+      - eval: request.Header.Set(contentTypeHeader, contentType)
+        to: request.Header.Set
+      - bind: response, doErr
+        eval: s.client.Do(request)
+        to: s.client.Do
+      - opt:
+          do:
+            - return: errs.Wrap(doErr, s.signal.TransportFault)
+              to: errs
+          when: doErr != nil
+      - defer: closeResponse(response)
+        to: closeResponse
+      - bind: payload, readErr
+        eval: io.ReadAll(io.LimitReader(response.Body, s.maxResponse))
+        to: io
+      - opt:
+          do:
+            - set: payload
+              value: nil
+          when: readErr != nil
+      - return: s.classify(response, payload)
+        to: s.classify
+  - of: closeResponse
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeResponse
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: swallowTeardown
+        kind: internal
+    steps:
+      - bind: _, drainErr
+        eval: io.Copy(io.Discard, io.LimitReader(response.Body, DefaultMaxResponseBytes))
+        to: io
+      - eval: swallowTeardown(drainErr)
+        to: swallowTeardown
+      - eval: swallowTeardown(response.Body.Close())
+        to: swallowTeardown
+  - of: swallowTeardown
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: (*Sender).classify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Sender).classify
+        kind: self
+      - id: s.partialSuccessOf
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: s.partialSuccessOf(payload)
+              to: s.partialSuccessOf
+          when: response.StatusCode >= httpStatusOK && response.StatusCode < httpStatusMultiChoices
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(s.signal.Unavailable, errs.WrapParams{},
+                			errs.Int(statusFieldKey, response.StatusCode),
+                			errs.Int(retryAfterFieldKey, retryAfterSeconds(response.Header)))
+              to: errs
+          when: isRetryableStatus(response.StatusCode)
+      - return: |-
+          errs.Wrap(s.signal.Rejected, errs.WrapParams{},
+          		errs.Int(statusFieldKey, response.StatusCode))
+        to: errs
+  - of: isRetryableStatus
+    steps:
+      - switch:
+          cases:
+            - case: http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": status
+  - of: retryAfterSeconds
+    participants:
+      - id: caller
+        kind: actor
+      - id: retryAfterSeconds
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: strings.TrimSpace(header.Get(retryAfterHeader))
+        to: strings
+      - opt:
+          do:
+            - return: "0"
+          when: raw == ""
+      - bind: seconds, err
+        eval: strconv.Atoi(raw)
+        to: strconv
+      - opt:
+          do:
+            - return: "0"
+          when: err != nil || seconds < 0
+      - return: seconds
+  - of: (*Sender).partialSuccessOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Sender).partialSuccessOf
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: rejected
+        eval: s.signal.DecodeRejected(payload)
+      - opt:
+          do:
+            - return: nil
+          when: rejected == 0
+      - return: |-
+          errs.Wrap(s.signal.PartialSuccess, errs.WrapParams{},
+          		errs.Int64(s.signal.RejectedField, rejected))
+        to: errs
+  - of: NewStream
+    steps:
+      - return: "&Stream{dst: dst, failure: *failure}"
+  - of: (*Stream).Emit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Stream).Emit
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.dst.Write
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - set: doc
+        value: append(doc, DocumentTerminator)
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: _, writeErr
+        eval: s.dst.Write(doc)
+        to: s.dst.Write
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: nil
+          when: writeErr == nil
+      - return: errs.Wrap(writeErr, s.failure)
+        to: errs

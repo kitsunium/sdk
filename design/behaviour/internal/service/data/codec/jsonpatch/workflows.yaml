@@ -1,0 +1,50 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: align
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(a) == 0 || len(b) == 0 || len(a) > maxAlignCells/len(b)
+      - bind: lengths, width
+        eval: lcsLengths(a, b), len(b)+1
+      - var:
+          name: kept
+          type: "[][2]int"
+      - bind: i, j
+        eval: 0, 0
+      - loop:
+          cond: i < len(a) && j < len(b)
+          do:
+            - switch:
+                cases:
+                  - case: equal(a[i], b[j])
+                    do:
+                      - set: kept
+                        value: append(kept, [2]int{i, j})
+                      - set: i, j
+                        value: i+1, j+1
+                  - case: lengths[(i+1)*width+j] >= lengths[i*width+j+1]
+                    do:
+                      - op: ++
+                        set: i
+                  - default: true
+                    do:
+                      - op: ++
+                        set: j
+      - return: kept
+  - of: everyMember
+    steps:
+      - loop:
+          do:
+            - bind: other, found
+              eval: b.fields[name]
+            - opt:
+                do:
+                  - return: "false"
+                when: "!found || !equal(value, other)"
+          key: name
+          range: a.fields
+          value: value
+      - return: "true"

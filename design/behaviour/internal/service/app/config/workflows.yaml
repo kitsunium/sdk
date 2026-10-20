@@ -1,0 +1,76 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: lastSupplier
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, holds
+                  eval: layer.values[key]
+                when: "!holds"
+            - set: env, supplied
+              value: layer.source.(envSource)
+            - return: env, supplied
+          key: _
+          range: slices.Backward(layers)
+          value: layer
+      - return: envSource{}, false
+  - of: coversPath
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: path == corevalidation.RootPath
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: path == key || strings.HasPrefix(path, key+keySeparator)
+          key: _
+          range: declared
+          value: key
+      - return: "false"
+  - of: lookupKey
+    steps:
+      - loop:
+          do:
+            - bind: next, isTable
+              eval: level[segment].(map[string]any)
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isTable"
+            - set: level
+              value: next
+          key: _
+          range: segments[:len(segments)-1]
+          value: segment
+      - bind: _, exists
+        eval: level[segments[len(segments)-1]]
+      - return: exists
+  - of: missingKeys
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(required) == 0
+      - var:
+          name: missing
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: lookupKey(merged, key.segments)
+            - set: missing
+              value: append(missing, key.key)
+          key: _
+          range: required
+          value: key
+      - return: missing

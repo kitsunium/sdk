@@ -1,0 +1,460 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      defaultHTTPTimeout bounds an HTTP POST so a stalled collector cannot wedge the
+      drainer goroutine indefinitely when the caller supplies no HTTPClient.
+    items:
+      - name: defaultHTTPTimeout
+        type: time.Duration
+        value: 30 * time.Second
+    name: defaultHTTPTimeout
+  - doc: |-
+      httpDrainMaxBytes bounds how much of a collector's response body is drained
+      after the verdict — see postRecord.
+
+      There is no bounded read here for it to share a figure with: postRecord judges
+      a delivery by its status alone and reads nothing of the body, so the drain is
+      the only read of that remote-controlled length. It is the 1 MiB the OTLP
+      exporters bound their response with (DefaultOTLPMaxResponseBytes in
+      service/observe/metrics and service/observe/trace), so the SDK's three HTTP emitters read a
+      collector's body the same way — and it sits above the 256 KiB net/http drains
+      by itself after an early Close, which it does not even attempt for a
+      response declaring more.
+    items:
+      - name: httpDrainMaxBytes
+        type: int64
+        value: 1 << 20
+    name: httpDrainMaxBytes
+  - doc: |-
+      httpFallbackIdleTimeout is how long the default client's fallback transport
+      keeps an idle connection — see newHTTPTransport. It is net/http's own
+      DefaultTransport value, so the fallback reaps its pool exactly as the clone it
+      stands in for does, rather than holding a connection for as long as the
+      collector tolerates it.
+    items:
+      - name: httpFallbackIdleTimeout
+        type: time.Duration
+        value: 90 * time.Second
+    name: httpFallbackIdleTimeout
+  - doc: |-
+      contentTypeJSON labels the POST body; the encoder owns the actual format, but
+      JSON is the de-facto log-ingestion content type (Loki/Datadog/Elastic).
+    items:
+      - name: contentTypeJSON
+        type: string
+        value: "\"application/json\""
+    name: contentTypeJSON
+  - doc: httpStatusFloor / httpStatusCeil bound the accepted 2xx success range.
+    grouped: true
+    items:
+      - name: httpStatusFloor
+        type: int
+        value: "200"
+      - name: httpStatusCeil
+        type: int
+        value: "300"
+    name: httpStatusFloor
+  - doc: |-
+      protoTCP / protoUDP / protoHTTP are the canonical writer keys the three
+      factories register under and the network identifiers passed to net.Dial.
+    grouped: true
+    items:
+      - name: protoTCP
+        value: "\"tcp\""
+      - name: protoUDP
+        value: "\"udp\""
+      - name: protoHTTP
+        value: "\"http\""
+    name: protoTCP
+files:
+  - decls:
+      - defaultHTTPTimeout
+      - httpDrainMaxBytes
+      - httpFallbackIdleTimeout
+      - contentTypeJSON
+      - httpStatusFloor
+      - newConnSeam
+      - newHTTPSeam
+      - newHTTPClient
+      - newHTTPTransport
+      - postRecord
+      - swallowErr
+    name: client.go
+  - decls:
+      - NetConfig
+      - compose
+    name: config.go
+  - decls:
+      - (*netFactory).Decode
+      - (*netFactory).invalid
+      - decodeStr
+      - decodeLevelKey
+      - decodeIntKey
+    name: decode.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - sendFunc
+      - netSink
+      - newNetSink
+      - (*netSink).Write
+      - (*netSink).Flush
+      - (*netSink).Close
+    name: netsink.go
+  - decls:
+      - protoTCP
+      - WriterTCP
+      - netFactory
+      - (*netFactory).Name
+      - (*netFactory).Open
+      - (*netFactory).build
+    name: nettransport.go
+  - decls:
+      - wrapDial
+      - wrapWrite
+    name: wrap.go
+functions:
+  - doc: |-
+      newConnSeam dials network/addr (via dialer, or net.Dial when nil) and returns
+      a sendFunc that writes each record verbatim to the connection plus the
+      connection's Close as the closer. The encoder owns line framing; for udp the
+      datagram boundary is the frame, for tcp the encoder's trailing newline
+      delimits records — so send writes p as-is and stays 0 alloc.
+    name: newConnSeam
+    params: network, addr string, dialer func(network, addr string) (net.Conn, error)
+    results: send sendFunc, closer func() error, err error
+  - doc: |-
+      newHTTPSeam returns a sendFunc that POSTs each record to url (via client, or a
+      timeout-bounded default when nil). Unlike the conn seam this allocates per
+      send (request + reader) — HTTP egress is not a 0-alloc path; the 0-alloc
+      invariant is the conn seam's.
+
+      The closer releases the idle connections of the pool the sink OWNS, which is
+      the default client's and nothing else. A caller-supplied HTTPClient is used as
+      given and its pool is left to the caller: calling CloseIdleConnections on it
+      would reach whatever else shares that pool — for a client with a nil
+      Transport, every other client in the process — and emptying a shared pool is
+      the very call newHTTPTransport explains is not harmless.
+    name: newHTTPSeam
+    params: url string, client *http.Client
+    results: send sendFunc, closer func() error
+  - doc: |-
+      newHTTPClient builds the default client: bounded by timeout, refusing to
+      follow a redirect, and riding a connection pool of its own.
+
+      The bound keeps a stalled collector from wedging the async drainer goroutine
+      forever, and keeps zero-config usage safe. The redirect refusal is CWE-918: a
+      consumer-controlled URL must not 30x-bounce the POST to an internal host past
+      an allowlist that only validated the configured target, so CheckRedirect halts
+      every redirect with the stdlib ErrUseLastResponse signal (not an error
+      verdict) and the non-2xx last response surfaces downstream as a write
+      failure. A caller-supplied HTTPClient owns its own redirect policy and is used
+      as-is.
+
+      The pool is newHTTPTransport's, which says why it is not the process's.
+    name: newHTTPClient
+    params: timeout time.Duration
+    results: "*http.Client"
+  - doc: |-
+      newHTTPTransport returns the connection pool the default client owns: a clone
+      of http.DefaultTransport, so every setting a process expects of an outbound
+      client — the proxy environment first of all — carries over, and none of its
+      connections do.
+
+      # Why the default client does not share http.DefaultTransport
+
+      Because anything in the process can empty that pool, and net/http turns doing
+      so at the wrong instant into a wrong verdict. A response with no body — a 204
+      is how Loki answers a push — is put back in the idle pool BEFORE the waiting
+      round trip is handed it, and a CloseIdleConnections landing in that window
+      closes the connection under it: the round trip then reports "connection
+      broken" for a response that had already arrived. Here that turns a delivered
+      record into a failed write, which a failover or a retry then sends again — a
+      duplicated log line. Every httptest.Server.Close and every
+      http.DefaultClient.CloseIdleConnections is such a call, made by code this
+      writer cannot see; so was this package's own closer, which used to empty
+      that pool whenever an http sink closed.
+
+      A caller-supplied HTTPClient is used as given, Transport included, so one that
+      rides http.DefaultTransport inherits that exposure; giving it a Transport of
+      its own is how it avoids it.
+
+      The clone is a snapshot taken at construction. A process that has replaced
+      http.DefaultTransport with something other than an *http.Transport leaves
+      nothing to clone, and a fresh transport that still honours the proxy
+      environment stands in; one that routes traffic through a custom RoundTripper
+      passes it as the HTTPClient.
+    name: newHTTPTransport
+    results: "*http.Transport"
+  - doc: |-
+      postRecord POSTs p to url and returns the raw cause on a transport error or
+      the shared NetTransportWriteFailed sentinel on a non-2xx status. netSink.Write
+      wraps the result (origin-wins keeps the sentinel's code on the status path).
+
+      The body is drained after the verdict so the connection returns to the pool,
+      and the drain is BOUNDED by httpDrainMaxBytes: it is the only read of a
+      length a remote party controls, and a collector streaming an endless body held
+      the async drainer here forever whenever the client had no deadline — the
+      default client's Timeout covers the body, a supplied one is used as-is and may
+      carry none. Past the bound the body is closed unread; net/http recycles only a
+      connection whose response it has seen end, and the drain it attempts itself
+      after an early Close is bounded as well, so a body that runs past both costs
+      the connection — correct, since reading on to save one handshake is exactly
+      what the bound refuses. The bound is on bytes, not time: a collector that
+      stops sending mid-body is bounded only by the client's deadline.
+    name: postRecord
+    params: ctx context.Context, c *http.Client, url string, p []byte
+    results: error
+  - doc: |-
+      swallowErr intentionally drops a body-teardown error: the HTTP delivery
+      verdict is already decided, and stacking a drain/close error on top would
+      obscure it. It mirrors syslog's swallowDialClose so the error-discard audit
+      sees an explicit, reviewed no-op rather than a bare `_ =`.
+    name: swallowErr
+    params: err error
+  - doc: |-
+      compose builds the network writer chain: the terminal per-record netSink
+      wrapped by async (non-blocking ring + OnDrop back-pressure) and then by
+      levelgate (the per-writer MinLevel floor). It returns the chain behind the
+      core/observe/logger.Sink interface so each protocol factory only supplies its send +
+      close seams and a plain-data NetConfig — the composition order lives here,
+      mirroring the dbsink and s3 factories.
+    name: compose
+    params: network string, send sendFunc, closer func() error, cfg NetConfig
+    results: corelogger.Sink
+  - doc: |-
+      decodeStr maps an optional string key onto dst, reporting false only when the
+      key is present with a non-string value. An absent key leaves dst untouched and
+      reports true (the caller enforces mandatoriness separately).
+    name: decodeStr
+    params: raw map[string]any, key string, dst *string
+    results: bool
+  - doc: |-
+      decodeLevelKey maps the optional "min_level" name onto dst, reporting false on
+      a non-string or unknown level. An absent key leaves dst untouched.
+    name: decodeLevelKey
+    params: raw map[string]any, dst *level.Level
+    results: bool
+  - doc: |-
+      decodeIntKey maps an optional integer key onto dst, accepting the numeric
+      shapes a config codec yields (int / int64 / float64). An absent key leaves dst
+      untouched; a present non-numeric value reports false.
+    name: decodeIntKey
+    params: raw map[string]any, key string, dst *int
+    results: bool
+  - doc: |-
+      newNetSink builds a per-record sink over the send/close seams. A nil closer is
+      substituted with a no-op so Close stays branch-free.
+    name: newNetSink
+    params: network string, send sendFunc, closer func() error
+    results: "*netSink"
+  - doc: |-
+      wrapDial wraps cause under the dial sentinel with a private diagnostic. The
+      address is NOT attached — only the network identifier — so a consumer-supplied
+      endpoint never leaks into the error (SSRF/secret gate).
+    name: wrapDial
+    params: cause error, network string
+    results: error
+  - doc: |-
+      wrapWrite wraps cause under the write sentinel with a private diagnostic. Only
+      the network and byte count are attached — never the payload or address.
+    name: wrapWrite
+    params: cause error, network string, n int
+    results: error
+imports:
+  async: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
+  bytes: bytes
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  corenettransport: github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  io: io
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  net: net
+  sync: sync
+  time: time
+  writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/nettransport
+  name: nettransport
+  purpose: "Package nettransport — the transport seams: the ONLY file that touches net / net/http."
+types:
+  - fields:
+      - doc: "Address is the destination: \"host:port\" for tcp/udp, a full URL for http."
+        name: Address
+        type: string
+      - doc: |-
+          Dialer, when non-nil, replaces net.Dial for tcp/udp connection setup.
+          SECURITY (CWE-918): when Address is consumer-controlled, plug an
+          allowlist dialer so an attacker cannot target internal services or the
+          cloud-metadata endpoint (169.254.169.254). Nil falls back to net.Dial.
+        name: Dialer
+        type: func(network, addr string) (conn net.Conn, err error)
+      - doc: |-
+          HTTPClient, when non-nil, replaces the default client for the http
+          protocol. SECURITY: supply a client whose Transport enforces an SSRF
+          allowlist for consumer-controlled URLs. Nil falls back to a
+          timeout-bounded client that refuses redirects (CheckRedirect returns
+          http.ErrUseLastResponse), NOT http.DefaultClient — so a redirect cannot
+          bypass the validated target — on a connection pool of its own, which the
+          sink's Close releases: a clone of http.DefaultTransport while that is the
+          stdlib's *http.Transport, proxy environment included. A process that
+          replaced http.DefaultTransport with another RoundTripper gets a fresh
+          transport that keeps only the proxy environment and the idle reaping,
+          never that RoundTripper — whatever it carries reaches this writer only
+          through an HTTPClient that carries it.
+
+          A supplied client is used AS-IS, Transport included, and its pool is the
+          caller's: the sink's Close leaves it alone, so a caller that built one for
+          this writer alone releases it with CloseIdleConnections after closing the
+          writer. One whose Transport is http.DefaultTransport (a nil Transport is)
+          shares that pool with the whole process, and anything that empties it —
+          every httptest.Server.Close, every http.DefaultClient.CloseIdleConnections
+          — can make a delivered record read as a failed write, which a failover or
+          retry then duplicates. Give such a client a Transport of its own.
+        name: HTTPClient
+        type: "*http.Client"
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          (level.Info) inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          BufferSize is the async ring capacity; a non-positive value applies
+          async's own default. The producer never blocks on the network — drops
+          surface through OnDrop instead.
+        name: BufferSize
+        type: int
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated (network slower than producers).
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every downstream send failure the
+          async drainer observes (dial/write/non-2xx). Nil discards the error — the
+          async ring is the only failure surface once the producer has handed off.
+          Code-only, like Dialer/HTTPClient — never decoded from a config blob.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: NetConfig
+  - doc: |-
+      sendFunc ships one formatted record over the transport, returning a non-nil
+      error to fail the write. A func type (not an interface) keeps the concrete
+      transport (a dialed net.Conn or an http.Client closure) captured in client.go
+      and lets tests inject a recording closure with no real network.
+    kind: named
+    name: sendFunc
+    underlying: func(ctx context.Context, p []byte) error
+  - doc: |-
+      netSink is the unexported per-record sink behind core/observe/logger.Sink. It owns the
+      transport's send + close seams and serialises both under mu so a Close never
+      races an in-flight send.
+    fields:
+      - doc: |-
+          network is the protocol identifier (tcp/udp/http) used only for error
+          fields — never the address (SSRF/secret gate).
+        name: network
+        type: string
+      - doc: send ships one record over the transport; captured at construction.
+        name: send
+        type: sendFunc
+      - doc: |-
+          closer releases the transport: net.Conn.Close for tcp/udp; for http, the
+          idle connections of the pool the sink owns — the default client's — and
+          nothing of a caller-supplied client's.
+        name: closer
+        type: func() error
+      - doc: |-
+          mu serialises send against Close so the transport is never used after or
+          during its own close.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          Write ships p over the transport synchronously under the mutex. The payload is
+          consumed before Write returns, so no clone is needed even though the caller
+          recycles p (0 alloc). A cancelled context skips the send.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *netSink
+        results: n int, err error
+      - doc: |-
+          Flush is a no-op: each record is shipped synchronously by Write, so nothing is
+          buffered on this side (the async ring upstream owns buffering). It still
+          honours cancellation to satisfy the Sink contract.
+        name: Flush
+        params: ctx context.Context
+        recv: s *netSink
+        results: error
+      - doc: |-
+          Close releases the transport under the mutex. Subsequent sends fail with the
+          transport's own closed error, wrapped as NetTransportWriteFailed.
+        name: Close
+        recv: s *netSink
+        results: error
+    name: netSink
+  - doc: |-
+      netFactory builds a network Sink for one protocol. The proto field is both the
+      registry key (Name) and the net.Dial network, so one type serves all three
+      registrations without three near-identical structs.
+    fields:
+      - doc: "proto is the protocol identifier: tcp, udp, or http."
+        name: proto
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          Decode builds a NetConfig from a raw config map, satisfying
+          core/observe/logger/writer.Decoder. "address" is mandatory; "min_level" and "buffer_size"
+          are optional. The code-only Dialer / HTTPClient seams are not decodable.
+        name: Decode
+        params: raw map[string]any
+        recv: f *netFactory
+        results: cfg writer.Config, err error
+      - doc: |-
+          invalid returns the shared, redacted WriterConfigInvalid sentinel tagged with
+          the protocol only — never a decoded option value (secret gate).
+        name: invalid
+        recv: f *netFactory
+        results: error
+      - doc: Name reports the canonical key (the protocol identifier).
+        name: Name
+        recv: f *netFactory
+        results: writer.Name
+      - doc: |-
+          Open validates cfg and builds the composed sink. A wrong concrete config type
+          yields the shared WriterConfigInvalid; an empty Address surfaces the dial
+          sentinel (no address echoed).
+        name: Open
+        params: cfg writer.Config
+        recv: f *netFactory
+        results: sink corelogger.Sink, err error
+      - doc: |-
+          build wires the protocol seam (http client or a dialed conn) and composes the
+          levelgate(async(netSink)) chain around it.
+        name: build
+        params: c NetConfig
+        recv: f *netFactory
+        results: sink corelogger.Sink, err error
+    name: netFactory
+vars:
+  - doc: |-
+      WriterTCP / WriterUDP / WriterHTTP are the registered factory singletons. The
+      blank assignments run writer.Register at package load (no init()), mirroring
+      the codec convention.
+    grouped: true
+    items:
+      - name: WriterTCP
+        value: "writer.Register(&netFactory{proto: protoTCP})"
+      - name: WriterUDP
+        value: "writer.Register(&netFactory{proto: protoUDP})"
+      - name: WriterHTTP
+        value: "writer.Register(&netFactory{proto: protoHTTP})"
+    name: WriterTCP

@@ -1,0 +1,105 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: CodePolicyInvalid identifies a gate policy that could not be used as written.
+    items:
+      - name: CodePolicyInvalid
+        type: errs.Code
+        value: coregate.CodePolicyInvalid
+    name: CodePolicyInvalid
+  - doc: UpdateRefuse stops the invocation and reports the floor.
+    items:
+      - name: UpdateRefuse
+        type: UpdateAction
+        value: coregate.UpdateRefuse
+    name: UpdateRefuse
+  - doc: UpdateApply asks the caller to upgrade and re-run the invocation.
+    items:
+      - name: UpdateApply
+        type: UpdateAction
+        value: coregate.UpdateApply
+    name: UpdateApply
+  - doc: UpdateWarn runs the invocation anyway and reports the floor alongside it.
+    items:
+      - name: UpdateWarn
+        type: UpdateAction
+        value: coregate.UpdateWarn
+    name: UpdateWarn
+  - doc: OutcomeAllow runs the invocation.
+    items:
+      - name: OutcomeAllow
+        type: Outcome
+        value: coregate.OutcomeAllow
+    name: OutcomeAllow
+  - doc: OutcomeRefuse stops the invocation; Decision.Cause says why.
+    items:
+      - name: OutcomeRefuse
+        type: Outcome
+        value: coregate.OutcomeRefuse
+    name: OutcomeRefuse
+  - doc: OutcomeUpgrade asks the caller to upgrade and re-run.
+    items:
+      - name: OutcomeUpgrade
+        type: Outcome
+        value: coregate.OutcomeUpgrade
+    name: OutcomeUpgrade
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - CodePolicyInvalid
+      - UpdateRefuse
+      - UpdateApply
+      - UpdateWarn
+      - OutcomeAllow
+      - OutcomeRefuse
+      - OutcomeUpgrade
+      - Policy
+      - Decision
+      - UpdateAction
+      - Outcome
+      - Decide
+    name: gate.go
+functions:
+  - name: Decide
+    params: policy *Policy, path []string, verify func() error
+    results: Decision
+imports:
+  coregate: github.com/kitsunium/sdk/framework/internal/core/gate
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  svcgate: github.com/kitsunium/sdk/framework/internal/service/gate
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/gate
+  name: gate
+  purpose: Package gate decides whether one invocation of a distributed binary may run.
+types:
+  - alias: true
+    doc: |-
+      Policy is one product's gate policy: what runs unchecked, what must never be
+      gated, and what a mandated upgrade does. Its zero value is refused by
+      Validate.
+    kind: alias
+    name: Policy
+    underlying: coregate.PolicyValue
+  - alias: true
+    doc: |-
+      Decision is what the gate concluded about one invocation. It carries no
+      method that acts.
+    kind: alias
+    name: Decision
+    underlying: coregate.DecisionValue
+  - alias: true
+    doc: |-
+      UpdateAction is what happens when the vendor mandates a newer build. Its zero
+      value is unclaimed, because refusing and upgrading are opposite answers.
+    kind: alias
+    name: UpdateAction
+    underlying: coregate.UpdateAction
+  - alias: true
+    doc: |-
+      Outcome is what the caller should do with an invocation. Its zero value is
+      unclaimed, so a decision nobody made never reads as "allow".
+    kind: alias
+    name: Outcome
+    underlying: coregate.Outcome

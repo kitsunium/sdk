@@ -1,0 +1,1377 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Boundary
+    participants:
+      - id: caller
+        kind: actor
+      - id: Boundary
+        kind: self
+      - id: firstDelimiterLine
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: candidateOrRefusal
+        kind: internal
+    steps:
+      - bind: candidate, found
+        eval: firstDelimiterLine(data)
+        to: firstDelimiterLine
+      - opt:
+          do:
+            - return: "\"\", boundaryInvalid(\"no delimiter line found within the sniff window\")"
+          when: "!found"
+      - bind: trimmed, closing
+        eval: strings.CutSuffix(candidate, delimiterPrefix)
+        to: strings
+      - opt:
+          do:
+            - return: candidateOrRefusal(candidate)
+              to: candidateOrRefusal
+          when: "!closing"
+      - opt:
+          do:
+            - return: candidate, nil
+          when: validateBoundary(candidate) == nil && closesWith(data, candidate)
+      - opt:
+          do:
+            - return: trimmed, nil
+          when: validateBoundary(trimmed) == nil && closesWith(data, trimmed)
+      - return: candidateOrRefusal(candidate)
+        to: candidateOrRefusal
+  - of: candidateOrRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: candidateOrRefusal
+        kind: self
+      - id: validateBoundary
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: candidate, nil
+          init:
+            bind: verr
+            eval: validateBoundary(candidate)
+            to: validateBoundary
+          when: verr == nil
+      - return: "\"\", boundaryInvalid(\"first delimiter line is not a valid RFC 2046 boundary\")"
+  - of: ContentType
+    participants:
+      - id: caller
+        kind: actor
+      - id: ContentType
+        kind: self
+      - id: Boundary
+        kind: internal
+      - id: mime
+        kind: stdlib
+    steps:
+      - bind: boundary, berr
+        eval: Boundary(data)
+        to: Boundary
+      - opt:
+          do:
+            - return: "\"\", berr"
+          when: berr != nil
+      - return: "mime.FormatMediaType(mimeFormData, map[string]string{\"boundary\": boundary}), nil"
+        to: mime
+  - of: firstDelimiterLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: firstDelimiterLine
+        kind: self
+      - id: scanDelimiterLine
+        kind: internal
+    steps:
+      - bind: raw, ok
+        eval: scanDelimiterLine(data)
+        to: scanDelimiterLine
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok"
+      - return: string(raw), true
+  - of: scanDelimiterLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanDelimiterLine
+        kind: self
+      - id: nextLine
+        kind: internal
+    steps:
+      - bind: window
+        eval: data
+      - opt:
+          do:
+            - set: window
+              value: window[:boundarySniffWindow]
+          when: len(window) > boundarySniffWindow
+      - bind: prefix
+        eval: "[]byte(delimiterPrefix)"
+      - loop:
+          cond: cursor < len(window)
+          do:
+            - bind: line, next
+              eval: nextLine(window, cursor)
+              to: nextLine
+            - set: cursor
+              value: next
+            - opt:
+                do:
+                  - continue: true
+                when: "!bytes.HasPrefix(line, prefix)"
+            - return: line[len(prefix):], true
+          init: cursor := 0
+      - return: nil, false
+  - of: nextLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: nextLine
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - bind: offset
+        eval: bytes.IndexByte(data[cursor:], '\n')
+        to: bytes
+      - opt:
+          do:
+            - return: bytes.TrimSuffix(data[cursor:], []byte{'\r'}), len(data)
+              to: bytes
+          when: offset < 0
+      - return: bytes.TrimSuffix(data[cursor:cursor+offset], []byte{'\r'}), cursor + offset + 1
+        to: bytes
+  - of: closesWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: closesWith
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - return: bytes.Contains(data, []byte(delimiterPrefix+boundary+delimiterPrefix))
+        to: bytes
+  - of: validateBoundary
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateBoundary
+        kind: self
+      - id: boundaryInvalid
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: boundaryInvalid("boundary length must be 1..70 characters")
+              to: boundaryInvalid
+          when: boundary == "" || len(boundary) > maxBoundaryLen
+      - opt:
+          do:
+            - return: boundaryInvalid("boundary carries a character outside the RFC 2046 set")
+              to: boundaryInvalid
+          when: |-
+            strings.ContainsFunc(boundary, func(r rune) bool {
+            		//: report the first character outside the allowed set.
+            		return !strings.ContainsRune(boundaryChars, r)
+            	})
+      - opt:
+          do:
+            - return: boundaryInvalid("boundary must not end with a space")
+              to: boundaryInvalid
+          when: strings.HasSuffix(boundary, " ")
+      - return: nil
+  - of: boundaryInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundaryInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremultipart.CodeMultipartBoundaryInvalid,
+          		Reason:  "BOUNDARY_INVALID",
+          		Public:  "multipart boundary is missing or invalid",
+          		Private: "service/data/codec/multipart: " + detail,
+          	})
+        to: errs
+  - of: defaultLimits
+    steps:
+      - return: |-
+          LimitsConfig{
+          		MaxPartBytes:  DefaultMaxPartBytes,
+          		MaxParts:      DefaultMaxParts,
+          		MaxTotalBytes: DefaultMaxTotalBytes,
+          	}
+  - of: New
+    steps:
+      - return: Codec
+  - of: NewWithLimits
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWithLimits
+        kind: self
+      - id: l.resolve
+        kind: internal
+    steps:
+      - bind: resolved, rerr
+        eval: l.resolve()
+        to: l.resolve
+      - opt:
+          do:
+            - return: nil, rerr
+          when: rerr != nil
+      - return: "&multipartCodec{limits: resolved}, nil"
+  - of: (*multipartCodec).Name
+    steps:
+      - return: "\"multipart\""
+  - of: (*multipartCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*multipartCodec).Extensions
+    steps:
+      - return: nil
+  - of: (*multipartCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).Marshal
+        kind: self
+      - id: asForm
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: c.encodeForm
+        kind: internal
+    steps:
+      - bind: form, ferr
+        eval: asForm(v)
+        to: asForm
+      - opt:
+          do:
+            - return: nil, ferr
+          when: ferr != nil
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: nil, eerr
+          init:
+            bind: eerr
+            eval: c.encodeForm(buf, form)
+            to: c.encodeForm
+          when: eerr != nil
+      - return: scratch.DetachBuffer(buf), nil
+        to: scratch
+  - of: (*multipartCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).Unmarshal
+        kind: self
+      - id: Boundary
+        kind: internal
+      - id: c.decoderFor
+        kind: internal
+      - id: readForm
+        kind: internal
+      - id: readJSONMediated
+        kind: internal
+    steps:
+      - bind: boundary, berr
+        eval: Boundary(data)
+        to: Boundary
+      - opt:
+          do:
+            - return: berr
+          when: berr != nil
+      - bind: dec
+        eval: c.decoderFor(bytes.NewReader(data), boundary)
+        to: c.decoderFor
+      - opt:
+          do:
+            - return: readForm(dec, boundary, form)
+              to: readForm
+          init:
+            bind: form, ok
+            eval: v.(*FormValue)
+          when: ok && form != nil
+      - return: readJSONMediated(dec, v)
+        to: readJSONMediated
+  - of: (*multipartCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).Append
+        kind: self
+      - id: asForm
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: c.encodeForm
+        kind: internal
+    steps:
+      - bind: form, ferr
+        eval: asForm(v)
+        to: asForm
+      - opt:
+          do:
+            - return: dst, ferr
+          when: ferr != nil
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: dst, eerr
+          init:
+            bind: eerr
+            eval: c.encodeForm(buf, form)
+            to: c.encodeForm
+          when: eerr != nil
+      - bind: out
+        eval: append(dst, buf.Bytes()...)
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: out, nil
+  - of: (*multipartCodec).NewEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).NewEncoder
+        kind: self
+      - id: c.encoderFor
+        kind: internal
+    steps:
+      - return: c.encoderFor(w)
+        to: c.encoderFor
+  - of: (*multipartCodec).NewDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).NewDecoder
+        kind: self
+      - id: sniffReader
+        kind: internal
+      - id: c.decoderFor
+        kind: internal
+    steps:
+      - bind: buffered, boundary, serr
+        eval: sniffReader(r)
+        to: sniffReader
+      - opt:
+          do:
+            - return: "&multipartDecoder{pendErr: serr}"
+          when: serr != nil
+      - return: c.decoderFor(buffered, boundary)
+        to: c.decoderFor
+  - of: (*multipartCodec).NewEncoderWithBoundary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).NewEncoderWithBoundary
+        kind: self
+      - id: c.pinnedEncoder
+        kind: internal
+    steps:
+      - bind: built, berr
+        eval: c.pinnedEncoder(w, boundary)
+        to: c.pinnedEncoder
+      - opt:
+          do:
+            - return: nil, berr
+          when: berr != nil
+      - return: built, nil
+  - of: (*multipartCodec).NewDecoderWithBoundary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).NewDecoderWithBoundary
+        kind: self
+      - id: validateBoundary
+        kind: internal
+      - id: c.decoderFor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: validateBoundary(boundary)
+            to: validateBoundary
+          when: verr != nil
+      - return: c.decoderFor(r, boundary), nil
+        to: c.decoderFor
+  - of: (*multipartCodec).encoderFor
+    steps:
+      - return: "&multipartEncoder{inner: stdmp.NewWriter(w), count: counter{limits: c.limits}}"
+  - of: (*multipartCodec).pinnedEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).pinnedEncoder
+        kind: self
+      - id: c.encoderFor
+        kind: internal
+      - id: built.inner.SetBoundary
+        kind: value
+    steps:
+      - bind: built
+        eval: c.encoderFor(w)
+        to: c.encoderFor
+      - opt:
+          do:
+            - return: nil, boundaryInvalid("mime/multipart rejected the caller-supplied boundary")
+          init:
+            bind: serr
+            eval: built.inner.SetBoundary(boundary)
+            to: built.inner.SetBoundary
+          when: serr != nil
+      - return: built, nil
+  - of: (*multipartCodec).decoderFor
+    steps:
+      - return: "&multipartDecoder{inner: stdmp.NewReader(r, boundary), count: counter{limits: c.limits}}"
+  - of: (*multipartCodec).encodeForm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).encodeForm
+        kind: self
+      - id: c.formEncoder
+        kind: internal
+      - id: enc.Encode
+        kind: internal
+      - id: enc.Close
+        kind: internal
+    steps:
+      - bind: enc, eerr
+        eval: c.formEncoder(w, form.Boundary)
+        to: c.formEncoder
+      - opt:
+          do:
+            - return: eerr
+          when: eerr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: werr
+                init:
+                  bind: werr
+                  eval: enc.Encode(&form.Parts[i])
+                  to: enc.Encode
+                when: werr != nil
+          key: i
+          range: form.Parts
+      - return: enc.Close()
+        to: enc.Close
+  - of: (*multipartCodec).formEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).formEncoder
+        kind: self
+      - id: c.encoderFor
+        kind: internal
+      - id: c.pinnedEncoder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: c.encoderFor(w), nil
+              to: c.encoderFor
+          when: boundary == ""
+      - return: c.pinnedEncoder(w, boundary)
+        to: c.pinnedEncoder
+  - of: asForm
+    participants:
+      - id: caller
+        kind: actor
+      - id: asForm
+        kind: self
+      - id: asPart
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: typed
+          cases:
+            - do:
+                - return: "&typed, nil"
+              types: FormValue
+            - do:
+                - opt:
+                    do:
+                      - return: nil, valueInvalid("Marshal called with a nil *FormValue")
+                    when: typed == nil
+                - return: typed, nil
+              types: "*FormValue"
+            - do:
+                - return: "&FormValue{Parts: typed}, nil"
+              types: "[]PartValue"
+          "on": v
+      - bind: part, perr
+        eval: asPart(v)
+        to: asPart
+      - opt:
+          do:
+            - return: nil, perr
+          when: perr != nil
+      - return: "&FormValue{Parts: []PartValue{*part}}, nil"
+  - of: readForm
+    participants:
+      - id: caller
+        kind: actor
+      - id: readForm
+        kind: self
+      - id: dec.Decode
+        kind: internal
+    steps:
+      - var:
+          name: parts
+          type: "[]PartValue"
+      - loop:
+          do:
+            - var:
+                name: part
+                type: PartValue
+            - bind: derr
+              eval: dec.Decode(&part)
+              to: dec.Decode
+            - opt:
+                do:
+                  - set: form.Boundary
+                    value: boundary
+                  - set: form.Parts
+                    value: parts
+                  - return: nil
+                when: errIsEOF(derr)
+            - opt:
+                do:
+                  - return: derr
+                when: derr != nil
+            - set: parts
+              value: append(parts, part)
+          forever: true
+  - of: readJSONMediated
+    participants:
+      - id: caller
+        kind: actor
+      - id: readJSONMediated
+        kind: self
+      - id: dec.Decode
+        kind: internal
+      - id: unmarshalFailed
+        kind: internal
+      - id: assignPart
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - var:
+                name: part
+                type: PartValue
+            - bind: derr
+              eval: dec.Decode(&part)
+              to: dec.Decode
+            - opt:
+                do:
+                  - return: |-
+                      unmarshalFailed(nil,
+                      				"Unmarshal: body carries no "+JSONPartName+" part; decode into a *FormValue instead")
+                    to: unmarshalFailed
+                when: errIsEOF(derr)
+            - opt:
+                do:
+                  - return: derr
+                when: derr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: part.Name != JSONPartName
+            - return: assignPart(&part, v)
+              to: assignPart
+          forever: true
+  - of: (*counter).readBudget
+    steps:
+      - bind: remaining
+        eval: c.limits.MaxTotalBytes - c.total
+      - opt:
+          do:
+            - return: "\"MaxTotalBytes\", c.limits.MaxTotalBytes, remaining"
+          when: remaining < c.limits.MaxPartBytes
+      - return: "\"MaxPartBytes\", c.limits.MaxPartBytes, c.limits.MaxPartBytes"
+  - of: (*counter).admitPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*counter).admitPart
+        kind: self
+      - id: limitExceeded
+        kind: internal
+    steps:
+      - op: ++
+        set: c.parts
+      - opt:
+          do:
+            - return: limitExceeded("MaxParts", int64(c.limits.MaxParts), int64(c.parts))
+              to: limitExceeded
+          when: c.parts > c.limits.MaxParts
+      - opt:
+          do:
+            - return: limitExceeded("MaxPartBytes", c.limits.MaxPartBytes, n)
+              to: limitExceeded
+          when: n > c.limits.MaxPartBytes
+      - op: +=
+        set: c.total
+        value: "n"
+      - opt:
+          do:
+            - return: limitExceeded("MaxTotalBytes", c.limits.MaxTotalBytes, c.total)
+              to: limitExceeded
+          when: c.total > c.limits.MaxTotalBytes
+      - return: nil
+  - of: (*multipartDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartDecoder).Decode
+        kind: self
+      - id: d.fetch
+        kind: internal
+      - id: publishPart
+        kind: internal
+      - id: assignPart
+        kind: internal
+    steps:
+      - eval: d.fetch()
+        to: d.fetch
+      - opt:
+          do:
+            - bind: err
+              eval: d.pendErr
+            - set: d.pendErr
+              value: nil
+            - set: d.done
+              value: "true"
+            - return: err
+          when: d.pendErr != nil
+      - opt:
+          do:
+            - return: io.EOF
+          when: d.pending == nil
+      - bind: part
+        eval: d.pending
+      - set: d.pending
+        value: nil
+      - opt:
+          do:
+            - return: publishPart(part, target)
+              to: publishPart
+          init:
+            bind: target, ok
+            eval: v.(*PartValue)
+          when: ok
+      - return: assignPart(part, v)
+        to: assignPart
+  - of: (*multipartDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartDecoder).More
+        kind: self
+      - id: d.fetch
+        kind: internal
+    steps:
+      - eval: d.fetch()
+        to: d.fetch
+      - return: d.pending != nil || d.pendErr != nil
+  - of: (*multipartDecoder).fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartDecoder).fetch
+        kind: self
+      - id: d.inner.NextPart
+        kind: value
+      - id: unmarshalFailed
+        kind: internal
+      - id: d.readInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: d.done || d.pending != nil || d.pendErr != nil
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: ""
+          when: d.inner == nil
+      - bind: next, nerr
+        eval: d.inner.NextPart()
+        to: d.inner.NextPart
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: ""
+          when: errIsEOF(nerr)
+      - opt:
+          do:
+            - set: d.pendErr
+              to: unmarshalFailed
+              value: "unmarshalFailed(nerr, \"Decoder: reading the next part failed\")"
+            - return: ""
+          when: nerr != nil
+      - eval: d.readInto(next)
+        to: d.readInto
+  - of: (*multipartDecoder).readInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartDecoder).readInto
+        kind: self
+      - id: dispositionOf
+        kind: internal
+      - id: unmarshalFailed
+        kind: internal
+      - id: d.readBody
+        kind: internal
+    steps:
+      - bind: name, fileName
+        eval: dispositionOf(src)
+        to: dispositionOf
+      - opt:
+          do:
+            - set: d.pendErr
+              to: unmarshalFailed
+              value: "unmarshalFailed(nil, \"Decoder: a part carries no form-data name (RFC 7578 §4.2)\")"
+            - return: ""
+          when: name == ""
+      - bind: body, berr
+        eval: d.readBody(src)
+        to: d.readBody
+      - opt:
+          do:
+            - set: d.pendErr
+              value: berr
+            - return: ""
+          when: berr != nil
+      - set: d.pending
+        value: |-
+          &PartValue{
+          		Name:        name,
+          		FileName:    fileName,
+          		ContentType: src.Header.Get("Content-Type"),
+          		Data:        body,
+          	}
+  - of: (*multipartDecoder).readBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartDecoder).readBody
+        kind: self
+      - id: d.count.readBudget
+        kind: internal
+      - id: readBounded
+        kind: internal
+      - id: d.count.admitPart
+        kind: internal
+    steps:
+      - bind: knob, ceiling, budget
+        eval: d.count.readBudget()
+        to: d.count.readBudget
+      - bind: read, overflow, rerr
+        eval: readBounded(src, budget)
+        to: readBounded
+      - opt:
+          do:
+            - return: "nil, unmarshalFailed(rerr, \"Decoder: reading a part body failed\")"
+          when: rerr != nil
+      - opt:
+          do:
+            - return: nil, limitExceeded(knob, ceiling, probeSize(ceiling))
+          when: overflow
+      - opt:
+          do:
+            - return: nil, lerr
+          init:
+            bind: lerr
+            eval: d.count.admitPart(int64(len(read)))
+            to: d.count.admitPart
+          when: lerr != nil
+      - return: read, nil
+  - of: readBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: readBounded
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: limited
+        eval: io.LimitReader(r, probeSize(max))
+        to: io
+      - bind: buf, rerr
+        eval: io.ReadAll(limited)
+        to: io
+      - opt:
+          do:
+            - return: nil, false, rerr
+          when: rerr != nil
+      - opt:
+          do:
+            - return: nil, true, nil
+          when: int64(len(buf)) > max
+      - return: buf, false, nil
+  - of: probeSize
+    steps:
+      - opt:
+          do:
+            - return: bound + 1
+          when: bound < math.MaxInt64
+      - return: bound
+  - of: publishPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: publishPart
+        kind: self
+      - id: valueInvalid
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: valueInvalid("Decode called with a nil *PartValue")
+              to: valueInvalid
+          when: target == nil
+      - set: "*target"
+        value: "*part"
+      - return: nil
+  - of: assignPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: assignPart
+        kind: self
+      - id: valueInvalid
+        kind: internal
+      - id: stdjson
+        kind: stdlib
+      - id: unmarshalFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: valueInvalid("Decode target is not a non-nil pointer")
+              to: valueInvalid
+          when: "!isSettablePointer(v)"
+      - opt:
+          do:
+            - return: "unmarshalFailed(uerr, \"Decoder: part body is not valid JSON\")"
+              to: unmarshalFailed
+          init:
+            bind: uerr
+            eval: stdjson.Unmarshal(part.Data, v)
+            to: stdjson
+          when: uerr != nil
+      - return: nil
+  - of: errIsEOF
+    participants:
+      - id: caller
+        kind: actor
+      - id: errIsEOF
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: errors.Is(err, io.EOF)
+        to: errors
+  - of: isSettablePointer
+    participants:
+      - id: caller
+        kind: actor
+      - id: isSettablePointer
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - return: rv.Kind() == reflect.Pointer && !rv.IsNil()
+  - of: sniffReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: sniffReader
+        kind: self
+      - id: bufio
+        kind: stdlib
+      - id: peekHead
+        kind: internal
+      - id: Boundary
+        kind: internal
+    steps:
+      - bind: br
+        eval: bufio.NewReaderSize(r, boundarySniffWindow)
+        to: bufio
+      - bind: head, perr
+        eval: peekHead(br)
+        to: peekHead
+      - opt:
+          do:
+            - return: "nil, \"\", unmarshalFailed(perr, \"Decoder: reading the boundary failed\")"
+          when: perr != nil && !errIsEOF(perr) && !errors.Is(perr, bufio.ErrBufferFull)
+      - bind: found, berr
+        eval: Boundary(head)
+        to: Boundary
+      - opt:
+          do:
+            - return: nil, "", berr
+          when: berr != nil
+      - return: br, found, nil
+  - of: peekHead
+    participants:
+      - id: caller
+        kind: actor
+      - id: peekHead
+        kind: self
+      - id: br.Peek
+        kind: internal
+    steps:
+      - bind: want
+        eval: "1"
+      - loop:
+          do:
+            - set: head, err
+              to: br.Peek
+              value: br.Peek(want)
+            - opt:
+                do:
+                  - return: head, err
+                when: err != nil || len(head) >= boundarySniffWindow
+            - set: head, err
+              to: br.Peek
+              value: br.Peek(br.Buffered())
+            - opt:
+                do:
+                  - return: head, err
+                when: err != nil
+            - opt:
+                do:
+                  - return: head, nil
+                when: delimiterLineComplete(head)
+            - set: want
+              value: len(head) + 1
+          forever: true
+  - of: delimiterLineComplete
+    participants:
+      - id: caller
+        kind: actor
+      - id: delimiterLineComplete
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: offset
+              eval: bytes.IndexByte(head[cursor:], '\n')
+              to: bytes
+            - opt:
+                do:
+                  - return: "false"
+                when: offset < 0
+            - bind: line
+              eval: bytes.TrimSuffix(head[cursor:cursor+offset], []byte{'\r'})
+              to: bytes
+            - opt:
+                do:
+                  - return: "!bytes.HasSuffix(candidate, []byte(delimiterPrefix))"
+                    to: bytes
+                init:
+                  bind: candidate, ok
+                  eval: bytes.CutPrefix(line, []byte(delimiterPrefix))
+                  to: bytes
+                when: ok
+            - op: +=
+              set: cursor
+              value: offset + 1
+          init: cursor := 0
+  - of: unmarshalFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coremultipart.CodeMultipartUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "multipart decoding failed",
+          		Private: "service/data/codec/multipart." + detail,
+          	})
+        to: errs
+  - of: dispositionOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: dispositionOf
+        kind: self
+      - id: mime
+        kind: stdlib
+    steps:
+      - bind: disposition, params, err
+        eval: mime.ParseMediaType(src.Header.Get("Content-Disposition"))
+        to: mime
+      - opt:
+          do:
+            - return: "\"\", \"\""
+          when: err != nil
+      - opt:
+          do:
+            - set: name
+              value: params["name"]
+          when: disposition == formDataDisposition
+      - return: name, lastElement(params["filename"])
+  - of: lastElement
+    participants:
+      - id: caller
+        kind: actor
+      - id: lastElement
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: trimmed
+        eval: strings.TrimRight(fileName, pathSeparators)
+        to: strings
+      - return: trimmed[strings.LastIndexAny(trimmed, pathSeparators)+1:]
+  - of: (*multipartEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartEncoder).Encode
+        kind: self
+      - id: asPart
+        kind: internal
+      - id: e.count.admitPart
+        kind: internal
+      - id: e.writePart
+        kind: internal
+    steps:
+      - bind: part, perr
+        eval: asPart(v)
+        to: asPart
+      - opt:
+          do:
+            - return: perr
+          when: perr != nil
+      - opt:
+          do:
+            - return: lerr
+          init:
+            bind: lerr
+            eval: e.count.admitPart(int64(len(part.Data)))
+            to: e.count.admitPart
+          when: lerr != nil
+      - return: e.writePart(part)
+        to: e.writePart
+  - of: (*multipartEncoder).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartEncoder).Close
+        kind: self
+      - id: e.inner.Close
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: cerr
+        eval: e.inner.Close()
+        to: e.inner.Close
+      - opt:
+          do:
+            - return: nil
+          when: cerr == nil
+      - return: |-
+          errs.Wrap(cerr, errs.WrapParams{
+          		Code:    coremultipart.CodeMultipartMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "multipart encoding failed",
+          		Private: "service/data/codec/multipart.Encoder.Close: mime/multipart returned an error",
+          	})
+        to: errs
+  - of: (*multipartEncoder).Boundary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartEncoder).Boundary
+        kind: self
+      - id: e.inner.Boundary
+        kind: value
+    steps:
+      - return: e.inner.Boundary()
+        to: e.inner.Boundary
+  - of: (*multipartEncoder).writePart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartEncoder).writePart
+        kind: self
+      - id: valueInvalid
+        kind: internal
+      - id: injectedHeaderField
+        kind: internal
+      - id: e.inner.CreatePart
+        kind: value
+      - id: marshalFailed
+        kind: internal
+      - id: body.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: valueInvalid("part carries no field name")
+              to: valueInvalid
+          when: part.Name == ""
+      - opt:
+          do:
+            - return: |-
+                valueInvalid("a part header value carries a CR, LF or NUL",
+                			errs.String("field", field))
+              to: valueInvalid
+          init:
+            bind: field, found
+            eval: injectedHeaderField(part)
+            to: injectedHeaderField
+          when: found
+      - bind: body, cerr
+        eval: e.inner.CreatePart(partHeader(part))
+        to: e.inner.CreatePart
+      - opt:
+          do:
+            - return: "marshalFailed(cerr, \"Encoder.Encode: CreatePart returned an error\")"
+              to: marshalFailed
+          when: cerr != nil
+      - opt:
+          do:
+            - return: "marshalFailed(werr, \"Encoder.Encode: writing the part body failed\")"
+              to: marshalFailed
+          init:
+            bind: _, werr
+            eval: body.Write(part.Data)
+            to: body.Write
+          when: werr != nil
+      - return: nil
+  - of: injectedHeaderField
+    steps:
+      - opt:
+          do:
+            - return: "\"Name\", true"
+          when: strings.ContainsAny(part.Name, forbiddenHeaderOctets)
+      - opt:
+          do:
+            - return: "\"FileName\", true"
+          when: strings.ContainsAny(part.FileName, forbiddenHeaderOctets)
+      - opt:
+          do:
+            - return: "\"ContentType\", true"
+          when: strings.ContainsAny(part.ContentType, forbiddenHeaderOctets)
+      - return: "\"\", false"
+  - of: partHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: partHeader
+        kind: self
+      - id: header.Set
+        kind: value
+    steps:
+      - bind: disposition
+        eval: "`form-data; name=\"` + quoteEscaper.Replace(part.Name) + `\"`"
+      - opt:
+          do:
+            - op: +=
+              set: disposition
+              value: "`; filename=\"` + quoteEscaper.Replace(part.FileName) + `\"`"
+          when: part.FileName != ""
+      - bind: header
+        eval: make(textproto.MIMEHeader, partHeaderFields)
+      - eval: header.Set("Content-Disposition", disposition)
+        to: header.Set
+      - opt:
+          do:
+            - eval: header.Set("Content-Type", part.ContentType)
+              to: header.Set
+          when: part.ContentType != ""
+      - return: header
+  - of: asPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: asPart
+        kind: self
+      - id: stdjson
+        kind: stdlib
+    steps:
+      - typeswitch:
+          bind: typed
+          cases:
+            - do:
+                - return: "&typed, nil"
+              types: PartValue
+            - do:
+                - opt:
+                    do:
+                      - return: nil, valueInvalid("Encode called with a nil *PartValue")
+                    when: typed == nil
+                - return: typed, nil
+              types: "*PartValue"
+          "on": v
+      - bind: inner, jerr
+        eval: stdjson.Marshal(v)
+        to: stdjson
+      - opt:
+          do:
+            - return: nil, marshalFailed(jerr, "encoding/json rejected the value")
+          when: jerr != nil
+      - return: "&PartValue{Name: JSONPartName, ContentType: mimeJSON, Data: inner}, nil"
+  - of: marshalFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coremultipart.CodeMultipartMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "multipart encoding failed",
+          		Private: "service/data/codec/multipart." + detail,
+          	})
+        to: errs
+  - of: valueInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: valueInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremultipart.CodeMultipartValueInvalid,
+          		Reason:  "VALUE_INVALID",
+          		Public:  "multipart codec rejected the value shape",
+          		Private: "service/data/codec/multipart: " + detail,
+          	}, fields...)
+        to: errs
+  - of: LimitsConfig.resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: LimitsConfig.resolve
+        kind: self
+      - id: l.negativeKnob
+        kind: internal
+    steps:
+      - bind: knob, bad
+        eval: l.negativeKnob()
+        to: l.negativeKnob
+      - opt:
+          do:
+            - return: |-
+                LimitsConfig{}, errs.Wrap(nil, errs.WrapParams{
+                			Code:    coremultipart.CodeMultipartLimitsInvalid,
+                			Reason:  "LIMITS_INVALID",
+                			Public:  "multipart limits are not usable",
+                			Private: "service/data/codec/multipart.NewWithLimits: a negative bound is not a limit",
+                		}, errs.String("knob", knob))
+          when: bad
+      - return: |-
+          LimitsConfig{
+          		MaxPartBytes:  clampInt64(l.MaxPartBytes, DefaultMaxPartBytes),
+          		MaxParts:      clampInt(l.MaxParts, DefaultMaxParts),
+          		MaxTotalBytes: clampInt64(l.MaxTotalBytes, DefaultMaxTotalBytes),
+          	}, nil
+  - of: LimitsConfig.negativeKnob
+    steps:
+      - opt:
+          do:
+            - return: "\"MaxPartBytes\", true"
+          when: l.MaxPartBytes < 0
+      - opt:
+          do:
+            - return: "\"MaxParts\", true"
+          when: l.MaxParts < 0
+      - opt:
+          do:
+            - return: "\"MaxTotalBytes\", true"
+          when: l.MaxTotalBytes < 0
+      - return: "\"\", false"
+  - of: clampInt64
+    steps:
+      - opt:
+          do:
+            - return: fallback
+          when: v == 0
+      - return: v
+  - of: clampInt
+    steps:
+      - opt:
+          do:
+            - return: fallback
+          when: v == 0
+      - return: v
+  - of: limitExceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: limitExceeded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremultipart.CodeMultipartLimitExceeded,
+          		Reason:  "LIMIT_EXCEEDED",
+          		Public:  "multipart payload exceeds a configured limit",
+          		Private: "service/data/codec/multipart: bound crossed while walking the parts",
+          	}, errs.String("knob", knob), errs.Int64("bound", bound), errs.Int64("got", got))
+        to: errs

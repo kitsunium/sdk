@@ -1,0 +1,124 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*failoverSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*failoverSink).Write
+        kind: self
+      - id: branch.Write
+        kind: value
+    steps:
+      - var:
+          name: collected
+          type: "[]error"
+      - loop:
+          do:
+            - bind: written, werr
+              eval: branch.Write(ctx, rec, p)
+              to: branch.Write
+            - opt:
+                do:
+                  - return: written, nil
+                when: werr == nil
+            - set: collected
+              value: append(collected, werr)
+          key: _
+          range: s.chain
+          value: branch
+      - return: |-
+          0, errs.Wrap(errors.Join(collected...), errs.WrapParams{
+          		Code:    corefailover.CodeFailoverExhausted,
+          		Reason:  "FAILOVER_EXHAUSTED",
+          		Public:  "All failover sinks returned an error",
+          		Private: "service/observe/logger/middleware/failover.Write exhausted the chain",
+          	}, errs.Int("attempts", len(s.chain)), errs.Int("level", int(rec.Level)))
+  - of: (*failoverSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*failoverSink).Flush
+        kind: self
+      - id: branch.Flush
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: collected
+        eval: make([]error, 0, len(s.chain))
+      - bind: seen
+        eval: make(map[corelogger.Sink]struct{}, len(s.chain))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[branch]
+                when: dup
+            - set: seen[branch]
+              value: struct{}{}
+            - opt:
+                do:
+                  - set: collected
+                    value: append(collected, ferr)
+                init:
+                  bind: ferr
+                  eval: branch.Flush(ctx)
+                  to: branch.Flush
+                when: ferr != nil
+          key: _
+          range: s.chain
+          value: branch
+      - opt:
+          do:
+            - return: errors.Join(collected...)
+              to: errors
+          when: len(collected) > 0
+      - return: nil
+  - of: (*failoverSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*failoverSink).Close
+        kind: self
+      - id: branch.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: collected
+        eval: make([]error, 0, len(s.chain))
+      - bind: seen
+        eval: make(map[corelogger.Sink]struct{}, len(s.chain))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[branch]
+                when: dup
+            - set: seen[branch]
+              value: struct{}{}
+            - opt:
+                do:
+                  - set: collected
+                    value: append(collected, cerr)
+                init:
+                  bind: cerr
+                  eval: branch.Close()
+                  to: branch.Close
+                when: cerr != nil
+          key: _
+          range: s.chain
+          value: branch
+      - opt:
+          do:
+            - return: errors.Join(collected...)
+              to: errors
+          when: len(collected) > 0
+      - return: nil

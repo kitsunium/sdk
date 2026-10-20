@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: FileSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: FileSource
+        kind: self
+      - id: svcconfig
+        kind: package
+    steps:
+      - return: svcconfig.FileSource(codec.Format(format), path)
+        to: svcconfig
+  - of: FSSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: FSSource
+        kind: self
+      - id: svcconfig
+        kind: package
+    steps:
+      - return: svcconfig.FSSource(fsys, codec.Format(format), path)
+        to: svcconfig

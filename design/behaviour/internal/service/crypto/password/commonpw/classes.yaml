@@ -1,0 +1,64 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - listText
+      - IsCommon
+      - compareFolded
+      - Len
+    name: commonpw.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: IsCommon
+    params: password []byte
+    results: bool
+  - doc: |-
+      compareFolded compares entry with password lower-cased, byte for byte, as
+      strings.Compare(entry, strings.ToLower(string(password))) would, without
+      building that string: each rune of password is lower-cased by
+      unicode.ToLower and encoded as strings.ToLower encodes it — an invalid byte
+      as U+FFFD — into a buffer on the stack.
+    name: compareFolded
+    params: entry string, password []byte
+    results: int
+  - name: Len
+    results: int
+imports:
+  cmp: cmp
+  slices: slices
+  strings: strings
+  sync: sync
+  unicode: unicode
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/password/commonpw
+  name: commonpw
+  purpose: Package commonpw holds the ten thousand most common passwords, and says whether a password is one of them (ADR 0143 §D10).
+types: []
+vars:
+  - grouped: true
+    items:
+      - doc: listText is the list, one password per line, as SecLists publishes it.
+        name: listText
+        type: string
+      - doc: |-
+          sorted is the list lower-cased, deduplicated and sorted, built at the
+          first question.
+        name: sorted
+        value: |-
+          sync.OnceValue(func() []string {
+          		entries := make([]string, 0, strings.Count(listText, "\n"))
+          		//: one entry a line, compared lower-cased, as passwords are.
+          		for line := range strings.Lines(listText) {
+          			//: the empty line is the empty password, which a length rule refuses.
+          			if entry := strings.TrimRight(line, "\r\n"); entry != "" {
+          				entries = append(entries, strings.ToLower(entry))
+          			}
+          		}
+          		slices.Sort(entries)
+          		//: a password and its case variants are one entry.
+          		return slices.Compact(entries)
+          	})
+    name: listText

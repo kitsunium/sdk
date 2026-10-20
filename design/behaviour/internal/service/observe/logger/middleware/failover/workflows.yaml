@@ -1,0 +1,23 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: New
+    steps:
+      - bind: cp
+        eval: make([]corelogger.Sink, 0, len(branches))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: branch == nil
+            - set: cp
+              value: append(cp, branch)
+          key: _
+          range: branches
+          value: branch
+      - opt:
+          do:
+            - return: nil, corefailover.Empty
+          when: len(cp) == 0
+      - return: "&failoverSink{chain: cp}, nil"

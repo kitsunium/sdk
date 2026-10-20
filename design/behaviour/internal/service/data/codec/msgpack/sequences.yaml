@@ -1,0 +1,5936 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*msgpackCodec).Name
+    steps:
+      - return: "\"msgpack\""
+  - of: (*msgpackCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*msgpackCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*msgpackCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).Marshal
+        kind: self
+      - id: scratch
+        kind: package
+      - id: appendAny
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: retain
+        kind: internal
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: b, merr
+        eval: appendAny(buf.AvailableBuffer(), v, 0)
+        to: appendAny
+      - opt:
+          do:
+            - set: encoded
+              to: slices
+              value: slices.Clone(b)
+          when: merr == nil
+      - eval: retain(buf, b)
+        to: retain
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - opt:
+          do:
+            - return: nil, merr
+          when: merr != nil
+      - return: encoded, nil
+  - of: (*msgpackCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).Unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: unmarshalInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
+                			Reason:  reasonUnmarshal,
+                			Public:  "MessagePack input exceeds size limit",
+                			Private: "service/data/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
+                		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
+              to: errs
+          when: len(data) > maxMsgPackBytes
+      - return: unmarshalInto(data, v)
+        to: unmarshalInto
+  - of: (*msgpackCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).Append
+        kind: self
+      - id: appendAny
+        kind: internal
+    steps:
+      - bind: out, aerr
+        eval: appendAny(dst, v, 0)
+        to: appendAny
+      - opt:
+          do:
+            - return: dst, aerr
+          when: aerr != nil
+      - return: out, nil
+  - of: (*msgpackCodec).NewEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).NewEncoder
+        kind: self
+      - id: newEncoder
+        kind: internal
+    steps:
+      - return: newEncoder(w)
+        to: newEncoder
+  - of: (*msgpackCodec).NewDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackCodec).NewDecoder
+        kind: self
+      - id: newDecoder
+        kind: internal
+    steps:
+      - return: newDecoder(r)
+        to: newDecoder
+  - of: retain
+    steps:
+      - set: "*buf"
+        value: "*bytes.NewBuffer(b[:0])"
+  - of: (*decodeState).truncated
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).truncated
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - return: unmarshalFault("input ends inside a value", errs.Int(fieldOffset, d.off))
+        to: unmarshalFault
+  - of: (*decodeState).remaining
+    steps:
+      - return: uint64(len(d.data) - d.off)
+  - of: (*decodeState).readHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).readHeader
+        kind: self
+      - id: d.readField
+        kind: internal
+      - id: widen
+        kind: internal
+      - id: d.readExtType
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: header{}, d.truncated()
+          when: d.off >= len(d.data)
+      - bind: info
+        eval: "&headerTable[d.data[d.off]]"
+      - op: ++
+        set: d.off
+      - bind: h
+        eval: "header{fam: info.fam, width: info.width, arg: info.inline}"
+      - opt:
+          do:
+            - return: h, unmarshalFault("header byte 0xc1 is never used", errs.Int(fieldOffset, d.off-1))
+          when: info.fam == famInvalid
+      - opt:
+          do:
+            - bind: raw, err
+              eval: d.readField(info.width)
+              to: d.readField
+            - opt:
+                do:
+                  - return: h, err
+                when: err != nil
+            - set: h.arg
+              to: widen
+              value: widen(raw, info)
+          when: info.width != 0
+      - opt:
+          do:
+            - return: d.readExtType(h)
+              to: d.readExtType
+          when: info.fam == famExt
+      - return: h, nil
+  - of: (*decodeState).readField
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).readField
+        kind: self
+      - id: beUint
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: int(width)
+      - opt:
+          do:
+            - return: 0, d.truncated()
+          when: len(d.data)-d.off < n
+      - bind: p
+        eval: "d.data[d.off : d.off+n]"
+      - op: +=
+        set: d.off
+        value: "n"
+      - return: beUint(p), nil
+        to: beUint
+  - of: beUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: beUint
+        kind: self
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: int(width8)
+              do:
+                - return: uint64(p[0])
+            - case: int(width16)
+              do:
+                - return: uint64(binary.BigEndian.Uint16(p))
+            - case: int(width32)
+              do:
+                - return: uint64(binary.BigEndian.Uint32(p))
+            - default: true
+              do:
+                - return: binary.BigEndian.Uint64(p)
+                  to: binary.BigEndian.Uint64
+          "on": len(p)
+  - of: widen
+    steps:
+      - opt:
+          do:
+            - return: raw
+          when: info.fam != famInt
+      - switch:
+          cases:
+            - case: width8
+              do:
+                - return: uint64(int64(int8(raw)))
+            - case: width16
+              do:
+                - return: uint64(int64(int16(raw)))
+            - case: width32
+              do:
+                - return: uint64(int64(int32(raw)))
+            - default: true
+              do:
+                - return: raw
+          "on": info.width
+  - of: (*decodeState).readExtType
+    steps:
+      - opt:
+          do:
+            - return: h, d.truncated()
+          when: d.off >= len(d.data)
+      - set: h.ext
+        value: int8(d.data[d.off])
+      - op: ++
+        set: d.off
+      - return: h, nil
+  - of: (*decodeState).take
+    steps:
+      - opt:
+          do:
+            - return: |-
+                nil, unmarshalFault("declared length exceeds the remaining input",
+                			errs.Int(fieldOffset, d.off), errs.Int64(fieldLen, int64(min(n, math.MaxInt64))))
+          when: n > d.remaining()
+      - bind: p
+        eval: "d.data[d.off : d.off+int(n)]"
+      - op: +=
+        set: d.off
+        value: int(n)
+      - return: p, nil
+  - of: (*decodeState).checkCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkCount
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - bind: need
+        eval: h.arg
+      - opt:
+          do:
+            - op: "*="
+              set: need
+              value: mapEntryMinBytes
+          when: h.fam == famMap
+      - opt:
+          do:
+            - return: |-
+                unmarshalFault("declared element count exceeds the remaining input",
+                			errs.Int(fieldOffset, d.off), errs.Int64(fieldLen, int64(h.arg)))
+              to: unmarshalFault
+          when: need > d.remaining()
+      - return: nil
+  - of: (*decodeState).enter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).enter
+        kind: self
+      - id: depthExceeded
+        kind: internal
+    steps:
+      - op: ++
+        set: d.depth
+      - opt:
+          do:
+            - return: depthExceeded(false)
+              to: depthExceeded
+          when: d.depth > maxDepth
+      - return: nil
+  - of: (*decodeState).leave
+    steps:
+      - op: "--"
+        set: d.depth
+  - of: (*decodeState).peekNil
+    steps:
+      - return: d.off < len(d.data) && d.data[d.off] == codeNil
+  - of: (*decodeState).skip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).skip
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.skipBody
+        kind: internal
+    steps:
+      - loop:
+          cond: owed > 0
+          do:
+            - bind: h, err
+              eval: d.readHeader()
+              to: d.readHeader
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: owed, err
+              to: d.skipBody
+              value: d.skipBody(h, owed)
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          init: owed := uint64(1)
+          post: owed--
+      - return: nil
+  - of: (*decodeState).skipBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).skipBody
+        kind: self
+      - id: d.take
+        kind: internal
+      - id: d.checkCount
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: famStr, famBin, famExt
+              do:
+                - bind: _, err
+                  eval: d.take(h.arg)
+                  to: d.take
+                - return: owed, err
+            - case: famArray, famMap
+              do:
+                - opt:
+                    do:
+                      - return: owed, err
+                    init:
+                      bind: err
+                      eval: d.checkCount(h)
+                      to: d.checkCount
+                    when: err != nil
+                - opt:
+                    do:
+                      - return: owed + h.arg*valuesPerPair, nil
+                    when: h.fam == famMap
+                - return: owed + h.arg, nil
+            - default: true
+              do:
+                - return: owed, nil
+          "on": h.fam
+  - of: valueExtent
+    participants:
+      - id: caller
+        kind: actor
+      - id: valueExtent
+        kind: self
+      - id: extentStep
+        kind: internal
+    steps:
+      - bind: "off"
+        eval: "0"
+      - loop:
+          cond: owed > 0
+          do:
+            - var:
+                name: ok
+                type: bool
+            - set: off, owed, ok
+              to: extentStep
+              value: extentStep(p, off, owed)
+            - opt:
+                do:
+                  - return: 0, false
+                when: "!ok"
+          init: owed := uint64(1)
+          post: owed--
+      - return: off, true
+  - of: extentStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: extentStep
+        kind: self
+      - id: beUint
+        kind: internal
+      - id: extentBody
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: off, owed, false
+          when: off >= len(p)
+      - bind: info
+        eval: "&headerTable[p[off]]"
+      - op: ++
+        set: "off"
+      - bind: arg
+        eval: info.inline
+      - opt:
+          do:
+            - return: off, owed, false
+          when: info.fam == famInvalid || len(p)-off < int(info.width)
+      - opt:
+          do:
+            - set: arg
+              to: beUint
+              value: "beUint(p[off : off+int(info.width)])"
+            - op: +=
+              set: "off"
+              value: int(info.width)
+          when: info.width != 0
+      - return: extentBody(p, off, owed, info.fam, arg)
+        to: extentBody
+  - of: extentBody
+    steps:
+      - bind: left
+        eval: uint64(len(p) - off)
+      - switch:
+          cases:
+            - case: famStr, famBin
+              do:
+                - return: off + int(min(arg, left)), owed, arg <= left
+            - case: famExt
+              do:
+                - return: off + int(min(arg+1, left)), owed, arg+1 <= left
+            - case: famArray
+              do:
+                - return: off, owed + arg, owed+arg-1 <= left
+            - case: famMap
+              do:
+                - return: off, owed + arg*valuesPerPair, owed+arg*valuesPerPair-1 <= left
+            - default: true
+              do:
+                - return: off, owed, true
+          "on": fam
+  - of: (*decodeState).decodeAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).decodeAny
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.decodeArrayAny
+        kind: internal
+      - id: d.decodeMapAny
+        kind: internal
+      - id: d.decodePayloadAny
+        kind: internal
+      - id: scalarAny
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famArray
+              do:
+                - return: d.decodeArrayAny(h)
+                  to: d.decodeArrayAny
+            - case: famMap
+              do:
+                - return: d.decodeMapAny(h)
+                  to: d.decodeMapAny
+            - case: famStr, famBin, famExt
+              do:
+                - return: d.decodePayloadAny(h)
+                  to: d.decodePayloadAny
+            - default: true
+              do:
+                - return: scalarAny(h), nil
+                  to: scalarAny
+          "on": h.fam
+  - of: scalarAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: scalarAny
+        kind: self
+      - id: signedAny
+        kind: internal
+      - id: unsignedAny
+        kind: internal
+      - id: math
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: famBool
+              do:
+                - return: h.arg == 1
+            - case: famInt
+              do:
+                - return: signedAny(int64(h.arg), h.width)
+                  to: signedAny
+            - case: famUint
+              do:
+                - return: unsignedAny(h.arg, h.width)
+                  to: unsignedAny
+            - case: famFloat32
+              do:
+                - return: math.Float32frombits(uint32(h.arg))
+                  to: math
+            - case: famFloat64
+              do:
+                - return: math.Float64frombits(h.arg)
+                  to: math
+            - default: true
+              do:
+                - return: nil
+          "on": h.fam
+  - of: signedAny
+    steps:
+      - switch:
+          cases:
+            - case: width16
+              do:
+                - return: int16(n)
+            - case: width32
+              do:
+                - return: int32(n)
+            - case: width64
+              do:
+                - return: "n"
+            - default: true
+              do:
+                - return: int8(n)
+          "on": width
+  - of: unsignedAny
+    steps:
+      - switch:
+          cases:
+            - case: width16
+              do:
+                - return: uint16(n)
+            - case: width32
+              do:
+                - return: uint32(n)
+            - case: width64
+              do:
+                - return: "n"
+            - default: true
+              do:
+                - return: uint8(n)
+          "on": width
+  - of: (*decodeState).decodePayloadAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).decodePayloadAny
+        kind: self
+      - id: d.take
+        kind: internal
+      - id: cloneBytes
+        kind: internal
+      - id: extAny
+        kind: internal
+    steps:
+      - bind: p, err
+        eval: d.take(h.arg)
+        to: d.take
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famStr
+              do:
+                - return: string(p), nil
+            - case: famBin
+              do:
+                - return: cloneBytes(p), nil
+                  to: cloneBytes
+            - default: true
+              do:
+                - return: extAny(h.ext, p)
+                  to: extAny
+          "on": h.fam
+  - of: extAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: extAny
+        kind: self
+      - id: decodeTimestamp
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, unmarshalFault("unsupported extension type", errs.Int(fieldWire, int(ext)))
+          when: ext != extTimestamp
+      - return: decodeTimestamp(p)
+        to: decodeTimestamp
+  - of: (*decodeState).decodeArrayAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).decodeArrayAny
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: d.decodeAny
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - bind: out
+        eval: make([]any, 0, min(h.arg, anyPreallocElems))
+      - loop:
+          do:
+            - bind: v, err
+              eval: d.decodeAny()
+              to: d.decodeAny
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: out
+              value: append(out, v)
+          range: h.arg
+      - eval: d.leave()
+        to: d.leave
+      - return: out, nil
+  - of: (*decodeState).decodeMapAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).decodeMapAny
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: d.fillMapAny
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - bind: out
+        eval: make(map[string]any, min(h.arg, anyPreallocElems))
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: d.fillMapAny(out, h.arg)
+            to: d.fillMapAny
+          when: err != nil
+      - eval: d.leave()
+        to: d.leave
+      - return: out, nil
+  - of: (*decodeState).fillMapAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).fillMapAny
+        kind: self
+      - id: d.readKeyString
+        kind: internal
+      - id: d.decodeAny
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: key, err
+              eval: d.readKeyString()
+              to: d.readKeyString
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - bind: v, err
+              eval: d.decodeAny()
+              to: d.decodeAny
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: m[key]
+              value: v
+          range: "n"
+      - return: nil
+  - of: (*decodeState).readKeyString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).readKeyString
+        kind: self
+      - id: d.readKey
+        kind: internal
+    steps:
+      - bind: key, err
+        eval: d.readKey()
+        to: d.readKey
+      - return: string(key), err
+  - of: (*decodeState).readKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).readKey
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.take
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.off
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famStr, famBin
+              do:
+                - return: d.take(h.arg)
+                  to: d.take
+            - case: famNil
+              do:
+                - return: nil, nil
+            - default: true
+              do:
+                - return: |-
+                    nil, unmarshalFault("map key is not a string",
+                    			errs.Int(fieldOffset, at), errs.String(fieldWire, h.fam.String()))
+          "on": h.fam
+  - forward: bytes.Clone
+    of: cloneBytes
+  - of: unmarshalInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalInto
+        kind: self
+      - id: d.decodeTarget
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - bind: d
+        eval: "&decodeState{data: data}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.decodeTarget(v)
+            to: d.decodeTarget
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                unmarshalFault("trailing bytes after the value",
+                			errs.Int(fieldOffset, d.off), errs.Int(fieldLen, len(d.data)))
+              to: unmarshalFault
+          when: d.off != len(d.data)
+      - return: nil
+  - of: (*decodeState).decodeTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).decodeTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: unmarshalFault
+        kind: internal
+      - id: rv.Elem
+        kind: value
+      - id: decodeEmptyInterface
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: unmarshalFault("decode target is not a non-nil pointer")
+              to: unmarshalFault
+          when: rv.Kind() != reflect.Pointer || rv.IsNil()
+      - bind: e
+        eval: rv.Elem()
+        to: rv.Elem
+      - opt:
+          do:
+            - return: decodeEmptyInterface(d, e)
+              to: decodeEmptyInterface
+          when: rv.Type() == pointerToAnyType
+      - return: decoderFor(e.Type())(d, e)
+  - of: pointerDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: pointerDecoder
+        kind: self
+      - id: decoderFor
+        kind: internal
+      - id: t.Elem
+        kind: value
+      - id: zeroValue
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: v.Set
+        kind: value
+    steps:
+      - bind: elem
+        eval: decoderFor(t.Elem())
+        to: decoderFor
+      - bind: elemType
+        eval: t.Elem()
+        to: t.Elem
+      - return:
+          closure:
+            params: d *decodeState, v reflect.Value
+            results: error
+            steps:
+              - opt:
+                  do:
+                    - op: ++
+                      set: d.off
+                    - return: zeroValue(v)
+                      to: zeroValue
+                  when: d.peekNil()
+              - opt:
+                  do:
+                    - opt:
+                        do:
+                          - return: unmarshalFault("cannot set a value reached through an unexported field", typeField(t))
+                            to: unmarshalFault
+                        when: "!v.CanSet()"
+                    - eval: v.Set(reflect.New(elemType))
+                      to: v.Set
+                  when: v.IsNil()
+              - return: elem(d, v.Elem())
+  - of: interfaceDecoder
+    steps:
+      - switch:
+          cases:
+            - case: t.NumMethod() == 0
+              do:
+                - return: decodeEmptyInterface
+            - case: t == errorType
+              do:
+                - return: decodeErrorValue
+            - default: true
+              do:
+                - return: decodeNonEmptyInterface
+  - of: heldPointer
+    participants:
+      - id: caller
+        kind: actor
+      - id: heldPointer
+        kind: self
+      - id: v.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: reflect.Value{}, false
+          when: v.IsNil() || d.peekNil()
+      - bind: e
+        eval: v.Elem()
+        to: v.Elem
+      - return: e, e.Kind() == reflect.Pointer && !e.IsNil()
+  - of: decodeEmptyInterface
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeEmptyInterface
+        kind: self
+      - id: heldPointer
+        kind: internal
+      - id: d.decodeAny
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: v.SetZero
+        kind: value
+      - id: v.Set
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: decoderFor(p.Type().Elem())(d, p.Elem())
+          init:
+            bind: p, ok
+            eval: heldPointer(d, v)
+            to: heldPointer
+          when: ok
+      - bind: x, err
+        eval: d.decodeAny()
+        to: d.decodeAny
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: unmarshalFault("cannot set a value reached through an unexported field", typeField(v.Type()))
+              to: unmarshalFault
+          when: "!v.CanSet()"
+      - opt:
+          do:
+            - eval: v.SetZero()
+              to: v.SetZero
+            - return: nil
+          when: x == nil
+      - eval: v.Set(reflect.ValueOf(x))
+        to: v.Set
+      - return: nil
+  - of: decodeErrorValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeErrorValue
+        kind: self
+      - id: d.readBytesOrNil
+        kind: internal
+      - id: zeroValue
+        kind: internal
+      - id: v.Set
+        kind: value
+    steps:
+      - bind: p, err
+        eval: d.readBytesOrNil(v.Type())
+        to: d.readBytesOrNil
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: zeroValue(v)
+              to: zeroValue
+          when: p == nil
+      - eval: "v.Set(reflect.ValueOf(error(&decodedError{msg: string(p)})))"
+        to: v.Set
+      - return: nil
+  - of: decodeNonEmptyInterface
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeNonEmptyInterface
+        kind: self
+      - id: heldPointer
+        kind: internal
+      - id: zeroValue
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: decoderFor(p.Type().Elem())(d, p.Elem())
+          init:
+            bind: p, ok
+            eval: heldPointer(d, v)
+            to: heldPointer
+          when: ok
+      - opt:
+          do:
+            - op: ++
+              set: d.off
+            - return: zeroValue(v)
+              to: zeroValue
+          when: d.peekNil()
+      - return: unmarshalFault("cannot decode into a non-empty interface that holds no pointer", typeField(v.Type()))
+        to: unmarshalFault
+  - of: selfTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: selfTarget
+        kind: self
+      - id: interfaceOf
+        kind: internal
+    steps:
+      - bind: target, ok
+        eval: interfaceOf[T](v.Addr())
+        to: interfaceOf
+      - opt:
+          do:
+            - return: target, unmarshalFault("cannot call the decoding method of a value reached through an unexported field", typeField(v.Type()))
+          when: "!ok"
+      - return: target, nil
+  - of: decodeSelfMsgpack
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSelfMsgpack
+        kind: self
+      - id: zeroValue
+        kind: internal
+      - id: d.skip
+        kind: internal
+      - id: selfTarget
+        kind: internal
+      - id: callUnmarshalMsgpack
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: d.off
+            - return: zeroValue(v)
+              to: zeroValue
+          when: d.peekNil()
+      - bind: start
+        eval: d.off
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.skip()
+            to: d.skip
+          when: err != nil
+      - bind: u, err
+        eval: selfTarget[unmarshalMsgpacker](v)
+        to: selfTarget
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: callUnmarshalMsgpack(u, cloneBytes(d.data[start:d.off]), v.Type())
+        to: callUnmarshalMsgpack
+  - of: callUnmarshalMsgpack
+    participants:
+      - id: caller
+        kind: actor
+      - id: callUnmarshalMsgpack
+        kind: self
+      - id: u.UnmarshalMsgpack
+        kind: internal
+      - id: wrapUnmarshal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapUnmarshal(err, "UnmarshalMsgpack failed", typeField(t))
+              to: wrapUnmarshal
+          init:
+            bind: err
+            eval: u.UnmarshalMsgpack(raw)
+            to: u.UnmarshalMsgpack
+          when: err != nil
+      - return: nil
+  - of: decodeSelfBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSelfBinary
+        kind: self
+      - id: d.selfPayload
+        kind: internal
+      - id: selfTarget
+        kind: internal
+      - id: u.UnmarshalBinary
+        kind: value
+      - id: wrapUnmarshal
+        kind: internal
+    steps:
+      - bind: p, isNil, err
+        eval: d.selfPayload(v)
+        to: d.selfPayload
+      - opt:
+          do:
+            - return: err
+          when: err != nil || isNil
+      - bind: u, err
+        eval: selfTarget[encoding.BinaryUnmarshaler](v)
+        to: selfTarget
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: wrapUnmarshal(uerr, "UnmarshalBinary failed", typeField(v.Type()))
+              to: wrapUnmarshal
+          init:
+            bind: uerr
+            eval: u.UnmarshalBinary(p)
+            to: u.UnmarshalBinary
+          when: uerr != nil
+      - return: nil
+  - of: decodeSelfText
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSelfText
+        kind: self
+      - id: d.selfPayload
+        kind: internal
+      - id: selfTarget
+        kind: internal
+      - id: u.UnmarshalText
+        kind: value
+      - id: wrapUnmarshal
+        kind: internal
+    steps:
+      - bind: p, isNil, err
+        eval: d.selfPayload(v)
+        to: d.selfPayload
+      - opt:
+          do:
+            - return: err
+          when: err != nil || isNil
+      - bind: u, err
+        eval: selfTarget[encoding.TextUnmarshaler](v)
+        to: selfTarget
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: wrapUnmarshal(uerr, "UnmarshalText failed", typeField(v.Type()))
+              to: wrapUnmarshal
+          init:
+            bind: uerr
+            eval: u.UnmarshalText(p)
+            to: u.UnmarshalText
+          when: uerr != nil
+      - return: nil
+  - of: (*decodeState).selfPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).selfPayload
+        kind: self
+      - id: d.readBytesOrNil
+        kind: internal
+      - id: cloneBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: d.off
+            - return: nil, true, zeroValue(v)
+          when: d.peekNil()
+      - bind: p, err
+        eval: d.readBytesOrNil(v.Type())
+        to: d.readBytesOrNil
+      - opt:
+          do:
+            - return: nil, false, err
+          when: err != nil
+      - return: cloneBytes(p), false, nil
+        to: cloneBytes
+  - of: sliceDecoder
+    steps:
+      - opt:
+          do:
+            - return: decodeByteSlice
+          when: t.Elem().Kind() == reflect.Uint8
+      - return: newListDecoder(t.Elem()).decodeSlice
+  - of: arrayDecoder
+    steps:
+      - opt:
+          do:
+            - return: decodeByteArray
+          when: t.Elem().Kind() == reflect.Uint8
+      - return: newListDecoder(t.Elem()).decodeArray
+  - of: newListDecoder
+    steps:
+      - bind: firstCap
+        eval: uint64(preallocBytes)
+      - opt:
+          do:
+            - set: firstCap
+              value: max(firstCap/size, 1)
+          init:
+            bind: size
+            eval: uint64(elem.Size())
+          when: size > 0
+      - return: "&listDecoder{elem: decoderFor(elem), firstCap: firstCap}"
+  - of: (*listDecoder).decodeSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listDecoder).decodeSlice
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: l.fillSlice
+        kind: internal
+      - id: zeroValue
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famArray
+              do:
+                - return: l.fillSlice(d, v, h)
+                  to: l.fillSlice
+            - case: famNil
+              do:
+                - return: zeroValue(v)
+                  to: zeroValue
+            - default: true
+              do:
+                - return: d.mismatch(h, v.Type())
+                  to: d.mismatch
+          "on": h.fam
+  - of: (*listDecoder).fillSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listDecoder).fillSlice
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: v.Set
+        kind: value
+      - id: v.SetLen
+        kind: value
+      - id: v.Grow
+        kind: value
+      - id: v.Index
+        kind: value
+      - id: elem.SetZero
+        kind: value
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - bind: "n"
+        eval: int(h.arg)
+      - alt:
+          - do:
+              - eval: v.Set(reflect.MakeSlice(v.Type(), 0, int(min(h.arg, l.firstCap))))
+                to: v.Set
+            when: v.Cap() == 0 || n == 0
+          - do:
+              - eval: v.SetLen(0)
+                to: v.SetLen
+            else: true
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: v.Grow(min(n-i, max(i, 1)))
+                    to: v.Grow
+                when: i == v.Cap()
+            - eval: v.SetLen(i + 1)
+              to: v.SetLen
+            - bind: elem
+              eval: v.Index(i)
+              to: v.Index
+            - eval: elem.SetZero()
+              to: elem.SetZero
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: l.elem(d, elem)
+                when: err != nil
+          key: i
+          range: "n"
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: (*listDecoder).decodeArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listDecoder).decodeArray
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: l.fillArray
+        kind: internal
+      - id: zeroValue
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famArray
+              do:
+                - return: l.fillArray(d, v, h)
+                  to: l.fillArray
+            - case: famNil
+              do:
+                - return: zeroValue(v)
+                  to: zeroValue
+            - default: true
+              do:
+                - return: d.mismatch(h, v.Type())
+                  to: d.mismatch
+          "on": h.fam
+  - of: (*listDecoder).fillArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listDecoder).fillArray
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: v.Index
+        kind: value
+      - id: elem.SetZero
+        kind: value
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                unmarshalFault("array has more elements than the Go array holds",
+                			typeField(v.Type()), errs.Int64(fieldLen, int64(h.arg)))
+              to: unmarshalFault
+          when: h.arg > uint64(v.Len())
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - loop:
+          do:
+            - bind: elem
+              eval: v.Index(i)
+              to: v.Index
+            - eval: elem.SetZero()
+              to: elem.SetZero
+            - opt:
+                do:
+                  - continue: true
+                when: uint64(i) >= h.arg
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: l.elem(d, elem)
+                when: err != nil
+          key: i
+          range: v.Len()
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: decodeByteSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeByteSlice
+        kind: self
+      - id: zeroValue
+        kind: internal
+      - id: d.readBytesOrNil
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: v.SetBytes
+        kind: value
+    steps:
+      - bind: at
+        eval: d.off
+      - opt:
+          do:
+            - op: ++
+              set: d.off
+            - return: zeroValue(v)
+              to: zeroValue
+          when: d.peekNil()
+      - bind: p, err
+        eval: d.readBytesOrNil(v.Type())
+        to: d.readBytesOrNil
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: unmarshalFault("cannot set a value reached through an unexported field", errs.Int(fieldOffset, at))
+              to: unmarshalFault
+          when: "!v.CanSet()"
+      - eval: v.SetBytes(cloneBytes(p))
+        to: v.SetBytes
+      - return: nil
+  - of: decodeByteArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeByteArray
+        kind: self
+      - id: d.readBytesOrNil
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: v.Bytes
+        kind: value
+    steps:
+      - bind: p, err
+        eval: d.readBytesOrNil(v.Type())
+        to: d.readBytesOrNil
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: unmarshalFault("binary is longer than the Go array holds", typeField(v.Type()), errs.Int(fieldLen, len(p)))
+              to: unmarshalFault
+          when: len(p) > v.Len()
+      - bind: dst
+        eval: v.Bytes()
+        to: v.Bytes
+      - eval: clear(dst[copy(dst, p):])
+      - return: nil
+  - of: newMapDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMapDecoder
+        kind: self
+      - id: stringMapDecoder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: fast
+          init:
+            bind: fast
+            eval: stringMapDecoder(t)
+            to: stringMapDecoder
+          when: fast != nil
+      - bind: m
+        eval: |-
+          &mapDecoder{
+          		typ:           t,
+          		keyType:       t.Key(),
+          		elemType:      t.Elem(),
+          		key:           decoderFor(t.Key()),
+          		elem:          decoderFor(t.Elem()),
+          		checkHashable: mayBeUnhashable(t.Key()),
+          	}
+      - return: m.decode
+  - of: stringMapDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: stringMapDecoder
+        kind: self
+      - id: directMapDecoder
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.TypeFor[map[string]any]()
+              do:
+                - return: directMapDecoder(decodeAnyElem)
+                  to: directMapDecoder
+            - case: reflect.TypeFor[map[string]string]()
+              do:
+                - return: directMapDecoder(decodeStringElem)
+                  to: directMapDecoder
+            - case: reflect.TypeFor[map[string]int]()
+              do:
+                - return: directMapDecoder(decodeIntElem[int])
+                  to: directMapDecoder
+            - case: reflect.TypeFor[map[string]int64]()
+              do:
+                - return: directMapDecoder(decodeIntElem[int64])
+                  to: directMapDecoder
+            - case: reflect.TypeFor[map[string]float64]()
+              do:
+                - return: directMapDecoder(decodeFloat64Elem)
+                  to: directMapDecoder
+            - case: reflect.TypeFor[map[string]bool]()
+              do:
+                - return: directMapDecoder(decodeBoolElem)
+                  to: directMapDecoder
+            - default: true
+              do:
+                - return: nil
+          "on": t
+  - of: (*mapDecoder).decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapDecoder).decode
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: m.fill
+        kind: internal
+      - id: zeroValue
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famMap
+              do:
+                - return: m.fill(d, v, h)
+                  to: m.fill
+            - case: famNil
+              do:
+                - return: zeroValue(v)
+                  to: zeroValue
+            - default: true
+              do:
+                - return: d.mismatch(h, v.Type())
+                  to: d.mismatch
+          "on": h.fam
+  - of: (*mapDecoder).fill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapDecoder).fill
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: v.Set
+        kind: value
+      - id: reflect.New(m.keyType).Elem
+        kind: value
+      - id: reflect.New(m.elemType).Elem
+        kind: value
+      - id: m.pair
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - opt:
+          do:
+            - eval: v.Set(reflect.MakeMapWithSize(m.typ, int(min(h.arg, mapPreallocPairs))))
+              to: v.Set
+          when: v.IsNil()
+      - bind: key
+        eval: reflect.New(m.keyType).Elem()
+        to: reflect.New(m.keyType).Elem
+      - bind: val
+        eval: reflect.New(m.elemType).Elem()
+        to: reflect.New(m.elemType).Elem
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: m.pair(d, v, key, val)
+                  to: m.pair
+                when: err != nil
+          range: h.arg
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: (*mapDecoder).pair
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapDecoder).pair
+        kind: self
+      - id: key.SetZero
+        kind: value
+      - id: unmarshalFault
+        kind: internal
+      - id: val.SetZero
+        kind: value
+      - id: v.SetMapIndex
+        kind: value
+    steps:
+      - bind: at
+        eval: d.off
+      - eval: key.SetZero()
+        to: key.SetZero
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: m.key(d, key)
+          when: err != nil
+      - opt:
+          do:
+            - return: unmarshalFault("map key is not hashable", errs.Int(fieldOffset, at), typeField(m.keyType))
+              to: unmarshalFault
+          when: m.checkHashable && !key.Comparable()
+      - eval: val.SetZero()
+        to: val.SetZero
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: m.elem(d, val)
+          when: err != nil
+      - eval: v.SetMapIndex(key, val)
+        to: v.SetMapIndex
+      - return: nil
+  - of: directMapDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: directMapDecoder
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: fillDirectMap
+        kind: internal
+      - id: zeroValue
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: d *decodeState, v reflect.Value
+            results: error
+            steps:
+              - bind: h, err
+                eval: d.readHeader()
+                to: d.readHeader
+              - opt:
+                  do:
+                    - return: err
+                  when: err != nil
+              - switch:
+                  cases:
+                    - case: famMap
+                      do:
+                        - return: fillDirectMap(d, v, h, elem)
+                          to: fillDirectMap
+                    - case: famNil
+                      do:
+                        - return: zeroValue(v)
+                          to: zeroValue
+                    - default: true
+                      do:
+                        - return: d.mismatch(h, v.Type())
+                          to: d.mismatch
+                  "on": h.fam
+  - of: fillDirectMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: fillDirectMap
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: d.readKeyString
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - bind: target, ok
+        eval: interfaceOf[*map[string]V](v.Addr())
+        to: interfaceOf
+      - opt:
+          do:
+            - return: unmarshalFault("cannot set a value reached through an unexported field", typeField(v.Type()))
+              to: unmarshalFault
+          when: "!ok"
+      - opt:
+          do:
+            - set: "*target"
+              value: make(map[string]V, min(h.arg, mapPreallocPairs))
+          when: "*target == nil"
+      - bind: m
+        eval: "*target"
+      - loop:
+          do:
+            - bind: key, kerr
+              eval: d.readKeyString()
+              to: d.readKeyString
+            - opt:
+                do:
+                  - return: kerr
+                when: kerr != nil
+            - bind: x, verr
+              eval: elem(d)
+            - opt:
+                do:
+                  - return: verr
+                when: verr != nil
+            - set: m[key]
+              value: x
+          range: h.arg
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: decodeAnyElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeAnyElem
+        kind: self
+      - id: d.decodeAny
+        kind: internal
+    steps:
+      - return: d.decodeAny()
+        to: d.decodeAny
+  - of: decodeStringElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStringElem
+        kind: self
+      - id: d.readBytesOrNil
+        kind: internal
+    steps:
+      - bind: p, err
+        eval: d.readBytesOrNil(stringType)
+        to: d.readBytesOrNil
+      - return: string(p), err
+  - of: decodeIntElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeIntElem
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: signedArg
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - bind: n, ok
+        eval: signedArg(h)
+        to: signedArg
+      - opt:
+          do:
+            - return: 0, d.rangeOrMismatch(h, reflect.TypeFor[T](), isInteger(h.fam))
+          when: "!ok || int64(T(n)) != n"
+      - return: T(n), nil
+  - of: decodeFloat64Elem
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeFloat64Elem
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: floatArg
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - bind: f, ok
+        eval: floatArg(h)
+        to: floatArg
+      - opt:
+          do:
+            - return: 0, d.mismatch(h, float64Type)
+          when: "!ok"
+      - return: f, nil
+  - of: decodeBoolElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeBoolElem
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: boolArg
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - bind: b, ok
+        eval: boolArg(h)
+        to: boolArg
+      - opt:
+          do:
+            - return: false, d.mismatch(h, boolType)
+          when: "!ok"
+      - return: b, nil
+  - of: mayBeUnhashable
+    participants:
+      - id: caller
+        kind: actor
+      - id: mayBeUnhashable
+        kind: self
+      - id: structMayBeUnhashable
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Interface
+              do:
+                - return: "true"
+            - case: reflect.Array
+              do:
+                - return: mayBeUnhashable(t.Elem())
+                  to: mayBeUnhashable
+            - case: reflect.Struct
+              do:
+                - return: structMayBeUnhashable(t)
+                  to: structMayBeUnhashable
+            - default: true
+              do:
+                - return: "false"
+          "on": t.Kind()
+  - of: (*decodedError).Error
+    steps:
+      - return: e.msg
+  - of: decoderFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: decoderFor
+        kind: self
+      - id: decoders.Load
+        kind: value
+      - id: wg.Add
+        kind: value
+      - id: decoders.LoadOrStore
+        kind: value
+      - id: buildDecoder
+        kind: internal
+      - id: wg.Done
+        kind: value
+      - id: decoders.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: f
+                init:
+                  bind: f, isFunc
+                  eval: cached.(decodeFunc)
+                when: isFunc
+          init:
+            bind: cached, ok
+            eval: decoders.Load(t)
+            to: decoders.Load
+          when: ok
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		wg    sync.WaitGroup
+          		built decodeFunc
+          	)
+      - eval: wg.Add(1)
+        to: wg.Add
+      - bind: placeholder
+        eval: |-
+          decodeFunc(func(d *decodeState, v reflect.Value) error {
+          		wg.Wait()
+          		//: forward to the finished decoder.
+          		return built(d, v)
+          	})
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: f
+                init:
+                  bind: f, isFunc
+                  eval: actual.(decodeFunc)
+                when: isFunc
+          init:
+            bind: actual, loaded
+            eval: decoders.LoadOrStore(t, placeholder)
+            to: decoders.LoadOrStore
+          when: loaded
+      - set: built
+        to: buildDecoder
+        value: buildDecoder(t)
+      - eval: wg.Done()
+        to: wg.Done
+      - eval: decoders.Store(t, built)
+        to: decoders.Store
+      - return: built
+  - of: buildDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildDecoder
+        kind: self
+      - id: hookDecoder
+        kind: internal
+      - id: scalarDecoder
+        kind: internal
+      - id: compositeDecoder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: f
+          init:
+            bind: f
+            eval: hookDecoder(t)
+            to: hookDecoder
+          when: f != nil
+      - opt:
+          do:
+            - return: f
+          init:
+            bind: f
+            eval: scalarDecoder(t.Kind())
+            to: scalarDecoder
+          when: f != nil
+      - return: compositeDecoder(t)
+        to: compositeDecoder
+  - of: hookDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: hookDecoder
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface
+      - bind: pt
+        eval: reflect.PointerTo(t)
+        to: reflect
+      - switch:
+          cases:
+            - case: t == timeType
+              do:
+                - return: decodeTimeValue
+            - case: pt.Implements(unmarshalMsgpackerType)
+              do:
+                - return: decodeSelfMsgpack
+            - case: pt.Implements(binaryUnmarshalerType)
+              do:
+                - return: decodeSelfBinary
+            - case: pt.Implements(textUnmarshalerType)
+              do:
+                - return: decodeSelfText
+            - default: true
+              do:
+                - return: nil
+  - of: scalarDecoder
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - return: decodeBoolValue
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: decodeIntValue
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: decodeUintValue
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: decodeFloatValue
+            - case: reflect.String
+              do:
+                - return: decodeStringValue
+            - default: true
+              do:
+                - return: nil
+          "on": k
+  - of: compositeDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: compositeDecoder
+        kind: self
+      - id: sliceDecoder
+        kind: internal
+      - id: arrayDecoder
+        kind: internal
+      - id: newMapDecoder
+        kind: internal
+      - id: newStructDecoder
+        kind: internal
+      - id: pointerDecoder
+        kind: internal
+      - id: interfaceDecoder
+        kind: internal
+      - id: failingDecoder
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Slice
+              do:
+                - return: sliceDecoder(t)
+                  to: sliceDecoder
+            - case: reflect.Array
+              do:
+                - return: arrayDecoder(t)
+                  to: arrayDecoder
+            - case: reflect.Map
+              do:
+                - return: newMapDecoder(t)
+                  to: newMapDecoder
+            - case: reflect.Struct
+              do:
+                - return: newStructDecoder(t)
+                  to: newStructDecoder
+            - case: reflect.Pointer
+              do:
+                - return: pointerDecoder(t)
+                  to: pointerDecoder
+            - case: reflect.Interface
+              do:
+                - return: interfaceDecoder(t)
+                  to: interfaceDecoder
+            - default: true
+              do:
+                - return: failingDecoder(unmarshalFault("cannot decode into a value of this Go type", typeField(t)))
+                  to: failingDecoder
+          "on": t.Kind()
+  - of: failingDecoder
+    steps:
+      - return:
+          closure:
+            params: "*decodeState, reflect.Value"
+            results: error
+            steps:
+              - return: err
+  - of: (*decodeState).mismatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).mismatch
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - return: |-
+          unmarshalFault("cannot decode the MessagePack value into this Go type",
+          		errs.String(fieldWire, h.fam.String()), typeField(t), errs.Int(fieldOffset, d.off))
+        to: unmarshalFault
+  - of: zeroValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroValue
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+      - id: v.SetZero
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: unmarshalFault("cannot set a value reached through an unexported field", typeField(v.Type()))
+              to: unmarshalFault
+          when: "!v.CanSet()"
+      - eval: v.SetZero()
+        to: v.SetZero
+      - return: nil
+  - of: decodeBoolValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeBoolValue
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: boolArg
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+      - id: v.SetBool
+        kind: value
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: b, ok
+        eval: boolArg(h)
+        to: boolArg
+      - opt:
+          do:
+            - return: d.mismatch(h, v.Type())
+              to: d.mismatch
+          when: "!ok"
+      - eval: v.SetBool(b)
+        to: v.SetBool
+      - return: nil
+  - of: boolArg
+    steps:
+      - switch:
+          cases:
+            - case: famBool
+              do:
+                - return: h.arg == 1, true
+            - case: famNil
+              do:
+                - return: false, true
+            - default: true
+              do:
+                - return: false, false
+          "on": h.fam
+  - of: decodeIntValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeIntValue
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: signedArg
+        kind: internal
+      - id: d.rangeOrMismatch
+        kind: internal
+      - id: v.SetInt
+        kind: value
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: n, ok
+        eval: signedArg(h)
+        to: signedArg
+      - opt:
+          do:
+            - return: d.rangeOrMismatch(h, v.Type(), isInteger(h.fam))
+              to: d.rangeOrMismatch
+          when: "!ok || v.OverflowInt(n)"
+      - eval: v.SetInt(n)
+        to: v.SetInt
+      - return: nil
+  - of: decodeUintValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeUintValue
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: unsignedArg
+        kind: internal
+      - id: d.rangeOrMismatch
+        kind: internal
+      - id: v.SetUint
+        kind: value
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: n, ok
+        eval: unsignedArg(h)
+        to: unsignedArg
+      - opt:
+          do:
+            - return: d.rangeOrMismatch(h, v.Type(), isInteger(h.fam))
+              to: d.rangeOrMismatch
+          when: "!ok || v.OverflowUint(n)"
+      - eval: v.SetUint(n)
+        to: v.SetUint
+      - return: nil
+  - of: decodeFloatValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeFloatValue
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: floatArg
+        kind: internal
+      - id: d.rangeOrMismatch
+        kind: internal
+      - id: v.SetFloat
+        kind: value
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: f, ok
+        eval: floatArg(h)
+        to: floatArg
+      - opt:
+          do:
+            - return: d.rangeOrMismatch(h, v.Type(), ok)
+              to: d.rangeOrMismatch
+          when: "!ok || v.OverflowFloat(f)"
+      - eval: v.SetFloat(f)
+        to: v.SetFloat
+      - return: nil
+  - of: (*decodeState).rangeOrMismatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).rangeOrMismatch
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unmarshalFault("number does not fit the Go type", typeField(t), errs.Int(fieldOffset, d.off))
+              to: unmarshalFault
+          when: numeric
+      - return: d.mismatch(h, t)
+        to: d.mismatch
+  - of: isInteger
+    steps:
+      - return: f == famInt || f == famUint
+  - of: signedArg
+    steps:
+      - switch:
+          cases:
+            - case: famInt
+              do:
+                - return: int64(h.arg), true
+            - case: famUint
+              do:
+                - return: int64(h.arg), h.arg <= math.MaxInt64
+            - case: famNil
+              do:
+                - return: 0, true
+            - default: true
+              do:
+                - return: 0, false
+          "on": h.fam
+  - of: unsignedArg
+    steps:
+      - switch:
+          cases:
+            - case: famUint
+              do:
+                - return: h.arg, true
+            - case: famInt
+              do:
+                - return: h.arg, int64(h.arg) >= 0
+            - case: famNil
+              do:
+                - return: 0, true
+            - default: true
+              do:
+                - return: 0, false
+          "on": h.fam
+  - of: floatArg
+    participants:
+      - id: caller
+        kind: actor
+      - id: floatArg
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: famFloat32
+              do:
+                - return: float64(math.Float32frombits(uint32(h.arg))), true
+            - case: famFloat64
+              do:
+                - return: math.Float64frombits(h.arg), true
+                  to: math
+            - case: famInt
+              do:
+                - return: float64(int64(h.arg)), true
+            - case: famUint
+              do:
+                - return: float64(h.arg), true
+            - case: famNil
+              do:
+                - return: 0, true
+            - default: true
+              do:
+                - return: 0, false
+          "on": h.fam
+  - of: decodeStringValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStringValue
+        kind: self
+      - id: d.readBytesOrNil
+        kind: internal
+      - id: v.SetString
+        kind: value
+    steps:
+      - bind: p, err
+        eval: d.readBytesOrNil(v.Type())
+        to: d.readBytesOrNil
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - eval: v.SetString(string(p))
+        to: v.SetString
+      - return: nil
+  - of: (*decodeState).readBytesOrNil
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).readBytesOrNil
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.take
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famStr, famBin
+              do:
+                - return: d.take(h.arg)
+                  to: d.take
+            - case: famNil
+              do:
+                - return: nil, nil
+            - default: true
+              do:
+                - return: nil, d.mismatch(h, t)
+          "on": h.fam
+  - of: decodeTimeValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTimeValue
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.timeOf
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.off
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: t, err
+        eval: d.timeOf(h, v.Type())
+        to: d.timeOf
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: dst, ok
+        eval: interfaceOf[*time.Time](v.Addr())
+        to: interfaceOf
+      - opt:
+          do:
+            - return: unmarshalFault("cannot set a value reached through an unexported field", errs.Int(fieldOffset, at))
+              to: unmarshalFault
+          when: "!ok"
+      - set: "*dst"
+        value: t
+      - return: nil
+  - of: (*decodeState).timeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).timeOf
+        kind: self
+      - id: d.timestampPayload
+        kind: internal
+      - id: d.timeFromText
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: famExt
+              do:
+                - return: d.timestampPayload(h)
+                  to: d.timestampPayload
+            - case: famStr
+              do:
+                - return: d.timeFromText(h)
+                  to: d.timeFromText
+            - case: famNil
+              do:
+                - return: time.Time{}, nil
+            - default: true
+              do:
+                - return: time.Time{}, d.mismatch(h, t)
+          "on": h.fam
+  - of: (*decodeState).timestampPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).timestampPayload
+        kind: self
+      - id: d.take
+        kind: internal
+      - id: decodeTimestamp
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}, unmarshalFault("extension is not a timestamp", errs.Int(fieldWire, int(h.ext)))
+          when: h.ext != extTimestamp
+      - bind: p, err
+        eval: d.take(h.arg)
+        to: d.take
+      - opt:
+          do:
+            - return: time.Time{}, err
+          when: err != nil
+      - return: decodeTimestamp(p)
+        to: decodeTimestamp
+  - of: (*decodeState).timeFromText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).timeFromText
+        kind: self
+      - id: d.take
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: t.UTC
+        kind: value
+    steps:
+      - bind: p, err
+        eval: d.take(h.arg)
+        to: d.take
+      - opt:
+          do:
+            - return: time.Time{}, err
+          when: err != nil
+      - bind: t, perr
+        eval: time.Parse(time.RFC3339Nano, string(p))
+        to: time
+      - opt:
+          do:
+            - return: time.Time{}, unmarshalFault("string is not an RFC 3339 time", errs.Int(fieldOffset, d.off))
+          when: perr != nil
+      - return: t.UTC(), nil
+        to: t.UTC
+  - of: newStructDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: newStructDecoder
+        kind: self
+      - id: layoutOf
+        kind: internal
+      - id: layout.defect
+        kind: internal
+      - id: failingDecoder
+        kind: internal
+      - id: fieldDecoderOf
+        kind: internal
+    steps:
+      - bind: layout
+        eval: layoutOf(t)
+        to: layoutOf
+      - opt:
+          do:
+            - return: failingDecoder(err)
+              to: failingDecoder
+          init:
+            bind: err
+            eval: layout.defect(t, false)
+            to: layout.defect
+          when: err != nil
+      - bind: s
+        eval: |-
+          &structDecoder{
+          		byName: make(map[string]*fieldDecoder, len(layout.byName)),
+          		fields: make([]*fieldDecoder, 0, len(layout.fields)),
+          	}
+      - bind: built
+        eval: make(map[*structField]*fieldDecoder, len(layout.byName))
+      - loop:
+          do:
+            - set: s.fields
+              value: append(s.fields, fieldDecoderOf(f, built))
+          key: _
+          range: layout.fields
+          value: f
+      - loop:
+          do:
+            - set: s.byName[name]
+              to: fieldDecoderOf
+              value: fieldDecoderOf(f, built)
+          key: name
+          range: layout.byName
+          value: f
+      - return: s.decode
+  - of: fieldDecoderOf
+    steps:
+      - opt:
+          do:
+            - return: fd
+          init:
+            bind: fd, ok
+            eval: built[f]
+          when: ok
+      - bind: fd
+        eval: "&fieldDecoder{field: f, dec: decoderFor(f.typ)}"
+      - set: built[f]
+        value: fd
+      - return: fd
+  - of: (*structDecoder).decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structDecoder).decode
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: s.decodeMap
+        kind: internal
+      - id: s.decodeArray
+        kind: internal
+      - id: s.zero
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famMap
+              do:
+                - return: s.decodeMap(d, v, h)
+                  to: s.decodeMap
+            - case: famArray
+              do:
+                - return: s.decodeArray(d, v, h)
+                  to: s.decodeArray
+            - case: famNil
+              do:
+                - return: s.zero(v)
+                  to: s.zero
+            - default: true
+              do:
+                - return: d.mismatch(h, v.Type())
+                  to: d.mismatch
+          "on": h.fam
+  - of: (*structDecoder).decodeMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structDecoder).decodeMap
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: s.decodePair
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.decodePair(d, v)
+                  to: s.decodePair
+                when: err != nil
+          range: h.arg
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: (*structDecoder).decodePair
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structDecoder).decodePair
+        kind: self
+      - id: d.readKey
+        kind: internal
+      - id: d.skip
+        kind: internal
+      - id: f.decodeInto
+        kind: internal
+    steps:
+      - bind: key, err
+        eval: d.readKey()
+        to: d.readKey
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: f
+        eval: s.byName[string(key)]
+      - opt:
+          do:
+            - return: d.skip()
+              to: d.skip
+          when: f == nil
+      - return: f.decodeInto(d, v)
+        to: f.decodeInto
+  - of: (*structDecoder).decodeArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structDecoder).decodeArray
+        kind: self
+      - id: s.zero
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: f.decodeInto
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.zero(v)
+              to: s.zero
+          when: h.arg == 0
+      - opt:
+          do:
+            - return: |-
+                unmarshalFault("array-encoded struct has a different number of fields",
+                			typeField(v.Type()), errs.Int64(fieldLen, int64(h.arg)), errs.Int(fieldLimit, len(s.fields)))
+              to: unmarshalFault
+          when: h.arg != uint64(len(s.fields))
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: f.decodeInto(d, v)
+                  to: f.decodeInto
+                when: err != nil
+          key: _
+          range: s.fields
+          value: f
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: (*fieldDecoder).decodeInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldDecoder).decodeInto
+        kind: self
+      - id: fieldForDecode
+        kind: internal
+      - id: d.skip
+        kind: internal
+    steps:
+      - bind: fv, err
+        eval: fieldForDecode(v, f.field.index)
+        to: fieldForDecode
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: d.skip()
+              to: d.skip
+          when: "!fv.CanSet() && fv.Kind() != reflect.Struct"
+      - return: f.dec(d, fv)
+  - of: (*structDecoder).zero
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structDecoder).zero
+        kind: self
+      - id: v.SetZero
+        kind: value
+      - id: fieldValue
+        kind: internal
+      - id: fv.SetZero
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: v.SetZero()
+              to: v.SetZero
+            - return: nil
+          when: v.CanSet()
+      - loop:
+          do:
+            - bind: fv, ok
+              eval: fieldValue(v, f.field.index)
+              to: fieldValue
+            - opt:
+                do:
+                  - eval: fv.SetZero()
+                    to: fv.SetZero
+                when: ok && fv.CanSet()
+          key: _
+          range: s.fields
+          value: f
+      - return: nil
+  - of: fieldForDecode
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldForDecode
+        kind: self
+      - id: v.Field
+        kind: value
+      - id: allocEmbedded
+        kind: internal
+      - id: v.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v.Field(index[0]), nil
+              to: v.Field
+          when: len(index) == 1
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: reflect.Value{}, err
+                      init:
+                        bind: err
+                        eval: allocEmbedded(v)
+                        to: allocEmbedded
+                      when: err != nil
+                  - set: v
+                    to: v.Elem
+                    value: v.Elem()
+                when: i > 0 && v.Kind() == reflect.Pointer
+            - set: v
+              to: v.Field
+              value: v.Field(x)
+          key: i
+          range: index
+          value: x
+      - return: v, nil
+  - of: allocEmbedded
+    participants:
+      - id: caller
+        kind: actor
+      - id: allocEmbedded
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+      - id: v.Set
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!v.IsNil()"
+      - opt:
+          do:
+            - return: unmarshalFault("cannot allocate an embedded pointer to an unexported struct", typeField(v.Type()))
+              to: unmarshalFault
+          when: "!v.CanSet()"
+      - eval: v.Set(reflect.New(v.Type().Elem()))
+        to: v.Set
+      - return: nil
+  - of: newDecoder
+    steps:
+      - opt:
+          do:
+            - return: "&msgpackDecoder{}"
+          when: r == nil
+      - bind: src
+        eval: "&io.LimitedReader{R: r, N: int64(maxMsgPackBytes) + 1}"
+      - return: "&msgpackDecoder{src: src, r: bufio.NewReaderSize(src, streamBufSize)}"
+  - of: (*msgpackDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackDecoder).Decode
+        kind: self
+      - id: d.ending
+        kind: internal
+      - id: d.finish
+        kind: internal
+      - id: d.decodeNext
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.ending()
+              to: d.ending
+          when: d.done
+      - opt:
+          do:
+            - eval: d.finish(unmarshalFault("streaming decoder has no reader"))
+              to: d.finish
+            - return: d.err
+          when: d.r == nil
+      - opt:
+          do:
+            - eval: d.finish(err)
+              to: d.finish
+            - return: err
+          init:
+            bind: err
+            eval: d.decodeNext(v)
+            to: d.decodeNext
+          when: err != nil
+      - return: nil
+  - of: (*msgpackDecoder).decodeNext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackDecoder).decodeNext
+        kind: self
+      - id: d.bufferedValue
+        kind: internal
+      - id: d.decodeBuffered
+        kind: internal
+      - id: d.decodeFramed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.decodeBuffered(frame, v)
+              to: d.decodeBuffered
+          init:
+            bind: frame, ok
+            eval: d.bufferedValue()
+            to: d.bufferedValue
+          when: ok
+      - return: d.decodeFramed(v)
+        to: d.decodeFramed
+  - of: (*msgpackDecoder).bufferedValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackDecoder).bufferedValue
+        kind: self
+      - id: d.r.Peek
+        kind: value
+      - id: valueExtent
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, false
+                init:
+                  bind: _, err
+                  eval: d.r.Peek(1)
+                  to: d.r.Peek
+                when: err != nil
+          when: d.r.Buffered() == 0
+      - bind: buf, err
+        eval: d.r.Peek(d.r.Buffered())
+        to: d.r.Peek
+      - opt:
+          do:
+            - return: nil, false
+          when: err != nil
+      - bind: size, complete
+        eval: valueExtent(buf)
+        to: valueExtent
+      - opt:
+          do:
+            - return: nil, false
+          when: "!complete"
+      - return: buf[:size], true
+  - of: (*msgpackDecoder).decodeBuffered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackDecoder).decodeBuffered
+        kind: self
+      - id: unmarshalInto
+        kind: internal
+      - id: d.r.Discard
+        kind: value
+      - id: wrapUnmarshal
+        kind: internal
+    steps:
+      - bind: err
+        eval: unmarshalInto(frame, v)
+        to: unmarshalInto
+      - opt:
+          do:
+            - return: wrapUnmarshal(derr, "reading the stream failed")
+              to: wrapUnmarshal
+          init:
+            bind: _, derr
+            eval: d.r.Discard(len(frame))
+            to: d.r.Discard
+          when: derr != nil
+      - return: err
+  - of: (*msgpackDecoder).decodeFramed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackDecoder).decodeFramed
+        kind: self
+      - id: scratch
+        kind: package
+      - id: f.run
+        kind: internal
+      - id: unmarshalInto
+        kind: internal
+      - id: retain
+        kind: internal
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: f
+        eval: "framer{src: d.src, r: d.r, out: buf.AvailableBuffer()}"
+      - bind: err
+        eval: f.run()
+        to: f.run
+      - opt:
+          do:
+            - set: err
+              to: unmarshalInto
+              value: unmarshalInto(f.out, v)
+          when: err == nil
+      - eval: retain(buf, f.out)
+        to: retain
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: err
+  - of: (*msgpackDecoder).More
+    steps:
+      - return: "!d.done"
+  - of: (*msgpackDecoder).finish
+    steps:
+      - set: d.done
+        value: "true"
+      - opt:
+          do:
+            - set: d.err
+              value: err
+          when: "!errors.Is(err, io.EOF)"
+  - of: (*msgpackDecoder).ending
+    steps:
+      - opt:
+          do:
+            - return: d.err
+          when: d.err != nil
+      - return: io.EOF
+  - of: (*framer).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).run
+        kind: self
+      - id: f.r.ReadByte
+        kind: value
+      - id: f.readFailure
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: f.body
+        kind: internal
+    steps:
+      - loop:
+          cond: owed > 0
+          do:
+            - bind: c, err
+              eval: f.r.ReadByte()
+              to: f.r.ReadByte
+            - opt:
+                do:
+                  - return: f.readFailure(err, len(f.out) == 0)
+                    to: f.readFailure
+                when: err != nil
+            - set: f.out
+              value: append(f.out, c)
+            - bind: info
+              eval: "&headerTable[c]"
+            - opt:
+                do:
+                  - return: unmarshalFault("header byte 0xc1 is never used", errs.Int(fieldOffset, len(f.out)-1))
+                    to: unmarshalFault
+                when: info.fam == famInvalid
+            - set: owed, err
+              to: f.body
+              value: f.body(info, owed)
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          init: owed := uint64(1)
+          post: owed--
+      - return: nil
+  - of: (*framer).body
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).body
+        kind: self
+      - id: f.copyField
+        kind: internal
+      - id: f.owe
+        kind: internal
+    steps:
+      - bind: arg
+        eval: info.inline
+      - opt:
+          do:
+            - bind: raw, err
+              eval: f.copyField(info.width)
+              to: f.copyField
+            - opt:
+                do:
+                  - return: owed, err
+                when: err != nil
+            - set: arg
+              value: raw
+          when: info.width != 0
+      - switch:
+          cases:
+            - case: famStr, famBin
+              do:
+                - return: owed, f.copyPayload(arg)
+            - case: famExt
+              do:
+                - return: owed, f.copyPayload(arg + 1)
+            - case: famArray
+              do:
+                - return: f.owe(owed, arg)
+                  to: f.owe
+            - case: famMap
+              do:
+                - return: f.owe(owed, arg*valuesPerPair)
+                  to: f.owe
+            - default: true
+              do:
+                - return: owed, nil
+          "on": info.fam
+  - of: (*framer).owe
+    steps:
+      - opt:
+          do:
+            - return: |-
+                owed, unmarshalFault("declared element count exceeds what the stream can still deliver",
+                			errs.Int(fieldOffset, len(f.out)), errs.Int64(fieldLen, int64(n)))
+          when: owed-1+n > f.budget()
+      - return: owed + n, nil
+  - of: (*framer).budget
+    steps:
+      - return: uint64(f.src.N) + uint64(f.r.Buffered())
+  - of: (*framer).copyField
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).copyField
+        kind: self
+      - id: f.read
+        kind: internal
+      - id: beUint
+        kind: internal
+    steps:
+      - bind: start
+        eval: len(f.out)
+      - opt:
+          do:
+            - return: 0, err
+          init:
+            bind: err
+            eval: f.read(uint64(width))
+            to: f.read
+          when: err != nil
+      - return: beUint(f.out[start:]), nil
+        to: beUint
+  - of: (*framer).copyPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).copyPayload
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+      - id: f.read
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                unmarshalFault("declared length exceeds what the stream can still deliver",
+                			errs.Int(fieldOffset, len(f.out)), errs.Int64(fieldLen, int64(n)))
+              to: unmarshalFault
+          when: n > f.budget()
+      - loop:
+          cond: n > 0
+          do:
+            - bind: chunk
+              eval: min(n, frameChunk)
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: f.read(chunk)
+                  to: f.read
+                when: err != nil
+            - op: "-="
+              set: "n"
+              value: chunk
+      - return: nil
+  - of: (*framer).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).read
+        kind: self
+      - id: f.readBuffered
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: f.readFailure
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: f.readBuffered(int(n))
+              to: f.readBuffered
+          when: n <= uint64(f.r.Buffered())
+      - bind: start
+        eval: len(f.out)
+      - set: f.out
+        value: slices.Grow(f.out, int(n))[:start+int(n)]
+      - opt:
+          do:
+            - set: f.out
+              value: f.out[:start]
+            - return: f.readFailure(err, false)
+              to: f.readFailure
+          init:
+            bind: _, err
+            eval: io.ReadFull(f.r, f.out[start:])
+            to: io
+          when: err != nil
+      - return: nil
+  - of: (*framer).readBuffered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).readBuffered
+        kind: self
+      - id: f.r.Peek
+        kind: value
+      - id: f.readFailure
+        kind: internal
+      - id: f.r.Discard
+        kind: value
+    steps:
+      - bind: p, err
+        eval: f.r.Peek(n)
+        to: f.r.Peek
+      - opt:
+          do:
+            - return: f.readFailure(err, false)
+              to: f.readFailure
+          when: err != nil
+      - set: f.out
+        value: append(f.out, p...)
+      - opt:
+          do:
+            - return: f.readFailure(derr, false)
+              to: f.readFailure
+          init:
+            bind: _, derr
+            eval: f.r.Discard(n)
+            to: f.r.Discard
+          when: derr != nil
+      - return: nil
+  - of: (*framer).readFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*framer).readFailure
+        kind: self
+      - id: unmarshalFault
+        kind: internal
+      - id: wrapUnmarshal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: io.EOF
+          when: atStart && errors.Is(err, io.EOF)
+      - opt:
+          do:
+            - return: unmarshalFault("stream ends inside a value", errs.Int(fieldOffset, len(f.out)))
+              to: unmarshalFault
+          when: errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+      - return: wrapUnmarshal(err, "reading the stream failed")
+        to: wrapUnmarshal
+  - of: appendNil
+    steps:
+      - return: append(b, codeNil)
+  - of: appendBool
+    steps:
+      - opt:
+          do:
+            - return: append(b, codeTrue)
+          when: v
+      - return: append(b, codeFalse)
+  - of: appendUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendUint
+        kind: self
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: n <= uint64(posFixintMax)
+              do:
+                - return: append(b, byte(n))
+            - case: n <= math.MaxUint8
+              do:
+                - return: append(b, codeUint8, byte(n))
+            - case: n <= math.MaxUint16
+              do:
+                - return: binary.BigEndian.AppendUint16(append(b, codeUint16), uint16(n))
+                  to: binary.BigEndian.AppendUint16
+            - case: n <= math.MaxUint32
+              do:
+                - return: binary.BigEndian.AppendUint32(append(b, codeUint32), uint32(n))
+                  to: binary.BigEndian.AppendUint32
+            - default: true
+              do:
+                - return: binary.BigEndian.AppendUint64(append(b, codeUint64), n)
+                  to: binary.BigEndian.AppendUint64
+  - of: appendInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendInt
+        kind: self
+      - id: appendUint
+        kind: internal
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: n >= 0
+              do:
+                - return: appendUint(b, uint64(n))
+                  to: appendUint
+            - case: n >= negFixintFloor
+              do:
+                - return: append(b, byte(n))
+            - case: n >= math.MinInt8
+              do:
+                - return: append(b, codeInt8, byte(n))
+            - case: n >= math.MinInt16
+              do:
+                - return: binary.BigEndian.AppendUint16(append(b, codeInt16), uint16(n))
+                  to: binary.BigEndian.AppendUint16
+            - case: n >= math.MinInt32
+              do:
+                - return: binary.BigEndian.AppendUint32(append(b, codeInt32), uint32(n))
+                  to: binary.BigEndian.AppendUint32
+            - default: true
+              do:
+                - return: binary.BigEndian.AppendUint64(append(b, codeInt64), uint64(n))
+                  to: binary.BigEndian.AppendUint64
+  - of: appendFloat32
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFloat32
+        kind: self
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - return: binary.BigEndian.AppendUint32(append(b, codeFloat32), math.Float32bits(f))
+        to: binary.BigEndian.AppendUint32
+  - of: appendFloat64
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFloat64
+        kind: self
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - return: binary.BigEndian.AppendUint64(append(b, codeFloat64), math.Float64bits(f))
+        to: binary.BigEndian.AppendUint64
+  - of: appendLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLength
+        kind: self
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: n <= forms.fixMax
+              do:
+                - return: append(b, forms.fixPrefix|byte(n))
+            - case: n <= math.MaxUint8 && forms.code8 != 0
+              do:
+                - return: append(b, forms.code8, byte(n))
+            - case: n <= math.MaxUint16
+              do:
+                - return: binary.BigEndian.AppendUint16(append(b, forms.code16), uint16(n))
+                  to: binary.BigEndian.AppendUint16
+            - default: true
+              do:
+                - return: binary.BigEndian.AppendUint32(append(b, forms.code32), uint32(n))
+                  to: binary.BigEndian.AppendUint32
+  - of: checkLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkLength
+        kind: self
+      - id: marshalFault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: marshalFault("length exceeds what a MessagePack length field holds", errs.Int(fieldLen, n))
+              to: marshalFault
+          when: uint64(n) > math.MaxUint32
+      - return: nil
+  - of: appendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendString
+        kind: self
+      - id: checkLength
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, err
+          init:
+            bind: err
+            eval: checkLength(len(s))
+            to: checkLength
+          when: err != nil
+      - return: append(appendLength(b, len(s), &strForms), s...), nil
+  - of: appendBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBinary
+        kind: self
+      - id: checkLength
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, err
+          init:
+            bind: err
+            eval: checkLength(len(p))
+            to: checkLength
+          when: err != nil
+      - return: append(appendLength(b, len(p), &binForms), p...), nil
+  - of: appendBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBytes
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: appendBinary
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: p == nil
+      - return: appendBinary(b, p)
+        to: appendBinary
+  - of: appendArrayHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendArrayHeader
+        kind: self
+      - id: checkLength
+        kind: internal
+      - id: appendLength
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, err
+          init:
+            bind: err
+            eval: checkLength(n)
+            to: checkLength
+          when: err != nil
+      - return: appendLength(b, n, &arrayForms), nil
+        to: appendLength
+  - of: appendMapHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMapHeader
+        kind: self
+      - id: checkLength
+        kind: internal
+      - id: appendLength
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, err
+          init:
+            bind: err
+            eval: checkLength(n)
+            to: checkLength
+          when: err != nil
+      - return: appendLength(b, n, &mapForms), nil
+        to: appendLength
+  - of: appendAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAny
+        kind: self
+      - id: appendScalarAny
+        kind: internal
+      - id: appendStringMap
+        kind: internal
+      - id: appendAnySlice
+        kind: internal
+      - id: reflect
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: encoded, err
+          init:
+            bind: encoded, handled, err
+            eval: appendScalarAny(b, x)
+            to: appendScalarAny
+          when: handled
+      - typeswitch:
+          bind: v
+          cases:
+            - do:
+                - return: appendStringMap(b, v, appendAnyElem, depth)
+                  to: appendStringMap
+              types: map[string]any
+            - do:
+                - return: appendAnySlice(b, v, depth)
+                  to: appendAnySlice
+              types: "[]any"
+            - default: true
+              do:
+                - bind: rv
+                  eval: reflect.ValueOf(x)
+                  to: reflect
+                - return: encoderFor(rv.Type())(b, rv, depth)
+          "on": x
+  - of: appendScalarAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendScalarAny
+        kind: self
+      - id: appendNumberAny
+        kind: internal
+      - id: appendNil
+        kind: internal
+      - id: appendString
+        kind: internal
+      - id: appendBool
+        kind: internal
+      - id: appendBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: encoded, true, nil
+          init:
+            bind: encoded, handled
+            eval: appendNumberAny(b, x)
+            op: =
+            to: appendNumberAny
+          when: handled
+      - typeswitch:
+          bind: v
+          cases:
+            - do:
+                - return: appendNil(b), true, nil
+                  to: appendNil
+              types: nil
+            - do:
+                - set: encoded, err
+                  to: appendString
+                  value: appendString(b, v)
+                - return: encoded, true, err
+              types: string
+            - do:
+                - return: appendBool(b, v), true, nil
+                  to: appendBool
+              types: bool
+            - do:
+                - set: encoded, err
+                  to: appendBytes
+                  value: appendBytes(b, v)
+                - return: encoded, true, err
+              types: "[]byte"
+            - default: true
+              do:
+                - return: b, false, nil
+          "on": x
+  - of: appendNumberAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendNumberAny
+        kind: self
+      - id: appendInt
+        kind: internal
+      - id: appendUint
+        kind: internal
+      - id: appendFloat64
+        kind: internal
+      - id: appendFloat32
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: v
+          cases:
+            - do:
+                - return: appendInt(b, int64(v)), true
+                  to: appendInt
+              types: int
+            - do:
+                - return: appendInt(b, v), true
+                  to: appendInt
+              types: int64
+            - do:
+                - return: appendUint(b, v), true
+                  to: appendUint
+              types: uint64
+            - do:
+                - return: appendFloat64(b, v), true
+                  to: appendFloat64
+              types: float64
+            - do:
+                - return: appendFloat32(b, v), true
+                  to: appendFloat32
+              types: float32
+            - default: true
+              do:
+                - return: b, false
+          "on": x
+  - of: appendAnySlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAnySlice
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: appendArrayHeader
+        kind: internal
+      - id: appendAny
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: s == nil
+      - opt:
+          do:
+            - return: b, depthExceeded(true)
+          when: depth >= maxDepth
+      - bind: b, err
+        eval: appendArrayHeader(b, len(s))
+        to: appendArrayHeader
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - loop:
+          do:
+            - set: b, err
+              to: appendAny
+              value: appendAny(b, x, depth+1)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: _
+          range: s
+          value: x
+      - return: b, nil
+  - of: addressEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: addressEncoder
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: p.Elem().Set
+        kind: value
+    steps:
+      - return:
+          closure:
+            params: b []byte, v reflect.Value, depth int
+            results: "[]byte, error"
+            steps:
+              - opt:
+                  do:
+                    - return: method(b, v.Addr(), depth)
+                  when: v.CanAddr()
+              - opt:
+                  do:
+                    - return: b, readOnly(v.Type())
+                  when: "!v.CanInterface()"
+              - bind: p
+                eval: reflect.New(v.Type())
+                to: reflect
+              - eval: p.Elem().Set(v)
+                to: p.Elem().Set
+              - return: method(b, p, depth)
+  - of: encodeSelfMsgpack
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeSelfMsgpack
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+      - id: appendMarshalled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: isNilable(v.Kind()) && v.IsNil()
+      - bind: m, ok
+        eval: interfaceOf[marshalMsgpacker](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: b, readOnly(v.Type())
+          when: "!ok"
+      - return: appendMarshalled(b, m, v.Type())
+        to: appendMarshalled
+  - of: appendMarshalled
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMarshalled
+        kind: self
+      - id: m.MarshalMsgpack
+        kind: internal
+    steps:
+      - bind: raw, err
+        eval: m.MarshalMsgpack()
+        to: m.MarshalMsgpack
+      - opt:
+          do:
+            - return: b, wrapMarshal(err, "MarshalMsgpack failed", typeField(t))
+          when: err != nil
+      - opt:
+          do:
+            - return: b, marshalFault("MarshalMsgpack did not return exactly one MessagePack value", typeField(t))
+          when: "!isSingleValue(raw)"
+      - return: append(b, raw...), nil
+  - of: encodeSelfBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeSelfBinary
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+      - id: m.MarshalBinary
+        kind: value
+      - id: appendBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: isNilable(v.Kind()) && v.IsNil()
+      - bind: m, ok
+        eval: interfaceOf[encoding.BinaryMarshaler](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: b, readOnly(v.Type())
+          when: "!ok"
+      - bind: raw, err
+        eval: m.MarshalBinary()
+        to: m.MarshalBinary
+      - opt:
+          do:
+            - return: b, wrapMarshal(err, "MarshalBinary failed", typeField(v.Type()))
+          when: err != nil
+      - return: appendBytes(b, raw)
+        to: appendBytes
+  - of: encodeSelfText
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeSelfText
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+      - id: m.MarshalText
+        kind: value
+      - id: appendBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: isNilable(v.Kind()) && v.IsNil()
+      - bind: m, ok
+        eval: interfaceOf[encoding.TextMarshaler](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: b, readOnly(v.Type())
+          when: "!ok"
+      - bind: raw, err
+        eval: m.MarshalText()
+        to: m.MarshalText
+      - opt:
+          do:
+            - return: b, wrapMarshal(err, "MarshalText failed", typeField(v.Type()))
+          when: err != nil
+      - return: appendBytes(b, raw)
+        to: appendBytes
+  - of: isSingleValue
+    steps:
+      - bind: d
+        eval: "decodeState{data: raw}"
+      - return: d.skip() == nil && d.off == len(raw)
+  - of: newMapEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMapEncoder
+        kind: self
+      - id: stringMapEncoder
+        kind: internal
+    steps:
+      - bind: generic
+        eval: |-
+          &mapEncoder{
+          		keyType:  t.Key(),
+          		elemType: t.Elem(),
+          		key:      encoderFor(t.Key()),
+          		elem:     encoderFor(t.Elem()),
+          	}
+      - opt:
+          do:
+            - return: fast
+          init:
+            bind: fast
+            eval: stringMapEncoder(t, generic.encode)
+            to: stringMapEncoder
+          when: fast != nil
+      - return: generic.encode
+  - of: stringMapEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: stringMapEncoder
+        kind: self
+      - id: directMapEncoder
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.TypeFor[map[string]any]()
+              do:
+                - return: directMapEncoder(appendAnyElem, fallback)
+                  to: directMapEncoder
+            - case: reflect.TypeFor[map[string]string]()
+              do:
+                - return: directMapEncoder(appendStringElem, fallback)
+                  to: directMapEncoder
+            - case: reflect.TypeFor[map[string]int]()
+              do:
+                - return: directMapEncoder(appendIntElem[int], fallback)
+                  to: directMapEncoder
+            - case: reflect.TypeFor[map[string]int64]()
+              do:
+                - return: directMapEncoder(appendIntElem[int64], fallback)
+                  to: directMapEncoder
+            - case: reflect.TypeFor[map[string]float64]()
+              do:
+                - return: directMapEncoder(appendFloat64Elem, fallback)
+                  to: directMapEncoder
+            - case: reflect.TypeFor[map[string]bool]()
+              do:
+                - return: directMapEncoder(appendBoolElem, fallback)
+                  to: directMapEncoder
+            - default: true
+              do:
+                - return: nil
+          "on": t
+  - of: directMapEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: directMapEncoder
+        kind: self
+      - id: interfaceOf
+        kind: internal
+      - id: appendStringMap
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: b []byte, v reflect.Value, depth int
+            results: "[]byte, error"
+            steps:
+              - bind: m, ok
+                eval: interfaceOf[map[string]V](v)
+                to: interfaceOf
+              - opt:
+                  do:
+                    - return: fallback(b, v, depth)
+                  when: "!ok"
+              - return: appendStringMap(b, m, elem, depth)
+                to: appendStringMap
+  - of: appendStringMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendStringMap
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: appendMapHeader
+        kind: internal
+      - id: appendString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: m == nil
+      - opt:
+          do:
+            - return: b, depthExceeded(true)
+          when: depth >= maxDepth
+      - bind: b, err
+        eval: appendMapHeader(b, len(m))
+        to: appendMapHeader
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - loop:
+          do:
+            - set: b, err
+              to: appendString
+              value: appendString(b, k)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+            - set: b, err
+              value: elem(b, x, depth+1)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: k
+          range: m
+          value: x
+      - return: b, nil
+  - of: appendAnyElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAnyElem
+        kind: self
+      - id: appendAny
+        kind: internal
+    steps:
+      - return: appendAny(b, x, depth)
+        to: appendAny
+  - of: appendStringElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendStringElem
+        kind: self
+      - id: appendString
+        kind: internal
+    steps:
+      - return: appendString(b, s)
+        to: appendString
+  - of: appendIntElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendIntElem
+        kind: self
+      - id: appendInt
+        kind: internal
+    steps:
+      - return: appendInt(b, int64(n)), nil
+        to: appendInt
+  - of: appendFloat64Elem
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFloat64Elem
+        kind: self
+      - id: appendFloat64
+        kind: internal
+    steps:
+      - return: appendFloat64(b, f), nil
+        to: appendFloat64
+  - of: appendBoolElem
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBoolElem
+        kind: self
+      - id: appendBool
+        kind: internal
+    steps:
+      - return: appendBool(b, x), nil
+        to: appendBool
+  - of: (*mapEncoder).encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapEncoder).encode
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: appendMapHeader
+        kind: internal
+      - id: v.MapRange
+        kind: value
+      - id: m.encodePairsInPlace
+        kind: internal
+      - id: m.encodePairsCopied
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: v.IsNil()
+      - opt:
+          do:
+            - return: b, depthExceeded(true)
+          when: depth >= maxDepth
+      - bind: b, err
+        eval: appendMapHeader(b, v.Len())
+        to: appendMapHeader
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - bind: iter
+        eval: v.MapRange()
+        to: v.MapRange
+      - opt:
+          do:
+            - return: m.encodePairsInPlace(b, iter, depth)
+              to: m.encodePairsInPlace
+          when: v.CanInterface()
+      - return: m.encodePairsCopied(b, iter, depth)
+        to: m.encodePairsCopied
+  - of: (*mapEncoder).encodePairsInPlace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapEncoder).encodePairsInPlace
+        kind: self
+      - id: reflect.New(m.keyType).Elem
+        kind: value
+      - id: reflect.New(m.elemType).Elem
+        kind: value
+      - id: key.SetIterKey
+        kind: value
+      - id: val.SetIterValue
+        kind: value
+      - id: m.encodePair
+        kind: internal
+    steps:
+      - bind: key
+        eval: reflect.New(m.keyType).Elem()
+        to: reflect.New(m.keyType).Elem
+      - bind: val
+        eval: reflect.New(m.elemType).Elem()
+        to: reflect.New(m.elemType).Elem
+      - loop:
+          cond: iter.Next()
+          do:
+            - eval: key.SetIterKey(iter)
+              to: key.SetIterKey
+            - eval: val.SetIterValue(iter)
+              to: val.SetIterValue
+            - var:
+                name: err
+                type: error
+            - set: b, err
+              to: m.encodePair
+              value: m.encodePair(b, key, val, depth)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+      - return: b, nil
+  - of: (*mapEncoder).encodePairsCopied
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapEncoder).encodePairsCopied
+        kind: self
+      - id: m.encodePair
+        kind: internal
+    steps:
+      - loop:
+          cond: iter.Next()
+          do:
+            - var:
+                name: err
+                type: error
+            - set: b, err
+              to: m.encodePair
+              value: m.encodePair(b, iter.Key(), iter.Value(), depth)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+      - return: b, nil
+  - of: (*mapEncoder).encodePair
+    steps:
+      - bind: b, err
+        eval: m.key(b, key, depth+1)
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - return: m.elem(b, val, depth+1)
+  - of: encoderFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: encoderFor
+        kind: self
+      - id: encoders.Load
+        kind: value
+      - id: wg.Add
+        kind: value
+      - id: encoders.LoadOrStore
+        kind: value
+      - id: buildEncoder
+        kind: internal
+      - id: wg.Done
+        kind: value
+      - id: encoders.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: f
+                init:
+                  bind: f, isFunc
+                  eval: cached.(encodeFunc)
+                when: isFunc
+          init:
+            bind: cached, ok
+            eval: encoders.Load(t)
+            to: encoders.Load
+          when: ok
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		wg    sync.WaitGroup
+          		built encodeFunc
+          	)
+      - eval: wg.Add(1)
+        to: wg.Add
+      - bind: placeholder
+        eval: |-
+          encodeFunc(func(b []byte, v reflect.Value, depth int) ([]byte, error) {
+          		wg.Wait()
+          		//: forward to the finished encoder.
+          		return built(b, v, depth)
+          	})
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: f
+                init:
+                  bind: f, isFunc
+                  eval: actual.(encodeFunc)
+                when: isFunc
+          init:
+            bind: actual, loaded
+            eval: encoders.LoadOrStore(t, placeholder)
+            to: encoders.LoadOrStore
+          when: loaded
+      - set: built
+        to: buildEncoder
+        value: buildEncoder(t)
+      - eval: wg.Done()
+        to: wg.Done
+      - eval: encoders.Store(t, built)
+        to: encoders.Store
+      - return: built
+  - of: buildEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildEncoder
+        kind: self
+      - id: hookEncoder
+        kind: internal
+      - id: scalarEncoder
+        kind: internal
+      - id: compositeEncoder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: f
+          init:
+            bind: f
+            eval: hookEncoder(t)
+            to: hookEncoder
+          when: f != nil
+      - opt:
+          do:
+            - return: f
+          init:
+            bind: f
+            eval: scalarEncoder(t.Kind())
+            to: scalarEncoder
+          when: f != nil
+      - return: compositeEncoder(t)
+        to: compositeEncoder
+  - of: hookEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: hookEncoder
+        kind: self
+      - id: methodEncoder
+        kind: internal
+      - id: addressEncoder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface
+      - opt:
+          do:
+            - return: encodeTime
+          when: t == timeType
+      - opt:
+          do:
+            - return: f
+          init:
+            bind: f
+            eval: methodEncoder(t)
+            to: methodEncoder
+          when: f != nil
+      - opt:
+          do:
+            - return: addressEncoder(f)
+              to: addressEncoder
+          init:
+            bind: f
+            eval: methodEncoder(reflect.PointerTo(t))
+            to: methodEncoder
+          when: f != nil
+      - return: nil
+  - of: methodEncoder
+    steps:
+      - switch:
+          cases:
+            - case: t.Implements(marshalMsgpackerType)
+              do:
+                - return: encodeSelfMsgpack
+            - case: t.Implements(binaryMarshalerType)
+              do:
+                - return: encodeSelfBinary
+            - case: t.Implements(textMarshalerType)
+              do:
+                - return: encodeSelfText
+            - default: true
+              do:
+                - return: nil
+  - of: scalarEncoder
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - return: encodeBool
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: encodeIntValue
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: encodeUintValue
+            - case: reflect.Float32
+              do:
+                - return: encodeFloat32Value
+            - case: reflect.Float64
+              do:
+                - return: encodeFloat64Value
+            - case: reflect.String
+              do:
+                - return: encodeStringValue
+            - default: true
+              do:
+                - return: nil
+          "on": k
+  - of: compositeEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: compositeEncoder
+        kind: self
+      - id: sliceEncoder
+        kind: internal
+      - id: arrayEncoder
+        kind: internal
+      - id: newMapEncoder
+        kind: internal
+      - id: newStructEncoder
+        kind: internal
+      - id: pointerEncoder
+        kind: internal
+      - id: interfaceEncoder
+        kind: internal
+      - id: failingEncoder
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Slice
+              do:
+                - return: sliceEncoder(t)
+                  to: sliceEncoder
+            - case: reflect.Array
+              do:
+                - return: arrayEncoder(t)
+                  to: arrayEncoder
+            - case: reflect.Map
+              do:
+                - return: newMapEncoder(t)
+                  to: newMapEncoder
+            - case: reflect.Struct
+              do:
+                - return: newStructEncoder(t)
+                  to: newStructEncoder
+            - case: reflect.Pointer
+              do:
+                - return: pointerEncoder(t)
+                  to: pointerEncoder
+            - case: reflect.Interface
+              do:
+                - return: interfaceEncoder(t)
+                  to: interfaceEncoder
+            - default: true
+              do:
+                - return: failingEncoder(unsupportedType(t))
+                  to: failingEncoder
+          "on": t.Kind()
+  - of: failingEncoder
+    steps:
+      - return:
+          closure:
+            params: b []byte, _ reflect.Value, _ int
+            results: "[]byte, error"
+            steps:
+              - return: b, err
+  - of: encodeBool
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeBool
+        kind: self
+      - id: appendBool
+        kind: internal
+    steps:
+      - return: appendBool(b, v.Bool()), nil
+        to: appendBool
+  - of: encodeIntValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeIntValue
+        kind: self
+      - id: appendInt
+        kind: internal
+    steps:
+      - return: appendInt(b, v.Int()), nil
+        to: appendInt
+  - of: encodeUintValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeUintValue
+        kind: self
+      - id: appendUint
+        kind: internal
+    steps:
+      - return: appendUint(b, v.Uint()), nil
+        to: appendUint
+  - of: encodeFloat32Value
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeFloat32Value
+        kind: self
+      - id: appendFloat32
+        kind: internal
+    steps:
+      - return: appendFloat32(b, float32(v.Float())), nil
+        to: appendFloat32
+  - of: encodeFloat64Value
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeFloat64Value
+        kind: self
+      - id: appendFloat64
+        kind: internal
+    steps:
+      - return: appendFloat64(b, v.Float()), nil
+        to: appendFloat64
+  - of: encodeStringValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeStringValue
+        kind: self
+      - id: appendString
+        kind: internal
+    steps:
+      - return: appendString(b, v.String())
+        to: appendString
+  - of: encodeTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeTime
+        kind: self
+      - id: interfaceOf
+        kind: internal
+      - id: appendTimestamp
+        kind: internal
+    steps:
+      - bind: t, ok
+        eval: interfaceOf[time.Time](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: b, readOnly(v.Type())
+          when: "!ok"
+      - return: appendTimestamp(b, t), nil
+        to: appendTimestamp
+  - of: sliceEncoder
+    steps:
+      - opt:
+          do:
+            - return: encodeByteSlice
+          when: t.Elem().Kind() == reflect.Uint8
+      - return: "(&listEncoder{elem: encoderFor(t.Elem())}).encodeSlice"
+  - of: arrayEncoder
+    steps:
+      - opt:
+          do:
+            - return: encodeByteArray
+          when: t.Elem().Kind() == reflect.Uint8
+      - return: "(&listEncoder{elem: encoderFor(t.Elem())}).encodeList"
+  - of: encodeByteSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeByteSlice
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: appendBinary
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: v.IsNil()
+      - return: appendBinary(b, v.Bytes())
+        to: appendBinary
+  - of: encodeByteArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeByteArray
+        kind: self
+      - id: appendBinary
+        kind: internal
+      - id: v.Len
+        kind: value
+      - id: checkLength
+        kind: internal
+      - id: appendLength
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendBinary(b, v.Bytes())
+              to: appendBinary
+          when: v.CanAddr()
+      - bind: "n"
+        eval: v.Len()
+        to: v.Len
+      - opt:
+          do:
+            - return: b, err
+          init:
+            bind: err
+            eval: checkLength(n)
+            to: checkLength
+          when: err != nil
+      - set: b
+        to: appendLength
+        value: appendLength(b, n, &binForms)
+      - loop:
+          do:
+            - set: b
+              value: append(b, byte(v.Index(i).Uint()))
+          key: i
+          range: "n"
+      - return: b, nil
+  - of: (*listEncoder).encodeSlice
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listEncoder).encodeSlice
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: l.encodeList
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: v.IsNil()
+      - return: l.encodeList(b, v, depth)
+        to: l.encodeList
+  - of: (*listEncoder).encodeList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listEncoder).encodeList
+        kind: self
+      - id: v.Len
+        kind: value
+      - id: appendArrayHeader
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, depthExceeded(true)
+          when: depth >= maxDepth
+      - bind: "n"
+        eval: v.Len()
+        to: v.Len
+      - bind: b, err
+        eval: appendArrayHeader(b, n)
+        to: appendArrayHeader
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - loop:
+          do:
+            - set: b, err
+              value: l.elem(b, v.Index(i), depth+1)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: i
+          range: "n"
+      - return: b, nil
+  - of: pointerEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: pointerEncoder
+        kind: self
+      - id: encoderFor
+        kind: internal
+      - id: appendNil
+        kind: internal
+    steps:
+      - bind: elem
+        eval: encoderFor(t.Elem())
+        to: encoderFor
+      - return:
+          closure:
+            params: b []byte, v reflect.Value, depth int
+            results: "[]byte, error"
+            steps:
+              - opt:
+                  do:
+                    - return: appendNil(b), nil
+                      to: appendNil
+                  when: v.IsNil()
+              - opt:
+                  do:
+                    - return: b, depthExceeded(true)
+                  when: depth >= maxDepth
+              - return: elem(b, v.Elem(), depth+1)
+  - of: interfaceEncoder
+    steps:
+      - opt:
+          do:
+            - return: encodeError
+          when: t == errorType
+      - return: encodeInterface
+  - of: encodeInterface
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeInterface
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: appendAny
+        kind: internal
+      - id: v.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: v.IsNil()
+      - opt:
+          do:
+            - return: b, depthExceeded(true)
+          when: depth >= maxDepth
+      - opt:
+          do:
+            - return: appendAny(b, v.Interface(), depth+1)
+              to: appendAny
+          when: v.CanInterface()
+      - bind: e
+        eval: v.Elem()
+        to: v.Elem
+      - return: encoderFor(e.Type())(b, e, depth+1)
+  - of: encodeError
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeError
+        kind: self
+      - id: appendNil
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+      - id: appendString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: v.IsNil()
+      - bind: err, ok
+        eval: interfaceOf[error](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: b, readOnly(v.Type())
+          when: "!ok"
+      - return: appendString(b, err.Error())
+        to: appendString
+  - of: interfaceOf
+    steps:
+      - var:
+          name: zero
+          type: T
+      - opt:
+          do:
+            - return: zero, false
+          when: "!v.CanInterface()"
+      - return: reflect.TypeAssert[T](v)
+  - of: readOnly
+    participants:
+      - id: caller
+        kind: actor
+      - id: readOnly
+        kind: self
+      - id: marshalFault
+        kind: internal
+    steps:
+      - return: marshalFault("cannot call the encoding method of a value reached through an unexported field", typeField(t))
+        to: marshalFault
+  - of: newStructEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: newStructEncoder
+        kind: self
+      - id: layoutOf
+        kind: internal
+      - id: layout.defect
+        kind: internal
+      - id: failingEncoder
+        kind: internal
+    steps:
+      - bind: layout
+        eval: layoutOf(t)
+        to: layoutOf
+      - opt:
+          do:
+            - return: failingEncoder(err)
+              to: failingEncoder
+          init:
+            bind: err
+            eval: layout.defect(t, true)
+            to: layout.defect
+          when: err != nil
+      - bind: s
+        eval: |-
+          &structEncoder{
+          		fields:       make([]fieldEncoder, len(layout.fields)),
+          		asArray:      layout.asArray,
+          		hasOmitEmpty: layout.hasOmitEmpty,
+          	}
+      - loop:
+          do:
+            - set: s.fields[i]
+              value: "fieldEncoder{field: f, enc: encoderFor(f.typ), empty: emptyFor(f.typ)}"
+          key: i
+          range: layout.fields
+          value: f
+      - return: s.encode
+  - of: (*structEncoder).encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structEncoder).encode
+        kind: self
+      - id: s.encodeArray
+        kind: internal
+      - id: s.encodeMap
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, depthExceeded(true)
+          when: depth >= maxDepth
+      - opt:
+          do:
+            - return: s.encodeArray(b, v, depth)
+              to: s.encodeArray
+          when: s.asArray
+      - return: s.encodeMap(b, v, depth)
+        to: s.encodeMap
+  - of: (*structEncoder).encodeArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structEncoder).encodeArray
+        kind: self
+      - id: appendLength
+        kind: internal
+      - id: s.fields[i].encodeValue
+        kind: internal
+    steps:
+      - set: b
+        to: appendLength
+        value: appendLength(b, len(s.fields), &arrayForms)
+      - loop:
+          do:
+            - var:
+                name: err
+                type: error
+            - set: b, err
+              to: s.fields[i].encodeValue
+              value: s.fields[i].encodeValue(b, v, depth)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: i
+          range: s.fields
+      - return: b, nil
+  - of: (*structEncoder).encodeMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structEncoder).encodeMap
+        kind: self
+      - id: s.keptCount
+        kind: internal
+      - id: appendLength
+        kind: internal
+      - id: f.encodeValue
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: len(s.fields)
+      - opt:
+          do:
+            - set: "n"
+              to: s.keptCount
+              value: s.keptCount(v)
+          when: s.hasOmitEmpty
+      - set: b
+        to: appendLength
+        value: appendLength(b, n, &mapForms)
+      - loop:
+          do:
+            - bind: f
+              eval: "&s.fields[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: s.hasOmitEmpty && f.omitted(v)
+            - set: b
+              value: append(b, f.field.wireName...)
+            - var:
+                name: err
+                type: error
+            - set: b, err
+              to: f.encodeValue
+              value: f.encodeValue(b, v, depth)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+          key: i
+          range: s.fields
+      - return: b, nil
+  - of: (*fieldEncoder).omitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldEncoder).omitted
+        kind: self
+      - id: fieldValue
+        kind: internal
+    steps:
+      - bind: fv, ok
+        eval: fieldValue(v, f.field.index)
+        to: fieldValue
+      - opt:
+          do:
+            - return: "true"
+          when: "!ok"
+      - return: f.field.omitEmpty && f.empty(fv)
+  - of: (*fieldEncoder).encodeValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldEncoder).encodeValue
+        kind: self
+      - id: fieldValue
+        kind: internal
+      - id: appendNil
+        kind: internal
+    steps:
+      - bind: fv, ok
+        eval: fieldValue(v, f.field.index)
+        to: fieldValue
+      - opt:
+          do:
+            - return: appendNil(b), nil
+              to: appendNil
+          when: "!ok"
+      - return: f.enc(b, fv, depth+1)
+  - of: fieldValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldValue
+        kind: self
+      - id: v.Field
+        kind: value
+      - id: v.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v.Field(index[0]), true
+              to: v.Field
+          when: len(index) == 1
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: reflect.Value{}, false
+                      when: v.IsNil()
+                  - set: v
+                    to: v.Elem
+                    value: v.Elem()
+                when: i > 0 && v.Kind() == reflect.Pointer
+            - set: v
+              to: v.Field
+              value: v.Field(x)
+          key: i
+          range: index
+          value: x
+      - return: v, true
+  - of: emptyFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: emptyFor
+        kind: self
+      - id: kindEmpty
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: zeroerEmpty
+          when: t.Kind() != reflect.Interface && t.Implements(isZeroerType)
+      - return: kindEmpty(t.Kind())
+        to: kindEmpty
+  - of: kindEmpty
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Array, reflect.Map, reflect.Slice, reflect.String
+              do:
+                - return: lenEmpty
+            - case: reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64
+              do:
+                - return: scalarEmpty
+            - case: reflect.Pointer
+              do:
+                - return: reflect.Value.IsNil
+            - case: reflect.Interface
+              do:
+                - return: isEmptyValue
+            - case: reflect.Struct
+              do:
+                - return: structEmpty
+            - default: true
+              do:
+                - return: neverEmpty
+          "on": k
+  - of: scalarEmpty
+    participants:
+      - id: caller
+        kind: actor
+      - id: scalarEmpty
+        kind: self
+      - id: v.Bool
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - return: "!v.Bool()"
+                  to: v.Bool
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: v.Int() == 0
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: v.Float() == 0
+            - default: true
+              do:
+                - return: v.Uint() == 0
+          "on": v.Kind()
+  - of: isEmptyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: isEmptyValue
+        kind: self
+      - id: v.Elem
+        kind: value
+    steps:
+      - loop:
+          cond: v.Kind() == reflect.Interface
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: v.IsNil()
+            - set: v
+              to: v.Elem
+              value: v.Elem()
+      - return: emptyFor(v.Type())(v)
+  - of: zeroerEmpty
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroerEmpty
+        kind: self
+      - id: interfaceOf
+        kind: internal
+      - id: z.IsZero
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: isNilable(v.Kind()) && v.IsNil()
+      - bind: z, ok
+        eval: interfaceOf[isZeroer](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: kindEmpty(v.Kind())(v)
+          when: "!ok"
+      - return: z.IsZero()
+        to: z.IsZero
+  - of: lenEmpty
+    steps:
+      - return: v.Len() == 0
+  - of: neverEmpty
+    steps:
+      - return: "false"
+  - of: structEmpty
+    participants:
+      - id: caller
+        kind: actor
+      - id: structEmpty
+        kind: self
+      - id: layoutOf
+        kind: internal
+      - id: fieldValue
+        kind: internal
+    steps:
+      - bind: layout
+        eval: layoutOf(v.Type())
+        to: layoutOf
+      - opt:
+          do:
+            - return: len(layout.fields) == 0
+          when: "!layout.hasOmitEmpty"
+      - loop:
+          do:
+            - bind: fv, ok
+              eval: fieldValue(v, f.index)
+              to: fieldValue
+            - opt:
+                do:
+                  - return: "false"
+                when: ok && (!f.omitEmpty || !isEmptyValue(fv))
+          key: _
+          range: layout.fields
+          value: f
+      - return: "true"
+  - of: isNilable
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
+  - of: newEncoder
+    steps:
+      - return: "&msgpackEncoder{w: w}"
+  - of: (*msgpackEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackEncoder).Encode
+        kind: self
+      - id: marshalFault
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: appendAny
+        kind: internal
+      - id: e.write
+        kind: internal
+      - id: retain
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: marshalFault("streaming encoder has no writer")
+              to: marshalFault
+          when: e.w == nil
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: b, err
+        eval: appendAny(buf.AvailableBuffer(), v, 0)
+        to: appendAny
+      - opt:
+          do:
+            - set: err
+              to: e.write
+              value: e.write(b)
+          when: err == nil
+      - eval: retain(buf, b)
+        to: retain
+      - eval: scratch.ReleaseBuffer(buf)
+        to: scratch
+      - return: err
+  - of: (*msgpackEncoder).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*msgpackEncoder).write
+        kind: self
+      - id: e.w.Write
+        kind: value
+      - id: wrapMarshal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapMarshal(err, "writing the encoded value failed")
+              to: wrapMarshal
+          init:
+            bind: _, err
+            eval: e.w.Write(b)
+            to: e.w.Write
+          when: err != nil
+      - return: nil
+  - of: (*msgpackEncoder).Close
+    steps:
+      - return: nil
+  - of: family.String
+    steps:
+      - return: familyNames[f]
+  - of: marshalFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremsgpack.CodeMsgPackMarshalFailed,
+          		Reason:  reasonMarshal,
+          		Public:  publicMarshal,
+          		Private: privatePrefix + detail,
+          	}, fields...)
+        to: errs
+  - of: unmarshalFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
+          		Reason:  reasonUnmarshal,
+          		Public:  publicUnmarshal,
+          		Private: privatePrefix + detail,
+          	}, fields...)
+        to: errs
+  - of: wrapMarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapMarshal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coremsgpack.CodeMsgPackMarshalFailed,
+          		Reason:  reasonMarshal,
+          		Public:  publicMarshal,
+          		Private: privatePrefix + detail,
+          	}, fields...)
+        to: errs
+  - of: wrapUnmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapUnmarshal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
+          		Reason:  reasonUnmarshal,
+          		Public:  publicUnmarshal,
+          		Private: privatePrefix + detail,
+          	}, fields...)
+        to: errs
+  - of: typeField
+    participants:
+      - id: caller
+        kind: actor
+      - id: typeField
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.String(fieldType, t.String())
+        to: errs
+  - of: unsupportedType
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsupportedType
+        kind: self
+      - id: marshalFault
+        kind: internal
+    steps:
+      - return: marshalFault("cannot encode a value of this Go type", typeField(t))
+        to: marshalFault
+  - of: depthExceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: depthExceeded
+        kind: self
+      - id: marshalFault
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: marshalFault("value nests deeper than the depth limit (a cyclic value?)", errs.Int(fieldLimit, maxDepth))
+              to: marshalFault
+          when: encode
+      - return: unmarshalFault("input nests deeper than the depth limit", errs.Int(fieldLimit, maxDepth))
+        to: unmarshalFault
+  - of: layoutOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: layoutOf
+        kind: self
+      - id: layouts.Load
+        kind: value
+      - id: buildLayout
+        kind: internal
+      - id: layouts.LoadOrStore
+        kind: value
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: l
+                init:
+                  bind: l, isLayout
+                  eval: cached.(*structLayout)
+                when: isLayout
+          init:
+            bind: cached, ok
+            eval: layouts.Load(t)
+            to: layouts.Load
+          when: ok
+      - bind: l
+        eval: buildLayout(t, map[reflect.Type]bool{})
+        to: buildLayout
+      - bind: actual, _
+        eval: layouts.LoadOrStore(t, l)
+        to: layouts.LoadOrStore
+      - opt:
+          do:
+            - return: stored
+          init:
+            bind: stored, isLayout
+            eval: actual.(*structLayout)
+          when: isLayout
+      - return: l
+  - of: buildLayout
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildLayout
+        kind: self
+      - id: b.addField
+        kind: internal
+    steps:
+      - set: visiting[t]
+        value: "true"
+      - bind: b
+        eval: |-
+          &layoutBuilder{
+          		layout:   &structLayout{byName: make(map[string]*structField, t.NumField())},
+          		visiting: visiting,
+          	}
+      - loop:
+          do:
+            - eval: b.addField(f)
+              to: b.addField
+          key: f
+          range: t.Fields()
+      - eval: delete(visiting, t)
+      - return: b.layout
+  - of: (*layoutBuilder).addField
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*layoutBuilder).addField
+        kind: self
+      - id: parseTag
+        kind: internal
+      - id: b.applyMarker
+        kind: internal
+      - id: b.alias
+        kind: internal
+      - id: b.add
+        kind: internal
+    steps:
+      - bind: tag
+        eval: parseTag(f.Tag.Get(tagKey))
+        to: parseTag
+      - opt:
+          do:
+            - return: ""
+          when: tag.name == tagSkip
+      - opt:
+          do:
+            - eval: b.applyMarker(tag)
+              to: b.applyMarker
+            - return: ""
+          when: f.Name == markerField
+      - opt:
+          do:
+            - return: ""
+          when: "!f.IsExported() && !f.Anonymous"
+      - bind: field
+        eval: |-
+          &structField{
+          		typ:       f.Type,
+          		name:      cmpOrName(tag.name, f.Name),
+          		index:     []int{f.Index[0]},
+          		omitEmpty: b.omitAll || tag.has(optOmitEmpty),
+          	}
+      - opt:
+          do:
+            - eval: b.alias(field.name, field)
+              to: b.alias
+            - return: ""
+          when: f.Anonymous && !tag.has(optNoInline) && b.inline(field, tag.has(optInline))
+      - eval: b.add(field)
+        to: b.add
+      - opt:
+          do:
+            - eval: b.alias(alias, field)
+              to: b.alias
+          init:
+            bind: alias, ok
+            eval: tag.opts[optAlias]
+          when: ok && alias != ""
+  - of: (*layoutBuilder).applyMarker
+    steps:
+      - set: b.layout.asArray
+        value: tag.has(optAsArray) || tag.has(optAsArrayCamel)
+      - opt:
+          do:
+            - set: b.omitAll
+              value: "true"
+          when: tag.has(optOmitEmpty)
+  - of: (*layoutBuilder).inline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*layoutBuilder).inline
+        kind: self
+      - id: et.Elem
+        kind: value
+      - id: buildLayout
+        kind: internal
+      - id: b.fail
+        kind: internal
+      - id: b.add
+        kind: internal
+    steps:
+      - bind: et
+        eval: field.typ
+      - loop:
+          cond: et.Kind() == reflect.Pointer
+          do:
+            - set: et
+              to: et.Elem
+              value: et.Elem()
+      - opt:
+          do:
+            - return: "false"
+          when: et.Kind() != reflect.Struct || hasCustomCodec(et) || b.visiting[et]
+      - bind: sub
+        eval: buildLayout(et, b.visiting)
+        to: buildLayout
+      - opt:
+          do:
+            - return: "false"
+          when: "!forced && b.collides(sub)"
+      - opt:
+          do:
+            - eval: b.fail(sub.dupName)
+              to: b.fail
+          when: sub.dupName != ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, taken
+                  eval: b.layout.byName[sf.name]
+                when: taken
+            - eval: |-
+                b.add(&structField{
+                			typ: sf.typ, name: sf.name, omitEmpty: sf.omitEmpty,
+                			index: append(append(make([]int, 0, len(field.index)+len(sf.index)), field.index...), sf.index...),
+                		})
+              to: b.add
+          key: _
+          range: sub.fields
+          value: sf
+      - return: "true"
+  - of: (*layoutBuilder).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*layoutBuilder).add
+        kind: self
+      - id: b.fail
+        kind: internal
+      - id: appendLength
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: b.fail(field.name)
+              to: b.fail
+            - return: ""
+          init:
+            bind: _, taken
+            eval: b.layout.byName[field.name]
+          when: taken
+      - set: field.wireName
+        to: appendLength
+        value: appendLength(nil, len(field.name), &strForms)
+      - set: field.wireName
+        value: append(field.wireName, field.name...)
+      - set: b.layout.fields
+        value: append(b.layout.fields, field)
+      - set: b.layout.byName[field.name]
+        value: field
+      - opt:
+          do:
+            - set: b.layout.hasOmitEmpty
+              value: "true"
+          when: field.omitEmpty
+  - of: (*layoutBuilder).alias
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, taken
+            eval: b.layout.byName[name]
+          when: taken
+      - set: b.layout.byName[name]
+        value: field
+  - of: (*layoutBuilder).fail
+    steps:
+      - opt:
+          do:
+            - set: b.layout.dupName
+              value: name
+          when: b.layout.dupName == ""
+  - of: (*structLayout).defect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*structLayout).defect
+        kind: self
+      - id: marshalFault
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: l.dupName == ""
+      - opt:
+          do:
+            - return: marshalFault(detailDuplicateKey, typeField(t), errs.String(fieldName, l.dupName))
+              to: marshalFault
+          when: encode
+      - return: unmarshalFault(detailDuplicateKey, typeField(t), errs.String(fieldName, l.dupName))
+        to: unmarshalFault
+  - of: hasCustomCodec
+    participants:
+      - id: caller
+        kind: actor
+      - id: hasCustomCodec
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: t == timeType
+      - bind: pt
+        eval: reflect.PointerTo(t)
+        to: reflect
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: t.Implements(iface) || pt.Implements(iface)
+          key: _
+          range: customCodecTypes
+          value: iface
+      - return: "false"
+  - of: parseTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTag
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: spec.setOption
+        kind: internal
+    steps:
+      - var:
+          name: spec
+          type: tagSpec
+      - opt:
+          do:
+            - return: spec
+          when: s == ""
+      - bind: head, rest, _
+        eval: strings.Cut(s, ",")
+        to: strings
+      - bind: first
+        eval: strings.TrimSpace(head)
+        to: strings
+      - alt:
+          - do:
+              - eval: spec.setOption(first)
+                to: spec.setOption
+            when: strings.Contains(first, ":")
+          - do:
+              - set: spec.name
+                value: first
+            else: true
+      - loop:
+          do:
+            - eval: spec.setOption(strings.TrimSpace(opt))
+              to: spec.setOption
+          key: opt
+          range: strings.SplitSeq(rest, ",")
+      - return: spec
+  - of: (*tagSpec).setOption
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tagSpec).setOption
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: opt == ""
+      - opt:
+          do:
+            - set: s.opts
+              value: map[string]string{}
+          when: s.opts == nil
+      - bind: key, value, _
+        eval: strings.Cut(opt, ":")
+        to: strings
+      - set: s.opts[strings.TrimSpace(key)]
+        to: strings
+        value: strings.TrimSpace(value)
+  - of: (*tagSpec).has
+    steps:
+      - bind: _, ok
+        eval: s.opts[opt]
+      - return: ok
+  - of: cmpOrName
+    steps:
+      - opt:
+          do:
+            - return: fieldName
+          when: tagName == ""
+      - return: tagName
+  - of: appendTimestamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTimestamp
+        kind: self
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - bind: secs
+        eval: uint64(t.Unix())
+      - bind: nsec
+        eval: uint64(t.Nanosecond())
+      - opt:
+          do:
+            - bind: word
+              eval: nsec<<ts64SecBits | secs
+            - opt:
+                do:
+                  - return: binary.BigEndian.AppendUint32(append(b, codeFixext4, extTimestampByte), uint32(word))
+                    to: binary.BigEndian.AppendUint32
+                when: word&ts32Mask == 0
+            - return: binary.BigEndian.AppendUint64(append(b, codeFixext8, extTimestampByte), word)
+              to: binary.BigEndian.AppendUint64
+          when: secs>>ts64SecBits == 0
+      - set: b
+        value: append(b, codeExt8, byte(ts96Len), extTimestampByte)
+      - set: b
+        to: binary.BigEndian.AppendUint32
+        value: binary.BigEndian.AppendUint32(b, uint32(nsec))
+      - return: binary.BigEndian.AppendUint64(b, secs)
+        to: binary.BigEndian.AppendUint64
+  - of: decodeTimestamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTimestamp
+        kind: self
+      - id: time.Unix(int64(binary.BigEndian.Uint32(p)), 0).UTC
+        kind: value
+      - id: binary.BigEndian.Uint64
+        kind: value
+      - id: timeFromParts
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: ts32Len
+              do:
+                - return: time.Unix(int64(binary.BigEndian.Uint32(p)), 0).UTC(), nil
+                  to: time.Unix(int64(binary.BigEndian.Uint32(p)), 0).UTC
+            - case: ts64Len
+              do:
+                - bind: word
+                  eval: binary.BigEndian.Uint64(p)
+                  to: binary.BigEndian.Uint64
+                - return: timeFromParts(int64(word&ts64SecMask), word>>ts64SecBits)
+                  to: timeFromParts
+            - case: ts96Len
+              do:
+                - bind: nsec
+                  eval: uint64(binary.BigEndian.Uint32(p))
+                - return: timeFromParts(int64(binary.BigEndian.Uint64(p[ts96NsecLen:])), nsec)
+                  to: timeFromParts
+            - default: true
+              do:
+                - return: time.Time{}, unmarshalFault("timestamp extension has an invalid length", errs.Int(fieldLen, len(p)))
+          "on": uint64(len(p))
+  - of: timeFromParts
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeFromParts
+        kind: self
+      - id: time.Unix(sec, int64(nsec)).UTC
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}, unmarshalFault("timestamp nanoseconds exceed 999999999")
+          when: nsec > maxNanos
+      - return: time.Unix(sec, int64(nsec)).UTC(), nil
+        to: time.Unix(sec, int64(nsec)).UTC
+  - of: buildHeaderTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildHeaderTable
+        kind: self
+      - id: classifyHeader
+        kind: internal
+    steps:
+      - var:
+          name: table
+          type: "[headerTableLen]headerInfo"
+      - loop:
+          do:
+            - set: table[i]
+              to: classifyHeader
+              value: classifyHeader(byte(i))
+          key: i
+          range: headerTableLen
+      - return: table
+  - of: classifyHeader
+    steps:
+      - switch:
+          cases:
+            - case: c <= posFixintMax
+              do:
+                - return: "headerInfo{fam: famInt, inline: uint64(c)}"
+            - case: c < fixarrayPrefix
+              do:
+                - return: "headerInfo{fam: famMap, inline: uint64(c & fixCountMask)}"
+            - case: c < fixstrPrefix
+              do:
+                - return: "headerInfo{fam: famArray, inline: uint64(c & fixCountMask)}"
+            - case: c < codeNil
+              do:
+                - return: "headerInfo{fam: famStr, inline: uint64(c & fixstrLenMask)}"
+            - case: c >= negFixintMin
+              do:
+                - return: "headerInfo{fam: famInt, inline: uint64(int64(int8(c)))}"
+            - default: true
+              do:
+                - return: formatBlock[c-codeNil]

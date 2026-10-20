@@ -1,0 +1,116 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: GrantDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: GrantDeadline
+        kind: self
+      - id: verifiedAt.Add
+        kind: value
+    steps:
+      - bind: deadline
+        eval: verifiedAt.Add(RosterLifetime)
+        to: verifiedAt.Add
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: deadline
+                    value: bound
+                when: "!bound.IsZero() && bound.Before(deadline)"
+          key: _
+          range: bounds
+          value: bound
+      - return: deadline
+  - of: (*GrantValue).Deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*GrantValue).Deadline
+        kind: self
+      - id: g.VerifiedAt.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: g.VerifiedAt.Add(RosterLifetime)
+              to: g.VerifiedAt.Add
+          when: g.NotAfter.IsZero()
+      - return: g.NotAfter
+  - of: (*GrantValue).Expired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*GrantValue).Expired
+        kind: self
+      - id: now.After
+        kind: value
+    steps:
+      - return: now.After(g.Deadline())
+        to: now.After
+  - of: (*RosterValue).CIEntitlementFor
+    steps:
+      - opt:
+          do:
+            - return: |-
+                CIEntitlementValue{}, errs.Wrap(ErrCINotEntitled, errs.WrapParams{},
+                			errs.String("stage", ciEntitlementStage),
+                			errs.String("condition", "no roster to check against"))
+          when: r == nil
+      - opt:
+          do:
+            - return: |-
+                CIEntitlementValue{}, errs.Wrap(ErrCINotEntitled, errs.WrapParams{},
+                			errs.String("stage", ciEntitlementStage),
+                			errs.String("condition", "no account id to match"))
+          when: accountID == ""
+      - bind: recorded, listed
+        eval: r.CIAccounts[accountID]
+      - opt:
+          do:
+            - return: |-
+                CIEntitlementValue{}, errs.Wrap(ErrCINotEntitled, errs.WrapParams{},
+                			errs.String("stage", ciEntitlementStage),
+                			errs.String("condition", "no entry for this account id"),
+                			errs.String("account_id", accountID))
+          when: "!listed"
+      - opt:
+          do:
+            - return: |-
+                CIEntitlementValue{}, errs.Wrap(ErrCINotEntitled, errs.WrapParams{},
+                			errs.String("stage", ciEntitlementStage),
+                			errs.String("condition", "the account's CI seat has expired"),
+                			errs.String("account_id", accountID),
+                			errs.String("expired_at", recorded.ExpiresAt.UTC().Format(time.RFC3339)))
+          when: "!recorded.ExpiresAt.IsZero() && now.After(recorded.ExpiresAt)"
+      - return: recorded, nil
+  - of: (*RosterValue).SubjectFor
+    steps:
+      - opt:
+          do:
+            - return: |-
+                SubjectValue{}, errs.Wrap(ErrRevoked, errs.WrapParams{},
+                			errs.String("stage", subjectLookupStage),
+                			errs.String("condition", "no roster to check against"),
+                			errs.String("subject", uuid))
+          when: r == nil
+      - bind: sv, listed
+        eval: r.Subjects[uuid]
+      - opt:
+          do:
+            - bind: condition
+              eval: "\"no entry for this uuid\""
+            - opt:
+                do:
+                  - set: condition
+                    value: "\"the entry carries no fingerprint\""
+                when: listed
+            - return: |-
+                SubjectValue{}, errs.Wrap(ErrRevoked, errs.WrapParams{},
+                			errs.String("stage", subjectLookupStage),
+                			errs.String("condition", condition),
+                			errs.String("subject", uuid))
+          when: "!listed || sv.Fingerprint == \"\""
+      - return: sv, nil

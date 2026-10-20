@@ -1,0 +1,32 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: headerValueSafe
+    steps:
+      - loop:
+          do:
+            - bind: character
+              eval: value[index]
+            - opt:
+                do:
+                  - return: "false"
+                when: (character < ' ' && character != '\t') || character == asciiDelete
+          key: index
+          range: len(value)
+      - return: "true"
+  - of: referrerPolicyKnown
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: "\"no-referrer\", \"no-referrer-when-downgrade\", \"origin\", \"origin-when-cross-origin\", \"same-origin\", \"strict-origin\", \"strict-origin-when-cross-origin\", \"unsafe-url\""
+                    do:
+                      - continue: true
+                  - default: true
+                    do:
+                      - return: "false"
+                "on": strings.Trim(item, " \t")
+          key: item
+          range: strings.SplitSeq(value, ",")
+      - return: "true"

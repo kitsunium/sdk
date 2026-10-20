@@ -1,0 +1,97 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Debug represents detailed tracing information useful during development.
+    items:
+      - name: Debug
+        type: Level
+        value: "-4"
+    name: Debug
+  - doc: Info represents routine operational events occurring during normal execution.
+    items:
+      - name: Info
+        type: Level
+        value: "0"
+    name: Info
+  - doc: Warn represents abnormal but recoverable conditions worth human attention.
+    items:
+      - name: Warn
+        type: Level
+        value: "4"
+    name: Warn
+  - doc: Error represents failures that usually signal a broken invariant and require action.
+    items:
+      - name: Error
+        type: Level
+        value: "8"
+    name: Error
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Level
+      - Debug
+      - Info
+      - Warn
+      - Error
+      - Level.String
+    name: level.go
+  - decls:
+      - _
+    name: level_compliance.go
+  - decls:
+      - ParseLevel
+    name: parse.go
+  - decls:
+      - Var
+      - NewVar
+      - (*Var).Set
+      - (*Var).Level
+    name: var.go
+functions:
+  - name: ParseLevel
+    params: name string
+    results: lvl Level, err error
+  - name: NewVar
+    params: initial Level
+    results: "*Var"
+imports:
+  atomic: sync/atomic
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  name: level
+  purpose: Package level defines severity levels for log records.
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: l Level
+        results: string
+    name: Level
+    underlying: int8
+  - fields:
+      - doc: |-
+          v stores the Level as an int32 so the holder is lock-free; Level is an
+          int8, which round-trips through int32 without loss.
+        name: v
+        type: atomic.Int32
+    kind: struct
+    methods:
+      - name: Set
+        params: lvl Level
+        recv: v *Var
+      - name: Level
+        recv: v *Var
+        results: Level
+    name: Var
+vars:
+  - doc: |-
+      _ proves *Var satisfies the Leveler port at compile time; a drift in either
+      signature breaks the build here rather than at a distant call site.
+    items:
+      - name: _
+        type: Leveler
+        value: (*Var)(nil)
+    name: _

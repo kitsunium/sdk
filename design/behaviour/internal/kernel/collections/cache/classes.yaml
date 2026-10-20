@@ -1,0 +1,204 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Cache
+      - NewCache
+      - (*Cache).Fetch
+      - (*Cache).Set
+      - (*Cache).SetTTL
+      - (*Cache).setTTL
+      - (*Cache).Delete
+      - (*Cache).Len
+      - (*Cache).Purge
+      - (*Cache).Stats
+      - (*Cache).expired
+      - (*Cache).evictIfNeeded
+      - (*Cache).removeEvict
+      - (*Cache).notifyEvicted
+      - (*Cache).moveFront
+      - (*Cache).pushFront
+      - (*Cache).unlink
+    name: cache.go
+  - decls:
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - entry
+    name: entry.go
+  - decls:
+      - evictionValue
+    name: eviction.go
+  - decls:
+      - StatsValue
+    name: stats.go
+functions:
+  - name: NewCache
+    params: cfg Config[K, V]
+    results: "*Cache[K, V]"
+    typeParams: K comparable, V any
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/collections/cache
+  name: cache
+  purpose: Package cache provides a generic, concurrency-safe LRU + TTL cache (Cache[K,V]) — a kernel primitive (stdlib-only, no domain vocabulary).
+types:
+  - fields:
+      - name: mu
+        type: sync.RWMutex
+      - name: clk
+        type: clock.Clock
+      - name: maxEntries
+        type: int
+      - name: defaultTTL
+        type: time.Duration
+      - name: onEvict
+        type: func(key K, val V)
+      - name: items
+        type: map[K]*entry[K, V]
+      - name: head
+        type: "*entry[K, V]"
+      - name: tail
+        type: "*entry[K, V]"
+      - name: hits
+        type: uint64
+      - name: misses
+        type: uint64
+      - name: evictions
+        type: uint64
+    kind: struct
+    methods:
+      - name: Fetch
+        params: key K
+        recv: c *Cache[K, V]
+        results: value V, ok bool
+      - name: Set
+        params: key K, val V
+        recv: c *Cache[K, V]
+      - name: SetTTL
+        params: key K, val V, ttl time.Duration
+        recv: c *Cache[K, V]
+      - doc: |-
+          setTTL inserts or updates key=val, computing the absolute expiry and applying
+          LRU eviction when the capacity is exceeded.
+        name: setTTL
+        params: key K, val V, ttl time.Duration
+        recv: c *Cache[K, V]
+      - name: Delete
+        params: key K
+        recv: c *Cache[K, V]
+      - name: Len
+        recv: c *Cache[K, V]
+        results: int
+      - name: Purge
+        recv: c *Cache[K, V]
+      - name: Stats
+        recv: c *Cache[K, V]
+        results: StatsValue
+      - doc: expired reports whether ent carries a deadline that has passed. Caller holds mu.
+        name: expired
+        params: ent *entry[K, V]
+        recv: c *Cache[K, V]
+        results: bool
+      - doc: |-
+          evictIfNeeded removes least-recently-used entries while over capacity. Caller
+          holds mu.
+        name: evictIfNeeded
+        params: pending *[]evictionValue[K, V]
+        recv: c *Cache[K, V]
+      - doc: |-
+          removeEvict unlinks ent, drops it from the map, counts an eviction, and
+          QUEUES the evicted pair onto pending. Caller holds mu.
+
+          OnEvict is deliberately NOT invoked here. Every caller holds c.mu and
+          sync.Mutex is not reentrant, so a callback that touches the cache would
+          deadlock outright, and a merely slow one would hold every other operation
+          off for its whole duration — turning eviction into an unbounded critical
+          section. Callers drain pending through notifyEvicted after unlocking.
+        name: removeEvict
+        params: ent *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *Cache[K, V]
+      - doc: |-
+          notifyEvicted fires OnEvict for every queued pair. It MUST be called with
+          c.mu released — the callback is user code and may re-enter the cache.
+        name: notifyEvicted
+        params: pending []evictionValue[K, V]
+        recv: c *Cache[K, V]
+      - doc: moveFront promotes ent to most-recently-used. Caller holds mu.
+        name: moveFront
+        params: ent *entry[K, V]
+        recv: c *Cache[K, V]
+      - doc: pushFront inserts ent at the head. Caller holds mu; ent MUST be detached.
+        name: pushFront
+        params: ent *entry[K, V]
+        recv: c *Cache[K, V]
+      - doc: unlink detaches ent from the list, fixing head/tail. Caller holds mu.
+        name: unlink
+        params: ent *entry[K, V]
+        recv: c *Cache[K, V]
+    name: Cache
+    typeParams: K comparable, V any
+  - fields:
+      - doc: MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.
+        name: MaxEntries
+        type: int
+      - doc: DefaultTTL applies to Set entries (SetTTL overrides per-entry). 0 = no expiry.
+        name: DefaultTTL
+        type: time.Duration
+      - doc: Clock is the time source (injectable for tests). nil = clock.System.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          OnEvict, if non-nil, is called with the key+value of every entry removed by
+          capacity eviction or expiry (not by an explicit Delete/Set-overwrite).
+        name: OnEvict
+        type: func(key K, val V)
+    kind: struct
+    name: Config
+    typeParams: K comparable, V any
+  - doc: |-
+      entry is one cache slot: it holds the key (so eviction can delete it from the
+      map), the value, an optional absolute expiry, and the prev/next links of the
+      intrusive LRU list (head = most-recently-used, tail = least).
+    fields:
+      - name: key
+        type: K
+      - name: val
+        type: V
+      - name: expireAt
+        type: time.Time
+      - name: prev
+        type: "*entry[K, V]"
+      - name: next
+        type: "*entry[K, V]"
+    kind: struct
+    name: entry
+    typeParams: K comparable, V any
+  - doc: |-
+      evictionValue is one evicted key/value pair, captured BY VALUE at eviction
+      time. Copying is deliberate: the *entry it came from is unlinked and may be
+      reused or collected before the observer runs, so holding the pointer would
+      hand the callback a node the cache no longer owns.
+    fields:
+      - name: key
+        type: K
+      - name: val
+        type: V
+    kind: struct
+    name: evictionValue
+    typeParams: K comparable, V any
+  - fields:
+      - name: Hits
+        type: uint64
+      - name: Misses
+        type: uint64
+      - name: Evictions
+        type: uint64
+    kind: struct
+    name: StatsValue

@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/csv
+  name: csv
+  purpose: Package csv declares the error codes and the sentinels of the CSV codec, internal/service/data/codec/csv — range 0.3.8.* (ADR 0005 service/data/codec/csv block).
+types: []

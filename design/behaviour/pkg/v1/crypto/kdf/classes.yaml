@@ -1,0 +1,39 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      HKDFSHA256 is HKDF (RFC 5869) over SHA-256 — extract-and-expand for key
+      separation from a strong secret.
+    items:
+      - name: HKDFSHA256
+        type: Algorithm
+        value: "\"hkdf-sha256\""
+    name: HKDFSHA256
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - HKDFSHA256
+      - Algorithm
+      - Subkey
+      - NewKeyTree
+    name: kdf.go
+functions:
+  - name: Subkey
+    params: a Algorithm, secret, salt []byte, info string, length int
+    results: subkey []byte, err error
+  - name: NewKeyTree
+    params: algo Algorithm, master Key
+    results: KeyTree
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  keytree: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto/kdf
+  name: kdf
+  purpose: Package kdf is the key-derivation facade for KEY SEPARATION.
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

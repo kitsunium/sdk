@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: unixAddr
+    steps:
+      - bind: sa
+        eval: (*syscall.RawSockaddrUnix)(unsafe.Pointer(raw))
+      - opt:
+          do:
+            - return: "&stdnet.UnixAddr{Net: \"unixgram\"}"
+          when: sa.Path[0] == 0
+      - bind: buf
+        eval: make([]byte, 0, len(sa.Path))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: c == 0
+            - set: buf
+              value: append(buf, byte(c))
+          key: _
+          range: sa.Path
+          value: c
+      - return: "&stdnet.UnixAddr{Name: string(buf), Net: \"unixgram\"}"

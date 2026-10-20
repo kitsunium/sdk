@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/resilience
+  name: resilience
+  purpose: "Package resilience is the public facade for the SDK's reliability policies: retry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging."
+types: []

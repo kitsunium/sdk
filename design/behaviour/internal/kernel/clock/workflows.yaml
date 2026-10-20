@@ -1,0 +1,23 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*ManualClock).nextDue
+    steps:
+      - var:
+          name: best
+          type: "*manualWait"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: w.deadline.After(target)
+            - opt:
+                do:
+                  - set: best
+                    value: w
+                when: best == nil || w.deadline.Before(best.deadline) || (w.deadline.Equal(best.deadline) && w.seq < best.seq)
+          key: _
+          range: m.waits
+          value: w
+      - return: best

@@ -1,0 +1,45 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: Operator.Valid
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(o) == 0 || len(o) > maxOperatorBytes
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: o[i] < operatorFirstByte || o[i] > operatorLastByte
+          key: i
+          range: len(o)
+      - return: "true"
+  - of: MembershipValue.Member
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: x, true
+                when: x.ID == id
+          key: _
+          range: m.Members
+          value: x
+      - return: MemberValue{}, false
+  - of: MembershipValue.Voters
+    steps:
+      - bind: out
+        eval: make([]NodeID, 0, len(m.Members))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, x.ID)
+                when: x.Voter
+          key: _
+          range: m.Members
+          value: x
+      - return: out

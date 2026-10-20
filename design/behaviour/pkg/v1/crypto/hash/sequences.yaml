@@ -1,0 +1,58 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Sum
+    participants:
+      - id: caller
+        kind: actor
+      - id: Sum
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.Sum(corecrypto.Algorithm(a), data)
+        to: corecrypto
+  - of: SumHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: SumHex
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.SumHex(corecrypto.Algorithm(a), data)
+        to: corecrypto
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.NewHash(corecrypto.Algorithm(a))
+        to: corecrypto
+  - of: NewDigestWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDigestWriter
+        kind: self
+      - id: stdhash
+        kind: package
+    steps:
+      - return: stdhash.NewDigestWriter(corecrypto.Algorithm(a), dst)
+        to: stdhash
+  - of: NewVerifyingReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewVerifyingReader
+        kind: self
+      - id: stdhash
+        kind: package
+    steps:
+      - return: stdhash.NewVerifyingReader(corecrypto.Algorithm(a), src, wantHex)
+        to: stdhash

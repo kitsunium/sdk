@@ -1,0 +1,1455 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      OTLPTracesPath is the OTLP/HTTP path for the trace signal. It is a constant
+      rather than something the exporter appends, so an endpoint stays a full URL a
+      reviewer can read in one string: "http://collector:4318" + OTLPTracesPath.
+    items:
+      - name: OTLPTracesPath
+        type: string
+        value: "\"/v1/traces\""
+    name: OTLPTracesPath
+  - doc: |-
+      DefaultOTLPTimeout is the OpenTelemetry protocol exporter specification's own
+      default for OTEL_EXPORTER_OTLP_TIMEOUT. The clamp lands on the specification's
+      number rather than on one this SDK invented.
+    items:
+      - name: DefaultOTLPTimeout
+        type: time.Duration
+        value: otlp.DefaultTimeout
+    name: DefaultOTLPTimeout
+  - doc: |-
+      DefaultOTLPMaxResponseBytes caps the response body read at 1 MiB. The response
+      is the one length a REMOTE party controls in this exchange; the REQUEST body
+      is deliberately not capped, because its size is a property of the caller's own
+      span volume, any SDK-chosen ceiling would be arbitrary (ADR 0031 §refuse), and
+      the collector already answers 413 for one it will not take.
+
+      It also bounds the drain that recycles the connection after the verdict —
+      always this default rather than OTLPHTTPConfig.MaxResponseBytes, because
+      that knob bounds what is read into memory and the drain keeps nothing.
+    items:
+      - name: DefaultOTLPMaxResponseBytes
+        type: int64
+        value: otlp.DefaultMaxResponseBytes
+    name: DefaultOTLPMaxResponseBytes
+  - doc: |-
+      rejectedFieldKey is the errs Field key a partial success carries the
+      rejected count under. It never carries remote-controlled text.
+    items:
+      - name: rejectedFieldKey
+        type: string
+        value: "\"rejected_spans\""
+    name: rejectedFieldKey
+  - doc: |-
+      otlpJSONExporterName is the registered name of the default OTLP/JSON span
+      exporter, which writes to stderr (ADR 0030). It names the ENCODING, not the
+      protocol, because an OTLP/protobuf encoder would register beside it.
+    items:
+      - name: otlpJSONExporterName
+        type: coretrace.ExporterName
+        value: "\"otlpjson\""
+    name: otlpJSONExporterName
+  - doc: |-
+      The three SpanFlags masks, copied from opentelemetry/proto/trace/v1.SpanFlags.
+
+      The pair is a presence protocol rather than two independent bits: bit 8 says
+      "bit 9 is meaningful". Without it a receiver cannot tell "the parent is local"
+      from "this producer does not track remoteness", and the two lead to different
+      service maps.
+    grouped: true
+    items:
+      - doc: |-
+          spanFlagsTraceFlagsMask is SPAN_FLAGS_TRACE_FLAGS_MASK: the low byte
+          carries the W3C trace-flags of this span's own context.
+        name: spanFlagsTraceFlagsMask
+        type: uint32
+        value: "0x0000_00FF"
+      - doc: |-
+          spanFlagsHasIsRemote is SPAN_FLAGS_CONTEXT_HAS_IS_REMOTE_MASK: this
+          producer knows whether the context is remote, so the next bit is real.
+        name: spanFlagsHasIsRemote
+        type: uint32
+        value: "0x0000_0100"
+      - doc: |-
+          spanFlagsIsRemote is SPAN_FLAGS_CONTEXT_IS_REMOTE_MASK: the context came
+          from another process.
+        name: spanFlagsIsRemote
+        type: uint32
+        value: "0x0000_0200"
+    name: spanFlagsTraceFlagsMask
+  - doc: |-
+      httpClientErrorFloor is the lowest status a CLIENT span reports as an error.
+
+      4xx IS an error on a client span, unlike on a server span: the caller asked
+      for something and did not get it, which is a failure of the call whatever it
+      says about whose fault it is. The OpenTelemetry HTTP conventions make exactly
+      this asymmetry, and it is the one thing a reader is most likely to assume is a
+      copy-paste slip between this constant and httpServerErrorFloor.
+    items:
+      - name: httpClientErrorFloor
+        type: int
+        value: "400"
+    name: httpClientErrorFloor
+  - doc: |-
+      The OpenTelemetry HTTP semantic-convention attribute keys this middleware
+      records. They are dotted, which is the spelling the conventions SPECIFY — and
+      the reason the Prometheus metrics connector refuses them (ADR 0044 §Decision
+      8). OTLP carries them unchanged.
+    grouped: true
+    items:
+      - doc: HTTPRequestMethodKey is the request method, uppercase.
+        name: HTTPRequestMethodKey
+        type: string
+        value: "\"http.request.method\""
+      - doc: HTTPResponseStatusCodeKey is the response status.
+        name: HTTPResponseStatusCodeKey
+        type: string
+        value: "\"http.response.status_code\""
+      - doc: |-
+          URLPathKey is the request path. It is the ESCAPED form — see the
+          middleware comment for why the decoded one is not recorded.
+        name: URLPathKey
+        type: string
+        value: "\"url.path\""
+      - doc: URLSchemeKey is "http" or "https".
+        name: URLSchemeKey
+        type: string
+        value: "\"url.scheme\""
+      - doc: |-
+          URLFullKey is the outbound URL, recorded on CLIENT spans only and with
+          its userinfo REDACTED — the client middleware renders it through
+          url.URL.Redacted(), not String(), so a password in the URL becomes
+          "xxxxx" instead of travelling to a telemetry backend. The query string
+          is NOT redacted: a secret passed as ?api_key= is still recorded, because
+          deciding which parameters are sensitive would mean guessing, and a
+          wrong guess is both a silent leak and a silently mangled attribute.
+          A caller who puts secrets in a query string must keep them out of the
+          URL the SDK is handed.
+        name: URLFullKey
+        type: string
+        value: "\"url.full\""
+      - doc: ServerAddressKey is the host a client called, or a server was called on.
+        name: ServerAddressKey
+        type: string
+        value: "\"server.address\""
+      - doc: ErrorTypeKey names what went wrong when a call produced no response.
+        name: ErrorTypeKey
+        type: string
+        value: "\"error.type\""
+    name: HTTPRequestMethodKey
+  - doc: |-
+      httpServerErrorFloor is the lowest status a SERVER span reports as an error.
+
+      4xx is deliberately NOT an error on a server span, and the OpenTelemetry HTTP
+      conventions say so: a 404 is the caller asking for something that is not
+      there, which is the server working correctly. Marking it ERROR would make
+      every scanner probing for /wp-admin light up a service's error rate.
+    items:
+      - name: httpServerErrorFloor
+        type: int
+        value: "500"
+    name: httpServerErrorFloor
+  - doc: |-
+      The two values url.scheme takes on a server span: the scheme the socket
+      actually spoke, decided by TLS presence alone (see requestScheme).
+    grouped: true
+    items:
+      - name: schemeHTTP
+        type: string
+        value: "\"http\""
+      - name: schemeHTTPS
+        type: string
+        value: "\"https\""
+    name: schemeHTTP
+  - grouped: true
+    items:
+      - doc: floatBitSize is the width every float in this package has.
+        name: floatBitSize
+        type: int
+        value: "64"
+      - doc: floatFmt is strconv's shortest-round-trip format verb.
+        name: floatFmt
+        type: byte
+        value: "'g'"
+      - doc: |-
+          floatPrec asks strconv for the shortest representation that parses back
+          to the same value.
+        name: floatPrec
+        type: int
+        value: "-1"
+    name: floatBitSize
+  - doc: |-
+      DefaultMaxSpans is the bound a Recorder uses when RecorderConfig leaves the
+      knob unset. 2048 finished spans is roughly one busy second of a single
+      service: high enough that a normal collection interval never reaches it, low
+      enough that a collector which stopped collecting costs megabytes rather than
+      the process.
+    items:
+      - name: DefaultMaxSpans
+        type: int
+        value: "2048"
+    name: DefaultMaxSpans
+  - doc: traceIDUniformBytes is how much of a trace id the uniform is drawn from.
+    items:
+      - name: traceIDUniformBytes
+        type: int
+        value: "8"
+    name: traceIDUniformBytes
+  - doc: |-
+      ratioThresholdBits is the width of that uniform — traceIDUniformBytes worth of
+      bits minus the top one, so the comparison is unsigned-safe on every
+      architecture without a cast that could sign-extend.
+    items:
+      - name: ratioThresholdBits
+        type: int
+        value: traceIDUniformBytes*bitsPerByte - 1
+    name: ratioThresholdBits
+  - doc: |-
+      bitsPerByte is the obvious 8, named so ratioThresholdBits derives from
+      traceIDUniformBytes rather than restating it.
+    items:
+      - name: bitsPerByte
+        type: int
+        value: "8"
+    name: bitsPerByte
+  - doc: |-
+      ratioSpace is the size of the uniform's range as a double: the threshold a
+      fraction is scaled into. float64 carries 53 mantissa bits, so the scaling is
+      exact to roughly 1 part in 2^53 — far finer than any rate a deployment states.
+    items:
+      - name: ratioSpace
+        type: float64
+        value: 1 << ratioThresholdBits
+    name: ratioSpace
+  - doc: |-
+      traceIDUniformOffset is where the uniform is read from: the LAST
+      traceIDUniformBytes, not the first. An id that carries structure carries it at
+      the front (a timestamp prefix, a machine id), and sampling on structured bits
+      samples whole prefixes in or out together. The tail is the part every
+      generator makes random.
+    items:
+      - name: traceIDUniformOffset
+        type: int
+        value: coretrace.TraceIDLen - traceIDUniformBytes
+    name: traceIDUniformOffset
+  - doc: |-
+      The traceparent field offsets, derived from the grammar rather than counted
+      by hand:
+
+      	value          = version "-" version-format
+      	version        = 2HEXDIGLC
+      	version-format = trace-id "-" parent-id "-" trace-flags
+      	trace-id       = 32HEXDIGLC
+      	parent-id      = 16HEXDIGLC
+      	trace-flags    = 2HEXDIGLC
+
+      which is 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 characters.
+    grouped: true
+    items:
+      - doc: TraceParentLen is the length of a version-00 traceparent, exactly.
+        name: TraceParentLen
+        type: int
+        value: "55"
+      - doc: traceParentSep separates the four components.
+        name: traceParentSep
+        type: string
+        value: "\"-\""
+      - doc: versionHexLen is the width of the version field.
+        name: versionHexLen
+        type: int
+        value: "2"
+      - doc: flagsHexLen is the width of the trace-flags field.
+        name: flagsHexLen
+        type: int
+        value: "2"
+    name: TraceParentLen
+  - doc: |-
+      The three field offsets inside the fixed 55-character prefix, derived from
+      the widths above rather than written as literals so the grammar and the
+      arithmetic cannot drift apart. Every version keeps these fields exactly where
+      version 00 puts them (§3.2.4), which is what makes fixed-offset reading
+      correct here and not merely convenient.
+    grouped: true
+    items:
+      - doc: "traceIDOffset is where trace-id starts: past the version and its dash."
+        name: traceIDOffset
+        type: int
+        value: versionHexLen + 1
+      - doc: parentIDOffset is where parent-id starts.
+        name: parentIDOffset
+        type: int
+        value: traceIDOffset + coretrace.TraceIDHexLen + 1
+      - doc: flagsOffset is where trace-flags starts.
+        name: flagsOffset
+        type: int
+        value: parentIDOffset + coretrace.SpanIDHexLen + 1
+    name: traceIDOffset
+  - doc: The two versions the specification names explicitly.
+    grouped: true
+    items:
+      - doc: |-
+          VersionSupported is the version this SDK emits: "00", the only version
+          the current Recommendation defines.
+        name: VersionSupported
+        type: string
+        value: "\"00\""
+      - doc: |-
+          versionInvalid is "ff", which §3.2.2.1 declares invalid outright — it is
+          reserved so that a forward-version negotiation can never collide with it.
+        name: versionInvalid
+        type: string
+        value: "\"ff\""
+    name: VersionSupported
+  - doc: |-
+      TraceParentHeader and TraceStateHeader are the two header names W3C Trace
+      Context defines. Both are lowercase: §3.2.1 asks a vendor to SEND the name in
+      lowercase while accepting any case on receipt, which is what http.Header's
+      canonicalisation already does for a Go receiver.
+    grouped: true
+    items:
+      - doc: TraceParentHeader carries the span context.
+        name: TraceParentHeader
+        type: string
+        value: "\"traceparent\""
+      - doc: TraceStateHeader carries the vendor list.
+        name: TraceStateHeader
+        type: string
+        value: "\"tracestate\""
+    name: TraceParentHeader
+  - doc: |-
+      The header's own punctuation, named so the parser reads as the grammar does:
+      `list = list-member 0*31( OWS "," OWS list-member )`, `list-member = (key "="
+      value) / OWS`, `OWS = *( SP / HTAB )`. They are strings rather than bytes
+      because every use site splits, cuts or trims with them.
+    grouped: true
+    items:
+      - name: traceStateListSep
+        type: string
+        value: "\",\""
+      - name: traceStatePairSep
+        type: string
+        value: "\"=\""
+      - name: traceStateOWS
+        type: string
+        value: "\" \\t\""
+    name: traceStateListSep
+files:
+  - decls:
+      - TracerConfig
+      - TracerConfig.resolved
+      - discardSpan
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - OTLPTracesPath
+      - DefaultOTLPTimeout
+      - DefaultOTLPMaxResponseBytes
+      - rejectedFieldKey
+      - otlpSignal
+      - otlpHTTPExporter
+      - NewOTLPHTTPExporter
+      - OTLPRetryable
+      - (*otlpHTTPExporter).Name
+      - (*otlpHTTPExporter).Export
+    name: exporter_otlphttp.go
+  - decls:
+      - otlpJSONExporterName
+      - spanFlagsTraceFlagsMask
+      - otlpEncodeFailure
+      - otlpJSONExporter
+      - EncodeOTLPJSON
+      - otlpSpans
+      - checkOTLPSpan
+      - otlpSpanOf
+      - otlpSpanFlags
+      - otlpStatusOf
+      - otlpEvents
+      - otlpLinks
+      - newOTLPJSONExporter
+      - NewOTLPJSONExporter
+      - (*otlpJSONExporter).Name
+      - (*otlpJSONExporter).Export
+    name: exporter_otlpjson.go
+  - decls:
+      - httpClientErrorFloor
+      - ClientMiddleware
+      - tracedRoundTripper
+      - (*tracedRoundTripper).RoundTrip
+    name: http_client.go
+  - decls:
+      - HTTPRequestMethodKey
+      - httpServerErrorFloor
+      - schemeHTTP
+      - ServerMiddleware
+      - serveTraced
+      - requestScheme
+      - statusRecorder
+      - (*statusRecorder).WriteHeader
+      - (*statusRecorder).Write
+      - (*statusRecorder).Unwrap
+      - (*statusRecorder).resolvedStatus
+    name: http_server.go
+  - decls:
+      - NewTraceID
+      - drawTraceID
+      - NewSpanID
+      - drawSpanID
+    name: idgen.go
+  - decls:
+      - noopSpan
+      - noopSpan.SpanContext
+      - noopSpan.SetAttrs
+      - noopSpan.AddEvent
+      - noopSpan.SetStatus
+      - noopSpan.End
+    name: noop_span.go
+  - decls:
+      - floatBitSize
+      - formatFloat
+    name: numeric.go
+  - decls:
+      - otlpPartialSuccess
+      - (*otlpPartialSuccess).RejectedCount
+      - decodeRejected
+    name: otlp_export_response.go
+  - decls:
+      - otlpRequest
+      - otlpResourceSpans
+      - otlpScopeSpans
+      - otlpSpan
+      - otlpEvent
+      - otlpLink
+      - otlpStatus
+    name: otlp_request.go
+  - decls:
+      - OTLPHTTPConfig
+    name: otlphttp_config.go
+  - decls:
+      - Inject
+      - Extract
+    name: propagation.go
+  - decls:
+      - RecordError
+    name: record_error.go
+  - decls:
+      - DefaultMaxSpans
+      - Recorder
+      - NewRecorder
+      - (*Recorder).Resource
+      - (*Recorder).Scope
+      - (*Recorder).Sink
+      - (*Recorder).record
+      - (*Recorder).Collect
+      - (*Recorder).Len
+      - (*Recorder).Dropped
+    name: recorder.go
+  - decls:
+      - RecorderConfig
+    name: recorder_config.go
+  - decls:
+      - traceIDUniformBytes
+      - ratioThresholdBits
+      - bitsPerByte
+      - ratioSpace
+      - traceIDUniformOffset
+      - AlwaysSample
+      - NeverSample
+      - ParentBased
+      - Ratio
+      - traceIDUniform
+      - formatRatio
+    name: sampler.go
+  - decls:
+      - span
+      - newSpan
+      - (*span).SpanContext
+      - (*span).SetAttrs
+      - sortedIncoming
+      - (*span).AddEvent
+      - (*span).SetStatus
+      - (*span).End
+      - (*span).finish
+      - normalizeLinks
+    name: span.go
+  - decls:
+      - TraceParentLen
+      - traceIDOffset
+      - VersionSupported
+      - TraceParentHeader
+      - ParseTraceParent
+      - hasValidTraceParentTail
+      - parseTraceParentPrefix
+      - parseTraceFlags
+      - FormatTraceParent
+      - isLowerHex
+      - isNotLowerHexDigit
+    name: traceparent.go
+  - decls:
+      - Tracer
+      - NewTracer
+      - (*Tracer).Resource
+      - (*Tracer).Scope
+      - (*Tracer).Start
+      - (*Tracer).mint
+    name: tracer.go
+  - decls:
+      - traceStateListSep
+      - ParseTraceState
+    name: tracestate.go
+functions:
+  - doc: |-
+      discardSpan is the SpanSink a Tracer with no configured destination uses. It
+      is a named function rather than a nil check on the hot path, and rather than a
+      buffer nobody drains.
+    name: discardSpan
+    params: _ coretrace.SpanValue
+  - name: NewOTLPHTTPExporter
+    params: name coretrace.ExporterName, cfg OTLPHTTPConfig
+    results: exporter coretrace.SpanExporter, err error
+  - name: OTLPRetryable
+    params: err error
+    results: bool
+  - name: EncodeOTLPJSON
+    params: spans coretrace.SpansValue
+    results: doc []byte, err error
+  - doc: otlpSpans renders a batch, validating each span before any of them is encoded.
+    name: otlpSpans
+    params: spans []coretrace.SpanValue
+    results: rendered []otlpSpan, err error
+  - doc: checkOTLPSpan refuses a span the schema cannot carry honestly.
+    name: checkOTLPSpan
+    params: span coretrace.SpanValue
+    results: error
+  - doc: otlpSpanOf renders one span in the schema's field-number order.
+    name: otlpSpanOf
+    params: span coretrace.SpanValue
+    results: otlpSpan
+  - doc: |-
+      otlpSpanFlags packs the W3C trace-flags byte and the parent's remoteness into
+      the fixed32 `flags` field.
+
+      The trace-flags half is SANITIZED: the same undefined-bits requirement that
+      governs the traceparent header applies here, because this field carries
+      "the W3C trace flags" — emitting a bit this version does not define would
+      claim a meaning the schema has not assigned.
+
+      SpanFlagsHasIsRemote is ALWAYS set, which is what makes the remoteness bit
+      readable at all: without it a receiver cannot distinguish "the parent is
+      local" from "this producer does not track it", and this producer does.
+    name: otlpSpanFlags
+    params: context, parent coretrace.SpanContextValue
+    results: uint32
+  - doc: |-
+      otlpStatusOf renders a span's status, or nil when there is nothing to say.
+
+      An UNSET status is OMITTED rather than emitted as {"code":0}. STATUS_CODE_UNSET
+      is the schema's default and the overwhelmingly common case, so emitting it
+      would add a message to every span that carries exactly the information its
+      absence does — and unlike the metrics encoder's three always-emitted fields,
+      nothing here has explicit presence to preserve.
+    name: otlpStatusOf
+    params: status coretrace.StatusValue
+    results: "*otlpStatus"
+  - doc: |-
+      otlpEvents renders a span's events. An empty set stays nil, which
+      encoding/json omits — the proto3 rule for an empty repeated field.
+    name: otlpEvents
+    params: events []coretrace.EventValue
+    results: "[]otlpEvent"
+  - doc: |-
+      otlpLinks renders a span's links. Every link reaching here is valid —
+      normalizeLinks dropped the ones that named no span.
+    name: otlpLinks
+    params: links []coretrace.LinkValue
+    results: "[]otlpLink"
+  - doc: newOTLPJSONExporter is the shared constructor.
+    name: newOTLPJSONExporter
+    params: name coretrace.ExporterName, dst io.Writer
+    results: "*otlpJSONExporter"
+  - name: NewOTLPJSONExporter
+    params: name coretrace.ExporterName, dst io.Writer
+    results: coretrace.SpanExporter
+  - name: ClientMiddleware
+    params: tracer coretrace.Tracer
+    results: corenet.Middleware[http.RoundTripper]
+  - name: ServerMiddleware
+    params: tracer coretrace.Tracer
+    results: corenet.Middleware[http.Handler]
+  - doc: serveTraced runs next under a SERVER span extracted from r's headers.
+    name: serveTraced
+    params: tracer coretrace.Tracer, next http.Handler, w http.ResponseWriter, r *http.Request
+  - doc: |-
+      requestScheme reports the scheme an inbound request arrived on.
+
+      r.URL.Scheme is empty on a server request — net/http fills it only for a
+      client — so TLS presence is the only fact available here. A forwarded-proto
+      header is deliberately NOT read: it is caller-controlled, and a proxy that
+      sets it correctly is a deployment fact this package cannot verify.
+    name: requestScheme
+    params: r *http.Request
+    results: string
+  - name: NewTraceID
+    results: id coretrace.TraceID, err error
+  - doc: |-
+      drawTraceID is NewTraceID without the error it never returns — what the
+      tracer mints a root span's trace id with.
+    name: drawTraceID
+    results: coretrace.TraceID
+  - name: NewSpanID
+    results: id coretrace.SpanID, err error
+  - doc: |-
+      drawSpanID is NewSpanID without the error it never returns — what the tracer
+      mints every span's id with.
+    name: drawSpanID
+    results: coretrace.SpanID
+  - doc: |-
+      formatFloat renders a finite double shortest-round-trip (123, 1.5, 1e+21,
+      -1.5e-08) — the spelling a refused ratio takes in its error field.
+    name: formatFloat
+    params: value float64
+    results: string
+  - doc: |-
+      decodeRejected reads a 2xx body's rejected count through this signal's own
+      partial-success message — the SignalSpec.DecodeRejected the shared sender
+      calls. A fresh message per response: nothing is kept between exports.
+    name: decodeRejected
+    params: payload []byte
+    results: int64
+  - name: Inject
+    params: context coretrace.SpanContextValue, carrier coretrace.Carrier
+  - name: Extract
+    params: carrier coretrace.Carrier
+    results: coretrace.SpanContextValue
+  - name: RecordError
+    params: span coretrace.Span, err error
+  - name: NewRecorder
+    params: cfg RecorderConfig
+    results: "*Recorder"
+  - name: AlwaysSample
+    params: _ coretrace.SamplingParams
+    results: bool
+  - name: NeverSample
+    params: _ coretrace.SamplingParams
+    results: bool
+  - name: ParentBased
+    params: root coretrace.Sampler
+    results: coretrace.Sampler
+  - name: Ratio
+    params: fraction float64
+    results: sampler coretrace.Sampler, err error
+  - doc: |-
+      traceIDUniform reads the tail of a trace id as a ratioThresholdBits-wide
+      uniform, from the offset traceIDUniformOffset names.
+    name: traceIDUniform
+    params: id coretrace.TraceID
+    results: uint64
+  - doc: |-
+      formatRatio renders a fraction for the error field, naming the two values
+      strconv would otherwise spell as an unhelpful "NaN"/"+Inf" in a log.
+    name: formatRatio
+    params: fraction float64
+    results: string
+  - doc: |-
+      newSpan builds a recording span. It normalises the attributes ONCE here — the
+      shared model's SortAttrs (internal/core/observe/otel), refusing under this signal's
+      own InvalidAttribute, so an unusable attribute set panics at the call site
+      that wrote it rather than at the first export.
+    name: newSpan
+    params: tracer *Tracer, context, parent coretrace.SpanContextValue, name string, params coretrace.SpanParams
+    results: "*span"
+  - doc: |-
+      sortedIncoming returns attrs in the canonical order, VALIDATED, cloning only
+      when a clone buys something.
+
+      SortAttrs always clones, and its reason is ownership: it SORTS in place, so it
+      must not sort the caller's array. A single attribute is already sorted, so
+      there is nothing to sort and nothing to protect — and the merge below only
+      ever COPIES elements out of this slice, never keeps it. The validation still
+      runs, still on this goroutine, still outside the lock.
+
+      One attribute is not a corner case: it is what ServerMiddleware does with the
+      response status on every request, and what almost every hand-written
+      `span.SetAttrs(...)` at an instrumentation site does.
+    name: sortedIncoming
+    params: attrs []coreotel.AttrValue
+    results: "[]coreotel.AttrValue"
+  - doc: |-
+      normalizeLinks sorts each link's attributes and drops links that name no span.
+
+      A link whose context is invalid is dropped rather than emitted: OTLP would
+      carry an all-zero trace-id, which W3C Trace Context declares invalid and the
+      OTLP encoder here refuses outright — so keeping it would turn one bad link
+      into a whole payload nobody can export.
+    name: normalizeLinks
+    params: links []coretrace.LinkValue
+    results: "[]coretrace.LinkValue"
+  - name: ParseTraceParent
+    params: header string
+    results: context coretrace.SpanContextValue, err error
+  - doc: |-
+      hasValidTraceParentTail reports whether whatever follows the fixed 55-character
+      prefix is legal for this version.
+    name: hasValidTraceParentTail
+    params: version, header string
+    results: bool
+  - doc: |-
+      parseTraceParentPrefix reads the four dash-separated fields of a 55-character
+      traceparent prefix.
+    name: parseTraceParentPrefix
+    params: prefix string
+    results: context coretrace.SpanContextValue, err error
+  - doc: parseTraceFlags reads the two-hex-digit trace-flags field.
+    name: parseTraceFlags
+    params: text string
+    results: flags coretrace.TraceFlags, err error
+  - name: FormatTraceParent
+    params: context coretrace.SpanContextValue
+    results: header string, ok bool
+  - doc: |-
+      isLowerHex reports whether text is drawn entirely from [0-9a-f].
+
+      hex.Decode accepts uppercase, and the traceparent grammar does not
+      (2HEXDIGLC for the version and the flags), so the alphabet is checked here
+      rather than left to the decoder — as coretrace.ParseTraceID checks its own.
+    name: isLowerHex
+    params: text string
+    results: bool
+  - doc: isNotLowerHexDigit reports whether c falls outside [0-9a-f].
+    name: isNotLowerHexDigit
+    params: c byte
+    results: bool
+  - name: NewTracer
+    params: cfg TracerConfig
+    results: "*Tracer"
+  - name: ParseTraceState
+    params: header string
+    results: state coretrace.StateValue, err error
+imports:
+  binary: encoding/binary
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+  coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  http: net/http
+  io: io
+  math: math
+  os: os
+  otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+  rand: crypto/rand
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/trace
+  name: trace
+  purpose: "Package trace — the Tracer's configuration: producing Resource, instrumentation Scope, sampling policy, span destination and clock."
+types:
+  - fields:
+      - doc: |-
+          Resource identifies the producer of the telemetry and is carried once
+          per exported payload. An absent service.name is filled with
+          UnknownService, which is what the OpenTelemetry specification mandates
+          rather than a value this SDK invented.
+
+          It is the SAME type a MeterConfig takes, deliberately: service.name is
+          the key a backend correlates a trace with a metric on, so a process
+          that built two of them could silently fail to correlate at all.
+        name: Resource
+        type: coreotel.ResourceValue
+      - doc: |-
+          Scope identifies the instrumentation that starts the spans. An empty
+          Name resolves to DefaultScopeName; Version stays empty when the caller
+          has none, because it is optional in the specification and inventing one
+          would be a claim about code this package cannot see.
+        name: Scope
+        type: coreotel.ScopeValue
+      - doc: |-
+          Sampler decides which ROOT traces are recorded. It is consulted for a
+          root span and for nothing else — every child inherits the answer through
+          the traceparent's sampled bit (see core/observe/trace.Sampler).
+
+          Unset CLAMPS to ParentBased(AlwaysSample), and the clamp is chosen so
+          that the zero value is the SAFE answer rather than the cheap one: a
+          tracer that silently dropped everything would make a misconfiguration
+          look exactly like a healthy quiet service. A deployment that wants none
+          says NeverSample, which is a name a reviewer can grep for.
+        name: Sampler
+        type: coretrace.Sampler
+      - doc: |-
+          Sink receives every sampled span at End. Unset means the tracer records
+          nothing — which is not an inert policy but the honest one: a Tracer with
+          no destination has nowhere to put a span, and buffering into a slice
+          nobody drains is the memory leak that shape invites.
+
+          NewRecorder is the in-tree destination; a batching processor would be a
+          Sink that buffers and forwards (ADR 0051 §Deferred).
+        name: Sink
+        type: coretrace.SpanSink
+      - doc: |-
+          Clock stamps StartTime and EndTime. Unset CLAMPS to clock.System.
+
+          It is here for the reason every clock in this SDK is: a test that had to
+          wait for wall-clock time to assert a duration is a test that is either
+          slow or flaky, and usually both.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          resolved returns the configuration a Tracer actually runs on: every clamp
+          applied once, at construction, so nothing on the per-span path has to test a
+          nil field.
+        name: resolved
+        recv: c TracerConfig
+        results: TracerConfig
+    name: TracerConfig
+  - doc: |-
+      otlpHTTPExporter POSTs each batch to an OTLP collector as OTLP/JSON.
+
+      It holds no mutable state, so unlike the writer-bound exporter it needs no
+      mutex: the sender is safe for concurrent use, and every request builds its own
+      body from its own batch.
+    fields:
+      - doc: |-
+          name is the exporter's name. It is NOT a registry key — this exporter is
+          never registered (see NewOTLPHTTPExporter) — it is what an error and a
+          diagnostic call it.
+        name: name
+        type: coretrace.ExporterName
+      - doc: sender is the shared transport, speaking this signal's vocabulary.
+        name: sender
+        type: "*otlp.Sender"
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/trace.SpanExporter.
+        name: Name
+        recv: e *otlpHTTPExporter
+        results: coretrace.ExporterName
+      - doc: |-
+          Export encodes spans and POSTs them, returning a typed verdict.
+
+          An encoding refusal returns before any socket is touched; everything after it
+          — the request, the bounded read, the drain, the verdict — is the shared
+          sender's, under this signal's codes.
+
+          An EMPTY batch is a no-op rather than a POST. A request carrying zero spans
+          costs a round trip to say nothing, and an export loop on a quiet service would
+          make one every interval forever.
+        name: Export
+        params: spans coretrace.SpansValue
+        recv: e *otlpHTTPExporter
+        results: error
+    name: otlpHTTPExporter
+  - doc: |-
+      otlpJSONExporter writes each batch to dst as one OTLP/JSON document.
+
+      The shared stream serialises the single write: core/observe/trace.SpanExporter
+      requires concurrency safety and the writer is caller-supplied. Encoding
+      happens before it, outside the lock, so a slow writer serialises callers
+      without also serialising the work.
+    fields:
+      - doc: name is the exporter's registry key.
+        name: name
+        type: coretrace.ExporterName
+      - doc: stream is the newline-delimited document stream bound to the writer.
+        name: stream
+        type: "*otlp.Stream"
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/trace.SpanExporter.
+        name: Name
+        recv: e *otlpJSONExporter
+        results: coretrace.ExporterName
+      - doc: |-
+          Export encodes the whole batch, then writes it once, so a refusal leaves dst
+          untouched and the only remaining error surface is the single write.
+        name: Export
+        params: spans coretrace.SpansValue
+        recv: e *otlpJSONExporter
+        results: error
+    name: otlpJSONExporter
+  - doc: tracedRoundTripper is the http.RoundTripper ClientMiddleware installs.
+    fields:
+      - doc: tracer starts the CLIENT span.
+        name: tracer
+        type: coretrace.Tracer
+      - doc: next is the transport that actually performs the call.
+        name: next
+        type: http.RoundTripper
+    kind: struct
+    methods:
+      - doc: |-
+          RoundTrip implements http.RoundTripper.
+
+          The span ends when the RESPONSE HEADERS arrive, not when the body has been
+          read, and that is a deliberate boundary rather than a convenience: RoundTrip
+          returns before the body exists, so there is nothing here that could observe the
+          body's end. It is the same boundary corenet.CallValue.Duration documents for
+          the client's own hook — "the upstream's time to first answer, which is the one
+          a slow upstream and a large payload do not share".
+        name: RoundTrip
+        params: request *http.Request
+        recv: t *tracedRoundTripper
+        results: response *http.Response, err error
+    name: tracedRoundTripper
+  - doc: |-
+      statusRecorder wraps an http.ResponseWriter to remember the status.
+
+      It implements Unwrap and NOTHING ELSE, and that is the whole design. The
+      tempting alternative — declaring Flush and Hijack that forward to the
+      underlying writer — would make this wrapper claim BOTH capabilities
+      unconditionally, so `w.(http.Hijacker)` would succeed on a writer that cannot
+      hijack and the failure would surface as a runtime error inside a protocol
+      upgrade rather than as a clean "not supported". That is the exact defect class
+      ADR 0047 fixed in the listener engine, re-introduced by a middleware.
+
+      http.ResponseController walks the Unwrap chain and asks the REAL writer, which
+      is how this SDK's own SSE and WebSocket implementations already find Flush and
+      Hijack (see internal/service/net/sse and .../websocket). Cooperating with that
+      convention costs one method and preserves every capability truthfully.
+    fields:
+      - name: ""
+        role: embedded
+        type: http.ResponseWriter
+      - doc: status is the code the handler wrote, or 0 when it wrote none.
+        name: status
+        type: int
+    kind: struct
+    methods:
+      - doc: WriteHeader records the status and forwards it.
+        name: WriteHeader
+        params: code int
+        recv: w *statusRecorder
+      - doc: |-
+          Write records the implicit 200 net/http writes for a handler that never called
+          WriteHeader, then forwards.
+        name: Write
+        params: data []byte
+        recv: w *statusRecorder
+        results: n int, err error
+      - doc: |-
+          Unwrap exposes the wrapped writer to http.ResponseController, which is how
+          Flush, Hijack and the deadline setters reach the real writer — see the type
+          comment for why they are not forwarded by hand.
+        name: Unwrap
+        recv: w *statusRecorder
+        results: http.ResponseWriter
+      - doc: |-
+          resolvedStatus reports the status that reached the wire: what the handler
+          wrote, or the 200 net/http writes for a handler that returned having written
+          nothing at all.
+        name: resolvedStatus
+        recv: w *statusRecorder
+        results: int
+    name: statusRecorder
+  - doc: |-
+      noopSpan is the core/observe/trace.Span an unsampled span becomes.
+
+      It still CARRIES a context, and that is the whole reason it is not nil. Three
+      things depend on it:
+
+        - Inject writes the traceparent with the sampled bit CLEAR, so the next
+          service inherits the decision instead of taking a second, contradictory
+          one. A nil span would propagate nothing and every downstream hop would
+          start its own root — turning one dropped trace into N kept ones, which is
+          the opposite of sampling.
+        - A caller can log the trace id of a request that was not sampled, which is
+          how a support ticket gets correlated with a trace that was never stored.
+        - Nothing has to nil-check a Span. Returning nil from Start would put
+          `if span != nil` at every instrumentation site, and the one place it was
+          forgotten would panic in production on the cheap path.
+
+      It is a value type with no pointer receiver, so it allocates nothing: an
+      unsampled span costs one interface conversion and no heap.
+    fields:
+      - doc: |-
+          context is the identity — valid and unsampled, minted as every span's
+          is (minting cannot fail).
+        name: context
+        type: coretrace.SpanContextValue
+    kind: struct
+    methods:
+      - doc: SpanContext implements core/observe/trace.Span.
+        name: SpanContext
+        recv: s noopSpan
+        results: coretrace.SpanContextValue
+      - doc: SetAttrs implements core/observe/trace.Span and records nothing.
+        name: SetAttrs
+        params: _ ...coreotel.AttrValue
+        recv: s noopSpan
+      - doc: AddEvent implements core/observe/trace.Span and records nothing.
+        name: AddEvent
+        params: _ string, _ ...coreotel.AttrValue
+        recv: s noopSpan
+      - doc: SetStatus implements core/observe/trace.Span and records nothing.
+        name: SetStatus
+        params: _ coretrace.StatusCode, _ string
+        recv: s noopSpan
+      - doc: End implements core/observe/trace.Span and ships nothing.
+        name: End
+        recv: s noopSpan
+    name: noopSpan
+  - doc: |-
+      otlpPartialSuccess is ExportTracePartialSuccess. The shared sender decodes a
+      2xx body into it (otlp.DecodeRejected), and it is the only part of that
+      decoding that differs between the two signals: the member is rejectedSpans
+      here and rejectedDataPoints for metrics.
+
+      errorMessage is declared so the shape matches the schema and encoding/json
+      has somewhere to put it; its value is never read into an error, because it
+      is unbounded remote-controlled text and an errs Field goes straight into
+      structured logs.
+    fields:
+      - name: RejectedSpans
+        type: otlp.LenientInt64
+      - name: ErrorMessage
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          RejectedCount implements otlp.RejectedCounter: how many spans the collector
+          says it rejected, zero being "fully accepted".
+        name: RejectedCount
+        recv: p *otlpPartialSuccess
+        results: int64
+    name: otlpPartialSuccess
+  - doc: |-
+      otlpRequest is ExportTraceServiceRequest — the body of a POST to /v1/traces.
+      Exactly one resourceSpans entry, because one Tracer has exactly one Resource.
+    fields:
+      - name: ResourceSpans
+        type: "[]otlpResourceSpans"
+    kind: struct
+    name: otlpRequest
+  - doc: |-
+      otlpResourceSpans is ResourceSpans: resource (1) + scopeSpans (2). schemaUrl
+      (3) is absent for the reason ADR 0044 §Decision 4 gives — it is optional,
+      nothing here produces one, and an always-empty field is a placeholder.
+    fields:
+      - name: Resource
+        type: otlp.ResourceMessage
+      - name: ScopeSpans
+        type: "[]otlpScopeSpans"
+    kind: struct
+    name: otlpResourceSpans
+  - doc: |-
+      otlpScopeSpans is ScopeSpans: scope (1) + spans (2), with the same schemaUrl
+      omission as otlpResourceSpans.
+    fields:
+      - name: Scope
+        type: otlp.ScopeMessage
+      - name: Spans
+        type: "[]otlpSpan"
+    kind: struct
+    name: otlpScopeSpans
+  - doc: |-
+      otlpSpan is Span, in field-number order: traceId (1), spanId (2), traceState
+      (3), parentSpanId (4), name (5), kind (6), startTimeUnixNano (7),
+      endTimeUnixNano (8), attributes (9), events (11), links (13), status (15),
+      flags (16).
+
+      Three encodings here are not the generic protobuf-JSON mapping:
+
+        - TraceID and SpanID are HEX, not base64. The OTLP specification overrides
+          the standard mapping by name: "the traceId and spanId byte arrays are
+          represented as case-insensitive hex-encoded strings; they are not
+          base64-encoded as is defined in the standard Protobuf JSON Mapping." A
+          base64 payload is accepted by nothing and looks plausible in a log.
+        - The two timestamps are fixed64, so they ride as DECIMAL STRINGS. A JSON
+          number is a double in most parsers and a nanosecond timestamp is past
+          2^53 permanently, so a number would lose its low bits — micro-scale jitter
+          that no dashboard can detect.
+        - Flags is fixed32, so it rides as a plain JSON NUMBER. The string rule is
+          for 64-bit integers only, and widening a 32-bit field to a string is as
+          wrong as narrowing a 64-bit one to a number.
+
+      Status is a POINTER and omitted when unset, because STATUS_CODE_UNSET is the
+      overwhelmingly common case and an all-default Status message carries exactly
+      the information its absence does. Flags is emitted ALWAYS, for the reason the
+      metrics mirror always emits isMonotonic: it is the field that says whether the
+      span was sampled and whether its parent was remote, and a field that vanishes
+      precisely when it carries the surprising answer is one a reader cannot trust.
+      It is also never actually zero here — SpanFlagsHasIsRemote is always set.
+    fields:
+      - name: TraceID
+        type: string
+      - name: SpanID
+        type: string
+      - name: TraceState
+        type: string
+      - name: ParentSpanID
+        type: string
+      - name: Name
+        type: string
+      - name: Kind
+        type: int32
+      - name: StartTimeUnixNano
+        type: otlp.Uint64
+      - name: EndTimeUnixNano
+        type: otlp.Uint64
+      - name: Attributes
+        type: "[]otlp.KeyValue"
+      - name: Events
+        type: "[]otlpEvent"
+      - name: Links
+        type: "[]otlpLink"
+      - name: Status
+        type: "*otlpStatus"
+      - name: Flags
+        type: uint32
+    kind: struct
+    name: otlpSpan
+  - doc: |-
+      otlpEvent is Span.Event: timeUnixNano (1), name (2), attributes (3).
+      droppedAttributesCount (4) is absent — nothing here drops an event attribute.
+    fields:
+      - name: TimeUnixNano
+        type: otlp.Uint64
+      - name: Name
+        type: string
+      - name: Attributes
+        type: "[]otlp.KeyValue"
+    kind: struct
+    name: otlpEvent
+  - doc: |-
+      otlpLink is Span.Link: traceId (1), spanId (2), traceState (3), attributes
+      (4), flags (6). droppedAttributesCount (5) is absent.
+
+      A link carries its own flags for the same reason a span does: the LINKED
+      context's sampled bit tells a backend whether following the link will find
+      anything, and its remoteness tells it whether the link crosses a process.
+    fields:
+      - name: TraceID
+        type: string
+      - name: SpanID
+        type: string
+      - name: TraceState
+        type: string
+      - name: Attributes
+        type: "[]otlp.KeyValue"
+      - name: Flags
+        type: uint32
+    kind: struct
+    name: otlpLink
+  - doc: |-
+      otlpStatus is Status: message (2), code (3). Field 1 is RESERVED in the schema
+      — it held a removed `deprecated_code` — which is why this struct starts at 2
+      and why a reader should not expect a field there.
+
+      Message is omitted unless it is set, and StatusValue.Resolved guarantees it is
+      set only alongside STATUS_CODE_ERROR: the schema says "message … SHOULD be
+      used only if the code is ERROR".
+    fields:
+      - name: Message
+        type: string
+      - name: Code
+        type: int32
+    kind: struct
+    name: otlpStatus
+  - kind: named
+    name: OTLPHTTPConfig
+    underlying: otlp.HTTPConfig
+  - fields:
+      - doc: resource and scope are stamped on every payload. Immutable.
+        name: resource
+        type: coreotel.ResourceValue
+      - name: scope
+        type: coreotel.ScopeValue
+      - doc: maxSpans is the resolved bound.
+        name: maxSpans
+        type: int
+      - doc: |-
+          mu guards spans and dropped. It is a sync.Mutex, and the choice was
+          MEASURED rather than reasoned — see BENCH.md §2.
+
+          This field held a sync.RWMutex, justified by "Len and Dropped are pure
+          reads an operator may poll while spans are still arriving". Every part of
+          that sentence is true and the conclusion is still backwards: `record`
+          takes the EXCLUSIVE side and runs once per span from every request
+          goroutine, while the shared side runs once per collection interval — and
+          `Collect`, which is what an export actually calls, takes the exclusive
+          side too, so it never benefited at all. A read-write lock was optimising
+          the rarest path and taxing the busiest one.
+
+          The measurement is not close. Writing alone, the RWMutex costs 1.27x to
+          1.65x more from one to eight goroutines. In the mixed shape its own
+          comment named — spans arriving while an operator polls Len — it costs
+          2.7x at one writer and 8.0x to 9.0x from two, because a writer's Lock
+          must drain the in-flight reader and pays a park/unpark round trip on
+          every acquisition.
+
+          What it gives up is stated too: with FOUR OR MORE goroutines doing
+          nothing but polling Len, the RWMutex was 1.20x to 1.23x faster. That is a
+          real regression on a scenario this type's own contract excludes — Collect
+          DRAINS, so a Recorder has exactly one reader — and at that one reader the
+          Mutex is marginally faster anyway (23.00 ns against 23.89).
+
+          TestRecorderTakesAnExclusiveLockOnEveryPath fails the build on a change
+          back.
+        name: mu
+        type: sync.Mutex
+      - doc: spans holds the finished spans awaiting collection, in end order.
+        name: spans
+        type: "[]coretrace.SpanValue"
+      - doc: |-
+          dropped counts spans refused since construction. It is CUMULATIVE and
+          deliberately not reset by Collect: a counter that resets on read cannot
+          be scraped by two readers, and this one is meant to be alerted on.
+        name: dropped
+        type: uint64
+    kind: struct
+    methods:
+      - name: Resource
+        recv: r *Recorder
+        results: coreotel.ResourceValue
+      - name: Scope
+        recv: r *Recorder
+        results: coreotel.ScopeValue
+      - name: Sink
+        recv: r *Recorder
+        results: coretrace.SpanSink
+      - doc: record is the SpanSink itself.
+        name: record
+        params: span coretrace.SpanValue
+        recv: r *Recorder
+      - name: Collect
+        recv: r *Recorder
+        results: coretrace.SpansValue
+      - name: Len
+        recv: r *Recorder
+        results: int
+      - name: Dropped
+        recv: r *Recorder
+        results: uint64
+    name: Recorder
+  - fields:
+      - doc: |-
+          Resource identifies the producer, stamped on every payload Collect
+          hands out.
+        name: Resource
+        type: coreotel.ResourceValue
+      - doc: Scope identifies the instrumentation, stamped on every payload.
+        name: Scope
+        type: coreotel.ScopeValue
+      - doc: |-
+          MaxSpans bounds how many finished spans are held between Collects.
+
+          Non-positive CLAMPS to DefaultMaxSpans. It does NOT mean "unbounded",
+          and there is no setting that does (ADR 0031): a buffer nobody drains is
+          how a tracing integration takes a process down, and the zero value must
+          not be the dangerous answer.
+        name: MaxSpans
+        type: int
+    kind: struct
+    name: RecorderConfig
+  - doc: |-
+      span is one recording core/observe/trace.Span.
+
+      Every method takes the mutex, and that is a deliberate trade rather than an
+      oversight: a span is written from the goroutine doing the work it measures,
+      and a handler that fans out to five goroutines and annotates the same span
+      from all five is the ordinary case, not the exotic one. A lock-free design
+      would need a lock-free slice append, which is a bigger claim than a mutex held
+      for the length of an append.
+
+      The mutex covers exactly the fields that mutate. The identity fields —
+      context, parent, name, kind, start — are written once in newSpan and never
+      again, so they are read without it.
+    fields:
+      - doc: tracer owns the sink and the clock this span reports through.
+        name: tracer
+        type: "*Tracer"
+      - doc: context is this span's own identity. Immutable after construction.
+        name: context
+        type: coretrace.SpanContextValue
+      - doc: parent is the context this span descends from, invalid for a root.
+        name: parent
+        type: coretrace.SpanContextValue
+      - doc: name is the operation label. Immutable after construction.
+        name: name
+        type: string
+      - doc: kind is the resolved SpanKind. Immutable after construction.
+        name: kind
+        type: coretrace.SpanKind
+      - doc: start is the instant the span opened. Immutable after construction.
+        name: start
+        type: time.Time
+      - doc: links are the links supplied at Start. Immutable after construction.
+        name: links
+        type: "[]coretrace.LinkValue"
+      - doc: mu guards everything below it.
+        name: mu
+        type: sync.Mutex
+      - doc: attrs accumulate; a repeated Key replaces rather than duplicates.
+        name: attrs
+        type: "[]coreotel.AttrValue"
+      - doc: events accumulate in the order they were recorded.
+        name: events
+        type: "[]coretrace.EventValue"
+      - doc: status is the recorded outcome.
+        name: status
+        type: coretrace.StatusValue
+      - doc: ended is what makes End idempotent.
+        name: ended
+        type: bool
+      - doc: end is the instant the span closed.
+        name: end
+        type: time.Time
+    kind: struct
+    methods:
+      - doc: SpanContext implements core/observe/trace.Span.
+        name: SpanContext
+        recv: s *span
+        results: coretrace.SpanContextValue
+      - doc: |-
+          SetAttrs implements core/observe/trace.Span. A repeated Key REPLACES the previous
+          value rather than appending a second entry.
+
+          Replacing is what the OTel API specifies, and it is also the only behaviour
+          that keeps the attribute set a set: two `http.response.status_code` entries on
+          one span are a payload a backend renders arbitrarily, and the arbitrary choice
+          differs between backends.
+        name: SetAttrs
+        params: attrs ...coreotel.AttrValue
+        recv: s *span
+      - doc: |-
+          AddEvent implements core/observe/trace.Span, stamping the event with the tracer's
+          clock.
+        name: AddEvent
+        params: name string, attrs ...coreotel.AttrValue
+        recv: s *span
+      - doc: |-
+          SetStatus implements core/observe/trace.Span. The LAST call wins, and a message is
+          kept only on StatusError — StatusValue.Resolved applies that at End.
+        name: SetStatus
+        params: code coretrace.StatusCode, message string
+        recv: s *span
+      - doc: |-
+          End implements core/observe/trace.Span: it closes the span and hands the immutable
+          SpanValue to the tracer's sink.
+
+          It is IDEMPOTENT. A second End is ignored rather than exporting the span
+          twice, because the common way to get one is a `defer span.End()` beside an
+          explicit End on an early return — a duplicate span is a duplicate row in every
+          backend and the duplicate is the one nobody notices.
+
+          The sink is called OUTSIDE the lock. It is caller-supplied, it may be slow,
+          and holding a span's mutex across it would serialise every annotation on a
+          span that is already finished.
+        name: End
+        recv: s *span
+      - doc: |-
+          finish marks the span ended and builds its immutable value. It reports false
+          when the span had already ended.
+        name: finish
+        recv: s *span
+        results: value coretrace.SpanValue, first bool
+    name: span
+  - fields:
+      - doc: cfg is the resolved configuration — every clamp already applied.
+        name: cfg
+        type: TracerConfig
+    kind: struct
+    methods:
+      - name: Resource
+        recv: t *Tracer
+        results: coreotel.ResourceValue
+      - name: Scope
+        recv: t *Tracer
+        results: coreotel.ScopeValue
+      - name: Start
+        params: ctx context.Context, name string, params coretrace.SpanParams
+        recv: t *Tracer
+        results: child context.Context, span coretrace.Span
+      - doc: |-
+          mint builds the new span's context: the trace id, a fresh span id, the
+          sampled bit and the inherited tracestate. It cannot fail: the draws cannot.
+        name: mint
+        params: parent coretrace.SpanContextValue, name string, params coretrace.SpanParams
+        recv: t *Tracer
+        results: coretrace.SpanContextValue
+    name: Tracer
+vars:
+  - doc: |-
+      otlpSignal is this signal's vocabulary for the shared OTLP/HTTP sender: its
+      own codes (0.3.50.5-8) and its own wording, byte for byte what this exporter
+      returned before the transport was shared.
+    items:
+      - name: otlpSignal
+        value: |-
+          otlp.SignalSpec{
+          	EndpointInvalid: coretrace.OTLPEndpointInvalid,
+          	EndpointUnparsable: errs.WrapParams{
+          		Code:    coretrace.CodeOTLPEndpointInvalid,
+          		Reason:  "OTLP_ENDPOINT_INVALID",
+          		Public:  "The OTLP endpoint must be an absolute http(s) URL with a path",
+          		Private: "service/observe/trace: the configured OTLP endpoint could not be parsed as a URL",
+          	},
+          	RequestUnbuildable: errs.WrapParams{
+          		Code:    coretrace.CodeOTLPExportRejected,
+          		Reason:  "OTLP_EXPORT_REJECTED",
+          		Public:  "The trace collector rejected the export",
+          		Private: "service/observe/trace: the OTLP/HTTP request could not be built",
+          	},
+          	TransportFault: errs.WrapParams{
+          		Code:    coretrace.CodeOTLPExportUnavailable,
+          		Reason:  "OTLP_EXPORT_UNAVAILABLE",
+          		Public:  "The trace collector is unavailable",
+          		Private: "service/observe/trace: the OTLP/HTTP request failed before a response was read",
+          	},
+          	Rejected:       coretrace.OTLPExportRejected,
+          	Unavailable:    coretrace.OTLPExportUnavailable,
+          	PartialSuccess: coretrace.OTLPPartialSuccess,
+          	RejectedField:  rejectedFieldKey,
+          	DecodeRejected: decodeRejected,
+          }
+    name: otlpSignal
+  - grouped: true
+    items:
+      - doc: |-
+          otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
+          under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
+          field of the tree is a Go primitive or one of the shared Marshalers — and
+          still typed rather than swallowed.
+        name: otlpEncodeFailure
+        value: |-
+          errs.WrapParams{
+          		Code:    coretrace.CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The trace exporter failed to ship the spans",
+          		Private: "service/observe/trace: the OTLP/JSON encoder could not render the payload",
+          	}
+      - doc: |-
+          otlpWriteFailure is the wrap a writer fault leaves under when the
+          writer-bound exporter emits a document: this signal's EXPORT_FAILED.
+        name: otlpWriteFailure
+        value: |-
+          errs.WrapParams{
+          		Code:    coretrace.CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The trace exporter failed to ship the spans",
+          		Private: "service/observe/trace: OTLP/JSON exporter writer returned an error",
+          	}
+      - doc: |-
+          OTLPJSON is the default OTLP/JSON span exporter, registered to write each
+          batch to stderr as one newline-terminated document. Use NewOTLPJSONExporter
+          for a custom writer/name, EncodeOTLPJSON for the bytes alone, or
+          NewOTLPHTTPExporter to actually ship them to a collector.
+
+          stderr, not stdout, for the reason ADR 0030 gives in full: importing a package
+          must never arm a writer on a stream the process may be using as a protocol
+          channel. This instance is a diagnostic — the production path is
+          NewOTLPHTTPExporter, which is never registered because arming a network client
+          on import would be strictly worse than arming a writer.
+        name: OTLPJSON
+        value: coretrace.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
+    name: otlpEncodeFailure

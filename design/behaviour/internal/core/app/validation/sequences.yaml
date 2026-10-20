@@ -1,0 +1,81 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: JoinField
+    steps:
+      - opt:
+          do:
+            - return: name
+          when: base == RootPath
+      - opt:
+          do:
+            - return: base
+          when: name == ""
+      - return: base + fieldSeparator + name
+  - of: JoinIndex
+    steps:
+      - return: base + indexOpen + strconv.Itoa(index) + indexClose
+  - of: ReportValue.OK
+    steps:
+      - return: len(r) == 0
+  - of: ReportValue.First
+    steps:
+      - opt:
+          do:
+            - return: ViolationValue{}, false
+          when: len(r) == 0
+      - return: r[0], true
+  - of: ReportValue.Paths
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(r) == 0
+      - bind: paths
+        eval: make([]string, 0, len(r))
+      - loop:
+          do:
+            - set: paths
+              value: append(paths, violation.Path)
+          key: _
+          range: r
+          value: violation
+      - return: paths
+  - of: ReportValue.Err
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReportValue.Err
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(r) == 0
+      - bind: first
+        eval: r[0]
+      - return: |-
+          errs.Wrap(ValidationFailed, errs.WrapParams{},
+          		errs.Int("violations", len(r)),
+          		errs.String("rule", first.Rule),
+          		errs.String("paths", clipPaths(r)))
+        to: errs
+  - of: clipPaths
+    participants:
+      - id: caller
+        kind: actor
+      - id: clipPaths
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: joined
+        eval: strings.Join(report.Paths(), pathSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: joined
+          when: len([]rune(joined)) <= maxPathEchoRunes
+      - return: string([]rune(joined)[:maxPathEchoRunes]) + truncationMark

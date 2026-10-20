@@ -1,0 +1,38 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: isNumeric
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isDigit(id[i])"
+          key: i
+          range: len(id)
+      - return: "true"
+  - of: isStamp
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(id) < stampLen+2 || id[stampLen] != hyphen
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isDigit(id[i])"
+          key: i
+          range: stampLen
+      - loop:
+          cond: i < len(id)
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isDigit(id[i]) && !isLetter(id[i])"
+          init: i := stampLen + 1
+          post: i++
+      - return: "true"

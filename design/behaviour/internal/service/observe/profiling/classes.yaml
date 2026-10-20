@@ -1,0 +1,1179 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Fold's defaults, taken when a FoldConfig field is not positive.
+    grouped: true
+    items:
+      - doc: DefaultTopFunctions is how many functions FoldedValue.Top lists.
+        name: DefaultTopFunctions
+        type: int
+        value: "25"
+      - doc: DefaultTopPerOwner is how many functions each owner's Top lists.
+        name: DefaultTopPerOwner
+        type: int
+        value: "8"
+      - doc: |-
+          DefaultFlameMinShare prunes a flame frame costing less than this share
+          of the total: half a percent.
+        name: DefaultFlameMinShare
+        type: float64
+        value: "0.005"
+      - doc: DefaultFlameMaxDepth is how many frames deep the flame graph goes.
+        name: DefaultFlameMaxDepth
+        type: int
+        value: "64"
+    name: DefaultTopFunctions
+  - doc: |-
+      dumpLineMax bounds one line of a dump the parser reads: a frame line with a
+      very long generic instantiation still fits; anything longer ends the parse.
+    items:
+      - name: dumpLineMax
+        type: int
+        value: 1 << 20
+    name: dumpLineMax
+  - doc: |-
+      debugTraceback and debugCounts are the two text forms of runtime/pprof's
+      goroutine profile: every goroutine's traceback, and the stacks counted.
+    grouped: true
+    items:
+      - name: debugTraceback
+        type: int
+        value: "2"
+      - name: debugCounts
+        type: int
+        value: "1"
+    name: debugTraceback
+  - doc: |-
+      Presence marks of a grouping label in a group key, and the room a key
+      starts with — enough for a few labels, a state and a frame without growing.
+    grouped: true
+    items:
+      - name: labelAbsent
+        type: byte
+        value: "0"
+      - name: labelPresent
+        type: byte
+        value: "1"
+      - name: keyRoom
+        type: int
+        value: "64"
+    name: labelAbsent
+  - doc: |-
+      joinDepth is how many innermost frames identify a stack when labels are
+      matched from the counted profile onto the dump.
+    items:
+      - name: joinDepth
+        type: int
+        value: "12"
+    name: joinDepth
+  - doc: |-
+      countFunctionColumn is the index, among a counted-profile frame line's
+      non-empty columns, of the function: after the "#" marker and the address.
+    items:
+      - name: countFunctionColumn
+        type: int
+        value: "2"
+    name: countFunctionColumn
+  - doc: |-
+      Field numbers of profile.proto's messages that Parse reads. Any other field
+      — mappings, drop and keep frames, the documentation URL — is skipped.
+    grouped: true
+    items:
+      - name: fieldSampleType
+        type: uint64
+        value: "1"
+      - name: fieldSample
+        type: uint64
+        value: "2"
+      - name: fieldLocation
+        type: uint64
+        value: "4"
+      - name: fieldFunction
+        type: uint64
+        value: "5"
+      - name: fieldStringTable
+        type: uint64
+        value: "6"
+      - name: fieldTimeNanos
+        type: uint64
+        value: "9"
+      - name: fieldDurationNanos
+        type: uint64
+        value: "10"
+      - name: fieldPeriodType
+        type: uint64
+        value: "11"
+      - name: fieldPeriod
+        type: uint64
+        value: "12"
+      - name: fieldComment
+        type: uint64
+        value: "13"
+      - name: fieldDefaultType
+        type: uint64
+        value: "14"
+    name: fieldSampleType
+  - doc: |-
+      gzipAlgorithm is the transform scheme a gzip profile is inflated through:
+      the one internal/service/data/transform registers, which the facade links.
+    items:
+      - name: gzipAlgorithm
+        type: coretransform.Algorithm
+        value: "\"gzip\""
+    name: gzipAlgorithm
+  - doc: |-
+      MaxCPUWindow is the longest window CaptureCPU samples. A longer profile is
+      not more precise, only larger and longer to hold the process's one CPU
+      profiler: take several.
+    items:
+      - name: MaxCPUWindow
+        type: time.Duration
+        value: 5 * time.Minute
+    name: MaxCPUWindow
+  - doc: |-
+      MaxProfileBytes bounds what Parse reads: the input, and the input once
+      decompressed. A CPU profile of the longest window CaptureCPU allows weighs a
+      few megabytes; a gzip stream inflating past this is not a profile anyone
+      should hold in memory.
+    items:
+      - name: MaxProfileBytes
+        type: int
+        value: 64 << 20
+    name: MaxProfileBytes
+  - doc: |-
+      MaxFrames bounds the frames Parse builds: each location's, once, and every
+      sample's stack, which copies them. The bytes a profile weighs do not bound
+      them: a sample names each location by its id, and a location stands for as
+      many frames as it has inlined lines, so a few megabytes naming one deep
+      location again and again would expand into gigabytes of frames. Four
+      million frames — some 230 MB of them — hold a profile of tens of thousands
+      of distinct stacks, as deep as the runtime records them.
+    items:
+      - name: MaxFrames
+        type: int
+        value: 1 << 22
+    name: MaxFrames
+  - doc: Field numbers of the nested messages Parse reads.
+    grouped: true
+    items:
+      - name: fieldSampleLocation
+        type: uint64
+        value: "1"
+      - name: fieldSampleValue
+        type: uint64
+        value: "2"
+      - name: fieldSampleLabel
+        type: uint64
+        value: "3"
+      - name: fieldLabelKey
+        type: uint64
+        value: "1"
+      - name: fieldLabelStr
+        type: uint64
+        value: "2"
+      - name: fieldLabelNum
+        type: uint64
+        value: "3"
+      - name: fieldLocationID
+        type: uint64
+        value: "1"
+      - name: fieldLocationAddr
+        type: uint64
+        value: "3"
+      - name: fieldLocationLine
+        type: uint64
+        value: "4"
+      - name: fieldLineFunction
+        type: uint64
+        value: "1"
+      - name: fieldLineLine
+        type: uint64
+        value: "2"
+      - name: fieldFunctionID
+        type: uint64
+        value: "1"
+      - name: fieldFunctionName
+        type: uint64
+        value: "2"
+      - name: fieldFunctionFile
+        type: uint64
+        value: "4"
+      - name: fieldFunctionStart
+        type: uint64
+        value: "5"
+    name: fieldSampleLocation
+  - doc: Wire types of the protocol-buffer encoding.
+    grouped: true
+    items:
+      - name: wireVarint
+        type: uint64
+        value: "0"
+      - name: wireFixed64
+        type: uint64
+        value: "1"
+      - name: wireBytes
+        type: uint64
+        value: "2"
+      - name: wireFixed32
+        type: uint64
+        value: "5"
+    name: wireVarint
+  - doc: |-
+      Sizes the reader skips over for the fixed-width wire types, the most bytes
+      one varint may take, and the largest last byte of a ten-byte varint: the
+      nine before it carry 63 bits, so the tenth carries the 64th alone and may
+      not ask for another byte.
+    grouped: true
+    items:
+      - name: fixed64Size
+        type: int
+        value: "8"
+      - name: fixed32Size
+        type: int
+        value: "4"
+      - name: maxVarint
+        type: int
+        value: "10"
+      - name: maxTenthByte
+        type: byte
+        value: "1"
+    name: fixed64Size
+  - doc: |-
+      varintPayload and varintMore split a varint byte: seven bits of value, and
+      the bit that says another byte follows.
+    grouped: true
+    items:
+      - name: varintPayload
+        type: byte
+        value: "0x7f"
+      - name: varintMore
+        type: byte
+        value: "0x80"
+      - name: varintShift
+        type: uint
+        value: "7"
+      - name: fieldShift
+        type: uint
+        value: "3"
+      - name: wireMask
+        type: uint64
+        value: "7"
+    name: varintPayload
+files:
+  - decls:
+      - canonicalPatterns
+      - CanonicalName
+      - receiverFirst
+    name: canonical.go
+  - decls:
+      - CaptureCPU
+      - captureCPU
+      - CaptureHeap
+    name: capture.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - DefaultTopFunctions
+      - FoldConfig
+      - Fold
+      - FoldConfig.normal
+      - costs
+      - newCosts
+      - flameFold
+      - folder
+      - newFolder
+      - (*folder).add
+      - (*folder).namesOf
+      - (*folder).cumulate
+      - (*folder).climb
+      - (*folder).finish
+      - (*folder).top
+      - prune
+      - resolveSampleType
+    name: fold.go
+  - decls:
+      - dumpLineMax
+      - debugTraceback
+      - stateFlags
+      - Goroutines
+      - goroutinesFrom
+      - goroutineProfile
+      - ParseGoroutines
+      - dumpParser
+      - (*dumpParser).line
+      - (*dumpParser).header
+      - (*dumpParser).location
+      - (*dumpParser).createdBy
+      - parseHeader
+      - readState
+      - functionOf
+      - fileLine
+    name: goroutine.go
+  - decls:
+      - labelAbsent
+      - GroupConfig
+      - GroupGoroutines
+      - groupKey
+      - appendPart
+      - pick
+      - compareLabels
+      - cmpBool
+      - cut
+      - topFrame
+      - runtimeFrame
+    name: group.go
+  - decls:
+      - joinDepth
+      - countFunctionColumn
+      - countRecord
+      - parseTracebackLabels
+      - labelToken
+      - parseCounts
+      - appendCountFrame
+      - parseCountLabels
+      - quotedToken
+      - stackKey
+      - joinLabels
+    name: labels.go
+  - decls:
+      - fieldSampleType
+      - gzipAlgorithm
+      - gzipMagic
+      - rawType
+      - rawLabel
+      - rawSample
+      - rawLine
+      - rawLocation
+      - rawFunction
+      - decoder
+      - Parse
+      - inflate
+      - libraryCause
+      - malformedParams
+      - fields
+      - scalar
+      - payload
+      - (*decoder).profileField
+      - (*decoder).readString
+      - (*decoder).readComment
+      - (*decoder).readSampleType
+      - (*decoder).readPeriodType
+      - (*decoder).readTime
+      - (*decoder).readDuration
+      - (*decoder).readPeriod
+      - (*decoder).readDefaultType
+      - valueType
+      - timeOf
+    name: parse.go
+  - decls:
+      - MaxCPUWindow
+      - MaxProfileBytes
+      - MaxFrames
+    name: profiling.go
+  - decls:
+      - resolver
+      - (*resolver).spend
+      - (*resolver).str
+      - (*resolver).valueType
+      - (*resolver).header
+      - (*resolver).sample
+      - (*resolver).location
+      - (*resolver).frame
+      - (*resolver).labels
+    name: resolve.go
+  - decls:
+      - fieldSampleLocation
+      - (*decoder).readSample
+      - readLabel
+      - (*decoder).readLocation
+      - readLine
+      - (*decoder).readFunction
+      - (*decoder).resolve
+    name: tables.go
+  - decls:
+      - wireVarint
+      - fixed64Size
+      - varintPayload
+      - wire
+      - (*wire).more
+      - (*wire).varint
+      - (*wire).key
+      - (*wire).bytes
+      - (*wire).skip
+      - (*wire).advance
+      - (*wire).varints
+      - malformed
+    name: wire.go
+functions:
+  - name: CanonicalName
+    params: name string
+    results: string
+  - doc: |-
+      receiverFirst rewrites go/types' "(*pkg.T).M" as the runtime's
+      "pkg.(*T).M", and "(pkg.T).M" as "pkg.T.M".
+    name: receiverFirst
+    params: name string
+    results: string
+  - name: CaptureCPU
+    params: ctx context.Context, window time.Duration
+    results: "*coreprofiling.ProfileValue, error"
+  - doc: |-
+      captureCPU is CaptureCPU with the clock the window is measured on, which a
+      white-box test sets to a ManualClock so a window ends when the test advances
+      it rather than after the test has slept through it.
+    name: captureCPU
+    params: ctx context.Context, clk clock.Waiter, window time.Duration
+    results: "*coreprofiling.ProfileValue, error"
+  - name: CaptureHeap
+    results: "*coreprofiling.ProfileValue, error"
+  - name: Fold
+    params: p *coreprofiling.ProfileValue, cfg FoldConfig
+    results: coreprofiling.FoldedValue, error
+  - doc: newCosts returns empty costs.
+    name: newCosts
+    results: "*costs"
+  - doc: newFolder returns an empty folder for p.
+    name: newFolder
+    params: p *coreprofiling.ProfileValue
+    results: "*folder"
+  - doc: |-
+      prune converts a flame frame, dropping every child costing less than
+      cutoff, and orders the children costliest first.
+    name: prune
+    params: ff *flameFold, cutoff float64
+    results: "*coreprofiling.FlameNodeValue"
+  - doc: |-
+      resolveSampleType returns the sample type a fold of p reads and its index
+      among p's sample types — -1 when p does not measure it. The type is typ, or,
+      when typ is empty, the profile's own default, else its last sample type: the
+      pprof tool's convention, which picks cpu for a CPU profile and inuse_space
+      for a heap profile. A profile with no sample type resolves to nothing, and
+      the fold refuses it.
+    name: resolveSampleType
+    params: p *coreprofiling.ProfileValue, typ string
+    results: name string, index int
+  - name: Goroutines
+    results: "[]coreprofiling.GoroutineValue, error"
+  - doc: |-
+      goroutinesFrom is Goroutines over a writer of the goroutine profile at a
+      debug level, so the fallback on labels is testable.
+    name: goroutinesFrom
+    params: profile func(debug int) ([]byte, error)
+    results: "[]coreprofiling.GoroutineValue, error"
+  - doc: goroutineProfile writes the goroutine profile at debug level.
+    name: goroutineProfile
+    params: debug int
+    results: "[]byte, error"
+  - name: ParseGoroutines
+    params: dump []byte
+    results: "[]coreprofiling.GoroutineValue"
+  - doc: parseHeader reads a goroutine header.
+    name: parseHeader
+    params: line string
+    results: coreprofiling.GoroutineValue, bool
+  - doc: |-
+      readState reads the bracket into g: the state, then ", N minutes",
+      ", locked to thread" and whatever else the runtime adds.
+    name: readState
+    params: g *coreprofiling.GoroutineValue, bracket string
+  - doc: |-
+      functionOf strips a frame line's arguments: "pkg.(*T).M(0x1, {…})" is
+      "pkg.(*T).M".
+    name: functionOf
+    params: line string
+    results: string
+  - doc: |-
+      fileLine reads "/path/file.go:12 +0x1d". The line number follows the LAST
+      colon, so a Windows path — "C:/Users/x/file.go:12" — keeps its drive.
+    name: fileLine
+    params: loc string
+    results: string, int
+  - name: GroupGoroutines
+    params: gs []coreprofiling.GoroutineValue, cfg GroupConfig
+    results: "[]coreprofiling.GoroutineGroupValue"
+  - doc: |-
+      groupKey is a goroutine's group identity: its grouping labels — each marked
+      present or absent — its state and its top frame, every string prefixed by
+      its length. No separator is needed, so no value — a label is the caller's
+      text, and may hold any byte — can make two different goroutines one group.
+    name: groupKey
+    params: g *coreprofiling.GoroutineValue, keys []string, top string
+    results: string
+  - doc: appendPart appends s to key, prefixed by its length.
+    name: appendPart
+    params: key []byte, s string
+    results: "[]byte"
+  - doc: pick returns the grouping labels a goroutine carries.
+    name: pick
+    params: labels map[string]string, keys []string
+    results: map[string]string
+  - doc: |-
+      compareLabels orders two groups' labels key by key, in the configured
+      order; an absent label sorts first.
+    name: compareLabels
+    params: x, y map[string]string, keys []string
+    results: int
+  - doc: cmpBool orders false before true.
+    name: cmpBool
+    params: x, y bool
+    results: int
+  - doc: |-
+      cut returns stack's innermost n frames, copied; the whole stack when n is
+      not positive.
+    name: cut
+    params: stack []coreprofiling.FrameValue, n int
+    results: "[]coreprofiling.FrameValue"
+  - doc: |-
+      topFrame returns the innermost frame that is not the runtime's machinery,
+      else the innermost frame.
+    name: topFrame
+    params: stack []coreprofiling.FrameValue
+    results: string
+  - doc: |-
+      runtimeFrame reports whether a function is the runtime's own machinery
+      rather than code that asked to wait: the runtime and its packages, the
+      standard library's internal packages, and the runtime_ hooks that sync and
+      internal/poll link to.
+    name: runtimeFrame
+    params: fn string
+    results: bool
+  - doc: |-
+      parseTracebackLabels reads a dump header's labels: `key: value, key:
+      "quoted value"`. The runtime quotes a key or a value only when it holds
+      something other than letters, digits, '.', '/' and '_', with escapes
+      strconv.Unquote reads.
+    name: parseTracebackLabels
+    params: s string
+    results: map[string]string
+  - doc: |-
+      labelToken reads one key or value off s: a quoted string, or the text up to
+      the next ':' or ','.
+    name: labelToken
+    params: s string
+    results: tok, rest string, ok bool
+  - doc: |-
+      parseCounts reads the counted goroutine profile, debug 1:
+
+      	3 @ 0x1 0x2
+      	# labels: {"kit_node":"shop/endpoint/Get"}
+      	#	0x1	pkg.f+0x10	/path/file.go:12
+    name: parseCounts
+    params: text []byte
+    results: "[]countRecord"
+  - doc: |-
+      appendCountFrame appends the function of a counted-profile frame line —
+      "#\t0x1\tpkg.f+0x10\t/path/file.go:12" — to stack.
+
+      The columns are aligned with tabwriter, so a frame whose address is shorter
+      than the widest one carries EMPTY columns between its fields: splitting on
+      every tab reads "" for its function. Measured on linux/arm64, where the
+      addresses of the runtime and of the program differ in width; darwin's did
+      not, which is how the copy this replaces passed its tests there.
+    name: appendCountFrame
+    params: stack []string, line string
+    results: "[]string"
+  - doc: parseCountLabels reads `{"key":"value", "key2":"value2"}`.
+    name: parseCountLabels
+    params: s string
+    results: map[string]string
+  - doc: quotedToken reads one quoted token off s.
+    name: quotedToken
+    params: s string
+    results: tok, rest string, ok bool
+  - doc: stackKey identifies a stack by its innermost frames.
+    name: stackKey
+    params: stack []string
+    results: string
+  - doc: |-
+      joinLabels gives each goroutine of a dump the labels the counted profile
+      records for its stack, one goroutine per counted record.
+    name: joinLabels
+    params: gs []coreprofiling.GoroutineValue, records []countRecord
+  - name: Parse
+    params: data []byte
+    results: "*coreprofiling.ProfileValue, error"
+  - doc: |-
+      inflate returns data decompressed when it is gzip, unchanged otherwise.
+
+      A gzip stream is inflated through the transform port rather than by a
+      decoder of this package's own: the scheme registered as "gzip" is asked for
+      at most MaxProfileBytes, so the bounded drain, the trailer check and the
+      reader pool are that scheme's (internal/service/data/transform), reached
+      through internal/core/data/transform — a core port, not an edge to another
+      engine. The facade links the scheme; a program that reaches this package
+      without it is told so by the transform domain's UNKNOWN_COMPRESSOR.
+    name: inflate
+    params: data []byte
+    results: "[]byte, error"
+  - doc: |-
+      libraryCause returns the decoding library's own error beneath the transform
+      scheme's sentinel, nil when it carried none. A wrap's origin wins (rule 6),
+      so wrapping the scheme's *errs.Error would leave the refusal under the
+      scheme's code; the library's error is what this package wrapped before the
+      scheme did the decoding, and the refusal stays PROFILE_MALFORMED around it.
+    name: libraryCause
+    params: err error
+    results: error
+  - doc: malformedParams wraps a decoding library's error as ProfileMalformed.
+    name: malformedParams
+    params: what string
+    results: errs.WrapParams
+  - doc: |-
+      fields walks a message's fields, handing each to read; a field read does
+      not handle is skipped.
+    name: fields
+    params: buf []byte, read func(w *wire, field, kind uint64) (bool, error)
+    results: error
+  - doc: scalar reads an int64 field, which must be a varint.
+    name: scalar
+    params: w *wire, kind uint64
+    results: int64, error
+  - doc: payload reads a message or a string field, which must be length-delimited.
+    name: payload
+    params: w *wire, kind uint64
+    results: "[]byte, error"
+  - doc: valueType decodes a ValueType message.
+    name: valueType
+    params: w *wire, kind uint64
+    results: rawType, error
+  - doc: |-
+      timeOf turns the profile's time_nanos into an instant, a zero field meaning
+      "not recorded".
+    name: timeOf
+    params: nanos int64
+    results: time.Time
+  - doc: "readLabel decodes one Label: a key and either a string or a number."
+    name: readLabel
+    params: w *wire, kind uint64
+    results: rawLabel, error
+  - doc: "readLine decodes one Line: a function id and a line number."
+    name: readLine
+    params: w *wire, kind uint64
+    results: rawLine, error
+  - doc: malformed builds [coreprofiling.ProfileMalformed] naming what could not be read.
+    name: malformed
+    params: what string
+    results: error
+imports:
+  binary: encoding/binary
+  bufio: bufio
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
+  context: context
+  coreprofiling: github.com/kitsunium/sdk/internal/core/observe/profiling
+  coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  math: math
+  pprof: runtime/pprof
+  regexp: regexp
+  runtime: runtime
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/profiling
+  name: profiling
+  purpose: "Package profiling — hosts CanonicalName: one spelling for a function, whoever named it."
+types:
+  - fields:
+      - doc: |-
+          Attribute returns the owner a sample is charged to — a pprof label's
+          value, the component whose code is on the stack — or "" when the
+          sample belongs to nobody in particular. The attribution is the
+          caller's: Fold only adds up. Nil charges every sample to nobody.
+        name: Attribute
+        type: func(sample coreprofiling.SampleValue) string
+      - doc: |-
+          SampleType names the value folded — "cpu", "inuse_space". Empty is
+          the profile's default sample type, else its last one.
+        name: SampleType
+        type: string
+      - doc: |-
+          TopFunctions is how many functions FoldedValue.Top lists; not
+          positive means DefaultTopFunctions.
+        name: TopFunctions
+        type: int
+      - doc: |-
+          TopPerOwner is how many functions each owner's Top lists; not positive
+          means DefaultTopPerOwner.
+        name: TopPerOwner
+        type: int
+      - doc: |-
+          FlameMinShare prunes a flame frame costing less than this share of
+          the total. Outside (0, 1), or NaN, means DefaultFlameMinShare.
+        name: FlameMinShare
+        type: float64
+      - doc: |-
+          FlameMaxDepth is how deep the flame graph goes from its root; not
+          positive means DefaultFlameMaxDepth.
+        name: FlameMaxDepth
+        type: int
+    kind: struct
+    methods:
+      - doc: normal returns c with every default applied.
+        name: normal
+        recv: c FoldConfig
+        results: FoldConfig
+    name: FoldConfig
+  - doc: costs accumulates flat and cumulative cost per function.
+    fields:
+      - name: flat
+        type: map[string]int64
+      - name: cum
+        type: map[string]int64
+    kind: struct
+    name: costs
+  - doc: flameFold is a flame frame being accumulated.
+    fields:
+      - name: children
+        type: map[string]*flameFold
+      - name: name
+        type: string
+      - name: value
+        type: int64
+    kind: struct
+    name: flameFold
+  - doc: folder accumulates a profile's samples.
+    fields:
+      - name: all
+        type: "*costs"
+      - name: owners
+        type: map[string]*costs
+      - name: ownerValue
+        type: map[string]int64
+      - name: sources
+        type: map[string]coreprofiling.FrameValue
+      - name: flame
+        type: "*flameFold"
+      - name: seen
+        type: map[string]struct{}
+      - name: names
+        type: "[]string"
+      - name: total
+        type: int64
+      - name: unattributed
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          add takes one sample: its stack, innermost first, the owner it is charged
+          to, and its value.
+        name: add
+        params: stack []coreprofiling.FrameValue, owner string, v int64, depth int
+        recv: f *folder
+      - doc: |-
+          namesOf returns the named frames of stack, innermost first, remembering
+          where each function is defined.
+        name: namesOf
+        params: stack []coreprofiling.FrameValue
+        recv: f *folder
+        results: "[]string"
+      - doc: cumulate charges v to each distinct function of names, once per sample.
+        name: cumulate
+        params: names []string, mine *costs, v int64
+        recv: f *folder
+      - doc: |-
+          climb adds v along the flame path of names, from the outermost frame in, no
+          deeper than depth frames.
+        name: climb
+        params: names []string, v int64, depth int
+        recv: f *folder
+      - doc: finish writes the accumulated costs into a FoldedValue.
+        name: finish
+        params: typ coreprofiling.SampleTypeValue, cfg FoldConfig
+        recv: f *folder
+        results: coreprofiling.FoldedValue
+      - doc: |-
+          top returns the n costliest functions of c: by flat cost, then cumulative,
+          then name.
+        name: top
+        params: c *costs, n int
+        recv: f *folder
+        results: "[]coreprofiling.FunctionCostValue"
+    name: folder
+  - doc: |-
+      dumpParser holds the goroutine being read and where its next location line
+      goes.
+    fields:
+      - name: out
+        type: "[]coreprofiling.GoroutineValue"
+      - doc: cur is the goroutine being read; nil between blocks.
+        name: cur
+        type: "*coreprofiling.GoroutineValue"
+      - doc: |-
+          pending is the frame a location line completes: the last function
+          line, or the created-by frame.
+        name: pending
+        type: "*coreprofiling.FrameValue"
+    kind: struct
+    methods:
+      - doc: line reads one line of a dump.
+        name: line
+        params: line string
+        recv: p *dumpParser
+      - doc: header reads "goroutine N [state, extra…] {labels}:" and opens a block.
+        name: header
+        params: line string
+        recv: p *dumpParser
+      - doc: location completes the pending frame with its file and line.
+        name: location
+        params: line string
+        recv: p *dumpParser
+      - doc: createdBy reads "created by pkg.f in goroutine N".
+        name: createdBy
+        params: line string
+        recv: p *dumpParser
+    name: dumpParser
+  - fields:
+      - doc: |-
+          Labels are the label keys a group is keyed by, in order — "kit_node",
+          "kit_loop" — beside the state and the top frame. None groups by state
+          and top frame alone.
+        name: Labels
+        type: "[]string"
+      - doc: MaxGroups keeps the largest groups only; not positive keeps them all.
+        name: MaxGroups
+        type: int
+      - doc: |-
+          MaxStack cuts each group's stack to its innermost frames; not
+          positive keeps it whole.
+        name: MaxStack
+        type: int
+    kind: struct
+    name: GroupConfig
+  - doc: |-
+      countRecord is one record of the counted goroutine profile: goroutines
+      sharing a stack and labels.
+    fields:
+      - name: labels
+        type: map[string]string
+      - name: stack
+        type: "[]string"
+      - name: count
+        type: int
+    kind: struct
+    name: countRecord
+  - doc: rawType is a ValueType before its strings are resolved.
+    fields:
+      - name: typ
+        type: int64
+      - name: unit
+        type: int64
+    kind: struct
+    name: rawType
+  - doc: rawLabel is a Label before its strings are resolved.
+    fields:
+      - name: key
+        type: int64
+      - name: str
+        type: int64
+      - name: num
+        type: int64
+    kind: struct
+    name: rawLabel
+  - doc: rawSample is a Sample before its locations are resolved.
+    fields:
+      - name: locations
+        type: "[]uint64"
+      - name: values
+        type: "[]int64"
+      - name: labels
+        type: "[]rawLabel"
+    kind: struct
+    name: rawSample
+  - doc: rawLine is one Line of a Location.
+    fields:
+      - name: function
+        type: uint64
+      - name: line
+        type: int64
+    kind: struct
+    name: rawLine
+  - doc: rawLocation is a Location before its functions are resolved.
+    fields:
+      - name: lines
+        type: "[]rawLine"
+      - name: address
+        type: uint64
+    kind: struct
+    name: rawLocation
+  - doc: rawFunction is a Function before its strings are resolved.
+    fields:
+      - name: name
+        type: int64
+      - name: file
+        type: int64
+      - name: start
+        type: int64
+    kind: struct
+    name: rawFunction
+  - doc: |-
+      decoder accumulates a profile's tables as they come: the string table is
+      written LAST by runtime/pprof, so nothing can be resolved until the end.
+    fields:
+      - name: locations
+        type: map[uint64]rawLocation
+      - name: functions
+        type: map[uint64]rawFunction
+      - name: strings
+        type: "[]string"
+      - name: types
+        type: "[]rawType"
+      - name: samples
+        type: "[]rawSample"
+      - name: comments
+        type: "[]int64"
+      - name: periodType
+        type: rawType
+      - name: timeNanos
+        type: int64
+      - name: durationNanos
+        type: int64
+      - name: period
+        type: int64
+      - name: defaultType
+        type: int64
+    kind: struct
+    methods:
+      - doc: profileField reads one top-level field.
+        name: profileField
+        params: w *wire, field, kind uint64
+        recv: d *decoder
+        results: bool, error
+      - doc: readString appends one entry of the string table.
+        name: readString
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readComment appends the string indexes of comments, packed or not.
+        name: readComment
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readSampleType appends one sample type.
+        name: readSampleType
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readPeriodType reads the period's value type.
+        name: readPeriodType
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readTime reads when the collection started.
+        name: readTime
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readDuration reads how long the collection lasted.
+        name: readDuration
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readPeriod reads the sampling period.
+        name: readPeriod
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: readDefaultType reads the default sample type's string index.
+        name: readDefaultType
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: |-
+          readSample decodes one Sample: its location ids and values, packed or not,
+          and its labels.
+        name: readSample
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: "readLocation decodes one Location: its id, address and lines."
+        name: readLocation
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: "readFunction decodes one Function: its id, name, file and start line."
+        name: readFunction
+        params: w *wire, kind uint64
+        recv: d *decoder
+        results: error
+      - doc: |-
+          resolve turns the raw tables into a ProfileValue, checking every index and
+          building at most frames frames, the locations' and the stacks' together.
+        name: resolve
+        params: frames int
+        recv: d *decoder
+        results: "*coreprofiling.ProfileValue, error"
+    name: decoder
+  - doc: resolver resolves a decoder's raw tables.
+    fields:
+      - name: d
+        type: "*decoder"
+      - doc: frames caches the frames of each location already resolved.
+        name: frames
+        type: map[uint64][]coreprofiling.FrameValue
+      - doc: |-
+          budget is how many more frames may be built or copied, from limit
+          down.
+        name: budget
+        type: int
+      - doc: limit is the whole budget, named in the refusal.
+        name: limit
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          spend takes n frames from the budget — before they are built or copied,
+          never after — or refuses the profile when fewer remain.
+        name: spend
+        params: n int
+        recv: r *resolver
+        results: error
+      - doc: str resolves a string index.
+        name: str
+        params: i int64
+        recv: r *resolver
+        results: string, error
+      - doc: valueType resolves a ValueType's two strings.
+        name: valueType
+        params: t rawType
+        recv: r *resolver
+        results: coreprofiling.SampleTypeValue, error
+      - doc: |-
+          header resolves the profile-level strings: the sample types, the period
+          type, the default sample type and the comments.
+        name: header
+        params: p *coreprofiling.ProfileValue
+        recv: r *resolver
+        results: error
+      - doc: |-
+          sample resolves one sample: its values checked against the sample types,
+          its stack built from its locations, its labels mapped.
+        name: sample
+        params: raw *rawSample, types int
+        recv: r *resolver
+        results: coreprofiling.SampleValue, error
+      - doc: |-
+          location returns the frames of a location, innermost inlined call first,
+          resolving them the first time.
+        name: location
+        params: id uint64
+        recv: r *resolver
+        results: "[]coreprofiling.FrameValue, error"
+      - doc: frame resolves one line of a location.
+        name: frame
+        params: line rawLine
+        recv: r *resolver
+        results: coreprofiling.FrameValue, error
+      - doc: |-
+          labels resolves a sample's labels: a string value into Labels, a number
+          into NumLabels.
+        name: labels
+        params: raw []rawLabel
+        recv: r *resolver
+        results: map[string][]string, map[string][]int64, error
+    name: resolver
+  - doc: |-
+      wire reads one message's bytes, field by field. Every read is bounds-checked:
+      a truncated or overlong varint, or a length past the end, is
+      [coreprofiling.ProfileMalformed] — never a panic and never a read past the
+      buffer.
+    fields:
+      - name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: more reports whether fields remain.
+        name: more
+        recv: w *wire
+        results: bool
+      - doc: |-
+          varint reads one base-128 varint. A tenth byte carrying more than the 64th
+          bit — a value past 64 bits, or an eleventh byte announced — is malformed,
+          never truncated into a value the decoder would trust.
+        name: varint
+        recv: w *wire
+        results: uint64, error
+      - doc: "key reads a field's key: its number and its wire type."
+        name: key
+        recv: w *wire
+        results: field, kind uint64, err error
+      - doc: bytes reads a length-delimited field's payload.
+        name: bytes
+        recv: w *wire
+        results: "[]byte, error"
+      - doc: skip passes over one field's payload of wire type kind.
+        name: skip
+        params: kind uint64
+        recv: w *wire
+        results: error
+      - doc: advance drops n bytes.
+        name: advance
+        params: n int
+        recv: w *wire
+        results: error
+      - doc: |-
+          varints appends to dst a repeated varint field's values, packed or not: a
+          packed field is one length-delimited run of varints, an unpacked one a
+          single varint per occurrence. runtime/pprof writes both, depending on the
+          count.
+        name: varints
+        params: dst []uint64, kind uint64
+        recv: w *wire
+        results: "[]uint64, error"
+    name: wire
+vars:
+  - doc: |-
+      canonicalPatterns compiles, at the first CanonicalName and never at the
+      package's initialisation, the two patterns it rewrites a name with:
+      generics, the instantiation a runtime name carries ("[...]"), and
+      closure, the suffixes the compiler gives a function literal, a go or
+      defer wrapper, a method value — which are their function's code. A
+      program that imports the package and never canonicalises a name pays
+      nothing for them.
+    items:
+      - name: canonicalPatterns
+        value: |-
+          sync.OnceValues(func() (generics, closure *regexp.Regexp) {
+          	return regexp.MustCompile(`\[[^\[\]]*\]`),
+          		regexp.MustCompile(`(\.func\d+|\.gowrap\d+|\.deferwrap\d+|-fm|\.\d+)+$`)
+          })
+    name: canonicalPatterns
+  - doc: |-
+      stateFlags are the suffixes the runtime appends to a state — a goroutine
+      being scanned, one leaked, one durably blocked in a synctest bubble — which
+      say something about the moment rather than what the goroutine waits on.
+    items:
+      - name: stateFlags
+        value: "[]string{\" (scan)\", \" (leaked)\", \" (durable)\"}"
+    name: stateFlags
+  - grouped: true
+    items:
+      - doc: |-
+          gzipMagic opens every gzip stream; runtime/pprof compresses what it
+          writes.
+        name: gzipMagic
+        value: "[]byte{0x1f, 0x8b}"
+      - doc: profileReaders maps each Profile field Parse reads to its reader.
+        name: profileReaders
+        value: |-
+          map[uint64]func(d *decoder, w *wire, kind uint64) error{
+          		fieldSampleType:    (*decoder).readSampleType,
+          		fieldSample:        (*decoder).readSample,
+          		fieldLocation:      (*decoder).readLocation,
+          		fieldFunction:      (*decoder).readFunction,
+          		fieldStringTable:   (*decoder).readString,
+          		fieldTimeNanos:     (*decoder).readTime,
+          		fieldDurationNanos: (*decoder).readDuration,
+          		fieldPeriodType:    (*decoder).readPeriodType,
+          		fieldPeriod:        (*decoder).readPeriod,
+          		fieldComment:       (*decoder).readComment,
+          		fieldDefaultType:   (*decoder).readDefaultType,
+          	}
+    name: gzipMagic

@@ -1,0 +1,3013 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultFoldAt is the least number of overlay entries that folds the overlay
+      into the snapshot, when [Config].FoldAt is zero.
+
+      A fold rewrites the whole snapshot, so how often it runs decides what a
+      write costs on average. Folding once the overlay holds as many entries as
+      the store holds documents keeps that average a constant — one fold of N
+      documents per N writes — and the floor keeps a small store from rewriting
+      its snapshot every few writes for nothing: a thousand small files in one
+      directory is not a cost worth avoiding.
+    items:
+      - name: DefaultFoldAt
+        type: int
+        value: "1024"
+    name: DefaultFoldAt
+  - doc: overlaySuffix names the overlay directory beside the snapshot.
+    items:
+      - name: overlaySuffix
+        type: string
+        value: "\".d\""
+    name: overlaySuffix
+  - doc: |-
+      versionsSuffix names the versions file beside the snapshot: every
+      document's former versions, as the last fold left them (ADR 0143).
+    items:
+      - name: versionsSuffix
+        type: string
+        value: "\".versions\""
+    name: versionsSuffix
+  - doc: |-
+      filePerm is the mode of every file the store writes: the owner's data, and
+      nobody else's to read.
+    items:
+      - name: filePerm
+        type: fs.FileMode
+        value: "0o600"
+    name: filePerm
+  - doc: dirPerm is the mode of every directory the store creates.
+    items:
+      - name: dirPerm
+        type: fs.FileMode
+        value: "0o700"
+    name: dirPerm
+  - doc: entrySuffix ends every overlay entry's name.
+    items:
+      - name: entrySuffix
+        type: string
+        value: "\".json\""
+    name: entrySuffix
+  - doc: |-
+      entryNameLen is an overlay entry's name length: 64 hexadecimal digits of a
+      SHA-256 and the suffix.
+    items:
+      - name: entryNameLen
+        type: int
+        value: sha256.Size*2 + len(entrySuffix)
+    name: entryNameLen
+  - doc: |-
+      leftoverPrefix and leftoverSuffix bracket the name of a temporary a crashed
+      vfs publication left behind: never a store's data, always removable.
+    grouped: true
+    items:
+      - name: leftoverPrefix
+        type: string
+        value: "\".vfs-\""
+      - name: leftoverSuffix
+        type: string
+        value: "\".tmp\""
+    name: leftoverPrefix
+  - doc: |-
+      MaxSQLTableLen is the longest table name a SQL store accepts, in bytes:
+      PostgreSQL's identifier limit of 63, less the five bytes of the longest names
+      the store derives from it — its index table, the name followed by "___ix",
+      and its versions table, followed by "___vs".
+      A caller whose names can be longer shortens them, with a digest, before
+      they reach the store.
+    items:
+      - name: MaxSQLTableLen
+        type: int
+        value: "58"
+    name: MaxSQLTableLen
+  - doc: |-
+      MaxSQLKeyLen is the longest store key, and the longest index key as it
+      reaches the table, in bytes. An index row carries an index key and a store
+      key in one primary key, and MySQL's InnoDB caps an index entry at 3072
+      bytes: two keys of this length and an index name fit in it, with room left.
+    items:
+      - name: MaxSQLKeyLen
+        type: int
+        value: "1024"
+    name: MaxSQLKeyLen
+  - doc: |-
+      MaxSQLIndexNameLen is the longest index name a SQL store accepts, in bytes.
+      An index's name is stored in every one of its rows, beside its keys.
+    items:
+      - name: MaxSQLIndexNameLen
+        type: int
+        value: "64"
+    name: MaxSQLIndexNameLen
+  - doc: |-
+      derivedSeparator joins a store's table name and the tag of a table the
+      store derives from it. Three underscores, which a table name may not
+      contain, so no derived name is ever another store's table.
+    items:
+      - name: derivedSeparator
+        type: string
+        value: "\"___\""
+    name: derivedSeparator
+  - doc: indexTableTag names the table of index rows beside the documents' table.
+    items:
+      - name: indexTableTag
+        type: string
+        value: "\"ix\""
+    name: indexTableTag
+  - doc: |-
+      versionsTableTag names the table of versions beside the documents' table
+      (ADR 0143).
+    items:
+      - name: versionsTableTag
+        type: string
+        value: "\"vs\""
+    name: versionsTableTag
+  - doc: |-
+      reservedTablePrefix starts every name SQLite keeps for itself: creating a
+      table under it is an error there, so it is refused on every engine and a
+      store moves between them unchanged.
+    items:
+      - name: reservedTablePrefix
+        type: string
+        value: "\"sqlite_\""
+    name: reservedTablePrefix
+  - doc: |-
+      indexRowArgs is how many arguments one index row binds: its index's name,
+      its key, its document's key, and whether its index is unique.
+    items:
+      - name: indexRowArgs
+        type: int
+        value: "4"
+    name: indexRowArgs
+  - doc: |-
+      versionRowArgs is how many arguments one version row binds: its document's
+      key, its number, its instant — seconds and nanoseconds — its metadata and its
+      document.
+    items:
+      - name: versionRowArgs
+        type: int
+        value: "6"
+    name: versionRowArgs
+  - doc: |-
+      sqlMigrationPrefix starts the name of every migration SQLMigration builds,
+      so a version table read during an incident says what created the tables.
+    items:
+      - name: sqlMigrationPrefix
+        type: string
+        value: "\"docstore \""
+    name: sqlMigrationPrefix
+  - doc: |-
+      sqlVersionsMigrationPrefix starts the name of every migration
+      SQLVersionsMigration builds.
+    items:
+      - name: sqlVersionsMigrationPrefix
+        type: string
+        value: "\"docstore versions \""
+    name: sqlVersionsMigrationPrefix
+  - doc: |-
+      reindexPage is how many documents Reindex reads at a time. A page is read
+      whole before its rows are filed, because a transaction runs one statement at
+      a time on its connection; the page bounds what that holds in memory.
+    items:
+      - name: reindexPage
+        type: int
+        value: "256"
+    name: reindexPage
+  - doc: |-
+      rowsHint is the capacity a read starts its answer with: a guess, grown by
+      append past it, and small enough that an empty answer costs little.
+    items:
+      - name: rowsHint
+        type: int
+        value: "16"
+    name: rowsHint
+  - doc: |-
+      keysPageLen is how many keys one statement of Keys reads: enough that a
+      listing of a large table is few round trips, few enough that a page is a
+      few kilobytes of keys and never holds the table's rows long.
+    items:
+      - name: keysPageLen
+        type: int
+        value: "256"
+    name: keysPageLen
+  - doc: |-
+      tombstoneNum is the number of a trashed document's row in the versions
+      table: one no version is given, since versions are numbered from 1.
+    items:
+      - name: tombstoneNum
+        type: int64
+        value: "0"
+    name: tombstoneNum
+  - doc: |-
+      versionRowsPerStatement bounds how many version rows one INSERT carries. At
+      six arguments a row it stays under the 999 bound parameters of an SQLite
+      older than 3.32, as indexRowsPerStatement does.
+    items:
+      - name: versionRowsPerStatement
+        type: int
+        value: "150"
+    name: versionRowsPerStatement
+  - doc: |-
+      uniqueKeysPerStatement bounds how many unique keys one unique check asks
+      about. At two arguments a key, plus the document's key, it stays under
+      SQLite's 999 bound parameters for the same reason indexRowsPerStatement does.
+    items:
+      - name: uniqueKeysPerStatement
+        type: int
+        value: "400"
+    name: uniqueKeysPerStatement
+  - doc: |-
+      indexRowsPerStatement bounds how many index rows one INSERT carries. At four
+      arguments a row it stays under 999 bound parameters — SQLite's ceiling
+      before 3.32 — so a document with many keys is filed in a few statements
+      rather than refused by an older engine.
+    items:
+      - name: indexRowsPerStatement
+        type: int
+        value: "200"
+    name: indexRowsPerStatement
+  - doc: The two collisions a write asks the database about after the fact.
+    grouped: true
+    items:
+      - doc: "docConflict: a document already stored under the key."
+        name: docConflict
+        type: conflictKind
+        value: iota
+      - doc: "uniqueConflict: a unique index filing one of the keys elsewhere."
+        name: uniqueConflict
+    name: docConflict
+  - doc: The problems VersionsInvalid names, the same on both engines.
+    grouped: true
+    items:
+      - doc: "problemNoVersion: a document is at least its current version."
+        name: problemNoVersion
+        type: string
+        value: "\"no version\""
+      - doc: "problemNumberZero: versions are numbered from 1."
+        name: problemNumberZero
+        type: string
+        value: "\"a version numbered 0\""
+      - doc: "problemNotDecreasing: newest first, no number twice."
+        name: problemNotDecreasing
+        type: string
+        value: "\"numbers that do not strictly decrease from the newest\""
+      - doc: "problemUnknownInstant: only version 1 may predate its store's versions."
+        name: problemUnknownInstant
+        type: string
+        value: "\"an unknown instant on a version other than 1\""
+      - doc: "problemNotJSON: a version holds a JSON document."
+        name: problemNotJSON
+        type: string
+        value: "\"a version that is not JSON\""
+      - doc: "problemOtherKey: a document sits under the key its own Key gives."
+        name: problemOtherKey
+        type: string
+        value: "\"a current document whose own key is another\""
+    name: problemNoVersion
+  - doc: The three write modes.
+    grouped: true
+    items:
+      - doc: upsert creates or replaces.
+        name: upsert
+        type: writeMode
+        value: iota
+      - doc: insertOnly refuses an existing key.
+        name: insertOnly
+      - doc: |-
+          replaceOnly refuses a missing key, so a document deleted meanwhile is
+          never brought back.
+        name: replaceOnly
+    name: upsert
+files:
+  - decls:
+      - DefaultFoldAt
+      - overlaySuffix
+      - versionsSuffix
+      - Config
+      - (*Config).validate
+      - validateVersions
+      - validateIndexes
+      - (*Config).validatePath
+      - misconfigured
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Store
+      - StatsValue
+      - (*Store).Get
+      - (*Store).List
+      - (*Store).Filter
+      - (*Store).Entries
+      - (*Store).Keys
+      - (*Store).keysAfter
+      - yieldKeys
+      - (*Store).Lookup
+      - (*Store).Find
+      - (*Store).Stats
+      - (*Store).snapshotEntries
+      - (*Store).decode
+      - decodeAs
+      - (*Store).decodeAll
+      - jsonCause
+      - sortedKeys
+    name: docstore.go
+  - decls:
+      - _
+    name: docstore_compliance.go
+  - decls:
+      - hook
+      - hooks
+      - (*hooks).add
+      - (*hooks).call
+      - (*Store).OnWrite
+      - (*Store).OnDelete
+    name: hooks.go
+  - decls:
+      - index
+      - newIndex
+      - (*index).keysOf
+      - fileableKeys
+      - (*index).taken
+      - (*index).set
+      - (*index).drop
+      - (*index).holders
+      - (*Store).indexKeys
+      - (*Store).uniqueTaken
+      - (*Store).file
+      - (*Store).unfile
+      - (*Store).rebuild
+    name: index.go
+  - decls:
+      - (*Store).load
+      - (*Store).replayOverSnapshot
+      - (*Store).readSnapshot
+      - (*Store).readOverlay
+      - (*Store).replay
+      - (*Store).checkEntryVersions
+      - (*Store).readVersions
+      - (*Store).versionsWithoutDocument
+      - checkRecord
+      - compacted
+      - (*Store).origin
+      - loadFailed
+      - swallowLeftover
+    name: load.go
+  - decls:
+      - Open
+      - newStore
+      - (*Store).open
+    name: open.go
+  - decls:
+      - filePerm
+      - dirPerm
+      - entrySuffix
+      - entryNameLen
+      - leftoverPrefix
+      - entryRecord
+      - entryName
+      - isEntryName
+      - (*Store).markPending
+      - (*Store).persist
+      - (*Store).publish
+      - (*Store).maybeFold
+      - swallowErr
+      - (*Store).Fold
+      - (*Store).Close
+      - (*Store).fold
+      - (*Store).removeFolded
+      - (*Store).recordFold
+      - encodeSnapshot
+      - (*Store).foldVersions
+    name: persist.go
+  - decls:
+      - MaxSQLTableLen
+      - MaxSQLKeyLen
+      - MaxSQLIndexNameLen
+      - derivedSeparator
+      - indexTableTag
+      - versionsTableTag
+      - reservedTablePrefix
+      - isTableName
+      - SQLConfig
+      - txParts
+      - (*SQLConfig).validate
+      - validateSQLIndexes
+      - validateTransactor
+      - validateTable
+      - indexTable
+      - versionsTable
+    name: sql_config.go
+  - decls:
+      - indexRowArgs
+      - versionRowArgs
+      - sqlStatements
+      - renderStatements
+      - trashStatements
+      - writeModes
+      - updateStatements
+      - claimStatement
+      - (*sqlStatements).claimReturnsRow
+      - (*sqlStatements).insertVersions
+      - (*sqlStatements).upsertArgs
+      - (*sqlStatements).upsertReturnsRev
+      - (*sqlStatements).insertConflictIsZeroRows
+      - (*sqlStatements).insertIndexRows
+      - (*sqlStatements).uniqueTaken
+      - (*sqlStatements).sharedKeys
+      - (*sqlStatements).markUnique
+      - (*sqlStatements).list
+      - shareLockClause
+      - createTableStatements
+      - createVersionsTableStatements
+      - dropVersionsTableStatements
+      - dropTableStatements
+    name: sql_dialect.go
+  - decls:
+      - sqlMigrationPrefix
+      - sqlVersionsMigrationPrefix
+      - SQLMigration
+      - SQLVersionsMigration
+    name: sql_migration.go
+  - decls:
+      - reindexPage
+      - storedDocument
+      - (*SQLStore).Reindex
+      - (*SQLStore).reindex
+      - (*SQLStore).readPage
+      - (*SQLStore).refile
+      - (*SQLStore).keysForRebuild
+      - (*SQLStore).constrainUnique
+    name: sql_reindex.go
+  - decls:
+      - rowsHint
+      - keysPageLen
+      - rowSet
+      - SQLStore
+      - OpenSQL
+      - ownTxOptions
+      - (*SQLStore).Get
+      - (*SQLStore).List
+      - (*SQLStore).Filter
+      - (*SQLStore).Entries
+      - (*SQLStore).Keys
+      - (*SQLStore).keysPage
+      - (*SQLStore).Count
+      - (*SQLStore).Lookup
+      - (*SQLStore).Find
+      - (*SQLStore).OnWrite
+      - (*SQLStore).OnDelete
+      - (*SQLStore).queryDocuments
+      - (*SQLStore).finishRows
+      - (*SQLStore).declared
+      - (*SQLStore).fileKey
+      - (*SQLStore).notFoundIn
+      - (*SQLStore).failed
+    name: sql_store.go
+  - decls:
+      - tombstoneNum
+      - (*SQLStore).Trash
+      - (*SQLStore).Restore
+      - (*SQLStore).Purge
+      - (*SQLStore).Tombstones
+      - (*SQLStore).trash
+      - (*SQLStore).restore
+      - (*SQLStore).purge
+      - (*SQLStore).firstVersion
+    name: sql_trash.go
+  - decls:
+      - versionRowsPerStatement
+      - storedWrite
+      - versionRow
+      - (*SQLStore).PutStamped
+      - (*SQLStore).InsertStamped
+      - (*SQLStore).ReplaceStamped
+      - (*SQLStore).Versions
+      - (*SQLStore).readVersionRows
+      - (*SQLStore).Version
+      - (*SQLStore).RewriteVersions
+      - (*SQLStore).rewrite
+      - (*SQLStore).lockedFormers
+      - (*SQLStore).keepVersions
+      - (*SQLStore).keepCreation
+      - (*SQLStore).readHead
+      - (*SQLStore).prune
+      - (*SQLStore).insertVersionRows
+      - (*SQLStore).versionArgs
+      - scannedVersion
+      - (*SQLStore).versionOf
+      - knownInstant
+      - (*SQLStore).PutDocument
+      - (*SQLStore).preparedDocument
+      - (*SQLStore).putDocument
+      - (*SQLStore).keyTaken
+      - (*SQLStore).VersionWeight
+    name: sql_version.go
+  - decls:
+      - uniqueKeysPerStatement
+      - indexRowsPerStatement
+      - conflictKind
+      - docConflict
+      - mayConflict
+      - (*mayConflict).Error
+      - indexRow
+      - sqlPrepared
+      - (*SQLStore).Put
+      - (*SQLStore).Insert
+      - (*SQLStore).Replace
+      - (*SQLStore).Update
+      - (*SQLStore).UpdateStamped
+      - (*SQLStore).Delete
+      - (*SQLStore).store
+      - (*SQLStore).run
+      - (*SQLStore).settle
+      - (*SQLStore).announce
+      - (*SQLStore).prepare
+      - (*SQLStore).indexRows
+      - (*SQLStore).several
+      - (*SQLStore).writeDocument
+      - (*SQLStore).claimRow
+      - (*SQLStore).lockedReplace
+      - (*SQLStore).writeLockedRow
+      - (*SQLStore).upsertRow
+      - (*SQLStore).insertRow
+      - (*SQLStore).modify
+      - (*SQLStore).remove
+      - (*SQLStore).fileIndexes
+      - (*SQLStore).checkUnique
+      - (*SQLStore).classify
+      - (*SQLStore).queryNames
+      - (*SQLStore).affected
+      - (*SQLStore).tooLong
+      - rowsAffected
+      - rowArgs
+    name: sql_write.go
+  - decls:
+      - (*Store).Trash
+      - (*Store).Restore
+      - (*Store).Purge
+      - (*Store).Tombstones
+      - (*Store).trash
+      - (*Store).restore
+      - (*Store).trashedRecord
+      - notTrashed
+    name: trash.go
+  - decls:
+      - problemNoVersion
+      - versionsRecord
+      - trashedDocument
+      - versionHead
+      - formerVersion
+      - firstHead
+      - (*Store).PutStamped
+      - (*Store).InsertStamped
+      - (*Store).ReplaceStamped
+      - (*Store).UpdateStamped
+      - (*Store).Versions
+      - (*Store).Version
+      - (*Store).RewriteVersions
+      - (*Store).nextVersions
+      - (*Store).pruned
+      - (*Store).setVersions
+      - (*versionsRecord).weighed
+      - (*Store).VersionWeight
+      - (*Store).now
+      - (*versionsRecord).list
+      - rewriteRecord
+      - checkRewrite
+      - pickVersion
+      - compactJSON
+      - versionsNotKept
+      - rewriteRefused
+      - (*Store).PutDocument
+      - (*Store).putDocument
+      - givenDocument
+      - (*Store).preparedDocument
+      - (*Store).persistDocument
+      - recordOf
+      - checkDocument
+      - versionProblem
+      - documentJSON
+      - metaOrNil
+      - versionsInvalid
+    name: version.go
+  - decls:
+      - writeMode
+      - upsert
+      - prepared
+      - (*Store).Put
+      - (*Store).Insert
+      - (*Store).Replace
+      - (*Store).Update
+      - (*Store).Delete
+      - (*Store).store
+      - (*Store).prepare
+      - encodeAs
+      - (*Store).commit
+      - (*Store).modify
+      - (*Store).persistAndApply
+      - (*Store).remove
+      - encodeCause
+    name: write.go
+functions:
+  - doc: |-
+      validateVersions refuses a negative number of versions, and a hold on a
+      store that keeps none: a caller who sets Held believes versions are kept.
+      Both engines refuse through it.
+    name: validateVersions
+    params: versions int, held bool
+    results: error
+  - doc: |-
+      validateIndexes refuses index declarations no engine could serve: an index
+      with no name, two of one name, or one with no key function. Both Open and
+      OpenSQL call it, so a declaration refused by one engine is refused by the
+      other.
+    name: validateIndexes
+    params: indexes []coredocstore.IndexSpec[T]
+    results: error
+    typeParams: T any
+  - doc: misconfigured is StoreMisconfigured naming the setting and the problem.
+    name: misconfigured
+    params: setting, problem string
+    results: error
+  - doc: |-
+      yieldKeys yields keys in order, then failure when there is one, and reports
+      whether the caller wants more: false once it stopped, and after a failure
+      whatever it answered to it — the failure is a listing's last yield. Both
+      engines' Keys yield through it.
+    name: yieldKeys
+    params: yield func(string, error) bool, keys []string, failure error
+    results: bool
+  - doc: |-
+      decodeAs decodes one stored document into a fresh value, or refuses it
+      naming store — a snapshot's path, or a table — and never a byte of it. Every
+      engine decodes through it, so a type that changed under stored data is the
+      same refusal in each.
+    name: decodeAs
+    params: store string, raw []byte
+    results: T, error
+    typeParams: T any
+  - doc: |-
+      jsonCause describes a decoding failure without a byte of the document:
+      encoding/json quotes the offending character of a syntax error, and a
+      stored document is exactly what must not travel in an error.
+    name: jsonCause
+    params: err error
+    results: string
+  - doc: sortedKeys returns m's keys in order.
+    name: sortedKeys
+    params: m map[string]V
+    results: "[]string"
+    typeParams: V any
+  - doc: newIndex builds the empty index a spec declares.
+    name: newIndex
+    params: spec coredocstore.IndexSpec[T]
+    results: "*index[T]"
+    typeParams: T any
+  - doc: |-
+      fileableKeys returns the keys an index files out of what its function
+      answered: in the order given, without the empty key — which is no key — and
+      with a repeated key once. The memory, file and SQL engines all file by it,
+      so a document has the same keys in every one of them.
+    name: fileableKeys
+    params: raw []string
+    results: "[]string"
+  - doc: |-
+      checkRecord refuses, as LoadFailed naming file, versions no store wrote:
+      a store numbers them from 1, the current one the highest, and keeps the
+      former ones newest first, each holding a document.
+    name: checkRecord
+    params: file string, record *versionsRecord
+    results: error
+  - doc: |-
+      compacted returns record with its former versions' documents compact, as
+      a write makes them: the files hold them indented. A nil record stays nil.
+    name: compacted
+    params: record *versionsRecord
+    results: "*versionsRecord"
+  - doc: |-
+      loadFailed is LoadFailed naming a file or directory and its problem, with
+      the filesystem's own verdict as a field when there is one.
+    name: loadFailed
+    params: file, problem string, cause error
+    results: error
+  - doc: |-
+      swallowLeftover discards the failure to remove a crashed publication's
+      temporary: it is garbage either way, and a later Open tries again.
+    name: swallowLeftover
+    params: err error
+  - name: Open
+    params: cfg Config[T], indexes ...coredocstore.IndexSpec[T]
+    results: "*Store[T], error"
+    typeParams: T any
+  - doc: newStore builds the empty store a validated cfg and its indexes describe.
+    name: newStore
+    params: cfg Config[T], indexes []coredocstore.IndexSpec[T]
+    results: "*Store[T]"
+    typeParams: T any
+  - doc: |-
+      entryName is the overlay entry's name for key: the SHA-256 of the key, in
+      lowercase hexadecimal. It is fixed-length, carries no character a
+      filesystem refuses or folds by case, and says nothing about the key.
+    name: entryName
+    params: key string
+    results: string
+  - doc: isEntryName reports whether name is an overlay entry's name.
+    name: isEntryName
+    params: name string
+    results: bool
+  - doc: |-
+      swallowErr discards an error the caller has already accounted for,
+      recording the discard so the error audit reads it as deliberate. Its one
+      caller is maybeFold: fold keeps its failure in Stats, and the write that
+      triggered it succeeded — its own entry was durable before the fold began.
+    name: swallowErr
+    params: err error
+  - doc: |-
+      encodeSnapshot renders the documents as the snapshot: one JSON object from
+      key to document, keys sorted, indented so a person can read the file a
+      closed store leaves.
+    name: encodeSnapshot
+    params: docs map[string]json.RawMessage
+    results: "[]byte, error"
+  - doc: |-
+      isTableName reports whether name has the only shape a table name may take,
+      `^[a-z_][a-z0-9_]*$`. It is interpolated into every statement — an
+      identifier cannot be a bound parameter — so this shape is the whole defence
+      against an injection. Lower case, because PostgreSQL folds an unquoted name
+      to it and MySQL's case sensitivity follows the server's filesystem: a name
+      that differs only by case would be one table on one engine and two on
+      another. Written out rather than a regular expression compiled at the
+      package's initialisation, which every program importing the store paid at
+      start (#276); its test holds it to the expression.
+    name: isTableName
+    params: name string
+    results: bool
+  - doc: |-
+      validateSQLIndexes refuses what every engine refuses, and an index name
+      longer than the column every one of its rows stores it in.
+    name: validateSQLIndexes
+    params: indexes []coredocstore.IndexSpec[T]
+    results: error
+    typeParams: T any
+  - doc: |-
+      validateTransactor refuses a transactor the store could not join a
+      transaction of, or hold its hooks until a commit of, and returns both
+      capabilities otherwise.
+    name: validateTransactor
+    params: tm coresql.Transactor
+    results: txParts, error
+  - doc: |-
+      validateTable refuses a table name the store could not interpolate safely,
+      or that another store's derived table could collide with.
+    name: validateTable
+    params: table string
+    results: error
+  - doc: indexTable derives the name of the table a store keeps its index rows in.
+    name: indexTable
+    params: table string
+    results: string
+  - doc: versionsTable derives the name of the table a store keeps its versions in.
+    name: versionsTable
+    params: table string
+    results: string
+  - doc: |-
+      renderStatements renders every fixed statement of the store keeping its
+      documents in table, on dialect. The table name was validated at OpenSQL.
+    name: renderStatements
+    params: dialect coresql.Dialect, table string
+    results: sqlStatements
+  - doc: |-
+      trashStatements renders the four statements of the trash, all on the
+      versions table, whose row numbered 0 — a number no version is given — is a
+      trashed document: the lowest row of a key, read locked where the engine
+      locks rows, which tells a trash row from a version row; the trash row's
+      removal; the versions a trashed document kept, with it as the current
+      one's document; and every trash row's key and instant, in key order.
+    name: trashStatements
+    params: dialect coresql.Dialect, table string
+    results: firstVersion, dropTombstone, readTrashed, tombstones string
+  - doc: |-
+      writeModes renders the upsert and the insertion, the two statements whose
+      grammar differs most between the engines.
+
+      PostgreSQL and SQLite share one: INSERT … ON CONFLICT. The upsert RETURNS
+      the revision it wrote, the first for a document it created; the insertion does
+      NOTHING on a conflict, so a taken key is zero rows rather than an error — an
+      error would abort a PostgreSQL transaction the caller may still want.
+
+      MySQL has no RETURNING and no ON CONFLICT. Its upsert is ON DUPLICATE KEY
+      UPDATE, which counts one affected row for a document it created and two for
+      one it changed — and since the revision always moves, a document is always
+      changed, whatever CLIENT_FOUND_ROWS the connection was opened with. The new
+      document is bound TWICE rather than read back through VALUES(), which MySQL
+      deprecated in 8.0.20, or through a row alias, which MariaDB does not parse.
+      Its insertion is a plain INSERT: INSERT IGNORE would also turn a truncation
+      into a warning, and a truncated key is another key.
+    name: writeModes
+    params: dialect coresql.Dialect, docs string
+    results: upsert, insert string
+  - doc: |-
+      updateStatements renders Update's two statements: the read that locks the
+      document, and the write under that lock.
+
+      PostgreSQL and MySQL lock the row they read, FOR UPDATE. SQLite has no row
+      lock and no FOR UPDATE: its lock is the database's, and a transaction takes
+      it at its first WRITE. So on SQLite the read IS a write — it moves the
+      revision and RETURNS the document — and takes the write lock before the
+      document is read, which is what keeps two Updates from reading the same
+      version. The write that follows then leaves the revision alone.
+    name: updateStatements
+    params: dialect coresql.Dialect, docs, replace string
+    results: lockDoc, writeLocked string
+  - doc: |-
+      claimStatement renders the first statement of a Put on a store that keeps
+      versions: it must know the document it replaces before replacing it, and
+      must not let another writer create the key between its read and its write.
+      So it creates the document when the key is free, and otherwise leaves the
+      stored one as it is while moving its revision — which locks the row, on
+      every engine, in the same statement.
+
+      PostgreSQL and SQLite answer the revision and the row's document: a
+      revision of 1 is a creation, and the document is then the one just written;
+      any other is the stored document, now locked. MySQL has no RETURNING: its
+      count of affected rows says which — 1 for a creation, 2 for a row changed,
+      since the revision always changes — and the document is read after, under
+      the lock this statement took.
+    name: claimStatement
+    params: dialect coresql.Dialect, docs string
+    results: string
+  - doc: |-
+      shareLockClause ends a read that must see the latest COMMITTED rows even
+      inside a transaction that keeps its own snapshot.
+
+      It exists for MySQL. InnoDB's default isolation, REPEATABLE READ, answers a
+      plain read from the snapshot the transaction took at its first read, so a
+      row committed since — the one a refused write collided with — is invisible
+      to it, while a locking read sees it. PostgreSQL's default, READ COMMITTED,
+      sees it with a plain read, and a SQLite writer holds the database's only
+      write lock, so there is nothing newer to see.
+
+      It is this store's decision rather than a core/data/sql Dialect method because
+      what it renders is not an engine's shared lock: PostgreSQL has one, FOR
+      SHARE, which this store deliberately does not send. Which engine needs a
+      locking read here follows from the isolation each one defaults to, and that
+      reasoning is the store's.
+    name: shareLockClause
+    params: dialect coresql.Dialect
+    results: string
+  - doc: |-
+      createTableStatements renders the DDL that creates a store's two tables, in
+      the order it must run, each one statement that does nothing when its table
+      exists — so a run that stopped between them, as MySQL's implicit commit can
+      make one stop, completes when it runs again (ADR 0139).
+
+      Every key column is BINARY, so two keys are one key only when their bytes
+      are: PostgreSQL's bytea, MySQL's VARBINARY, SQLite's BLOB. A text column
+      would compare through a collation, and go-sql-driver/mysql's default one is
+      case- and accent-insensitive. The document is the bytes the store encoded,
+      never the engine's JSON type, which re-orders members and re-spells numbers.
+
+      The index table's primary key serves Lookup and Find; its first UNIQUE
+      constraint only builds the index a document's rows are found by — it can
+      never be broken, and it is how PostgreSQL and SQLite, which declare no plain
+      index inside CREATE TABLE, get one without a second statement; its second
+      UNIQUE constraint is the unique indexes' guarantee, since uniq is 1 on a
+      unique index's rows and NULL on the others, and NULLs never collide.
+    name: createTableStatements
+    params: dialect coresql.Dialect, table string
+    results: "[]string"
+  - doc: |-
+      createVersionsTableStatements renders the DDL that creates the table a
+      store keeps its versions in, beside its two others (ADR 0143): one row per
+      version, keyed by the document's key and the version's number. A former
+      version's row holds the document it was; the current version's holds NULL,
+      because its document is the documents' table's. made_at and made_ns are the
+      instant — seconds since 1970 UTC and the nanoseconds within that second, two
+      integers that hold any instant a time.Time does, to the nanosecond — both
+      NULL when unknown; meta is the stamp's metadata as a JSON object, NULL when
+      there is none. The key is binary, as in the two other tables, and the table
+      has no index but its primary key: versions are read by document, never
+      looked up by what they hold.
+
+      The trash lives in the same table, so it needs no migration of its own: a
+      trashed document is a row numbered 0 — a number no version is given — that
+      holds the document and, in made_at and made_ns, when it was trashed, beside
+      the version rows it kept.
+    name: createVersionsTableStatements
+    params: dialect coresql.Dialect, table string
+    results: "[]string"
+  - doc: |-
+      dropVersionsTableStatements renders the reversal of
+      createVersionsTableStatements, doing nothing when the table is gone.
+    name: dropVersionsTableStatements
+    params: dialect coresql.Dialect, table string
+    results: "[]string"
+  - doc: |-
+      dropTableStatements renders the reversal of createTableStatements: the index
+      table first, then the documents', each doing nothing when its table is gone.
+    name: dropTableStatements
+    params: dialect coresql.Dialect, table string
+    results: "[]string"
+  - name: SQLMigration
+    params: dialect coresql.Dialect, table string, version uint64
+    results: coresql.MigrationValue, error
+  - name: SQLVersionsMigration
+    params: dialect coresql.Dialect, table string, version uint64
+    results: coresql.MigrationValue, error
+  - name: OpenSQL
+    params: cfg SQLConfig[T], indexes ...coredocstore.IndexSpec[T]
+    results: "*SQLStore[T], error"
+    typeParams: T any
+  - doc: |-
+      ownTxOptions are the options of a transaction the store opens for a write
+      of its own, when the caller's context carries none.
+
+      READ COMMITTED on MySQL. InnoDB's default, REPEATABLE READ, takes a gap
+      lock wherever a locking statement finds no row, and two writers of new
+      documents with neighbouring keys then each wait for the other's gap: a
+      deadlock, which InnoDB settles by rolling one of them back. A write of the
+      store's own needs no snapshot older than its statements, so it asks for none.
+      Every other engine keeps its default. Inside the caller's transaction the
+      caller's options stand, and ADR 0139 says what REPEATABLE READ costs there.
+    name: ownTxOptions
+    params: dialect coresql.Dialect
+    results: coresql.TxOptionsValue
+  - doc: |-
+      knownInstant is at's address, or nil when at is the zero instant — the
+      instant of a version nobody recorded.
+    name: knownInstant
+    params: at time.Time
+    results: "*time.Time"
+  - doc: rowsAffected reads a statement's affected-row count, or its failure.
+    name: rowsAffected
+    params: result stdsql.Result, execErr error
+    results: int64, error
+  - doc: rowArgs binds a batch of index rows of the document stored under key.
+    name: rowArgs
+    params: key []byte, batch []indexRow
+    results: "[]any"
+  - doc: notTrashed is DocumentNotTrashed naming store.
+    name: notTrashed
+    params: store string
+    results: error
+  - doc: |-
+      rewriteRecord applies a rewrite's function to the former versions of
+      record, and returns the record it leaves: the same current version, and the
+      former versions fn kept, checked. A nil record has no former version.
+    name: rewriteRecord
+    params: store string, record *versionsRecord, fn func([]coredocstore.VersionValue) ([]coredocstore.VersionValue, error)
+    results: "*versionsRecord, error"
+  - doc: |-
+      checkRewrite checks what a rewrite's function returned against the former
+      versions it was given, and returns them as the store keeps them: each one
+      of those it was given, in the same order, with its own number and instant,
+      and a document that is JSON, compacted and HTML-escaped as json.Marshal
+      writes one. Both engines check through it.
+    name: checkRewrite
+    params: store string, given []formerVersion, kept []coredocstore.VersionValue
+    results: "[]formerVersion, error"
+  - doc: |-
+      pickVersion returns the version numbered number among all, or
+      VersionNotFound naming store and the number.
+    name: pickVersion
+    params: store string, all []coredocstore.VersionValue, number uint64
+    results: coredocstore.VersionValue, error
+  - doc: |-
+      compactJSON returns raw without the spaces a snapshot's indentation puts in
+      it, so that a document read back from the files compares with one just
+      encoded. raw is JSON the store encoded or checked; were it not, it is
+      returned as it is.
+    name: compactJSON
+    params: raw json.RawMessage
+    results: json.RawMessage
+  - doc: versionsNotKept is VersionsNotKept naming store.
+    name: versionsNotKept
+    params: store string
+    results: error
+  - doc: rewriteRefused is VersionsRewriteRefused naming store and the problem.
+    name: rewriteRefused
+    params: store, problem string
+    results: error
+  - doc: |-
+      recordOf is the versions record of checked versions, newest first: the
+      first one's head as the current version, the others as the former ones.
+    name: recordOf
+    params: given []coredocstore.VersionValue
+    results: "*versionsRecord"
+  - doc: |-
+      checkDocument checks the versions PutDocument is given, newest first, and
+      returns copies as both engines keep them: each JSON compacted and
+      HTML-escaped as json.Marshal writes a document, each instant in UTC, and
+      no metadata as nil. Both engines check through it, so they refuse identical
+      inputs identically.
+    name: checkDocument
+    params: store string, versions []coredocstore.VersionValue
+    results: "[]coredocstore.VersionValue, error"
+  - doc: |-
+      versionProblem says what is wrong with the i-th of versions, newest first,
+      by itself or against the newer one, and whether anything is.
+    name: versionProblem
+    params: versions []coredocstore.VersionValue, i int
+    results: problem string, wrong bool
+  - doc: |-
+      documentJSON returns raw compacted and HTML-escaped as json.Marshal writes
+      a document, and whether raw is JSON at all.
+    name: documentJSON
+    params: raw json.RawMessage
+    results: json.RawMessage, bool
+  - doc: |-
+      metaOrNil is a copy of meta, nil when it says nothing: both engines read
+      an empty metadata back as nil.
+    name: metaOrNil
+    params: meta map[string]string
+    results: map[string]string
+  - doc: versionsInvalid is VersionsInvalid naming store and the problem.
+    name: versionsInvalid
+    params: store, problem string
+    results: error
+  - doc: |-
+      encodeAs computes v's key and JSON, or refuses v naming store and never a
+      byte of v. Every engine encodes through it, so a document one engine refuses
+      is refused by the other.
+    name: encodeAs
+    params: store string, keyOf func(T) string, v T
+    results: key string, raw json.RawMessage, err error
+    typeParams: T any
+  - doc: |-
+      encodeCause describes an encoding failure without the value that failed:
+      an unsupported value's text and a MarshalJSON's own error can both quote
+      what the document held.
+    name: encodeCause
+    params: err error
+    results: string
+imports:
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
+  context: context
+  coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
+  coresql: github.com/kitsunium/sdk/internal/core/data/sql
+  corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+  errors: errors
+  fmt: fmt
+  fs: io/fs
+  hex: encoding/hex
+  iter: iter
+  json: encoding/json
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  path: path
+  sha256: crypto/sha256
+  slices: slices
+  stdsql: database/sql
+  strconv: strconv
+  strings: strings
+  svcsql: github.com/kitsunium/sdk/internal/service/data/sql
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/docstore
+  name: docstore
+  purpose: "Package docstore — the store's construction parameters, and the refusals a configuration no store could honour gets, the index declarations' included: an IndexSpec is core/data/docstore's, which both engines take (ADR 0160)."
+types:
+  - fields:
+      - doc: |-
+          Key returns the key a document is stored under. It must be a pure
+          function of the document: the store calls it to file every write and
+          compares its answers to refuse an update that would rename a document.
+        name: Key
+        type: func(T) string
+      - doc: |-
+          FS is where the store persists, and Path is the snapshot's name inside
+          it — an io/fs name such as "shop/items.json". The overlay lives beside
+          the snapshot, in the directory Path + ".d". A nil FS keeps the store in
+          memory: nothing survives the process, and nothing is written anywhere.
+        name: FS
+        type: corevfs.FullFS
+      - doc: |-
+          Clock stamps each version with the instant of the write that made it.
+          Nil is the system clock.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          Held reports whether the document stored under key is held — a legal
+          hold — so that no write prunes its versions: they pile up beyond
+          Versions until a write finds the document released, and that write
+          prunes them. It is called with the document's key by a write that would
+          prune, under the writers' lock, so it may read this store and must not
+          write to it; a panic in it reaches the writer, and nothing is written.
+          Nil holds nothing. It is refused without Versions.
+        name: Held
+        type: func(key string) bool
+      - doc: |-
+          Path is the snapshot's name inside FS. It is required with FS and
+          refused without it, because a path with nowhere to be written is a
+          store that would silently keep nothing.
+        name: Path
+        type: string
+      - doc: |-
+          FoldAt is how many overlay entries fold the overlay into the snapshot
+          on the write that reaches it. Zero is the default rule: as many entries
+          as the store holds documents, and at least [DefaultFoldAt]. A negative
+          value never folds on a write; Fold, Open and Close still do.
+        name: FoldAt
+        type: int
+      - doc: |-
+          Versions is how many former versions each document keeps beside its
+          current one, the newest: a write that changes a document makes a new
+          version, and prunes the oldest beyond Versions in the same durable
+          write. Zero keeps no versions — the store writes exactly the files it
+          wrote before versions existed — and a negative value is refused. A
+          persistent store keeps them in the file Path + ".versions" once a fold
+          ran, and a store opened with zero over files that keep versions is
+          refused rather than left to drop or corrupt them (ADR 0143). A store
+          that keeps versions has a trash, Trash's; one that keeps none has none.
+        name: Versions
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          validate refuses a configuration no store could honour, with the indexes
+          Open was given, before anything touches a filesystem.
+        name: validate
+        params: indexes []coredocstore.IndexSpec[T]
+        recv: c *Config[T]
+        results: error
+      - doc: |-
+          validatePath checks the persistence settings: both or neither, and a path
+          that names a file — and an overlay directory — the filesystem can write.
+        name: validatePath
+        recv: c *Config[T]
+        results: error
+    name: Config
+    typeParams: T any
+  - fields:
+      - doc: key is the configured key function.
+        name: key
+        type: func(T) string
+      - doc: fs is where the store persists; nil in memory.
+        name: fs
+        type: corevfs.FullFS
+      - doc: |-
+          byName finds an index by its name. It and indexes never change after
+          Open.
+        name: byName
+        type: map[string]*index[T]
+      - doc: |-
+          docs holds each document's JSON under its key — the snapshot's own
+          shape, so a fold encodes it as it is.
+        name: docs
+        type: map[string]json.RawMessage
+      - doc: |-
+          versions holds each document's versions under its key, when the store
+          keeps them, and is nil otherwise. A document stored before the store
+          kept versions, and not versioned since, has none here. A record is
+          never changed once stored: a write stores a new one.
+        name: versions
+        type: map[string]*versionsRecord
+      - doc: |-
+          weight is what versions weigh, moved by every change of versions
+          (setVersions), so asking reads no record.
+        name: weight
+        type: coredocstore.VersionWeightValue
+      - doc: pending names the overlay entries the snapshot does not contain yet.
+        name: pending
+        type: map[string]struct{}
+      - doc: clock stamps each version.
+        name: clock
+        type: clock.Clock
+      - doc: |-
+          held reports a document whose versions no write may prune; nil holds
+          nothing.
+        name: held
+        type: func(key string) bool
+      - doc: foldErr is the last automatic fold's failure, until a fold succeeds.
+        name: foldErr
+        type: error
+      - doc: |-
+          path is the snapshot's name, overlay the overlay directory's, and
+          versionsPath the versions file's.
+        name: path
+        type: string
+      - doc: |-
+          path is the snapshot's name, overlay the overlay directory's, and
+          versionsPath the versions file's.
+        name: overlay
+        type: string
+      - doc: |-
+          path is the snapshot's name, overlay the overlay directory's, and
+          versionsPath the versions file's.
+        name: versionsPath
+        type: string
+      - doc: indexes are the secondary indexes, in declaration order.
+        name: indexes
+        type: "[]*index[T]"
+      - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+        name: onWrite
+        type: hooks
+      - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+        name: onDelete
+        type: hooks
+      - doc: |-
+          writing serialises writers, folds and Close; they hold it across the
+          filesystem work.
+        name: writing
+        type: sync.Mutex
+      - doc: |-
+          mu guards docs, versions, weight, pending, the index maps, closed, folds
+          and foldErr: changed under writing AND mu, read under either.
+        name: mu
+        type: sync.RWMutex
+      - doc: foldAt is the configured fold threshold.
+        name: foldAt
+        type: int
+      - doc: |-
+          keep is how many former versions each document keeps; zero keeps no
+          versions at all.
+        name: keep
+        type: int
+      - doc: folds counts the folds since Open.
+        name: folds
+        type: int
+      - doc: closed refuses every call once Close ran.
+        name: closed
+        type: bool
+    kind: struct
+    methods:
+      - name: Get
+        params: key string
+        recv: s *Store[T]
+        results: T, error
+      - name: List
+        recv: s *Store[T]
+        results: "[]T, error"
+      - name: Filter
+        params: keep func(T) bool
+        recv: s *Store[T]
+        results: "[]T, error"
+      - name: Entries
+        params: limit int
+        recv: s *Store[T]
+        results: "[]coredocstore.EntryValue, error"
+      - name: Keys
+        params: after string
+        recv: s *Store[T]
+        results: iter.Seq2[string, error]
+      - doc: |-
+          keysAfter is the sorted keys above after, taken under the read lock: the
+          map's own strings, so no key and no document is copied. A closed store
+          has none, and says StoreClosed.
+        name: keysAfter
+        params: after string
+        recv: s *Store[T]
+        results: "[]string, error"
+      - name: Lookup
+        params: index, key string
+        recv: s *Store[T]
+        results: T, error
+      - name: Find
+        params: index, key string
+        recv: s *Store[T]
+        results: "[]T, error"
+      - name: Stats
+        recv: s *Store[T]
+        results: StatsValue
+      - doc: |-
+          snapshotEntries takes up to limit documents, in key order — all of them
+          when limit is not positive — and reports whether the store is closed. The
+          JSON slices are the store's own: the caller copies what it hands out.
+        name: snapshotEntries
+        params: limit int
+        recv: s *Store[T]
+        results: entries []coredocstore.EntryValue, closed bool
+      - doc: decode decodes one stored document into a fresh value.
+        name: decode
+        params: raw json.RawMessage
+        recv: s *Store[T]
+        results: T, error
+      - doc: decodeAll decodes entries in order. It never returns nil for no entries.
+        name: decodeAll
+        params: entries []coredocstore.EntryValue
+        recv: s *Store[T]
+        results: "[]T, error"
+      - name: OnWrite
+        params: fn func(key string)
+        recv: s *Store[T]
+        results: remove func()
+      - name: OnDelete
+        params: fn func(key string)
+        recv: s *Store[T]
+        results: remove func()
+      - doc: |-
+          indexKeys computes v's keys in every index, in declaration order. It runs
+          the caller's key functions, so a write computes it before taking a lock
+          whenever the document is already known.
+        name: indexKeys
+        params: v T
+        recv: s *Store[T]
+        results: "[][]string"
+      - doc: |-
+          uniqueTaken reports the first unique index that refuses the keys of the
+          document stored under owner. The caller holds the writers' lock.
+        name: uniqueTaken
+        params: owner string, keys [][]string
+        recv: s *Store[T]
+        results: name string, taken bool
+      - doc: |-
+          file files the document stored under owner in every index. The caller holds
+          both locks and has checked uniqueTaken.
+        name: file
+        params: owner string, keys [][]string
+        recv: s *Store[T]
+      - doc: |-
+          unfile takes the document stored under owner out of every index. The caller
+          holds both locks.
+        name: unfile
+        params: owner string
+        recv: s *Store[T]
+      - doc: |-
+          rebuild checks every loaded document and files it in every index, when the
+          store opens. It refuses the open for a document that no longer decodes
+          (DocumentUndecodable), one stored under another key than the one its own
+          Key gives (LoadFailed: the store would answer under a key its own Update
+          refuses), two documents sharing a key in a unique index, or a key function
+          that panics (IndexBroken: a unique index that does not hold would be a lie
+          every Lookup tells).
+        name: rebuild
+        recv: s *Store[T]
+        results: err error
+      - doc: |-
+          load reads what an earlier store left: the directories created if absent,
+          the snapshot, the overlay replayed on top. It writes no data: it reports
+          whether Open must fold once the documents are known to be good — when the
+          overlay held anything, when there was no snapshot yet, or when the overlay
+          directory was just created, since the snapshot's publication flushes the
+          directory that holds both, which is what makes a new overlay directory
+          itself durable. Open holds the only reference, so no lock is taken.
+        name: load
+        recv: s *Store[T]
+        results: needsFold bool, err error
+      - doc: |-
+          replayOverSnapshot loads what the snapshot does not hold: the versions
+          file, then the overlay replayed over both, then the check that every
+          version belongs to a document.
+        name: replayOverSnapshot
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          readSnapshot loads the snapshot into docs and reports whether there was
+          one. An absent snapshot is an empty store.
+        name: readSnapshot
+        recv: s *Store[T]
+        results: found bool, err error
+      - doc: |-
+          readOverlay replays every overlay entry over the snapshot. An entry holds a
+          key's whole latest state, so the order does not matter. A temporary a
+          crashed publication left behind is removed; any other file is left alone.
+        name: readOverlay
+        recv: s *Store[T]
+        results: error
+      - doc: replay applies one overlay entry and marks it pending.
+        name: replay
+        params: name string
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          checkEntryVersions refuses, as LoadFailed naming file, the versions an
+          overlay entry holds when they are wrong: versions in a store that keeps
+          none, versions beside a deletion that is not a trashing — a deletion takes
+          them — a trashed document beside a document, or versions no store wrote.
+        name: checkEntryVersions
+        params: file string, record entryRecord
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          readVersions loads the versions file into versions when the store keeps
+          versions. A store that keeps none refuses one: it would neither maintain
+          the versions nor write them back, so a deletion would leave a document's
+          versions to the next document stored under its key, and a fold would drop
+          them all. An absent file is a store that has not folded since it began to
+          keep versions — or one that never did.
+        name: readVersions
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          versionsWithoutDocument refuses versions of a key the store holds no
+          document under, unless they hold its trashed document, and a trashed
+          document under a key the store holds one under. No write leaves either — a
+          deletion takes the versions in its own entry, a trashing removes the
+          document in its own, and any other entry keeping versions holds a document
+          — so they come from an edited versions file.
+        name: versionsWithoutDocument
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          origin names the file a loaded document came from: its overlay entry when
+          one was replayed for its key, the snapshot otherwise. The entry's name is a
+          digest, so it says nothing about the key.
+        name: origin
+        params: key string
+        recv: s *Store[T]
+        results: string
+      - doc: |-
+          open loads a persistent store, rebuilds the indexes, and writes the resting
+          state only once every check passed: an open it refuses writes no data. Open
+          holds the only reference, so no lock is taken.
+        name: open
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          markPending records that key's overlay entry is not folded yet. The caller
+          holds both locks; a memory store has no overlay.
+        name: markPending
+        params: key string
+        recv: s *Store[T]
+      - doc: |-
+          persist publishes key's overlay entry — its document and its versions, or
+          its deletion — before the write is applied. A memory store persists
+          nothing.
+        name: persist
+        params: key string, raw json.RawMessage, deleted bool, versions *versionsRecord
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          publish writes data at name atomically, and says which verdict a failure
+          is: PersistFailed when nothing changed, WriteUnconfirmed when the rename
+          happened and only the directory flush failed.
+        name: publish
+        params: name string, data []byte, step string
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          maybeFold folds the overlay when the write just made reached the
+          threshold. A failure does not fail that write — its own entry is already
+          durable — and is kept for Stats until a fold succeeds. The caller holds the
+          writers' lock.
+        name: maybeFold
+        recv: s *Store[T]
+      - name: Fold
+        recv: s *Store[T]
+        results: error
+      - name: Close
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          fold rewrites the versions file, when the store keeps versions, then the
+          snapshot, from what the store holds, and removes the entries they now
+          contain. The caller holds the writers' lock, so no entry changes meanwhile:
+          an entry removed here holds exactly what the two files now hold for its
+          key. A crash between the two publications leaves every entry in place, and
+          a key with no entry holds the same in the old files as in the new, since
+          nothing wrote it since the last fold — so the next open loads the same
+          documents with the same versions, whichever file got written.
+        name: fold
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          removeFolded removes every pending entry, now that the snapshot holds its
+          state, and returns the names it removed. An entry it could not remove stays
+          pending for the next fold; replaying it meanwhile changes nothing.
+        name: removeFolded
+        recv: s *Store[T]
+        results: removed []string, err error
+      - doc: |-
+          recordFold records a fold's outcome for Stats: the entries it removed, and
+          its failure, nil when it succeeded. A snapshot that could not be written
+          removes nothing and counts no fold.
+        name: recordFold
+        params: foldErr error, removed []string
+        recv: s *Store[T]
+      - doc: |-
+          foldVersions publishes the versions file: one JSON object from key to the
+          versions of the documents that have any recorded, sorted and indented as
+          the snapshot is — "{}" when none has, so the file says the store keeps
+          versions. A store that keeps none writes nothing.
+        name: foldVersions
+        recv: s *Store[T]
+        results: error
+      - name: Trash
+        params: key string
+        recv: s *Store[T]
+        results: error
+      - name: Restore
+        params: key string
+        recv: s *Store[T]
+        results: error
+      - name: Purge
+        params: key string
+        recv: s *Store[T]
+        results: error
+      - name: Tombstones
+        recv: s *Store[T]
+        results: "[]coredocstore.TombstoneValue, error"
+      - doc: |-
+          trash runs Trash under the writers' lock, and reports whether it took
+          effect.
+        name: trash
+        params: key string
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: |-
+          restore runs Restore under the writers' lock, and reports whether it took
+          effect.
+        name: restore
+        params: key string
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: |-
+          trashedRecord returns the versions of the document trashed under key, and
+          whether one is. The caller holds the writers' lock.
+        name: trashedRecord
+        params: key string
+        recv: s *Store[T]
+        results: "*versionsRecord, bool"
+      - name: PutStamped
+        params: v T, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: error
+      - name: InsertStamped
+        params: v T, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: error
+      - name: ReplaceStamped
+        params: v T, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: error
+      - name: UpdateStamped
+        params: key string, stamp coredocstore.StampValue, fn func(*T) error
+        recv: s *Store[T]
+        results: T, error
+      - name: Versions
+        params: key string
+        recv: s *Store[T]
+        results: "[]coredocstore.VersionValue, error"
+      - name: Version
+        params: key string, number uint64
+        recv: s *Store[T]
+        results: coredocstore.VersionValue, error
+      - name: RewriteVersions
+        params: key string, fn func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error)
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          nextVersions returns the versions a write storing raw under key leaves: a
+          creation is version 1; a write that changes the document makes the next
+          version, the current one becoming the newest former one; a write stamped
+          InPlace, or storing the JSON already stored, makes none. Either way the
+          former versions beyond what the store keeps are pruned, unless Held says
+          the document is held. It returns nil for a store that keeps no versions,
+          and for a document stored before it kept them that no write has versioned
+          since. The caller holds the writers' lock.
+        name: nextVersions
+        params: key string, raw json.RawMessage, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: "*versionsRecord"
+      - doc: |-
+          pruned returns record with at most as many former versions as the store
+          keeps — the newest — unless Held says the document is held: its versions
+          then pile up until a write finds it released. The caller holds the writers'
+          lock.
+        name: pruned
+        params: key string, record *versionsRecord
+        recv: s *Store[T]
+        results: "*versionsRecord"
+      - doc: setVersions stores record as key's versions. The caller holds both locks.
+        name: setVersions
+        params: key string, record *versionsRecord
+        recv: s *Store[T]
+      - name: VersionWeight
+        recv: s *Store[T]
+        results: coredocstore.VersionWeightValue, error
+      - doc: |-
+          now is the instant a version is made at, in UTC, without the monotonic
+          reading a clock may carry.
+        name: now
+        recv: s *Store[T]
+        results: time.Time
+      - name: PutDocument
+        params: key string, versions []coredocstore.VersionValue, trashedAt time.Time
+        recv: s *Store[T]
+        results: error
+      - doc: putDocument runs PutDocument, and reports whether it took effect.
+        name: putDocument
+        params: key string, versions []coredocstore.VersionValue, trashedAt time.Time
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: |-
+          preparedDocument checks what PutDocument is given and computes what it
+          writes. It runs the caller's key and index functions, before any lock.
+        name: preparedDocument
+        params: key string, versions []coredocstore.VersionValue
+        recv: s *Store[T]
+        results: givenDocument, error
+      - doc: |-
+          persistDocument makes PutDocument's write durable: the document and its
+          versions in one entry, or — for a trashed document — a deletion entry that
+          keeps its versions, as Trash publishes one.
+        name: persistDocument
+        params: key string, raw json.RawMessage, trashed bool, record *versionsRecord
+        recv: s *Store[T]
+        results: error
+      - name: Put
+        params: v T
+        recv: s *Store[T]
+        results: error
+      - name: Insert
+        params: v T
+        recv: s *Store[T]
+        results: error
+      - name: Replace
+        params: v T
+        recv: s *Store[T]
+        results: error
+      - name: Update
+        params: key string, fn func(*T) error
+        recv: s *Store[T]
+        results: T, error
+      - name: Delete
+        params: key string
+        recv: s *Store[T]
+        results: error
+      - doc: store prepares v outside every lock, commits it, and announces it.
+        name: store
+        params: v T, mode writeMode, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          prepare computes everything a write needs from v: its key, its JSON and its
+          index keys. It runs the caller's functions, so a write runs it before it
+          takes a lock whenever the document is already known.
+        name: prepare
+        params: v T
+        recv: s *Store[T]
+        results: prepared, error
+      - doc: |-
+          commit checks a prepared write against the store and stores it. It reports
+          whether the write took effect.
+        name: commit
+        params: p prepared, mode writeMode, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: modify runs Update's read-modify-write under the writers' lock.
+        name: modify
+        params: key string, stamp coredocstore.StampValue, fn func(*T) error
+        recv: s *Store[T]
+        results: result T, applied bool, err error
+      - doc: |-
+          persistAndApply checks the unique indexes, makes the write durable — the
+          document and its versions in one entry — applies it, and folds when the
+          overlay has grown enough. The caller holds the writers' lock.
+        name: persistAndApply
+        params: p prepared, stamp coredocstore.StampValue
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: remove runs Delete under the writers' lock.
+        name: remove
+        params: key string
+        recv: s *Store[T]
+        results: applied bool, err error
+    name: Store
+    typeParams: T any
+  - fields:
+      - doc: |-
+          FoldError is the last automatic fold's failure, nil once a fold
+          succeeds. The write that triggered the fold succeeded either way — its
+          own entry was already durable — and the entries stay until a fold works.
+        name: FoldError
+        type: error
+      - doc: Documents is how many documents the store holds.
+        name: Documents
+        type: int
+      - doc: |-
+          Pending is how many overlay entries the snapshot does not contain yet:
+          zero in memory, and after a fold.
+        name: Pending
+        type: int
+      - doc: Folds is how many folds ran since the store opened, Open's own included.
+        name: Folds
+        type: int
+      - doc: |-
+          Versions is what the store's versions weigh — its former versions, its
+          trashed documents and their bytes —, a counter every write moves:
+          zero on a store that keeps none (ADR 0143).
+        name: Versions
+        type: coredocstore.VersionWeightValue
+    kind: struct
+    name: StatsValue
+  - doc: hook is one registered function and the identity its remover finds it by.
+    fields:
+      - doc: fn is told the key.
+        name: fn
+        type: func(key string)
+      - doc: id identifies the registration.
+        name: id
+        type: uint64
+    kind: struct
+    name: hook
+  - doc: |-
+      hooks is an ordered set of functions called with a key. Registration and
+      removal may happen at any moment, concurrently with calls.
+    fields:
+      - doc: fns are the registered functions, in registration order.
+        name: fns
+        type: "[]hook"
+      - doc: mu guards fns and next.
+        name: mu
+        type: sync.Mutex
+      - doc: next is the identity the next registration gets.
+        name: next
+        type: uint64
+    kind: struct
+    methods:
+      - doc: |-
+          add registers fn and returns the function that removes it. A nil fn
+          registers nothing.
+        name: add
+        params: fn func(key string)
+        recv: h *hooks
+        results: remove func()
+      - doc: |-
+          call tells every registered function about key, in registration order, on
+          the caller's goroutine and outside the lock — a hook may register, remove,
+          or use the store it is told about.
+        name: call
+        params: key string
+        recv: h *hooks
+    name: hooks
+  - doc: |-
+      index is one secondary index of a Store[T]. Its maps are guarded by the
+      store: written under both of its locks, read under either.
+    fields:
+      - doc: keys is the declared key function.
+        name: keys
+        type: func(T) []string
+      - doc: |-
+          entries maps an index key to the store keys of the documents under it;
+          a unique index holds at most one per key.
+        name: entries
+        type: map[string]map[string]struct{}
+      - doc: |-
+          owned maps a store key to its document's index keys: what a rewrite or
+          a deletion takes out.
+        name: owned
+        type: map[string][]string
+      - doc: name reads the index.
+        name: name
+        type: string
+      - doc: unique refuses a second holder of a key.
+        name: unique
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          keysOf returns v's keys in the index: the declared function's answer
+          without its empty or repeated keys.
+        name: keysOf
+        params: v T
+        recv: ix *index[T]
+        results: "[]string"
+      - doc: |-
+          taken reports whether one of keys is already held, in this unique index, by
+          a document other than the one stored under owner.
+        name: taken
+        params: owner string, keys []string
+        recv: ix *index[T]
+        results: bool
+      - doc: |-
+          set files the document stored under owner under keys, replacing whatever
+          it was filed under before.
+        name: set
+        params: owner string, keys []string
+        recv: ix *index[T]
+      - doc: drop takes the document stored under owner out of the index.
+        name: drop
+        params: owner string
+        recv: ix *index[T]
+      - doc: holders returns the store keys filed under key, in store-key order.
+        name: holders
+        params: key string
+        recv: ix *index[T]
+        results: "[]string"
+    name: index
+    typeParams: T any
+  - doc: |-
+      entryRecord is one overlay entry: the whole latest state of one key since
+      the snapshot — its document and its versions, or its deletion.
+    fields:
+      - doc: |-
+          Versions are the key's versions, when the store keeps them and the
+          document has any recorded; absent otherwise, and for a deletion. They
+          travel in the document's own entry, so no crash can leave one without
+          the other.
+        name: Versions
+        type: "*versionsRecord"
+      - doc: Document is the key's document; absent for a deletion.
+        name: Document
+        type: json.RawMessage
+      - doc: Key is the store key, which the entry's name only hashes.
+        name: Key
+        type: string
+      - doc: Deleted records a deletion.
+        name: Deleted
+        type: bool
+    kind: struct
+    name: entryRecord
+  - fields:
+      - doc: |-
+          Key returns the key a document is stored under, as for [Open]: a pure
+          function of the document, compared byte for byte.
+        name: Key
+        type: func(T) string
+      - doc: |-
+          Clock stamps each version with the instant of the write that made it.
+          Nil is the system clock.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          Held reports whether the document stored under key is held — a legal
+          hold — so that no write prunes its versions, as for [Open]. It is
+          called by a write that would prune, inside that write's transaction
+          and with its context, so a read it makes through the same transactor
+          joins it. Nil holds nothing. It is refused without Versions.
+        name: Held
+        type: func(ctx context.Context, key string) bool
+      - doc: |-
+          Transactor is the transaction manager of the database the store lives
+          in — the one the caller's own transactions are opened with, so a call
+          made under one of them joins it. It must also be a core/data/sql Joiner and
+          Deferrer, which the SDK's own transactor is.
+        name: Transactor
+        type: coresql.Transactor
+      - doc: |-
+          IndexKey, when set, transforms every index key before it reaches the
+          database — on a write, and on every Lookup and Find — so a table holds
+          what it returns and never the key itself. An index is an equality
+          lookup, which a keyed hash keeps: a framework passes an HMAC under a key
+          of its own, and an e-mail address never reaches a table. It is called
+          with the index's name and a non-empty key; an empty answer files
+          nothing, as an empty key does. Nil stores index keys as they are.
+        name: IndexKey
+        type: func(index, key string) []byte
+      - doc: |-
+          Table names the documents' table. The store derives its index table's
+          name from it by appending "___ix". It is a lower-case SQL identifier of
+          at most [MaxSQLTableLen] bytes, holds no three underscores in a row,
+          and does not start with "sqlite_". [SQLMigration] creates both tables.
+        name: Table
+        type: string
+      - doc: |-
+          Dialect is the engine's: the SQL the store speaks to it. It must be the
+          Transactor's own.
+        name: Dialect
+        type: coresql.Dialect
+      - doc: |-
+          Versions is how many former versions each document keeps beside its
+          current one, as for [Open]: a write that changes a document makes a
+          new version and prunes the oldest beyond Versions, in its own
+          transaction. They live in a third table, <Table>___vs, which
+          [SQLVersionsMigration] creates. Zero keeps no versions and sends
+          exactly the statements the store sent before versions existed; a
+          negative value is refused. The store cannot see a versions table it was
+          told nothing about: turned off, it leaves the table as it is, and a
+          document deleted and written again meanwhile would find the rows of the
+          one it replaced — so drop the table with the migration's Down (ADR 0143).
+          A store that keeps versions has a trash, Trash's, in the same table; one
+          that keeps none has none.
+        name: Versions
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          validate refuses a configuration no SQL store could honour, with the indexes
+          OpenSQL was given, before any statement is sent, and returns what the store
+          needs of its transactor.
+        name: validate
+        params: indexes []coredocstore.IndexSpec[T]
+        recv: c *SQLConfig[T]
+        results: txParts, error
+    name: SQLConfig
+    typeParams: T any
+  - doc: |-
+      txParts are the two capabilities a SQL store needs of its transactor, found
+      once at OpenSQL.
+    fields:
+      - doc: join says where a statement issued under a context runs.
+        name: join
+        type: coresql.Joiner
+      - doc: hold keeps a write's hooks until its transaction commits.
+        name: hold
+        type: coresql.Deferrer
+    kind: struct
+    name: txParts
+  - doc: |-
+      sqlStatements are the statements one SQL store sends, rendered for its
+      dialect and tables. The fixed ones are rendered at OpenSQL; the two whose
+      length depends on a document — its index rows, and its unique keys — are
+      rendered by the methods below, from the same parts.
+    fields:
+      - doc: getDoc reads one document.
+        name: getDoc
+        type: string
+      - doc: listDocs reads every document, in key order.
+        name: listDocs
+        type: string
+      - doc: |-
+          entries reads every document with its key, in key order; entriesLimit
+          reads the first n.
+        name: entries
+        type: string
+      - doc: |-
+          entries reads every document with its key, in key order; entriesLimit
+          reads the first n.
+        name: entriesLimit
+        type: string
+      - doc: count counts the documents.
+        name: count
+        type: string
+      - doc: |-
+          exists reads whether a document is stored, with the latest committed
+          state — the question a refused insertion asks.
+        name: exists
+        type: string
+      - doc: upsert, insert and replace are the three write modes' statements.
+        name: upsert
+        type: string
+      - doc: upsert, insert and replace are the three write modes' statements.
+        name: insert
+        type: string
+      - doc: upsert, insert and replace are the three write modes' statements.
+        name: replace
+        type: string
+      - doc: |-
+          lockDoc reads a document for Update and takes its lock; writeLocked
+          writes the result under that lock.
+        name: lockDoc
+        type: string
+      - doc: |-
+          lockDoc reads a document for Update and takes its lock; writeLocked
+          writes the result under that lock.
+        name: writeLocked
+        type: string
+      - doc: deleteDoc removes a document; deleteIndex removes its index rows.
+        name: deleteDoc
+        type: string
+      - doc: deleteDoc removes a document; deleteIndex removes its index rows.
+        name: deleteIndex
+        type: string
+      - doc: clearIndex removes every index row, for Reindex.
+        name: clearIndex
+        type: string
+      - doc: |-
+          pageAfter reads the next page of documents with their keys, in key
+          order, for Reindex: the keys above the first argument, at most the
+          second argument of them.
+        name: pageAfter
+        type: string
+      - doc: |-
+          keysAfter reads the next page of keys alone, in key order, for Keys:
+          the keys above the first argument, at most the second argument of them.
+        name: keysAfter
+        type: string
+      - doc: |-
+          lookup reads the document one index key files; find reads every one,
+          in key order.
+        name: lookup
+        type: string
+      - doc: |-
+          lookup reads the document one index key files; find reads every one,
+          in key order.
+        name: find
+        type: string
+      - doc: |-
+          claim creates a document, or locks the one stored and leaves it as it
+          is, for a Put on a store that keeps versions: it answers the revision it
+          wrote and the document the row holds — PostgreSQL, SQLite — or its
+          count of affected rows — MySQL.
+        name: claim
+        type: string
+      - doc: |-
+          versionHead reads the number of a document's current version, locking
+          it where the engine locks rows; no row is a document stored before its
+          store kept versions.
+        name: versionHead
+        type: string
+      - doc: |-
+          retireHead gives the current version the document it holds, as it
+          becomes a former one.
+        name: retireHead
+        type: string
+      - doc: |-
+          pruneCut reads the newest former version a write prunes — the one past
+          the number a store keeps — which goes with every older one.
+        name: pruneCut
+        type: string
+      - doc: pruneVersions removes a document's former versions up to a number.
+        name: pruneVersions
+        type: string
+      - doc: |-
+          dropVersions removes every version of a document; dropFormers every
+          former one.
+        name: dropVersions
+        type: string
+      - doc: |-
+          dropVersions removes every version of a document; dropFormers every
+          former one.
+        name: dropFormers
+        type: string
+      - doc: |-
+          readVersions reads every version of a document with the document
+          itself, newest first; lockFormers reads its former ones, locked, for a
+          rewrite.
+        name: readVersions
+        type: string
+      - doc: |-
+          readVersions reads every version of a document with the document
+          itself, newest first; lockFormers reads its former ones, locked, for a
+          rewrite.
+        name: lockFormers
+        type: string
+      - doc: |-
+          firstVersion reads a document's lowest version row — its number and
+          the document it holds — locked where the engine locks rows: number 0 is
+          the trash's row (tombstone), any other the oldest version a document
+          left.
+        name: firstVersion
+        type: string
+      - doc: dropTombstone removes a document's trash row, number 0.
+        name: dropTombstone
+        type: string
+      - doc: |-
+          readTrashed reads every version a trashed document kept, with the
+          trashed document as the current one's, newest first.
+        name: readTrashed
+        type: string
+      - doc: tombstones reads every trash row's key and instant, in key order.
+        name: tombstones
+        type: string
+      - doc: |-
+          versionWeight reads, in one row, what the versions weigh: how many
+          former rows — a version row holding a document —, how many trash rows,
+          and the length of every document a row holds. A current version's row
+          holds NULL, which none of them counts, and the documents are binary on
+          every engine, so LENGTH counts bytes.
+        name: versionWeight
+        type: string
+      - doc: docTable, ixTable and vsTable are the three tables' quoted names.
+        name: docTable
+        type: string
+      - doc: docTable, ixTable and vsTable are the three tables' quoted names.
+        name: ixTable
+        type: string
+      - doc: docTable, ixTable and vsTable are the three tables' quoted names.
+        name: vsTable
+        type: string
+      - doc: |-
+          shareLock ends a read that must see the latest committed rows inside a
+          transaction that has its own snapshot; empty where a plain read does.
+        name: shareLock
+        type: string
+      - doc: dialect selects the placeholder grammar of the rendered-per-call ones.
+        name: dialect
+        type: coresql.Dialect
+    kind: struct
+    methods:
+      - doc: |-
+          claimReturnsRow reports whether the claim answers a row holding the
+          revision and the document, rather than a count of affected rows.
+        name: claimReturnsRow
+        recv: s *sqlStatements
+        results: bool
+      - doc: |-
+          insertVersions renders the insertion of n version rows, each binding
+          versionRowArgs arguments, in one statement.
+        name: insertVersions
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
+          upsertArgs binds the upsert's arguments: the key and the document, and on
+          MySQL the document again — see writeModes.
+        name: upsertArgs
+        params: key, doc []byte
+        recv: s *sqlStatements
+        results: "[]any"
+      - doc: |-
+          upsertReturnsRev reports whether the upsert answers a row holding the
+          revision it wrote, rather than a count of affected rows.
+        name: upsertReturnsRev
+        recv: s *sqlStatements
+        results: bool
+      - doc: |-
+          insertConflictIsZeroRows reports whether an insertion over a taken key
+          answers zero rows rather than an error.
+        name: insertConflictIsZeroRows
+        recv: s *sqlStatements
+        results: bool
+      - doc: |-
+          insertIndexRows renders the insertion of n index rows, each binding
+          indexRowArgs arguments, in one statement.
+        name: insertIndexRows
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
+          uniqueTaken renders the question a write asks before it files a document's
+          unique keys: which unique indexes already file one of these n keys under
+          ANOTHER document? The first argument is the document's own key, then each
+          key's index name and value. shared asks for the latest committed rows — see
+          shareLockClause — which a check made after a refused write needs.
+        name: uniqueTaken
+        params: n int, shared bool
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
+          sharedKeys renders Reindex's question about n unique indexes, named by the
+          n arguments: which of them file one key under two documents or more?
+        name: sharedKeys
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
+          markUnique renders the statement that turns the rows of n indexes, named by
+          the n arguments, into unique rows the table constrains.
+        name: markUnique
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: list renders n comma-separated placeholders, numbered from 1.
+        name: list
+        params: n int
+        recv: s *sqlStatements
+        results: string
+    name: sqlStatements
+  - doc: storedDocument is one row of the documents' table, as Reindex reads it.
+    fields:
+      - doc: key is the store key.
+        name: key
+        type: "[]byte"
+      - doc: raw is the document's JSON.
+        name: raw
+        type: "[]byte"
+    kind: struct
+    name: storedDocument
+  - doc: |-
+      rowSet is what finishing a read needs of *sql.Rows: the failure that ended
+      the iteration early, and the close.
+    kind: named
+    name: rowSet
+    underlying: |-
+      interface {
+      	// Err returns the failure that ended the iteration, or nil.
+      	Err() error
+      	// Close releases the rows.
+      	Close() error
+      }
+  - fields:
+      - doc: key is the configured key function.
+        name: key
+        type: func(T) string
+      - doc: tm opens the store's own transactions, and savepoints in the caller's.
+        name: tm
+        type: coresql.Transactor
+      - doc: tx says where a statement runs, and holds hooks until a commit.
+        name: tx
+        type: txParts
+      - doc: |-
+          indexKey transforms an index key before it reaches the database; nil
+          keeps it as it is.
+        name: indexKey
+        type: func(index, key string) []byte
+      - doc: clock stamps each version.
+        name: clock
+        type: clock.Clock
+      - doc: |-
+          held reports a document whose versions no write may prune; nil holds
+          nothing.
+        name: held
+        type: func(ctx context.Context, key string) bool
+      - doc: |-
+          byName finds an index by its name. It and indexes never change after
+          OpenSQL.
+        name: byName
+        type: map[string]coredocstore.IndexSpec[T]
+      - doc: table is the documents' table, which every refusal names.
+        name: table
+        type: string
+      - doc: stmts are the rendered statements.
+        name: stmts
+        type: sqlStatements
+      - doc: indexes are the secondary indexes, in declaration order.
+        name: indexes
+        type: "[]coredocstore.IndexSpec[T]"
+      - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+        name: onWrite
+        type: hooks
+      - doc: onWrite and onDelete are the hooks called after a write or a deletion.
+        name: onDelete
+        type: hooks
+      - doc: own are the options of a transaction the store opens itself.
+        name: own
+        type: coresql.TxOptionsValue
+      - doc: |-
+          keep is how many former versions each document keeps; zero keeps no
+          versions, and touches no versions table.
+        name: keep
+        type: int
+    kind: struct
+    methods:
+      - name: Reindex
+        params: ctx context.Context
+        recv: s *SQLStore[T]
+        results: error
+      - doc: reindex is Reindex's work, inside its transaction.
+        name: reindex
+        params: ctx context.Context, ex coresql.Executor
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          readPage reads up to reindexPage documents stored under keys above after —
+          the first page when after is nil.
+        name: readPage
+        params: ctx context.Context, ex coresql.Executor, after []byte
+        recv: s *SQLStore[T]
+        results: page []storedDocument, err error
+      - doc: |-
+          refile files every document of page under its keys, without the unique
+          constraint: two documents sharing a unique key are found by
+          constrainUnique, which can name the index, rather than by a constraint
+          violation, which cannot.
+        name: refile
+        params: ctx context.Context, ex coresql.Executor, page []storedDocument
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          keysForRebuild computes a stored document's rows, turning a key function's
+          panic into INDEX_BROKEN as the file store's rebuild does: stored data an
+          index cannot compute keys for is data the index cannot hold.
+        name: keysForRebuild
+        params: v T
+        recv: s *SQLStore[T]
+        results: rows []indexRow, err error
+      - doc: |-
+          constrainUnique refuses the rebuild when a unique index files one key under
+          two documents, naming the first such index in declaration order, and
+          otherwise marks the unique indexes' rows for the table to constrain.
+        name: constrainUnique
+        params: ctx context.Context, ex coresql.Executor
+        recv: s *SQLStore[T]
+        results: error
+      - name: Get
+        params: ctx context.Context, key string
+        recv: s *SQLStore[T]
+        results: T, error
+      - name: List
+        params: ctx context.Context
+        recv: s *SQLStore[T]
+        results: "[]T, error"
+      - name: Filter
+        params: ctx context.Context, keep func(T) bool
+        recv: s *SQLStore[T]
+        results: "[]T, error"
+      - name: Entries
+        params: ctx context.Context, limit int
+        recv: s *SQLStore[T]
+        results: entries []coredocstore.EntryValue, err error
+      - name: Keys
+        params: ctx context.Context, after string
+        recv: s *SQLStore[T]
+        results: iter.Seq2[string, error]
+      - doc: keysPage reads at most keysPageLen keys above after, in key order.
+        name: keysPage
+        params: ctx context.Context, after string
+        recv: s *SQLStore[T]
+        results: keys []string, err error
+      - name: Count
+        params: ctx context.Context
+        recv: s *SQLStore[T]
+        results: int, error
+      - name: Lookup
+        params: ctx context.Context, index, key string
+        recv: s *SQLStore[T]
+        results: T, error
+      - name: Find
+        params: ctx context.Context, index, key string
+        recv: s *SQLStore[T]
+        results: "[]T, error"
+      - name: OnWrite
+        params: fn func(key string)
+        recv: s *SQLStore[T]
+        results: remove func()
+      - name: OnDelete
+        params: fn func(key string)
+        recv: s *SQLStore[T]
+        results: remove func()
+      - doc: |-
+          queryDocuments runs a query answering one document per row and decodes
+          them, in the order the query gave them. It never returns nil for no rows.
+        name: queryDocuments
+        params: ctx context.Context, step, query string, args ...any
+        recv: s *SQLStore[T]
+        results: docs []T, err error
+      - doc: |-
+          finishRows closes rows and returns the read's verdict: err when the read had
+          already failed, else the failure that ended the iteration early — which
+          Next reports only as "no more rows" — else the close's.
+        name: finishRows
+        params: rows rowSet, step string, err error
+        recv: s *SQLStore[T]
+        results: error
+      - doc: declared returns the index named index, or IndexUnknown.
+        name: declared
+        params: index string
+        recv: s *SQLStore[T]
+        results: coredocstore.IndexSpec[T], error
+      - doc: |-
+          fileKey is key as the index table holds it: transformed by IndexKey when one
+          is set, as it is at every write. The empty key is no key, and neither is an
+          empty transform.
+        name: fileKey
+        params: index, key string
+        recv: s *SQLStore[T]
+        results: "[]byte"
+      - doc: notFoundIn is DocumentNotFound for a lookup in index.
+        name: notFoundIn
+        params: index string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          failed is StatementFailed for step, with the driver's error beside it and
+          its text withheld by service/data/sql's Withheld.
+        name: failed
+        params: step string, cause error
+        recv: s *SQLStore[T]
+        results: error
+      - name: Trash
+        params: ctx context.Context, key string
+        recv: s *SQLStore[T]
+        results: error
+      - name: Restore
+        params: ctx context.Context, key string
+        recv: s *SQLStore[T]
+        results: error
+      - name: Purge
+        params: ctx context.Context, key string
+        recv: s *SQLStore[T]
+        results: error
+      - name: Tombstones
+        params: ctx context.Context
+        recv: s *SQLStore[T]
+        results: tombstones []coredocstore.TombstoneValue, err error
+      - doc: trash is Trash's work, inside its transaction.
+        name: trash
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: restore is Restore's work, inside its transaction.
+        name: restore
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: purge is Purge's work, inside its transaction.
+        name: purge
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          firstVersion reads the lowest version row of key, locked where the engine
+          locks rows: its number and the document it holds, and whether there is
+          one. Number 0 is a trashed document's row.
+        name: firstVersion
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: num int64, doc []byte, found bool, err error
+      - name: PutStamped
+        params: ctx context.Context, v T, stamp coredocstore.StampValue
+        recv: s *SQLStore[T]
+        results: error
+      - name: InsertStamped
+        params: ctx context.Context, v T, stamp coredocstore.StampValue
+        recv: s *SQLStore[T]
+        results: error
+      - name: ReplaceStamped
+        params: ctx context.Context, v T, stamp coredocstore.StampValue
+        recv: s *SQLStore[T]
+        results: error
+      - name: Versions
+        params: ctx context.Context, key string
+        recv: s *SQLStore[T]
+        results: versions []coredocstore.VersionValue, err error
+      - doc: |-
+          readVersionRows runs query — the versions of the document stored under
+          key, or of the one trashed under it — on the transaction ctx carries, and
+          returns the versions it answers, newest first; none when no document is.
+        name: readVersionRows
+        params: ctx context.Context, query, key string
+        recv: s *SQLStore[T]
+        results: versions []coredocstore.VersionValue, err error
+      - name: Version
+        params: ctx context.Context, key string, number uint64
+        recv: s *SQLStore[T]
+        results: coredocstore.VersionValue, error
+      - name: RewriteVersions
+        params: ctx context.Context, key string, fn func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error)
+        recv: s *SQLStore[T]
+        results: error
+      - doc: rewrite is RewriteVersions' work, inside its transaction.
+        name: rewrite
+        params: ctx context.Context, ex coresql.Executor, key string, fn func([]coredocstore.VersionValue) ([]coredocstore.VersionValue, error)
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          lockedFormers reads the former versions of the document stored under key,
+          newest first, locked where the engine locks rows.
+        name: lockedFormers
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: former []formerVersion, err error
+      - doc: |-
+          keepVersions records what a write leaves of its document's versions, in
+          the write's own transaction: a creation is version 1, over no row of an
+          earlier document of its key — unless its key is a trashed document's, which
+          it writes over, continuing its versions; a write that changes
+          the document makes the next version, the current one becoming the newest
+          former one with the document it held; a write stamped InPlace, or storing
+          the JSON already stored, makes none. Either way the former versions beyond
+          what the store keeps are then pruned, unless Held says the document is
+          held.
+        name: keepVersions
+        params: ctx context.Context, ex coresql.Executor, w *storedWrite
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          keepCreation records the versions of a creation, as the first row its key
+          holds in the versions table says: none, and the creation is version 1; a
+          leftover of a document the store held while it kept no versions, which goes
+          before version 1 is written; or the trash row, number 0 — the key is a
+          trashed document's, which the creation writes over: the trash row goes, and
+          w becomes a write over the trashed document, for keepVersions to version.
+          It reports whether it wrote version 1.
+        name: keepCreation
+        params: ctx context.Context, ex coresql.Executor, w *storedWrite, now time.Time
+        recv: s *SQLStore[T]
+        results: created bool, err error
+      - doc: |-
+          readHead reads the number of the current version of the document stored
+          under key, locked; found is false for a document stored before the store
+          kept versions.
+        name: readHead
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: head uint64, found bool, err error
+      - doc: |-
+          prune removes the former versions of the document stored under key beyond
+          what the store keeps — the oldest — unless Held says it is held. It asks
+          the database which one is the first to go, and asks Held only when there is
+          one.
+        name: prune
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          insertVersionRows inserts version rows of the document stored under key, a
+          bounded number per statement.
+        name: insertVersionRows
+        params: ctx context.Context, ex coresql.Executor, key string, rows []versionRow
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          versionArgs binds a batch of version rows of the document stored under
+          key: its key, the number, the instant as seconds since 1970 UTC and the
+          nanoseconds within that second, the metadata as a JSON object and the
+          document, NULL where there is none.
+        name: versionArgs
+        params: key string, batch []versionRow
+        recv: s *SQLStore[T]
+        results: "[]any, error"
+      - doc: |-
+          versionOf turns one row of a versions read into a version. A row without a
+          number is a document stored before its store kept versions: version 1,
+          made at an unknown instant.
+        name: versionOf
+        params: row *scannedVersion
+        recv: s *SQLStore[T]
+        results: coredocstore.VersionValue, error
+      - name: PutDocument
+        params: ctx context.Context, key string, versions []coredocstore.VersionValue, trashedAt time.Time
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          preparedDocument checks what PutDocument is given and computes what it
+          writes, before any transaction: the current document prepared as a write
+          prepares it — its key, its index rows — holding the JSON given, and the
+          versions as the store keeps them.
+        name: preparedDocument
+        params: key string, versions []coredocstore.VersionValue
+        recv: s *SQLStore[T]
+        results: "*sqlPrepared, []coredocstore.VersionValue, error"
+      - doc: putDocument is PutDocument's work, inside its transaction.
+        name: putDocument
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared, given []coredocstore.VersionValue, trashedAt time.Time
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          keyTaken refuses a key that holds anything: a version row — the trash's
+          among them — or a document's row, a document stored while the store kept
+          no versions included. Both reads lock what they find.
+        name: keyTaken
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: error
+      - name: VersionWeight
+        params: ctx context.Context
+        recv: s *SQLStore[T]
+        results: coredocstore.VersionWeightValue, error
+      - name: Put
+        params: ctx context.Context, v T
+        recv: s *SQLStore[T]
+        results: error
+      - name: Insert
+        params: ctx context.Context, v T
+        recv: s *SQLStore[T]
+        results: error
+      - name: Replace
+        params: ctx context.Context, v T
+        recv: s *SQLStore[T]
+        results: error
+      - name: Update
+        params: ctx context.Context, key string, fn func(*T) error
+        recv: s *SQLStore[T]
+        results: T, error
+      - name: UpdateStamped
+        params: ctx context.Context, key string, stamp coredocstore.StampValue, fn func(*T) error
+        recv: s *SQLStore[T]
+        results: T, error
+      - name: Delete
+        params: ctx context.Context, key string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: store prepares v outside any transaction, writes it, and announces it.
+        name: store
+        params: ctx context.Context, v T, mode writeMode, stamp coredocstore.StampValue
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          run runs a write's statements where they belong.
+
+          Inside the caller's transaction, every write is a savepoint of it, however
+          many statements it sends: its failure — a refusal, a collision, a statement
+          the database cancelled when a per-call deadline passed — undoes it alone,
+          and on PostgreSQL clears the aborted state a failed statement leaves, so the
+          caller's transaction stays usable. Outside one, a write of several
+          statements runs in a transaction of the store's own, and a write of one
+          statement runs on the pool, where one statement is atomic by itself.
+        name: run
+        params: ctx context.Context, several bool, work coresql.TxFunc
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          settle turns a failed write's error into what the caller is told: a
+          collision is asked about now that the write has rolled back; anything else
+          is already the answer.
+        name: settle
+        params: ctx context.Context, err error
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          announce tells hooks about key once the transaction that holds the write
+          has committed — at once when the write ran in a transaction of its own,
+          which has.
+        name: announce
+        params: ctx context.Context, hooks *hooks, key string
+        recv: s *SQLStore[T]
+      - doc: |-
+          prepare computes everything a write needs from v: its key, its JSON, its
+          index rows. It runs the caller's functions, before any transaction opens.
+        name: prepare
+        params: v T
+        recv: s *SQLStore[T]
+        results: "*sqlPrepared, error"
+      - doc: |-
+          indexRows computes v's rows in every index, in declaration order: its
+          fileable keys, as the table holds them, each once.
+        name: indexRows
+        params: v T
+        recv: s *SQLStore[T]
+        results: "[]indexRow, error"
+      - doc: |-
+          several reports whether every write of the store sends more than one
+          statement — its index rows, its versions — and so needs a transaction of
+          its own outside the caller's.
+        name: several
+        recv: s *SQLStore[T]
+        results: bool
+      - doc: |-
+          writeDocument writes a prepared document's row the way mode asks, and
+          reports whether a document was already stored under its key — and, on a
+          store that keeps versions, the document it replaced.
+        name: writeDocument
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, p *sqlPrepared, mode writeMode,
+        recv: s *SQLStore[T]
+        results: existed bool, old []byte, err error
+      - doc: |-
+          claimRow creates or replaces a document's row on a store that keeps
+          versions, and returns the document it replaced: the claim creates the row,
+          or locks the stored one without changing what it holds, and a stored
+          document is then written under that lock — so no other writer lands between
+          the read and the write, and none creates the key between them either.
+        name: claimRow
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared
+        recv: s *SQLStore[T]
+        results: existed bool, old []byte, err error
+      - doc: |-
+          lockedReplace replaces a stored document on a store that keeps versions,
+          and returns the document it replaced: it is read and locked first, as
+          Update reads it, and DocumentNotFound when there is none.
+        name: lockedReplace
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared
+        recv: s *SQLStore[T]
+        results: old []byte, err error
+      - doc: writeLockedRow writes a prepared document over the row its write locked.
+        name: writeLockedRow
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          upsertRow creates or replaces a document's row and reports whether it
+          replaced one.
+        name: upsertRow
+        params: ctx context.Context, ex coresql.Executor, key, raw []byte
+        recv: s *SQLStore[T]
+        results: existed bool, err error
+      - doc: insertRow creates a document's row, or refuses a taken key.
+        name: insertRow
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared
+        recv: s *SQLStore[T]
+        results: error
+      - doc: modify runs Update's read-modify-write inside its transaction.
+        name: modify
+        params: ctx context.Context, ex coresql.Executor, key string, stamp coredocstore.StampValue, fn func(*T) error
+        recv: s *SQLStore[T]
+        results: T, error
+      - doc: remove runs Delete's statements.
+        name: remove
+        params: ctx context.Context, ex coresql.Executor, key string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          fileIndexes replaces a written document's index rows: it refuses a unique
+          key another document holds, takes out the rows the document had, and files
+          the ones it has now.
+        name: fileIndexes
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared, existed bool
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          checkUnique refuses p when a unique index files one of its keys under
+          another document, naming the first such index in declaration order. shared
+          reads the latest committed rows, which a check after a collision needs. The
+          keys are asked about a bounded number at a time, so a document whose unique
+          index answers many keys is checked, not refused by the engine's ceiling on
+          bound parameters.
+        name: checkUnique
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared, shared bool
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
+          classify asks the database, once a collided write has rolled back, whether
+          the collision was one of the store's refusals. It reads through what ctx
+          names — the caller's transaction, usable again after the savepoint's
+          rollback, or the pool — past any snapshot (shareLockClause).
+        name: classify
+        params: ctx context.Context, conflict *mayConflict
+        recv: s *SQLStore[T]
+        results: error
+      - doc: queryNames runs a query answering one name per row.
+        name: queryNames
+        params: ctx context.Context, ex coresql.Executor, query string, args []any
+        recv: s *SQLStore[T]
+        results: names []string, err error
+      - doc: |-
+          affected turns a write statement's outcome into the write's: a failure, the
+          miss no row affected means, or nil.
+        name: affected
+        params: result stdsql.Result, execErr error, step string
+        recv: s *SQLStore[T]
+        results: error
+      - doc: tooLong is KeyTooLong for the store key, or for a key of index.
+        name: tooLong
+        params: index string
+        recv: s *SQLStore[T]
+        results: error
+    name: SQLStore
+    typeParams: T any
+  - doc: |-
+      storedWrite is what a write that stored a document knows of it, for the
+      versions it keeps.
+    fields:
+      - doc: meta is what the write's stamp says about the version it makes.
+        name: meta
+        type: map[string]string
+      - doc: old is the document it replaced; nil for a creation.
+        name: old
+        type: "[]byte"
+      - doc: raw is the document it stored.
+        name: raw
+        type: "[]byte"
+      - doc: key is the document's key.
+        name: key
+        type: string
+      - doc: existed says whether it replaced a document.
+        name: existed
+        type: bool
+      - doc: "inPlace is the stamp's InPlace: the write makes no version."
+        name: inPlace
+        type: bool
+    kind: struct
+    name: storedWrite
+  - doc: versionRow is one row of the versions table, as a write inserts it.
+    fields:
+      - doc: at is when the write that made the version ran; nil when unknown.
+        name: at
+        type: "*time.Time"
+      - doc: meta is what that write's caller said about it; nil when nothing.
+        name: meta
+        type: map[string]string
+      - doc: |-
+          doc is the document the version holds; nil for the current version,
+          whose document is the documents' table's.
+        name: doc
+        type: "[]byte"
+      - doc: num is its number.
+        name: num
+        type: uint64
+    kind: struct
+    name: versionRow
+  - doc: scannedVersion is one row of a versions read, as the driver hands it over.
+    fields:
+      - doc: meta is the metadata as stored, NULL read as nil.
+        name: meta
+        type: "[]byte"
+      - doc: doc is the document the version holds.
+        name: doc
+        type: "[]byte"
+      - doc: |-
+          num is the number; not valid for a document stored before its store
+          kept versions.
+        name: num
+        type: stdsql.NullInt64
+      - doc: |-
+          at and ns are the instant's seconds and nanoseconds; not valid when
+          unknown.
+        name: at
+        type: stdsql.NullInt64
+      - doc: |-
+          at and ns are the instant's seconds and nanoseconds; not valid when
+          unknown.
+        name: ns
+        type: stdsql.NullInt64
+    kind: struct
+    name: scannedVersion
+  - doc: conflictKind says what a statement that failed may have collided with.
+    kind: named
+    name: conflictKind
+    underlying: uint8
+  - doc: |-
+      mayConflict is a statement failure that may be one of the store's own
+      refusals, raced in after the store checked: another transaction inserted
+      the same key, or filed the same unique key, and committed first. The write
+      rolls back, then asks the database which it was (classify).
+    fields:
+      - doc: cause is the driver's error.
+        name: cause
+        type: error
+      - doc: step names what the write was doing.
+        name: step
+        type: string
+      - doc: |-
+          written is the document the write was storing: its key and its unique
+          keys are what the database is asked about.
+        name: written
+        type: "*sqlPrepared"
+      - doc: kind is what the write may have collided with.
+        name: kind
+        type: conflictKind
+    kind: struct
+    methods:
+      - doc: |-
+          Error names the step, and never the driver's words: this value never leaves
+          the package — classify turns it into a refusal or into StatementFailed.
+        name: Error
+        recv: c *mayConflict
+        results: string
+    name: mayConflict
+  - doc: "indexRow is one row of the index table: a key a document is filed under."
+    fields:
+      - doc: name is the index's name.
+        name: name
+        type: string
+      - doc: key is the index key as the table holds it, transformed by IndexKey.
+        name: key
+        type: "[]byte"
+      - doc: unique marks a unique index's row, which the table refuses twice.
+        name: unique
+        type: bool
+    kind: struct
+    name: indexRow
+  - doc: |-
+      sqlPrepared is a document ready to be written: its key, its JSON and the
+      rows it is filed under.
+    fields:
+      - doc: key is the store key.
+        name: key
+        type: string
+      - doc: raw is the document's JSON, as it will be stored.
+        name: raw
+        type: json.RawMessage
+      - doc: rows are its index rows, in declaration order.
+        name: rows
+        type: "[]indexRow"
+    kind: struct
+    name: sqlPrepared
+  - doc: |-
+      versionsRecord is one document's versions as the file store keeps them in
+      memory and in its files: the current version without its document — the
+      document is the document itself — and the former versions, newest first.
+      A record is never changed once stored: a write stores a new one.
+
+      A document in the trash has no document any more: its record then holds
+      Trashed, the document its current version holds and when it was trashed,
+      and the store holds no document under its key.
+    fields:
+      - doc: |-
+          Trashed is the trashed document and its instant; nil for a document
+          the store holds.
+        name: Trashed
+        type: "*trashedDocument"
+      - doc: Former are the former versions, newest first.
+        name: Former
+        type: "[]formerVersion"
+      - doc: Current is the current version's number, instant and metadata.
+        name: Current
+        type: versionHead
+    kind: struct
+    methods:
+      - doc: |-
+          weighed is w with what the record weighs added sign times — its former
+          versions, its trashed document, and the bytes of the JSON they hold. A nil
+          record weighs nothing.
+        name: weighed
+        params: w coredocstore.VersionWeightValue, sign int
+        recv: r *versionsRecord
+        results: coredocstore.VersionWeightValue
+      - doc: |-
+          list returns the versions of a document whose current JSON is current,
+          newest first, as copies the caller owns. A nil record is a document stored
+          before its store kept versions: its one version is the document.
+        name: list
+        params: current json.RawMessage
+        recv: r *versionsRecord
+        results: "[]coredocstore.VersionValue"
+    name: versionsRecord
+  - doc: |-
+      trashedDocument is what the trash holds of a document: the document its
+      current version holds, and when it was trashed.
+    fields:
+      - doc: At is when the document was trashed.
+        name: At
+        type: time.Time
+      - doc: Document is the trashed document, compact.
+        name: Document
+        type: json.RawMessage
+    kind: struct
+    name: trashedDocument
+  - doc: versionHead is a version without its document.
+    fields:
+      - doc: At is when the write that made it ran; zero when unknown.
+        name: At
+        type: time.Time
+      - doc: Meta is what that write's caller said about it.
+        name: Meta
+        type: map[string]string
+      - doc: Number is its number, from 1.
+        name: Number
+        type: uint64
+    kind: struct
+    name: versionHead
+  - doc: "formerVersion is a former version: a version and the document it holds."
+    fields:
+      - doc: At is when the write that made it ran; zero when unknown.
+        name: At
+        type: time.Time
+      - doc: Meta is what that write's caller said about it.
+        name: Meta
+        type: map[string]string
+      - doc: Document is the document the version holds, compact.
+        name: Document
+        type: json.RawMessage
+      - doc: Number is its number, from 1.
+        name: Number
+        type: uint64
+    kind: struct
+    name: formerVersion
+  - doc: |-
+      givenDocument is what PutDocument writes, computed outside every lock: the
+      versions as the store keeps them, the current document's JSON, and its
+      keys in every index.
+    fields:
+      - doc: raw is the current document's JSON.
+        name: raw
+        type: json.RawMessage
+      - doc: given are the versions, newest first, as the store keeps them.
+        name: given
+        type: "[]coredocstore.VersionValue"
+      - doc: keys are the current document's keys in every index.
+        name: keys
+        type: "[][]string"
+    kind: struct
+    name: givenDocument
+  - doc: writeMode says what a write expects to find under its key.
+    kind: named
+    name: writeMode
+    underlying: uint8
+  - doc: |-
+      prepared is a document ready to be stored: its JSON, its keys in every
+      index, and its own key.
+    fields:
+      - doc: raw is the document's JSON.
+        name: raw
+        type: json.RawMessage
+      - doc: keys are its keys in every index, aligned with the store's indexes.
+        name: keys
+        type: "[][]string"
+      - doc: key is its store key.
+        name: key
+        type: string
+    kind: struct
+    name: prepared
+vars:
+  - doc: |-
+      Compile-time assertions that each engine still answers the ports
+      core/data/docstore declares for it: the file engine the context-free ports,
+      the SQL engine the ports with a context on every call, and both the hooks.
+
+      They matter because nothing else would notice. Open and OpenSQL return the
+      ENGINES, not the ports, so a method renamed or re-typed on one engine would
+      still compile everywhere in this package and break only a caller that holds
+      the port — or a facade alias that promises the engine satisfies it.
+    grouped: true
+    items:
+      - name: _
+        type: coredocstore.Collection[struct{}]
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.Versioned[struct{}]
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.Trashable
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.KeyLister
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.VersionWriter
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.VersionWeigher
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.Announcer
+        value: (*Store[struct{}])(nil)
+      - name: _
+        type: coredocstore.CollectionContext[struct{}]
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.VersionedContext[struct{}]
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.TrashableContext
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.KeyListerContext
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.VersionWriterContext
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.VersionWeigherContext
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.Announcer
+        value: (*SQLStore[struct{}])(nil)
+    name: _
+  - doc: |-
+      firstHead is the current version of a document stored before its store
+      kept versions: version 1, made at an instant nobody recorded.
+    items:
+      - name: firstHead
+        value: "versionHead{Number: 1}"
+    name: firstHead

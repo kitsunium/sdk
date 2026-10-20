@@ -1,0 +1,14 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls: []
+    name: profiling.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/observe/profiling
+  name: profiling
+  purpose: "Package profiling captures and reads the running process's own profiles (ADR 0121): its CPU over a bounded window, its live heap, and its goroutines — decoded, folded onto owners you name, and grouped."
+types: []

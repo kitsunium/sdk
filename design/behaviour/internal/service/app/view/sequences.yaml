@@ -1,0 +1,761 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*scanner).repeat
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: depth < startDetectingCyclesAfter
+      - opt:
+          do:
+            - set: s.seen
+              value: make(map[visitedKey]struct{}, initialSeenCapacity)
+          when: s.seen == nil
+      - bind: key
+        eval: "visitedKey{typ: value.Type(), addr: value.Pointer(), extra: extra}"
+      - opt:
+          do:
+            - return: "true"
+          init:
+            bind: _, duplicate
+            eval: s.seen[key]
+          when: duplicate
+      - set: s.seen[key]
+        value: struct{}{}
+      - return: "false"
+  - of: raise
+    participants:
+      - id: caller
+        kind: actor
+      - id: raise
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+              to: errs
+          when: cause == nil
+      - return: |-
+          errs.Wrap(sentinel, errs.WrapParams{},
+          		append(fields, errs.String("engine_error", cause.Error()))...)
+        to: errs
+  - of: htmlFactory.Engine
+    steps:
+      - return: coreview.HTML
+  - of: htmlFactory.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: htmlFactory.New
+        kind: self
+      - id: newHTMLRenderer
+        kind: internal
+    steps:
+      - return: newHTMLRenderer(cfg)
+        to: newHTMLRenderer
+  - of: NewHTML
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHTML
+        kind: self
+      - id: newHTMLRenderer
+        kind: internal
+    steps:
+      - return: newHTMLRenderer(cfg)
+        to: newHTMLRenderer
+  - of: newHTMLRenderer
+    participants:
+      - id: caller
+        kind: actor
+      - id: newHTMLRenderer
+        kind: self
+      - id: newRenderer
+        kind: internal
+    steps:
+      - bind: built, buildErr
+        eval: newRenderer(cfg)
+        to: newRenderer
+      - opt:
+          do:
+            - return: nil, buildErr
+          when: buildErr != nil
+      - return: built, nil
+  - of: (*renderer).ContentType
+    steps:
+      - return: coreview.ContentTypeHTML
+  - of: (*limitWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*limitWriter).Write
+        kind: self
+      - id: w.buf.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, coreview.RenderTooLarge
+          when: w.buf.Len()+len(p) > w.limit
+      - return: w.buf.Write(p)
+        to: w.buf.Write
+  - of: newRenderer
+    participants:
+      - id: caller
+        kind: actor
+      - id: newRenderer
+        kind: self
+      - id: tree.parseTree
+        kind: internal
+      - id: tree.refuseEndlessRecursion
+        kind: internal
+      - id: tree.probeEscaping
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, raise(coreview.ViewMisconfigured, nil, errs.String("option", "FS"))
+          when: cfg.FS == nil
+      - bind: tree
+        eval: "&parser{set: template.New(rootName), cfg: cfg}"
+      - opt:
+          do:
+            - return: nil, walkErr
+          init:
+            bind: walkErr
+            eval: tree.parseTree()
+            to: tree.parseTree
+          when: walkErr != nil
+      - opt:
+          do:
+            - return: nil, loopErr
+          init:
+            bind: loopErr
+            eval: tree.refuseEndlessRecursion()
+            to: tree.refuseEndlessRecursion
+          when: loopErr != nil
+      - opt:
+          do:
+            - return: nil, probeErr
+          init:
+            bind: probeErr
+            eval: tree.probeEscaping()
+            to: tree.probeEscaping
+          when: probeErr != nil
+      - return: "&renderer{set: tree.set, maxBytes: clampMaxBytes(cfg.MaxBytes), count: tree.count}, nil"
+  - of: clampMaxBytes
+    steps:
+      - opt:
+          do:
+            - return: coreview.DefaultMaxBytes
+          when: configured <= 0
+      - return: configured
+  - of: (*parser).parseTree
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).parseTree
+        kind: self
+      - id: fs
+        kind: stdlib
+    steps:
+      - return: fs.WalkDir(p.cfg.FS, ".", p.parseEntry)
+        to: fs
+  - of: (*parser).parseEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).parseEntry
+        kind: self
+      - id: raise
+        kind: internal
+      - id: fs
+        kind: stdlib
+      - id: p.set.New(entry).Parse
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: raise(coreview.TemplateSourceFailed, walkErr, errs.String("path", entry))
+              to: raise
+          when: walkErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: dirEntry.IsDir() || !selected(entry, p.cfg.Ext)
+      - bind: source, readErr
+        eval: fs.ReadFile(p.cfg.FS, entry)
+        to: fs
+      - opt:
+          do:
+            - return: raise(coreview.TemplateSourceFailed, readErr, errs.String("path", entry))
+              to: raise
+          when: readErr != nil
+      - opt:
+          do:
+            - return: raise(coreview.TemplateParseFailed, parseErr, errs.String("template", entry))
+              to: raise
+          init:
+            bind: _, parseErr
+            eval: p.set.New(entry).Parse(string(source))
+            to: p.set.New(entry).Parse
+          when: parseErr != nil
+      - op: ++
+        set: p.count
+      - return: nil
+  - of: selected
+    participants:
+      - id: caller
+        kind: actor
+      - id: selected
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: len(ext) == 0
+      - return: slices.Contains(ext, path.Ext(entry))
+        to: slices
+  - of: (*parser).refuseEndlessRecursion
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).refuseEndlessRecursion
+        kind: self
+      - id: unconditionalCalls
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: raise
+        kind: internal
+    steps:
+      - bind: calls
+        eval: make(map[string][]string, p.count)
+      - bind: names
+        eval: make([]string, 0, p.count)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: each.Tree == nil || each.Tree.Root == nil
+            - set: calls[each.Name()]
+              to: unconditionalCalls
+              value: unconditionalCalls(each.Tree.Root)
+            - set: names
+              value: append(names, each.Name())
+          key: _
+          range: p.set.Templates()
+          value: each
+      - eval: slices.Sort(names)
+        to: slices
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      raise(coreview.TemplateParseFailed, nil, errs.String("template", name),
+                      				errs.String("why", "it calls itself through {{template}} with no condition on the way"))
+                    to: raise
+                when: reachesItself(name, name, calls, make(map[string]bool, len(names)))
+          key: _
+          range: names
+          value: name
+      - return: nil
+  - of: (*parser).probeEscaping
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).probeEscaping
+        kind: self
+      - id: each.Execute
+        kind: value
+      - id: raise
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: each.Name() == rootName
+            - bind: execErr
+              eval: each.Execute(io.Discard, nil)
+              to: each.Execute
+            - opt:
+                do:
+                  - return: raise(coreview.TemplateParseFailed, escapeErr, errs.String("template", each.Name()))
+                    to: raise
+                init:
+                  bind: escapeErr, isEscape
+                  eval: errors.AsType[*template.Error](execErr)
+                when: isEscape
+          key: _
+          range: p.set.Templates()
+          value: each
+      - return: nil
+  - of: (*renderer).Render
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*renderer).Render
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: r.set.Lookup
+        kind: value
+      - id: scanUnsafe
+        kind: internal
+      - id: r.execute
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, ctxErr
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - bind: tmpl
+        eval: r.set.Lookup(name)
+        to: r.set.Lookup
+      - opt:
+          do:
+            - return: |-
+                nil, raise(coreview.TemplateNotFound, nil,
+                			errs.String("template", name), errs.Int("templates", r.count))
+          when: name == "" || tmpl == nil
+      - opt:
+          do:
+            - return: |-
+                nil, raise(coreview.UnsafeValue, nil,
+                			errs.String("path", path), errs.String("type", typeName))
+          init:
+            bind: path, typeName, unsafe
+            eval: scanUnsafe(data)
+            to: scanUnsafe
+          when: unsafe
+      - return: r.execute(tmpl, name, data)
+        to: r.execute
+  - of: (*renderer).execute
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*renderer).execute
+        kind: self
+      - id: buffers.Get
+        kind: value
+      - id: buffers.Put
+        kind: value
+      - id: tmpl.Execute
+        kind: value
+    steps:
+      - bind: buf
+        eval: buffers.Get()
+        to: buffers.Get
+      - defer: buffers.Put(buf)
+        to: buffers.Put
+      - bind: writer
+        eval: "&limitWriter{buf: buf, limit: r.maxBytes}"
+      - bind: execErr
+        eval: tmpl.Execute(writer, data)
+        to: tmpl.Execute
+      - opt:
+          do:
+            - return: nil, renderFailure(execErr, name, r.maxBytes)
+          when: execErr != nil
+      - set: document
+        value: make([]byte, buf.Len())
+      - eval: copy(document, buf.Bytes())
+      - return: document, nil
+  - of: renderFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderFailure
+        kind: self
+      - id: raise
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                raise(coreview.RenderTooLarge, nil,
+                			errs.String("template", name), errs.Int("limit", limit))
+              to: raise
+          when: errors.Is(execErr, coreview.RenderTooLarge)
+      - return: raise(coreview.RenderFailed, execErr, errs.String("template", name))
+        to: raise
+  - of: canReachUnsafe
+    participants:
+      - id: caller
+        kind: actor
+      - id: canReachUnsafe
+        kind: self
+      - id: reachCache.Load
+        kind: value
+      - id: reachable
+        kind: internal
+      - id: reachCache.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: typ == nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: answer
+                init:
+                  bind: answer, isBool
+                  eval: cached.(bool)
+                when: isBool
+          init:
+            bind: cached, found
+            eval: reachCache.Load(typ)
+            to: reachCache.Load
+          when: found
+      - bind: result
+        eval: reachable(typ, map[reflect.Type]bool{})
+        to: reachable
+      - eval: reachCache.Store(typ, result)
+        to: reachCache.Store
+      - return: result
+  - of: reachable
+    participants:
+      - id: caller
+        kind: actor
+      - id: reachable
+        kind: self
+      - id: reachableKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          init:
+            bind: _, refused
+            eval: unsafeTypeNames[typ]
+          when: refused
+      - opt:
+          do:
+            - return: "false"
+          when: visiting[typ]
+      - set: visiting[typ]
+        value: "true"
+      - bind: answer
+        eval: reachableKind(typ, visiting)
+        to: reachableKind
+      - eval: delete(visiting, typ)
+      - return: answer
+  - of: reachableKind
+    participants:
+      - id: caller
+        kind: actor
+      - id: reachableKind
+        kind: self
+      - id: reachable
+        kind: internal
+      - id: reachableStruct
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Interface
+              do:
+                - return: "true"
+            - case: reflect.Pointer, reflect.Slice, reflect.Array
+              do:
+                - return: reachable(typ.Elem(), visiting)
+                  to: reachable
+            - case: reflect.Map
+              do:
+                - return: reachable(typ.Key(), visiting) || reachable(typ.Elem(), visiting)
+            - case: reflect.Struct
+              do:
+                - return: reachableStruct(typ, visiting)
+                  to: reachableStruct
+            - default: true
+              do:
+                - return: "false"
+          "on": typ.Kind()
+  - of: scanUnsafe
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanUnsafe
+        kind: self
+      - id: state.walk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: data == nil || !canReachUnsafe(reflect.TypeOf(data))
+      - bind: state
+        eval: scanner{}
+      - bind: suffix, name, hit
+        eval: state.walk(reflect.ValueOf(data), 0)
+        to: state.walk
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: "!hit"
+      - return: rootPathSegment + suffix, name, true
+  - of: (*scanner).walk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).walk
+        kind: self
+      - id: value.Kind
+        kind: value
+      - id: s.walkIndirect
+        kind: internal
+      - id: s.walkKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: "!value.IsValid()"
+      - bind: kind
+        eval: value.Kind()
+        to: value.Kind
+      - opt:
+          do:
+            - return: s.walkIndirect(value, depth, false)
+              to: s.walkIndirect
+          when: kind == reflect.Interface
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "\"\", name, true"
+                init:
+                  bind: name, refused
+                  eval: unsafeTypeNames[value.Type()]
+                when: refused
+            - return: "\"\", \"\", false"
+          when: kind == reflect.String
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: "!composite(kind) || !canReachUnsafe(value.Type())"
+      - return: s.walkKind(value, kind, depth)
+        to: s.walkKind
+  - of: composite
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map, reflect.Struct
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": kind
+  - of: (*scanner).walkKind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).walkKind
+        kind: self
+      - id: s.walkIndirect
+        kind: internal
+      - id: s.walkIndexed
+        kind: internal
+      - id: s.walkMap
+        kind: internal
+      - id: s.walkStruct
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Pointer
+              do:
+                - return: s.walkIndirect(value, depth, true)
+                  to: s.walkIndirect
+            - case: reflect.Slice, reflect.Array
+              do:
+                - return: s.walkIndexed(value, depth)
+                  to: s.walkIndexed
+            - case: reflect.Map
+              do:
+                - return: s.walkMap(value, depth)
+                  to: s.walkMap
+            - case: reflect.Struct
+              do:
+                - return: s.walkStruct(value, depth)
+                  to: s.walkStruct
+            - default: true
+              do:
+                - return: "\"\", \"\", false"
+          "on": kind
+  - of: (*scanner).walkIndirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).walkIndirect
+        kind: self
+      - id: s.walk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: value.IsNil() || (cycles && s.repeat(value, depth, 0))
+      - return: s.walk(value.Elem(), depth+1)
+        to: s.walk
+  - of: (*scanner).walkIndexed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).walkIndexed
+        kind: self
+      - id: s.walk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: value.Kind() == reflect.Slice && s.repeat(value, depth, value.Len())
+      - loop:
+          do:
+            - bind: below, name, hit
+              eval: s.walk(value.Index(index), depth+1)
+              to: s.walk
+            - opt:
+                do:
+                  - return: "\"[\" + strconv.Itoa(index) + \"]\" + below, name, true"
+                when: hit
+          key: index
+          range: value.Len()
+      - return: "\"\", \"\", false"
+  - of: (*scanner).walkStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).walkStruct
+        kind: self
+      - id: s.walk
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!canReachUnsafe(field.Type)"
+            - bind: below, name, hit
+              eval: s.walk(member, depth+1)
+              to: s.walk
+            - opt:
+                do:
+                  - return: "\".\" + field.Name + below, name, true"
+                when: hit
+          key: field
+          range: value.Fields()
+          value: member
+      - return: "\"\", \"\", false"
+  - of: (*scanner).walkMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanner).walkMap
+        kind: self
+      - id: value.Type
+        kind: value
+      - id: reflect.New(mapType.Key()).Elem
+        kind: value
+      - id: reflect.New(mapType.Elem()).Elem
+        kind: value
+      - id: value.MapRange
+        kind: value
+      - id: key.SetIterKey
+        kind: value
+      - id: entry.SetIterValue
+        kind: value
+      - id: mapKeyLabel
+        kind: internal
+      - id: s.walk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: s.repeat(value, depth, 0)
+      - bind: mapType
+        eval: value.Type()
+        to: value.Type
+      - bind: key
+        eval: reflect.New(mapType.Key()).Elem()
+        to: reflect.New(mapType.Key()).Elem
+      - bind: entry
+        eval: reflect.New(mapType.Elem()).Elem()
+        to: reflect.New(mapType.Elem()).Elem
+      - bind: iter
+        eval: value.MapRange()
+        to: value.MapRange
+      - loop:
+          cond: iter.Next()
+          do:
+            - eval: key.SetIterKey(iter)
+              to: key.SetIterKey
+            - eval: entry.SetIterValue(iter)
+              to: entry.SetIterValue
+            - bind: label
+              eval: mapKeyLabel(key)
+              to: mapKeyLabel
+            - bind: below, name, hit
+              eval: s.walk(key, depth+1)
+              to: s.walk
+            - opt:
+                do:
+                  - return: "\"[\" + label + \"](key)\" + below, name, true"
+                when: hit
+            - set: below, name, hit
+              to: s.walk
+              value: s.walk(entry, depth+1)
+            - opt:
+                do:
+                  - return: "\"[\" + label + \"]\" + below, name, true"
+                when: hit
+      - return: "\"\", \"\", false"
+  - of: mapKeyLabel
+    participants:
+      - id: caller
+        kind: actor
+      - id: mapKeyLabel
+        kind: self
+      - id: key.String
+        kind: value
+      - id: strconv
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: reflect.String
+              do:
+                - return: key.String()
+                  to: key.String
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: strconv.FormatInt(key.Int(), decimalBase)
+                  to: strconv
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - return: strconv.FormatUint(key.Uint(), decimalBase)
+                  to: strconv
+            - default: true
+              do:
+                - return: "\"?\""
+          "on": key.Kind()

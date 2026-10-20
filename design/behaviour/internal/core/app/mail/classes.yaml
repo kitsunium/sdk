@@ -1,0 +1,261 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultAttachmentType is the media type used when an attachment names none.
+      RFC 2046 §4.5.1 makes application/octet-stream the type for "arbitrary
+      binary data", and guessing a narrower one from the bytes would be a sniffer
+      — the class of code that decides an uploaded .txt is really HTML.
+    items:
+      - name: DefaultAttachmentType
+        type: string
+        value: "\"application/octet-stream\""
+    name: DefaultAttachmentType
+  - doc: |-
+      Header field names the composer owns. A guard compares them
+      case-insensitively, because RFC 5322 makes a field name case-insensitive
+      (the field-name production) and an attacker who could smuggle "bCc" past a
+      case-sensitive check would have smuggled Bcc. The guards — the reserved set
+      and the injection gate every writer runs — are internal/service/app/mail's:
+      the names are vocabulary, checking a field is a mechanism (ADR 0160).
+    grouped: true
+    items:
+      - doc: HeaderFrom is RFC 5322 §3.6.2's originator field.
+        name: HeaderFrom
+        type: string
+        value: "\"From\""
+      - doc: HeaderTo is the primary recipient field, RFC 5322 §3.6.3.
+        name: HeaderTo
+        type: string
+        value: "\"To\""
+      - doc: HeaderCc is the carbon-copy field, RFC 5322 §3.6.3.
+        name: HeaderCc
+        type: string
+        value: "\"Cc\""
+      - doc: |-
+          HeaderBcc is the blind carbon-copy field. This domain never emits it:
+          a Bcc recipient reaches the [EnvelopeValue] and no header.
+        name: HeaderBcc
+        type: string
+        value: "\"Bcc\""
+      - doc: HeaderReplyTo is RFC 5322 §3.6.2's Reply-To field.
+        name: HeaderReplyTo
+        type: string
+        value: "\"Reply-To\""
+      - doc: HeaderSubject is RFC 5322 §3.6.5's subject field.
+        name: HeaderSubject
+        type: string
+        value: "\"Subject\""
+      - doc: HeaderDate is RFC 5322 §3.6.1's origination date field.
+        name: HeaderDate
+        type: string
+        value: "\"Date\""
+      - doc: HeaderMessageID is RFC 5322 §3.6.4's identification field.
+        name: HeaderMessageID
+        type: string
+        value: "\"Message-ID\""
+      - doc: HeaderMIMEVersion is RFC 2045 §4's version field.
+        name: HeaderMIMEVersion
+        type: string
+        value: "\"MIME-Version\""
+      - doc: HeaderContentType is RFC 2045 §5's media type field.
+        name: HeaderContentType
+        type: string
+        value: "\"Content-Type\""
+      - doc: HeaderContentTransferEncoding is RFC 2045 §6's encoding field.
+        name: HeaderContentTransferEncoding
+        type: string
+        value: "\"Content-Transfer-Encoding\""
+      - doc: HeaderContentDisposition is RFC 2183's disposition field.
+        name: HeaderContentDisposition
+        type: string
+        value: "\"Content-Disposition\""
+      - doc: |-
+          HeaderContentID is RFC 2045 §7's part identifier, referenced by cid:
+          URLs per RFC 2392 §2.
+        name: HeaderContentID
+        type: string
+        value: "\"Content-ID\""
+    name: HeaderFrom
+files:
+  - decls:
+      - AddressValue
+      - AddressValue.IsZero
+    name: address_value.go
+  - decls:
+      - DefaultAttachmentType
+      - AttachmentValue
+      - (*AttachmentValue).Inline
+    name: attachment_value.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - HeaderFrom
+      - HeaderFieldValue
+    name: header.go
+  - decls:
+      - MessageValue
+    name: message_value.go
+  - decls:
+      - DeliveryValue
+      - EnvelopeValue
+    name: value.go
+imports:
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/mail
+  name: mail
+  purpose: Package mail — the mailbox value.
+types:
+  - fields:
+      - doc: |-
+          Name is the optional display name. It may hold any printable text,
+          including non-ASCII, which is RFC 2047 encoded at composition. CR, LF and
+          NUL are refused.
+        name: Name
+        type: string
+      - doc: |-
+          Addr is the addr-spec: "local@domain", ASCII, in the dot-atom form of
+          RFC 5322 §3.4.1. Angle brackets are added by the composer and must not
+          appear here.
+        name: Addr
+        type: string
+    kind: struct
+    methods:
+      - name: IsZero
+        recv: a AddressValue
+        results: bool
+    name: AddressValue
+  - fields:
+      - doc: |-
+          Filename is the name presented to the recipient. It is required: an
+          attachment with no name is a part a client shows as "noname", and the
+          SDK will not invent one.
+        name: Filename
+        type: string
+      - doc: |-
+          ContentType is the media type. Empty selects the type implied by the
+          filename's extension, and [DefaultAttachmentType] when there is none.
+        name: ContentType
+        type: string
+      - doc: |-
+          ContentID, when non-empty, makes this part INLINE and referenceable as
+          cid:<ContentID>. It is an addr-spec-shaped token (RFC 2045 §7), written
+          without angle brackets — the composer adds them.
+        name: ContentID
+        type: string
+      - doc: |-
+          Content is the part's bytes, base64 encoded at composition (RFC 2045
+          §6.8). An empty slice is a legal zero-length attachment.
+        name: Content
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: Inline
+        recv: a *AttachmentValue
+        results: bool
+    name: AttachmentValue
+  - fields:
+      - doc: |-
+          Name is the field name — printable US-ASCII without a colon
+          (RFC 5322 §3.6.8).
+        name: Name
+        type: string
+      - doc: |-
+          Value is the unstructured field value. It is encoded per RFC 2047 when it
+          carries non-ASCII, folded to the RFC 5322 §2.1.1 line limits, and refused
+          outright when it carries CR, LF or NUL.
+        name: Value
+        type: string
+    kind: struct
+    name: HeaderFieldValue
+  - fields:
+      - doc: |-
+          Date is the origination date (RFC 5322 §3.6.1), which is REQUIRED in a
+          message. A zero Date is stamped by the composer from its clock rather
+          than refused: unlike a file mode, there is exactly one defensible value
+          and it is "now" (ADR 0031's clamping half).
+        name: Date
+        type: time.Time
+      - doc: |-
+          From is the author mailbox (RFC 5322 §3.6.2). Exactly one is supported;
+          the multi-author form requires a Sender header to disambiguate and no
+          caller has ever wanted it by accident.
+        name: From
+        type: AddressValue
+      - doc: |-
+          Subject is the unstructured subject field (RFC 5322 §3.6.5). Non-ASCII
+          content is encoded per RFC 2047 at composition; a CR or LF here is
+          [HeaderInjection].
+        name: Subject
+        type: string
+      - doc: |-
+          MessageID is the optional Message-ID (RFC 5322 §3.6.4), angle brackets
+          included or omitted at the caller's choice — the composer adds them.
+
+          An empty MessageID emits NO header. RFC 6409 §8.2 makes adding one the
+          submission server's job when it is absent, and generating one here would
+          mean inventing both entropy and a domain the SDK does not own.
+        name: MessageID
+        type: string
+      - doc: ReplyTo is the optional Reply-To mailbox list (RFC 5322 §3.6.2).
+        name: ReplyTo
+        type: "[]AddressValue"
+      - doc: To is the primary recipient list (RFC 5322 §3.6.3).
+        name: To
+        type: "[]AddressValue"
+      - doc: Cc is the carbon-copy recipient list (RFC 5322 §3.6.3).
+        name: Cc
+        type: "[]AddressValue"
+      - doc: |-
+          Bcc is the blind carbon-copy list. It reaches the ENVELOPE — the
+          [EnvelopeValue] internal/service/app/mail derives — and never a header.
+        name: Bcc
+        type: "[]AddressValue"
+      - doc: |-
+          Headers are additional fields, emitted in slice order so a composed
+          message is byte-deterministic. A name the composer owns is
+          [ReservedHeader].
+        name: Headers
+        type: "[]HeaderFieldValue"
+      - doc: Text is the text/plain body.
+        name: Text
+        type: string
+      - doc: |-
+          HTML is the text/html body. With Text it becomes a multipart/alternative
+          in which the plain part comes FIRST — RFC 2046 §5.1.4 orders alternatives
+          by increasing preference, so the last one is the one a client shows.
+        name: HTML
+        type: string
+      - doc: |-
+          Attachments are the file parts. One carrying a ContentID is INLINE and is
+          referenced from the HTML body as cid:<ContentID> (RFC 2392 §2).
+        name: Attachments
+        type: "[]AttachmentValue"
+    kind: struct
+    name: MessageValue
+  - fields:
+      - doc: Envelope is the MAIL FROM and the RCPT TO list the session would issue.
+        name: Envelope
+        type: EnvelopeValue
+      - doc: |-
+          Raw is the RFC 5322 message: headers, blank line, MIME body, CRLF line
+          endings throughout.
+        name: Raw
+        type: "[]byte"
+    kind: struct
+    name: DeliveryValue
+  - fields:
+      - doc: |-
+          From is the return path (RFC 5321 §4.1.1.2): where a bounce goes. It is
+          the message's From addr-spec.
+        name: From
+        type: string
+      - doc: |-
+          To is every RCPT TO the session will issue, in To, Cc, Bcc order. Bcc
+          recipients appear HERE and in no header.
+        name: To
+        type: "[]string"
+    kind: struct
+    name: EnvelopeValue

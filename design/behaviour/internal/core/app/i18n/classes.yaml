@@ -1,0 +1,465 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxFractionDigits bounds [Decimal]'s second argument. Ten fraction digits
+      would already exceed float64's honest precision for most integer parts, and
+      the operand f is an integer of that many digits — so the bound is where the
+      arithmetic stops being able to tell the truth, not a round number.
+    items:
+      - name: maxFractionDigits
+        type: int
+        value: "9"
+    name: maxFractionDigits
+  - doc: decimalBase is ten, because that is what a fraction DIGIT is worth.
+    items:
+      - name: decimalBase
+        type: uint64
+        value: "10"
+    name: decimalBase
+  - doc: The six categories, `other` first so it is the zero value.
+    grouped: true
+    items:
+      - doc: |-
+          FormOther is the catch-all category. Every language defines it and
+          every message is required to carry it.
+        name: FormOther
+        type: Form
+        value: iota
+      - doc: |-
+          FormZero is used by languages with a distinct form for nought — Arabic
+          and Latvian among them. Most languages do not have it.
+        name: FormZero
+      - doc: FormOne is the singular of languages that have one.
+        name: FormOne
+      - doc: FormTwo is the dual — Arabic, Slovenian, Welsh.
+        name: FormTwo
+      - doc: FormFew is the small-plural of the Slavic and Semitic families.
+        name: FormFew
+      - doc: |-
+          FormMany is the large-plural, and in several Romance languages the
+          compact-decimal form ("1 million").
+        name: FormMany
+      - doc: |-
+          formCount bounds the enum. It is unexported: it is a size, not a
+          category, and exporting it would put a seventh value in the public
+          vocabulary of a specification that defines six.
+        name: formCount
+    name: FormOther
+  - doc: The two ASCII bounds that make a key unsafe to print.
+    grouped: true
+    items:
+      - doc: |-
+          asciiSpace is the lowest printable ASCII byte; everything below it is a
+          C0 control character.
+        name: asciiSpace
+        type: byte
+        value: "0x20"
+      - doc: |-
+          asciiDelete is DEL, the one control character above the printable
+          range.
+        name: asciiDelete
+        type: byte
+        value: "0x7F"
+    name: asciiSpace
+  - doc: |-
+      argSizeGuess is the number of bytes [MessageValue.Format] assumes a
+      substituted value will occupy when it sizes the builder. It is a HINT: too
+      small costs one growth, too large costs untouched capacity, and neither is a
+      correctness question. Sixteen covers a formatted count, a short name and a
+      filename stem; internal/service/app/i18n/BENCH.md reports the resulting
+      allocations per render.
+    items:
+      - name: argSizeGuess
+        type: int
+        value: "16"
+    name: argSizeGuess
+  - doc: The subtag lengths BCP 47 fixes for the three positions this domain admits.
+    grouped: true
+    items:
+      - doc: minLanguageLen is the shortest ISO 639 language subtag ("fr").
+        name: minLanguageLen
+        type: int
+        value: "2"
+      - doc: |-
+          maxLanguageLen is the longest one this domain accepts ("fil"). BCP 47
+          also registers 4-letter (reserved) and 5-to-8-letter subtags; both are
+          refused — see [NewTag].
+        name: maxLanguageLen
+        type: int
+        value: "3"
+      - doc: scriptLen is the ISO 15924 script subtag length, always 4 ("Hant").
+        name: scriptLen
+        type: int
+        value: "4"
+      - doc: regionAlphaLen is the ISO 3166-1 alpha-2 region length ("CA").
+        name: regionAlphaLen
+        type: int
+        value: "2"
+      - doc: regionDigitLen is the UN M.49 numeric region length ("419").
+        name: regionDigitLen
+        type: int
+        value: "3"
+      - doc: separatorLen is the one byte a subtag separator occupies.
+        name: separatorLen
+        type: int
+        value: "1"
+      - doc: |-
+          maxTagLen is "fil-Hant-419": the longest canonical form the subset can
+          produce. It sizes the stack buffer NewTag canonicalises into.
+        name: maxTagLen
+        type: int
+        value: maxLanguageLen + separatorLen + scriptLen + separatorLen + regionDigitLen
+      - doc: asciiCaseBit is the single bit that separates 'a' from 'A'.
+        name: asciiCaseBit
+        type: byte
+        value: "'a' - 'A'"
+    name: minLanguageLen
+files:
+  - decls:
+      - maxFractionDigits
+      - decimalBase
+      - pow10
+      - buildPow10
+      - CountValue
+      - Int
+      - Decimal
+      - splitDecimal
+      - CountValue.IntegerPart
+      - CountValue.FractionValue
+      - CountValue.VisibleFractionDigits
+      - CountValue.IsIntegerValued
+    name: count_value.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Form
+      - FormOther
+      - formNames
+      - Form.String
+      - Form.Valid
+      - ParseForm
+    name: form.go
+  - decls:
+      - PluralRule
+      - Args
+    name: i18n.go
+  - decls:
+      - asciiSpace
+      - Key
+      - ValidateKey
+      - MessageValue
+      - FormPatternValue
+      - NewCompiledMessage
+      - MessageValue.Format
+      - MessageValue.patternFor
+      - MessageValue.HasForm
+      - MessageValue.IsPlural
+    name: message_value.go
+  - decls:
+      - argSizeGuess
+      - PartValue
+      - PatternValue
+      - NewPattern
+      - PatternValue.literal
+      - PatternValue.expand
+      - ValidPlaceholder
+      - isNameStart
+    name: pattern.go
+  - decls:
+      - minLanguageLen
+      - TagValue
+      - NewTag
+      - isRegion
+      - isAlpha
+      - isDigit
+      - appendLower
+      - appendUpper
+      - appendTitle
+      - lowerByte
+      - upperByte
+      - TagValue.String
+      - TagValue.IsZero
+      - TagValue.Language
+      - TagValue.Script
+      - TagValue.Region
+      - TagValue.Parent
+    name: tag_value.go
+functions:
+  - doc: buildPow10 fills the power table once, at package initialisation.
+    name: buildPow10
+    results: "[maxFractionDigits + 1]uint64"
+  - name: Int
+    params: n int64
+    results: CountValue
+  - name: Decimal
+    params: value float64, fractionDigits int
+    results: count CountValue, err error
+  - doc: |-
+      splitDecimal derives the operands i, f and v from a finite, non-negative
+      value and a display precision. It is separate from [Decimal] so the refusals
+      and the arithmetic read as two steps.
+    name: splitDecimal
+    params: abs float64, fractionDigits int
+    results: CountValue
+  - name: ParseForm
+    params: name string
+    results: form Form, err error
+  - name: ValidateKey
+    params: key Key
+    results: error
+  - name: NewCompiledMessage
+    params: other PatternValue, plural []FormPatternValue
+    results: message MessageValue, err error
+  - name: NewPattern
+    params: parts []PartValue
+    results: body PatternValue, err error
+  - name: ValidPlaceholder
+    params: name string
+    results: bool
+  - doc: isNameStart reports whether b may begin a placeholder name.
+    name: isNameStart
+    params: b byte
+    results: bool
+  - name: NewTag
+    params: language, script, region string
+    results: tag TagValue, err error
+  - doc: isRegion reports whether sub is an ISO 3166-1 alpha-2 or UN M.49 region.
+    name: isRegion
+    params: sub string
+    results: bool
+  - doc: isAlpha reports whether sub is non-empty and all ASCII letters.
+    name: isAlpha
+    params: sub string
+    results: bool
+  - doc: isDigit reports whether sub is non-empty and all ASCII digits.
+    name: isDigit
+    params: sub string
+    results: bool
+  - doc: appendLower appends sub to dst, ASCII-lowercased.
+    name: appendLower
+    params: dst []byte, sub string
+    results: "[]byte"
+  - doc: appendUpper appends sub to dst, ASCII-uppercased.
+    name: appendUpper
+    params: dst []byte, sub string
+    results: "[]byte"
+  - doc: |-
+      appendTitle appends sub to dst with the first byte uppercased and the rest
+      lowercased — the canonical case of an ISO 15924 script subtag.
+    name: appendTitle
+    params: dst []byte, sub string
+    results: "[]byte"
+  - doc: lowerByte folds one ASCII byte to lower case.
+    name: lowerByte
+    params: b byte
+    results: byte
+  - doc: upperByte folds one ASCII byte to upper case.
+    name: upperByte
+    params: b byte
+    results: byte
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/i18n
+  name: i18n
+  purpose: Package i18n — ranges 0.2.30.* (ADR 0063 core/app/i18n block) and 0.3.60.* (ADR 0063 service/app/i18n block, declared here since ADR 0160).
+types:
+  - fields:
+      - doc: |-
+          integerPart is CLDR operand i: the integer digits of the ABSOLUTE
+          value. CLDR's operands ignore the sign, and so does every rule:
+          "-1 degree" is `one` in English exactly as "1 degree" is.
+        name: integerPart
+        type: uint64
+      - doc: |-
+          fractionValue is CLDR operand f: the visible fraction digits read as an
+          integer, trailing zeros included.
+        name: fractionValue
+        type: uint64
+      - doc: |-
+          visibleFractionDigits is CLDR operand v: how many fraction digits the
+          reader sees.
+        name: visibleFractionDigits
+        type: uint8
+    kind: struct
+    methods:
+      - name: IntegerPart
+        recv: c CountValue
+        results: uint64
+      - name: FractionValue
+        recv: c CountValue
+        results: uint64
+      - name: VisibleFractionDigits
+        recv: c CountValue
+        results: int
+      - name: IsIntegerValued
+        recv: c CountValue
+        results: bool
+    name: CountValue
+  - kind: named
+    methods:
+      - name: String
+        recv: f Form
+        results: string
+      - name: Valid
+        recv: f Form
+        results: bool
+    name: Form
+    underlying: uint8
+  - kind: named
+    name: PluralRule
+    underlying: func(count CountValue) Form
+  - kind: named
+    name: Args
+    underlying: map[string]string
+  - kind: named
+    name: Key
+    underlying: string
+  - fields:
+      - doc: other is the mandatory FormOther pattern.
+        name: other
+        type: PatternValue
+      - doc: |-
+          plural holds the remaining categories, ascending by Form. It is nil for
+          a message with no plural forms, which is the common case and the one
+          worth keeping small.
+        name: plural
+        type: "[]FormPatternValue"
+    kind: struct
+    methods:
+      - name: Format
+        params: form Form, args Args
+        recv: m MessageValue
+        results: rendered string, err error
+      - doc: patternFor resolves a category to its compiled body.
+        name: patternFor
+        params: form Form
+        recv: m MessageValue
+        results: body PatternValue, ok bool
+      - name: HasForm
+        params: form Form
+        recv: m MessageValue
+        results: bool
+      - name: IsPlural
+        recv: m MessageValue
+        results: bool
+    name: MessageValue
+  - fields:
+      - doc: |-
+          Form is the category. [FormOther] is never one of these: a message
+          carries its `other` body out of line, and [NewCompiledMessage] refuses
+          it here.
+        name: Form
+        type: Form
+      - doc: Body is the compiled pattern for the category.
+        name: Body
+        type: PatternValue
+    kind: struct
+    name: FormPatternValue
+  - fields:
+      - doc: Text is the literal span. It is empty for a placeholder.
+        name: Text
+        type: string
+      - doc: Name is the placeholder name. It is empty for a literal span.
+        name: Name
+        type: string
+    kind: struct
+    name: PartValue
+  - fields:
+      - doc: parts is the compiled span list, in order.
+        name: parts
+        type: "[]PartValue"
+      - doc: size is the sum of the literal lengths, used to size the builder.
+        name: size
+        type: int
+      - doc: |-
+          set distinguishes a compiled EMPTY pattern from a pattern that was never
+          compiled at all.
+        name: set
+        type: bool
+    kind: struct
+    methods:
+      - doc: literal returns the pattern's text when it needs no substitution at all.
+        name: literal
+        recv: p PatternValue
+        results: text string, ok bool
+      - doc: expand renders a pattern that carries at least one placeholder.
+        name: expand
+        params: args Args
+        recv: p PatternValue
+        results: rendered string, err error
+    name: PatternValue
+  - fields:
+      - doc: |-
+          canonical is the canonical form: lowercase language, Titlecase script,
+          UPPERCASE alpha region. The three accessors slice it, so they cost
+          nothing and cannot disagree with it.
+        name: canonical
+        type: string
+      - doc: |-
+          langN, scriptN and regionN are the subtag lengths inside canonical. A
+          zero scriptN or regionN means the subtag is absent.
+        name: langN
+        type: uint8
+      - doc: |-
+          langN, scriptN and regionN are the subtag lengths inside canonical. A
+          zero scriptN or regionN means the subtag is absent.
+        name: scriptN
+        type: uint8
+      - doc: |-
+          langN, scriptN and regionN are the subtag lengths inside canonical. A
+          zero scriptN or regionN means the subtag is absent.
+        name: regionN
+        type: uint8
+    kind: struct
+    methods:
+      - name: String
+        recv: t TagValue
+        results: string
+      - name: IsZero
+        recv: t TagValue
+        results: bool
+      - name: Language
+        recv: t TagValue
+        results: string
+      - name: Script
+        recv: t TagValue
+        results: string
+      - name: Region
+        recv: t TagValue
+        results: string
+      - name: Parent
+        recv: t TagValue
+        results: parent TagValue, ok bool
+    name: TagValue
+vars:
+  - doc: |-
+      pow10 indexes 10^n for n in 0..maxFractionDigits.
+
+      It is built by multiplication rather than written out, for the reason the
+      table exists at all: math.Pow returns a float64 whose nearest representable
+      value for 10^7 is not exactly 10000000, and a hand-written literal table is
+      ten numbers a reviewer has to count the zeros in.
+    items:
+      - name: pow10
+        value: buildPow10()
+    name: pow10
+  - doc: |-
+      formNames maps each category to the name CLDR spells it with — the same
+      spelling a catalogue file uses.
+    items:
+      - name: formNames
+        value: |-
+          [formCount]string{
+          	FormOther: "other",
+          	FormZero:  "zero",
+          	FormOne:   "one",
+          	FormTwo:   "two",
+          	FormFew:   "few",
+          	FormMany:  "many",
+          }
+    name: formNames

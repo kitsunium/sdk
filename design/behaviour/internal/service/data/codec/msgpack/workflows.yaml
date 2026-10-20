@@ -1,0 +1,43 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: structMayBeUnhashable
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: mayBeUnhashable(f.Type)
+          key: f
+          range: t.Fields()
+      - return: "false"
+  - of: (*structEncoder).keptCount
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: "!s.fields[i].omitted(v)"
+          key: i
+          range: s.fields
+      - return: "n"
+  - of: (*layoutBuilder).collides
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: _, taken
+                  eval: b.layout.byName[sf.name]
+                when: taken
+          key: _
+          range: sub.fields
+          value: sf
+      - return: "false"

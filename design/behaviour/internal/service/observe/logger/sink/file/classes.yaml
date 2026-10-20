@@ -1,0 +1,103 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      defaultFilePerm is the permission bitmask passed to os.OpenFile when the
+      destination file does not yet exist. 0600 restricts reads to the owning
+      UID so diagnostic content (attr values, wrapped Private fields bubbled
+      in by consumers that log the Source chain) is never world-readable.
+      Operators that need group or other-reader access chmod explicitly.
+    items:
+      - name: defaultFilePerm
+        type: os.FileMode
+        value: "0o600"
+    name: defaultFilePerm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - defaultFilePerm
+      - openRefusals
+      - fileSink
+      - New
+      - (*fileSink).Write
+      - (*fileSink).Flush
+      - (*fileSink).Close
+    name: file.go
+functions:
+  - name: New
+    params: path string
+    results: sink corelogger.Sink, err error
+imports:
+  context: context
+  corefile: github.com/kitsunium/sdk/internal/core/observe/logger/sink/file
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  logfile: github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile
+  os: os
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/sink/file
+  name: file
+  purpose: Package file implements a Sink that appends formatted records to an on-disk file.
+types:
+  - doc: |-
+      fileSink wraps *os.File behind a mutex so concurrent goroutines emit
+      atomic Write calls. Process-level atomicity for payloads under PIPE_BUF
+      is provided by the kernel via O_APPEND.
+    fields:
+      - doc: f is the underlying *os.File opened in append mode.
+        name: f
+        type: "*os.File"
+      - doc: |-
+          mu serialises Write calls so concurrent goroutines emit atomic lines
+          even when the payload exceeds PIPE_BUF.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: Write appends p onto the underlying file under the local mutex.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *fileSink
+        results: n int, err error
+      - doc: |-
+          Flush calls fsync on the underlying file so kernel page cache contents
+          reach durable storage.
+        name: Flush
+        params: ctx context.Context
+        recv: s *fileSink
+        results: error
+      - doc: |-
+          Close closes the underlying file. Subsequent Writes will fail with the
+          kernel's "file already closed" error (which we wrap as WriteFailed).
+        name: Close
+        recv: s *fileSink
+        results: error
+    name: fileSink
+vars:
+  - doc: |-
+      openRefusals is this sink's vocabulary for the hardened open both file sinks
+      share (internal/service/observe/logger/internal/logfile): one sentinel, CodeOpenFailed, for
+      the policy refusal of a planted link and for every failed open — the kernel's
+      refusal of a link planted after the check among them — told apart by the
+      "kind" field the shared open adds.
+    items:
+      - name: openRefusals
+        value: |-
+          logfile.RefusalSpec{
+          	Symlink: errs.WrapParams{
+          		Code:    corefile.CodeOpenFailed,
+          		Reason:  "OPEN_FAILED",
+          		Public:  "File sink refuses to open a symlink",
+          		Private: "service/observe/logger/sink/file.New: path is a symlink; refusing per hardening policy",
+          	},
+          	Open: errs.WrapParams{
+          		Code:    corefile.CodeOpenFailed,
+          		Reason:  "OPEN_FAILED",
+          		Public:  "File sink could not open the destination file",
+          		Private: "service/observe/logger/sink/file.New: os.OpenFile returned an error",
+          	},
+          }
+    name: openRefusals

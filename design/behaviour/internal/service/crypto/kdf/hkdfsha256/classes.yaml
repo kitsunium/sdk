@@ -1,0 +1,52 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: algorithm is the canonical registry key for HKDF-SHA256.
+    items:
+      - name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"hkdf-sha256\""
+    name: algorithm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - algorithm
+      - Deriver
+      - hkdfSHA256
+      - hkdfSHA256.Algorithm
+      - hkdfSHA256.Derive
+    name: hkdfsha256.go
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  hkdf: crypto/hkdf
+  sha256: crypto/sha256
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256
+  name: hkdfsha256
+  purpose: Package hkdfsha256 registers the "hkdf-sha256" key-derivation scheme (ADR 0013).
+types:
+  - doc: hkdfSHA256 implements core/crypto.Deriver over crypto/hkdf with SHA-256.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: hkdfSHA256
+        results: corecrypto.Algorithm
+      - doc: |-
+          Derive runs HKDF-SHA256 extract-and-expand over secret/salt/info. The only
+          realistic failure is a length above HKDF's 255*HashLen (8160-byte) ceiling.
+        name: Derive
+        params: secret, salt []byte, info string, length int
+        recv: hkdfSHA256
+        results: subkey []byte, err error
+    name: hkdfSHA256
+vars:
+  - doc: |-
+      Deriver is the registered HKDF-SHA256 scheme singleton (no init();
+      package-level var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: Deriver
+        value: corecrypto.RegisterDeriver(hkdfSHA256{})
+    name: Deriver

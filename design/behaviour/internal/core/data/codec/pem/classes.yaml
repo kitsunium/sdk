@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/pem
+  name: pem
+  purpose: Package pem declares the error codes and the sentinels of the PEM codec, internal/service/data/codec/pem — range 0.3.10.* (ADR 0005 service/data/codec/pem block).
+types: []

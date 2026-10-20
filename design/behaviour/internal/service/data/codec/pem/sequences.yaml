@@ -1,0 +1,200 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: Codec
+  - of: (*pemCodec).Name
+    steps:
+      - return: "\"pem\""
+  - of: (*pemCodec).MIMETypes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).MIMETypes
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(mimeTypes)
+        to: slices
+  - of: (*pemCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(extensions)
+        to: slices
+  - of: (*pemCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).Marshal
+        kind: self
+      - id: marshalPromotionBlock
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: stdpem
+        kind: stdlib
+    steps:
+      - bind: block, ok
+        eval: v.(*stdpem.Block)
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    corepem.CodePEMValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "PEM codec requires a non-nil *pem.Block value",
+                			Private: "service/data/codec/pem.Marshal: argument is not a non-nil *pem.Block",
+                		})
+          when: "!ok || block == nil"
+      - opt:
+          do:
+            - return: marshalPromotionBlock(block.Bytes), nil
+              to: marshalPromotionBlock
+          when: block.Type == promotionBlockType && len(block.Headers) == 0
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - opt:
+          do:
+            - eval: scratch.ReleaseBuffer(buf)
+              to: scratch
+            - return: |-
+                nil, errs.Wrap(werr, errs.WrapParams{
+                			Code:    corepem.CodePEMMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "PEM encoding failed",
+                			Private: "service/data/codec/pem.Marshal: encoding/pem.Encode returned an error",
+                		})
+          init:
+            bind: werr
+            eval: stdpem.Encode(buf, block)
+            to: stdpem
+          when: werr != nil
+      - return: scratch.DetachBuffer(buf), nil
+        to: scratch
+  - of: marshalPromotionBlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalPromotionBlock
+        kind: self
+      - id: base64.StdEncoding.EncodedLen
+        kind: value
+      - id: base64.StdEncoding.Encode
+        kind: value
+      - id: insertNewlinesEvery64
+        kind: internal
+    steps:
+      - bind: bodyLen
+        eval: base64.StdEncoding.EncodedLen(len(payload))
+        to: base64.StdEncoding.EncodedLen
+      - bind: lineCount
+        eval: (bodyLen + promotionLineLength - 1) / promotionLineLength
+      - bind: total
+        eval: len(pemJSONBegin) + bodyLen + lineCount + len(pemJSONEnd)
+      - bind: out
+        eval: make([]byte, 0, total)
+      - set: out
+        value: append(out, pemJSONBegin...)
+      - bind: bodyStart
+        eval: len(out)
+      - set: out
+        value: out[:bodyStart+bodyLen+lineCount]
+      - eval: base64.StdEncoding.Encode(out[bodyStart:bodyStart+bodyLen], payload)
+        to: base64.StdEncoding.Encode
+      - eval: insertNewlinesEvery64(out[bodyStart:], bodyLen, lineCount)
+        to: insertNewlinesEvery64
+      - set: out
+        value: append(out, pemJSONEnd...)
+      - return: out
+  - of: insertNewlinesEvery64
+    steps:
+      - bind: dst
+        eval: bodyLen + lineCount - 1
+      - loop:
+          cond: line >= 0
+          do:
+            - bind: lineStart
+              eval: line * promotionLineLength
+            - bind: lineEnd
+              eval: lineStart + promotionLineLength
+            - set: lineEnd
+              value: min(lineEnd, bodyLen)
+            - set: body[dst]
+              value: "'\\n'"
+            - op: "--"
+              set: dst
+            - bind: lineLen
+              eval: lineEnd - lineStart
+            - eval: copy(body[dst-lineLen+1:dst+1], body[lineStart:lineEnd])
+            - op: "-="
+              set: dst
+              value: lineLen
+          init: line := lineCount - 1
+          post: line--
+  - of: (*pemCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).Append
+        kind: self
+      - id: c.Marshal
+        kind: internal
+    steps:
+      - bind: encoded, merr
+        eval: c.Marshal(v)
+        to: c.Marshal
+      - opt:
+          do:
+            - return: dst, merr
+          when: merr != nil
+      - return: append(dst, encoded...), nil
+  - of: (*pemCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).Unmarshal
+        kind: self
+      - id: errs
+        kind: package
+      - id: stdpem
+        kind: stdlib
+    steps:
+      - bind: dst, ok
+        eval: v.(**stdpem.Block)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corepem.CodePEMValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "PEM codec requires a non-nil **pem.Block target",
+                			Private: "service/data/codec/pem.Unmarshal: target is not a non-nil **pem.Block",
+                		})
+              to: errs
+          when: "!ok || dst == nil"
+      - bind: block, _
+        eval: stdpem.Decode(data)
+        to: stdpem
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corepem.CodePEMUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "PEM decoding failed",
+                			Private: "service/data/codec/pem.Unmarshal: encoding/pem.Decode returned no block",
+                		})
+              to: errs
+          when: block == nil
+      - set: "*dst"
+        value: block
+      - return: nil

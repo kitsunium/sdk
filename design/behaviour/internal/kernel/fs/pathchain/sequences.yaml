@@ -1,0 +1,477 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: Resolve
+        kind: self
+      - id: absoluteUncleaned
+        kind: internal
+      - id: resolveAbs
+        kind: internal
+    steps:
+      - bind: absolute, absErr
+        eval: absoluteUncleaned(path)
+        to: absoluteUncleaned
+      - opt:
+          do:
+            - return: nil, absErr
+          when: absErr != nil
+      - return: resolveAbs(absolute)
+        to: resolveAbs
+  - of: absoluteUncleaned
+    participants:
+      - id: caller
+        kind: actor
+      - id: absoluteUncleaned
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: path, nil
+          when: filepath.IsAbs(path)
+      - opt:
+          do:
+            - return: filepath.Abs(path)
+              to: filepath
+          when: filepath.VolumeName(path) != ""
+      - bind: working, workingErr
+        eval: os.Getwd()
+        to: os
+      - opt:
+          do:
+            - return: "\"\", workingErr"
+          when: workingErr != nil
+      - return: working + string(filepath.Separator) + path, nil
+  - of: resolveAbs
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveAbs
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: openStack
+        kind: internal
+      - id: walk.take
+        kind: internal
+      - id: move
+        kind: internal
+      - id: walk.step
+        kind: internal
+    steps:
+      - bind: volume
+        eval: filepath.VolumeName(abs)
+        to: filepath
+      - bind: stack, openErr
+        eval: openStack(volume + string(filepath.Separator))
+        to: openStack
+      - opt:
+          do:
+            - return: nil, openErr
+          when: openErr != nil
+      - defer: |-
+          func() {
+          		//: every directory handle this walk opened, given back. A refused
+          		//: close cannot have lost anything — nothing is written through these
+          		//: descriptors — but a filesystem that will not close one is saying
+          		//: something, and it is reported only when the walk itself had nothing
+          		//: to say, so a real resolution failure is never masked by it.
+          		err = cmp.Or(err, stack.close())
+          	}()
+      - bind: walk
+        eval: "&walkState{stack: stack, volume: volume, pending: split(strings.TrimPrefix(abs, volume))}"
+      - set: walk.collected
+        value: make([]StepValue, 0, len(walk.pending))
+      - loop:
+          cond: len(walk.pending) > 0
+          do:
+            - bind: name
+              eval: walk.take()
+              to: walk.take
+            - opt:
+                do:
+                  - eval: move(stack, name)
+                    to: move
+                  - continue: true
+                when: name == current || name == parent
+            - bind: done, stepErr
+              eval: walk.step(name, abs)
+              to: walk.step
+            - opt:
+                do:
+                  - return: nil, stepErr
+                when: stepErr != nil
+            - opt:
+                do:
+                  - return: walk.collected, nil
+                when: done
+      - return: walk.collected, nil
+  - of: (*walkState).take
+    steps:
+      - bind: next
+        eval: w.pending[0]
+      - set: w.pending
+        value: w.pending[1:]
+      - return: next
+  - of: (*walkState).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walkState).step
+        kind: self
+      - id: describe
+        kind: internal
+      - id: w.enter
+        kind: internal
+    steps:
+      - bind: described, describeErr
+        eval: describe(w.stack, name)
+        to: describe
+      - opt:
+          do:
+            - return: true, nil
+          when: os.IsNotExist(describeErr)
+      - opt:
+          do:
+            - return: false, describeErr
+          when: describeErr != nil
+      - set: w.collected
+        value: append(w.collected, *described)
+      - opt:
+          do:
+            - return: false, w.follow(described.Target, abs)
+          when: described.Indirect
+      - return: w.enter(name, described)
+        to: w.enter
+  - of: (*walkState).enter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walkState).enter
+        kind: self
+      - id: w.stack.push
+        kind: internal
+    steps:
+      - bind: enterErr
+        eval: w.stack.push(name)
+        to: w.stack.push
+      - opt:
+          do:
+            - return: false, nil
+          when: enterErr == nil
+      - opt:
+          do:
+            - return: true, nil
+          when: "!described.Mode.IsDir() && len(w.pending) == 0"
+      - return: false, enterErr
+  - of: (*walkState).follow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walkState).follow
+        kind: self
+      - id: exhausted
+        kind: internal
+      - id: redirect
+        kind: internal
+    steps:
+      - op: ++
+        set: w.hops
+      - opt:
+          do:
+            - return: exhausted(abs)
+              to: exhausted
+          when: w.hops > maxHops
+      - bind: restart, restartErr
+        eval: redirect(w.stack, target, w.volume)
+        to: redirect
+      - opt:
+          do:
+            - return: restartErr
+          when: restartErr != nil
+      - set: w.pending
+        value: append(restart, w.pending...)
+      - return: nil
+  - of: move
+    participants:
+      - id: caller
+        kind: actor
+      - id: move
+        kind: self
+      - id: stack.pop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: name == current
+      - eval: stack.pop()
+        to: stack.pop
+  - of: describe
+    participants:
+      - id: caller
+        kind: actor
+      - id: describe
+        kind: self
+      - id: stack.top
+        kind: internal
+      - id: root.Lstat
+        kind: value
+      - id: root.Stat
+        kind: value
+      - id: root.Readlink
+        kind: value
+    steps:
+      - bind: root
+        eval: stack.top()
+        to: stack.top
+      - bind: info, statErr
+        eval: root.Lstat(name)
+        to: root.Lstat
+      - opt:
+          do:
+            - return: nil, statErr
+          when: statErr != nil
+      - bind: container, containerErr
+        eval: root.Stat(current)
+        to: root.Stat
+      - opt:
+          do:
+            - return: nil, containerErr
+          when: containerErr != nil
+      - bind: built
+        eval: |-
+          StepValue{
+          		Path:      filepath.Join(stack.path(), name),
+          		Name:      name,
+          		Container: container.Mode(),
+          		Mode:      info.Mode(),
+          		Info:      info,
+          		Indirect:  indirect(info.Mode()),
+          	}
+      - opt:
+          do:
+            - return: "&built, nil"
+          when: "!built.Indirect"
+      - bind: target, linkErr
+        eval: root.Readlink(name)
+        to: root.Readlink
+      - opt:
+          do:
+            - return: nil, linkErr
+          when: linkErr != nil
+      - set: built.Target
+        value: target
+      - return: "&built, nil"
+  - of: indirect
+    steps:
+      - return: mode&(fs.ModeSymlink|fs.ModeIrregular) != 0
+  - of: redirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: redirect
+        kind: self
+      - id: split
+        kind: internal
+      - id: stack.reset
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: split(target), nil
+              to: split
+          when: "!filepath.IsAbs(target)"
+      - bind: resetErr
+        eval: stack.reset(rootOf(target, volume))
+        to: stack.reset
+      - opt:
+          do:
+            - return: nil, resetErr
+          when: resetErr != nil
+      - return: split(strings.TrimPrefix(target, filepath.VolumeName(target))), nil
+        to: split
+  - of: rootOf
+    steps:
+      - return: cmp.Or(filepath.VolumeName(target), fallback) + string(filepath.Separator)
+  - of: split
+    participants:
+      - id: caller
+        kind: actor
+      - id: split
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.FieldsFunc(path, isSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: "[]string{}"
+          when: len(parts) == 0
+      - return: parts
+  - of: isSeparator
+    steps:
+      - return: r == filepath.Separator || r == '/'
+  - of: exhausted
+    participants:
+      - id: caller
+        kind: actor
+      - id: exhausted
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: _, statErr
+        eval: os.Stat(path)
+        to: os
+      - return: "cmp.Or(statErr, error(&os.PathError{Op: \"resolve\", Path: path, Err: fs.ErrInvalid}))"
+        to: cmp
+  - of: openStack
+    participants:
+      - id: caller
+        kind: actor
+      - id: openStack
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: opened, openErr
+        eval: os.OpenRoot(base)
+        to: os
+      - opt:
+          do:
+            - return: nil, openErr
+          when: openErr != nil
+      - return: "&rootStack{roots: []*os.Root{opened}, base: base}, nil"
+  - of: (*rootStack).top
+    steps:
+      - return: s.roots[len(s.roots)-1]
+  - of: (*rootStack).path
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rootStack).path
+        kind: self
+      - id: s.top().Name
+        kind: value
+    steps:
+      - return: s.top().Name()
+        to: s.top().Name
+  - of: (*rootStack).push
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rootStack).push
+        kind: self
+      - id: s.top().OpenRoot
+        kind: value
+    steps:
+      - bind: entered, enterErr
+        eval: s.top().OpenRoot(name)
+        to: s.top().OpenRoot
+      - opt:
+          do:
+            - return: enterErr
+          when: enterErr != nil
+      - set: s.roots
+        value: append(s.roots, entered)
+      - set: s.names
+        value: append(s.names, name)
+      - return: nil
+  - of: (*rootStack).pop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rootStack).pop
+        kind: self
+      - id: s.closeAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(s.roots) == 1
+      - bind: last
+        eval: len(s.roots) - 1
+      - eval: "s.closeAll(s.roots[last : last+1])"
+        to: s.closeAll
+      - set: s.roots
+        value: s.roots[:last]
+      - set: s.names
+        value: s.names[:last]
+  - of: (*rootStack).reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rootStack).reset
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: s.closeAll
+        kind: internal
+    steps:
+      - bind: opened, openErr
+        eval: os.OpenRoot(base)
+        to: os
+      - opt:
+          do:
+            - return: openErr
+          when: openErr != nil
+      - eval: s.closeAll(s.roots)
+        to: s.closeAll
+      - set: s.roots
+        value: "[]*os.Root{opened}"
+      - set: s.names
+        value: nil
+      - set: s.base
+        value: base
+      - return: nil
+  - of: (*rootStack).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rootStack).close
+        kind: self
+      - id: s.closeAll
+        kind: internal
+    steps:
+      - eval: s.closeAll(s.roots)
+        to: s.closeAll
+      - set: s.roots
+        value: nil
+      - set: s.names
+        value: nil
+      - return: s.abandoned
+  - of: (*rootStack).closeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rootStack).closeAll
+        kind: self
+      - id: root.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: closeErr
+              eval: root.Close()
+              to: root.Close
+            - set: s.abandoned
+              to: errors
+              value: errors.Join(s.abandoned, closeErr)
+          key: _
+          range: roots
+          value: root

@@ -1,0 +1,212 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      facilityUser is the default RFC5424 facility code (USER, value 1) used
+      when callers do not override it. The full enum is documented in RFC5424
+      §6.2.1 — we ship just USER today and let consumers configure the rest
+      in a future commit.
+    items:
+      - name: facilityUser
+        type: int
+        value: "1"
+    name: facilityUser
+  - doc: |-
+      facilityShift is the multiplier applied to the facility code per
+      RFC5424 (priority = facility * 8 + severity).
+    items:
+      - name: facilityShift
+        type: int
+        value: "8"
+    name: facilityShift
+  - doc: severityError matches RFC5424 severity 3 (Error condition).
+    items:
+      - name: severityError
+        type: int
+        value: "3"
+    name: severityError
+  - doc: |-
+      severityWarning matches RFC5424 severity 4 — used as the default for
+      records whose level falls outside the four mapped buckets.
+    items:
+      - name: severityWarning
+        type: int
+        value: "4"
+    name: severityWarning
+  - doc: severityInfo matches RFC5424 severity 6 (Informational).
+    items:
+      - name: severityInfo
+        type: int
+        value: "6"
+    name: severityInfo
+  - doc: severityDebug matches RFC5424 severity 7 (Debug).
+    items:
+      - name: severityDebug
+        type: int
+        value: "7"
+    name: severityDebug
+  - doc: netUDP is the canonical udp network identifier accepted by net.Dial.
+    items:
+      - name: netUDP
+        type: string
+        value: "\"udp\""
+    name: netUDP
+  - doc: netTCP is the canonical tcp network identifier accepted by net.Dial.
+    items:
+      - name: netTCP
+        type: string
+        value: "\"tcp\""
+    name: netTCP
+  - doc: |-
+      envelopeSuffix is the "1 - - - - - - " RFC5424 envelope suffix written
+      after the <PRI> token. The trailing space separates header from message.
+    items:
+      - name: envelopeSuffix
+        type: string
+        value: "\"1 - - - - - - \""
+    name: envelopeSuffix
+  - doc: |-
+      maxPRITokenLen is the worst-case length of the "<PRI>" token: the angle
+      brackets plus up to three decimal digits ("<255>").
+    items:
+      - name: maxPRITokenLen
+        type: int
+        value: len("<255>")
+    name: maxPRITokenLen
+  - doc: |-
+      frameHeaderHint is the byte budget reserved for the "<PRI>1 - - - - - - "
+      header so the frame fits in a single allocation alongside the payload. It is
+      len(envelopeSuffix)+maxPRITokenLen — sized to the worst case so the
+      single-allocation hot path never reallocates for the header.
+    items:
+      - name: frameHeaderHint
+        type: int
+        value: len(envelopeSuffix) + maxPRITokenLen
+    name: frameHeaderHint
+  - doc: |-
+      decimalBase is the base passed to strconv.AppendInt when rendering the
+      PRI integer into the frame buffer.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+files:
+  - decls:
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - facilityUser
+      - facilityShift
+      - severityError
+      - severityWarning
+      - severityInfo
+      - severityDebug
+      - severityFor
+      - priorityFor
+    name: priority.go
+  - decls:
+      - netUDP
+      - netTCP
+      - envelopeSuffix
+      - maxPRITokenLen
+      - frameHeaderHint
+      - decimalBase
+      - syslogSink
+      - New
+      - NewWithConfig
+      - swallowDialClose
+      - (*syslogSink).Write
+      - (*syslogSink).Flush
+      - (*syslogSink).Close
+      - makeFrame
+    name: syslog_sink.go
+functions:
+  - doc: severityFor maps a corelogger.Level to its RFC5424 severity number.
+    name: severityFor
+    params: lv level.Level
+    results: int
+  - doc: |-
+      priorityFor returns the RFC5424 PRI value for the supplied level using
+      the default USER facility.
+    name: priorityFor
+    params: lv level.Level
+    results: int
+  - name: New
+    params: network, addr string
+    results: sink corelogger.Sink, err error
+  - name: NewWithConfig
+    params: network, addr string, cfg Config
+    results: sink corelogger.Sink, err error
+  - doc: |-
+      swallowDialClose drops a Close error from the constructor's defer path.
+      The original construction error (if any) carries the meaningful failure;
+      stacking the close error on top would obscure it.
+    name: swallowDialClose
+    params: err error
+  - doc: makeFrame builds the RFC5424 envelope around p.
+    name: makeFrame
+    params: pri int, p []byte
+    results: "[]byte"
+imports:
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coresyslog: github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  net: net
+  strconv: strconv
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/sink/syslog
+  name: syslog
+  purpose: Package syslog — holds the Config struct consumed by NewWithConfig.
+types:
+  - fields:
+      - doc: |-
+          Dialer, when non-nil, replaces net.Dial for the connection setup.
+          Callers whose operational environment exposes a hostile network
+          surface (e.g. a public-facing admin endpoint that takes a user-
+          controllable syslog destination) plug an allowlisted dialer here
+          to prevent SSRF against internal services or cloud-metadata
+          endpoints (CWE-918). Default nil preserves legacy net.Dial.
+        name: Dialer
+        type: func(network, addr string) (conn net.Conn, err error)
+    kind: struct
+    name: Config
+  - doc: |-
+      syslogSink wraps a net.Conn behind a mutex so concurrent producers emit
+      atomic frames (UDP datagrams are inherently atomic; the mutex protects
+      the TCP framing path).
+    fields:
+      - doc: conn is the underlying network connection.
+        name: conn
+        type: net.Conn
+      - doc: mu serialises Write calls so concurrent producers emit atomic frames.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: Write frames p as RFC5424 and ships it over the network connection.
+        name: Write
+        params: ctx context.Context, rec corelogger.RecordEvent, p []byte
+        recv: s *syslogSink
+        results: n int, err error
+      - doc: |-
+          Flush is a no-op for the syslog sink (UDP datagrams settle on send;
+          TCP delegates to the kernel buffer).
+        name: Flush
+        params: ctx context.Context
+        recv: s *syslogSink
+        results: error
+      - doc: |-
+          Close releases the underlying network connection. Subsequent Writes will
+          fail with the kernel's "use of closed network connection" error wrapped
+          as WriteFailed.
+        name: Close
+        recv: s *syslogSink
+        results: error
+    name: syslogSink

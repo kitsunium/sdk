@@ -1,0 +1,21 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: throughPointer
+    steps:
+      - bind: current
+        eval: root
+      - loop:
+          do:
+            - bind: embedded
+              eval: current.Field(step).Type
+            - opt:
+                do:
+                  - return: "true"
+                when: embedded.Kind() == reflect.Pointer
+            - set: current
+              value: embedded
+          key: _
+          range: index[:len(index)-1]
+          value: step
+      - return: "false"

@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Tag
+    participants:
+      - id: caller
+        kind: actor
+      - id: Tag
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.MACTag(corecrypto.Algorithm(a), key, message)
+        to: corecrypto
+  - of: Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: Verify
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.MACVerify(corecrypto.Algorithm(a), key, message, tag)
+        to: corecrypto

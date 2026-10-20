@@ -1,0 +1,213 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Package-level constants and vars are grouped per KTN-VAR-GROUP /
+      KTN-CONST-ORDER: all consts first (cap-discard threshold + promotion
+      shape constants), then the package-level vars (pool + Codec singleton).
+    grouped: true
+    items:
+      - doc: |-
+          promotionHeaderCell is the single-column header label the facade
+          promotion path stamps when wrapping a non-CSV value (matches
+          pkg/v1/data/codec/promote.go csvPromotionHeader).
+        name: promotionHeaderCell
+        value: "\"_json\""
+      - doc: |-
+          promotionRowCount is the expected row count of a promotion-wrapped
+          CSV: one header row plus one body row carrying the JSON.
+        name: promotionRowCount
+        type: int
+        value: "2"
+      - doc: promotionColumnCount is the expected column count per promotion row.
+        name: promotionColumnCount
+        type: int
+        value: "1"
+      - doc: |-
+          promotionBufWorstCaseFactor accounts for the worst-case `"` → `""`
+          expansion in the body cell of the promotion fast-path. Body length
+          is multiplied by this factor when pre-sizing the output buffer.
+        name: promotionBufWorstCaseFactor
+        type: int
+        value: "2"
+    name: promotionHeaderCell
+files:
+  - decls:
+      - promotionHeaderCell
+      - Codec
+      - csvCodec
+      - New
+      - NewWithEscape
+      - (*csvCodec).Name
+      - (*csvCodec).MIMETypes
+      - (*csvCodec).Extensions
+      - (*csvCodec).Marshal
+      - escapeFormulaCells
+      - escapeFormulaRow
+      - isFormulaTrigger
+      - escapeIfFormulaCell
+      - (*csvCodec).Append
+      - isPromotionShape
+      - marshalPromotionShape
+      - (*csvCodec).Unmarshal
+      - readAllPreSized
+      - extractRecords
+    name: codec.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: New
+    results: codec.Codec
+  - name: NewWithEscape
+    params: escape bool
+    results: codec.Codec
+  - doc: |-
+      escapeFormulaCells returns a defensive copy of records with every cell
+      starting with a formula-trigger byte prefixed by a single quote so the
+      cell renders as text in Excel / LibreOffice / Google Sheets. Implements
+      the OWASP CSV Injection mitigation (CWE-1236) on an opt-in basis.
+    name: escapeFormulaCells
+    params: records [][]string
+    results: "[][]string"
+  - doc: |-
+      escapeFormulaRow returns a defensive copy of row with every cell's
+      first byte passed through escapeIfFormulaCell. Kept as a dedicated
+      helper so its per-row allocation is attributed to its own stack frame
+      rather than being flagged as an inner-loop allocation by static
+      analysis.
+    name: escapeFormulaRow
+    params: row []string
+    results: "[]string"
+  - doc: |-
+      isFormulaTrigger reports whether b is a byte that a spreadsheet app
+      interprets as the start of a formula. The set includes the classic
+      trigger bytes (=, +, -, @) plus the two control characters (TAB, CR)
+      that some spreadsheets treat as formula prefixes after whitespace trim.
+    name: isFormulaTrigger
+    params: b byte
+    results: bool
+  - doc: |-
+      escapeIfFormulaCell prefixes cell with a single quote when its first
+      byte would otherwise trigger spreadsheet formula evaluation.
+    name: escapeIfFormulaCell
+    params: cell string
+    results: string
+  - doc: |-
+      isPromotionShape reports whether records is the exact 2-row × 1-col
+      shape pkg/v1/data/codec/promote.go produces — i.e. header == "_json" and
+      the body row has exactly one cell. Matching this shape lets Marshal
+      bypass csv.Writer for a measurable win on every promotion call.
+    name: isPromotionShape
+    params: records [][]string
+    results: bool
+  - doc: |-
+      marshalPromotionShape emits standards-compliant CSV bytes for the
+      2-row × 1-col promotion shape. The body cell always contains JSON
+      (with `{`, `"`, `,` etc.) so it always needs quoting; the only
+      escape needed is `"` → `""` per the double-quote-doubling rule.
+      Saves csv.Writer construction + per-row Write loop + Flush.
+    name: marshalPromotionShape
+    params: body string
+    results: "[]byte"
+  - doc: |-
+      readAllPreSized is the stdcsv.Reader.ReadAll equivalent with two
+      pre-allocation tricks: the outer [][]string is sized from the wire
+      newline count (one record per '\n', plus an orphan trailing record
+      if the input lacks the final terminator), and ReuseRecord lets the
+      stdlib reader avoid re-allocating the per-record []string backing
+      array on every call. Each record is cloned before storage because
+      ReuseRecord aliases — the strings inside are fresh (immutable)
+      but the slice header isn't.
+    name: readAllPreSized
+    params: br *bytes.Reader, data []byte
+    results: records [][]string, err error
+  - doc: |-
+      extractRecords coerces v into a [][]string, accepting both direct and
+      pointer forms.
+    name: extractRecords
+    params: v any
+    results: records [][]string, ok bool
+imports:
+  bytes: bytes
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corecsv: github.com/kitsunium/sdk/internal/core/data/codec/csv
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  stdcsv: encoding/csv
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/csv
+  name: csv
+  purpose: Package csv wraps encoding/csv as a codec.Codec implementation.
+types:
+  - doc: |-
+      csvCodec is the concrete Codec implementation for CSV. The escapeFormulas
+      field toggles the CSV-injection mitigation documented by OWASP: cells that
+      begin with '=', '+', '-', '@', TAB, or CR are prefixed with a single quote
+      so Excel / LibreOffice / Google Sheets do not evaluate them as formulas.
+      See NewWithEscape for the recommended opt-in path.
+    fields:
+      - doc: |-
+          escapeFormulas gates the OWASP CSV-injection mitigation. When true,
+          Marshal rewrites any cell starting with a formula-trigger byte by
+          prefixing it with "'" so downstream spreadsheet apps render the cell
+          as text. When false (the default), cells pass through verbatim so
+          the wire format is lossless for round-trip use.
+        name: escapeFormulas
+        type: bool
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*csvCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*csvCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*csvCodec"
+        results: "[]string"
+      - doc: Marshal serialises a [][]string into RFC 4180 CSV bytes.
+        name: Marshal
+        params: v any
+        recv: c *csvCodec
+        results: encoded []byte, err error
+      - doc: |-
+          Append encodes records into CSV bytes and appends them to dst.
+          Implements the optional codec.Appender interface so hot-path callers
+          (multi-table exports, paginated dumps) can stream CSV records into
+          a recycled buffer without an intermediate allocation per call.
+          Delegates to Marshal so the type-gate + escape-formula + wrap/error
+          contract has a single source.
+        name: Append
+        params: dst []byte, v any
+        recv: c *csvCodec
+        results: appended []byte, err error
+      - doc: Unmarshal parses data as CSV into *[][]string.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*csvCodec"
+        results: error
+    name: csvCodec
+vars:
+  - doc: |-
+      Package-level vars: the Marshal-buffer pool plus the singleton
+      registered with core/data/codec at package load.
+    grouped: true
+    items:
+      - doc: |-
+          : Codec is the CSV singleton, registered with core/data/codec at package
+          : load. Binding the registration result to a named var is more
+          : idiomatic than `var _ = codec.Register(...)` and keeps us clear of
+          : init(). The singleton has escapeFormulas=false for wire-format
+          : fidelity — consumers whose output is read by a spreadsheet
+          : application should use NewWithEscape(true) instead.
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&csvCodec{})
+    name: Codec

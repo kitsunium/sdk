@@ -1,0 +1,69 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: algorithm is the canonical registry key for Ed25519.
+    items:
+      - name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"ed25519\""
+    name: algorithm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - algorithm
+      - Signer
+      - ed25519Signer
+      - ed25519Signer.Algorithm
+      - ed25519Signer.GenerateKey
+      - ed25519Signer.Sign
+      - ed25519Signer.Verify
+    name: ed25519sig.go
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  ed25519: crypto/ed25519
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig
+  name: ed25519sig
+  purpose: Package ed25519sig registers the "ed25519" signature scheme (ADR 0013).
+types:
+  - doc: ed25519Signer implements core/crypto.Signer over crypto/ed25519.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: ed25519Signer
+        results: corecrypto.Algorithm
+      - doc: |-
+          GenerateKey draws a fresh Ed25519 keypair from crypto/rand. The only realistic
+          failure is a host entropy fault.
+        name: GenerateKey
+        recv: ed25519Signer
+        results: pub, priv []byte, err error
+      - doc: |-
+          Sign produces a 64-byte detached signature over message using priv. A priv of
+          the wrong length returns SigningFailed rather than panicking (ed25519.Sign
+          panics on a bad key length).
+        name: Sign
+        params: priv, message []byte
+        recv: ed25519Signer
+        results: sig []byte, err error
+      - doc: |-
+          Verify reports whether sig is a valid Ed25519 signature for message under pub.
+          A pub of the wrong length is reported as false (ed25519.Verify panics on a bad
+          public-key length), as is any invalid signature.
+        name: Verify
+        params: pub, message, sig []byte
+        recv: ed25519Signer
+        results: bool
+    name: ed25519Signer
+vars:
+  - doc: |-
+      Signer is the registered Ed25519 scheme singleton (no init(); package-level
+      var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: Signer
+        value: corecrypto.RegisterSigner(ed25519Signer{})
+    name: Signer

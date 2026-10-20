@@ -1,0 +1,61 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - fanoutSink
+      - New
+      - (*fanoutSink).Write
+      - (*fanoutSink).Flush
+      - (*fanoutSink).Close
+    name: multi.go
+functions:
+  - name: New
+    params: branches ...corelogger.Sink
+    results: corelogger.Sink
+imports:
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coremulti: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi
+  name: multi
+  purpose: Package multi implements a fanout Sink that broadcasts each Write to a fixed list of downstream sinks.
+types:
+  - doc: |-
+      fanoutSink dispatches every Write call to all branch sinks in order. The
+      branches slice is owned by the fanout sink — callers MUST NOT mutate it
+      after construction.
+    fields:
+      - doc: branches receives every Write / Flush / Close invocation in order.
+        name: branches
+        type: "[]corelogger.Sink"
+    kind: struct
+    methods:
+      - doc: |-
+          Write dispatches p to every branch sink in order and aggregates any
+          per-sink failures via errors.Join wrapped in the FanoutWriteFailed
+          sentinel.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *fanoutSink
+        results: n int, err error
+      - doc: |-
+          Flush forwards the call to every distinct branch and aggregates per-branch
+          errors. A sink reused across multiple branch slots (V33) is flushed once.
+        name: Flush
+        params: ctx context.Context
+        recv: s *fanoutSink
+        results: error
+      - doc: |-
+          Close forwards the call to every distinct branch and aggregates per-branch
+          errors. A sink reused across multiple branch slots (V33) is closed once so a
+          non-idempotent terminal sink does not surface a spurious double-close error.
+        name: Close
+        recv: s *fanoutSink
+        results: error
+    name: fanoutSink

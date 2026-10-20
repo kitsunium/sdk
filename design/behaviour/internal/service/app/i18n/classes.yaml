@@ -1,0 +1,1118 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The three constants the qvalue grammar is written in.
+    grouped: true
+    items:
+      - doc: |-
+          qualityScale is the number of fraction digits RFC 9110 §12.4.2 allows —
+          exactly three, which is why an integer in thousandths is exact rather
+          than an approximation of the float.
+        name: qualityScale
+        type: int
+        value: "3"
+      - doc: digitBase is ten, because that is what a decimal DIGIT is worth.
+        name: digitBase
+        type: int
+        value: "10"
+      - doc: qualityParam is the one parameter name this header defines.
+        name: qualityParam
+        type: string
+        value: "\"q\""
+      - doc: |-
+          integerPartLen is the width of a qvalue with no fraction at all: "0"
+          and "1" are complete qvalues.
+        name: integerPartLen
+        type: int
+        value: "1"
+      - doc: |-
+          decimalPointOffset is where the "." sits in "0.ddd", and
+          fractionOffset is where the digits start.
+        name: decimalPointOffset
+        type: int
+        value: "1"
+      - name: fractionOffset
+        type: int
+        value: "2"
+    name: qualityScale
+  - doc: |-
+      exitConfig matches sysexits EX_CONFIG (78), the status
+      corei18n.CatalogLoadFailed carries: a catalogue that cannot be read is
+      refused forever, and the fix is a deployment or a catalogue edit.
+    items:
+      - name: exitConfig
+        type: int
+        value: "78"
+    name: exitConfig
+  - doc: |-
+      expectedCatalogueKeys sizes the decode map. It is a HINT and never a bound:
+      a catalogue with more keys grows the map exactly as it would have without
+      it, and one with fewer wastes a few buckets at startup. Sixty-four is a
+      small application's whole message set and a large one's first page.
+    items:
+      - name: expectedCatalogueKeys
+        type: int
+        value: "64"
+    name: expectedCatalogueKeys
+  - doc: |-
+      maxRanges bounds how many Accept-Language elements one header contributes.
+
+      A header is written by a stranger and can be arbitrarily long; parsing all
+      of it would let a client spend the server's time on its own behalf. Thirty
+      two is far past what any real client sends — browsers send between one and
+      six — and the elements beyond it are IGNORED rather than treated as an
+      error, because failing a request over a peculiar header is the mistake this
+      whole file is written to avoid.
+    items:
+      - name: maxRanges
+        type: int
+        value: "32"
+    name: maxRanges
+  - doc: |-
+      defaultQuality is the weight of an element that carries no "q" parameter.
+      RFC 9110 §12.4.2 fixes it at 1.
+    items:
+      - name: defaultQuality
+        type: int
+        value: "1000"
+    name: defaultQuality
+  - doc: wildcardRange is the one range RFC 4647 §3.4 says to skip during Lookup.
+    items:
+      - name: wildcardRange
+        type: string
+        value: "\"*\""
+    name: wildcardRange
+  - doc: |-
+      braces is the set the compiler scans for. Everything else in a pattern is
+      literal, including "%", "$", "#" and every other character another
+      templating syntax would have claimed.
+    items:
+      - name: braces
+        type: string
+        value: "\"{}\""
+    name: braces
+  - doc: "escapeLen is the width of a doubled brace: two bytes in, one byte out."
+    items:
+      - name: escapeLen
+        type: int
+        value: "2"
+    name: escapeLen
+  - doc: |-
+      The numbers CLDR's clauses are written against. They are named rather than
+      inlined because a rule table is exactly the kind of code where a stray digit
+      is invisible: "i % 100 != 12..14" and "i % 100 != 11..14" differ by one
+      character and by one language.
+    grouped: true
+    items:
+      - doc: |-
+          million is the modulus CLDR's Romance `many` clause is written against.
+          It is the compact-decimal category — "1 million", "2 milhões" — and it
+          is the only place in this table where a clause about e (the compact
+          exponent) is implemented at e = 0. See [PluralValue] and ADR 0063 §D1.
+        name: million
+        type: uint64
+        value: "1_000_000"
+      - doc: |-
+          tenModulus and hundredModulus are the two operands every Slavic and
+          Semitic clause is written over.
+        name: tenModulus
+        type: uint64
+        value: "10"
+      - name: hundredModulus
+        type: uint64
+        value: "100"
+      - doc: singularValue and dualValue are the exact quantities Arabic names.
+        name: singularValue
+        type: uint64
+        value: "1"
+      - name: dualValue
+        type: uint64
+        value: "2"
+      - doc: |-
+          slavicFewLow..slavicFewHigh is "i % 10 = 2..4", the Polish and Russian
+          `few` clause.
+        name: slavicFewLow
+        type: uint64
+        value: "2"
+      - name: slavicFewHigh
+        type: uint64
+        value: "4"
+      - doc: slavicManyLow..slavicManyHigh is "i % 10 = 5..9", shared by both.
+        name: slavicManyLow
+        type: uint64
+        value: "5"
+      - name: slavicManyHigh
+        type: uint64
+        value: "9"
+      - doc: |-
+          polishTeenLow..teenHigh is "i % 100 = 12..14" — the exception that
+          pulls 12, 13 and 14 out of `few` and into `many`.
+        name: polishTeenLow
+        type: uint64
+        value: "12"
+      - name: teenHigh
+        type: uint64
+        value: "14"
+      - doc: |-
+          russianTeenLow is 11: Russian's `many` clause starts one lower than
+          Polish's, which is the whole difference between 11 in the two
+          languages.
+        name: russianTeenLow
+        type: uint64
+        value: "11"
+      - doc: arabicFewLow..arabicFewHigh is "n % 100 = 3..10".
+        name: arabicFewLow
+        type: uint64
+        value: "3"
+      - name: arabicFewHigh
+        type: uint64
+        value: "10"
+      - doc: |-
+          arabicManyLow is the start of "n % 100 = 11..99"; its upper bound is
+          the modulus itself, so it needs no constant.
+        name: arabicManyLow
+        type: uint64
+        value: "11"
+    name: million
+  - doc: |-
+      chainSeparator joins the languages a failed lookup tried, for the operator's
+      field.
+    items:
+      - name: chainSeparator
+        type: string
+        value: "\" \""
+    name: chainSeparator
+  - doc: |-
+      The subtag shapes the parser places by length; whether a subtag's
+      characters are right for its position is corei18n.NewTag's to judge.
+    grouped: true
+    items:
+      - doc: |-
+          maxTagBytes is the length of "fil-Hant-419", the longest canonical form
+          the subset can produce. A longer input is an extension or a variant,
+          refused whole before it is split.
+        name: maxTagBytes
+        type: int
+        value: len("fil-Hant-419")
+      - doc: maxSubtags is language + script + region.
+        name: maxSubtags
+        type: int
+        value: "3"
+      - doc: scriptSubtagLen is the ISO 15924 script subtag length, always 4.
+        name: scriptSubtagLen
+        type: int
+        value: "4"
+      - doc: alphaRegionLen is the ISO 3166-1 alpha-2 region length.
+        name: alphaRegionLen
+        type: int
+        value: "2"
+      - doc: digitRegionLen is the UN M.49 numeric region length.
+        name: digitRegionLen
+        type: int
+        value: "3"
+    name: maxTagBytes
+files:
+  - decls:
+      - qualityScale
+      - parseAcceptLanguage
+      - parseElement
+      - parseWeight
+      - parseQuality
+      - wholeQuality
+      - fractionQuality
+      - fractionDigits
+      - validRange
+      - isRangeByte
+    name: accept.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - EntryValue
+      - Catalogue
+      - Plain
+      - PluralForms
+    name: entry_value.go
+  - decls:
+      - exitConfig
+      - failLoad
+    name: errors.go
+  - decls:
+      - expectedCatalogueKeys
+      - LoadFS
+      - readCatalogues
+      - tagFromFilename
+      - readCatalogue
+      - entriesFrom
+      - entryFrom
+      - countedEntry
+    name: load.go
+  - decls:
+      - NewMessage
+      - NewPluralMessage
+      - compileForms
+      - compileSorted
+    name: message.go
+  - decls:
+      - maxRanges
+      - defaultQuality
+      - wildcardRange
+      - element
+      - (*Negotiator).lookup
+      - refused
+      - subtagPrefixFold
+      - sortByQuality
+    name: negotiate.go
+  - decls:
+      - Negotiator
+      - NewNegotiator
+      - (*Negotiator).Supported
+      - (*Negotiator).Negotiate
+      - (*Negotiator).selectTag
+    name: negotiator.go
+  - decls:
+      - braces
+      - escapeLen
+      - compilePattern
+      - compileBraced
+    name: pattern.go
+  - decls:
+      - patternCompiler
+      - (*patternCompiler).step
+      - (*patternCompiler).placeholder
+      - (*patternCompiler).flush
+      - (*patternCompiler).done
+    name: pattern_compiler.go
+  - decls:
+      - million
+      - formsOtherOnly
+      - Rules
+      - SupportedTags
+      - supportedList
+      - requireRules
+      - pluralGermanic
+      - pluralFrench
+      - pluralSpanish
+      - pluralItalian
+      - pluralPortuguese
+      - pluralEuropeanPortuguese
+      - isRomanceMany
+      - pluralPolish
+      - isSlavicFew
+      - isSlavicManyTail
+      - pluralRussian
+      - pluralArabic
+    name: plural.go
+  - decls:
+      - PluralValue
+      - PluralValue.Forms
+      - PluralValue.Select
+      - PluralValue.Valid
+    name: plural_value.go
+  - decls:
+      - chainSeparator
+      - Printer
+      - NewPrinter
+      - (*Printer).Tag
+      - (*Printer).Render
+      - (*Printer).RenderCount
+      - (*Printer).resolve
+      - (*Printer).notFound
+    name: printer.go
+  - decls:
+      - link
+      - buildChain
+      - appendLineage
+      - hasLink
+    name: printer_link.go
+  - decls:
+      - Store
+      - NewStore
+      - compileCatalogues
+      - compileCatalogue
+      - compileEntry
+      - compilePlain
+      - compileCounted
+      - parseForms
+      - requireComplete
+      - sortedTagKeys
+      - sortedTags
+      - compareTags
+      - (*Store).Lookup
+      - (*Store).Tags
+      - (*Store).Keys
+      - (*Store).Fallback
+      - (*Store).Missing
+    name: store.go
+  - decls:
+      - _
+    name: store_compliance.go
+  - decls:
+      - maxTagBytes
+      - ParseTag
+      - placeSubtags
+    name: tag.go
+functions:
+  - doc: |-
+      parseAcceptLanguage appends every usable element of header to dst and
+      returns it. It never fails: an element it cannot use is skipped.
+
+      The grammar is RFC 9110 §12.5.4:
+
+      	Accept-Language = #( language-range [ weight ] )
+      	weight          = OWS ";" OWS "q=" qvalue
+      	qvalue          = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3"0" ] )
+
+      Skipped, each deliberately and each with a test: an empty element (the
+      trailing comma every hand-written header eventually grows), a range with a
+      character outside the BCP 47 alphabet, a malformed qvalue ("q=2", "q=abc",
+      "q=0.5000"), and an element carrying any parameter other than q. Skipping
+      rather than failing is the whole posture — see [Negotiator.Negotiate].
+    name: parseAcceptLanguage
+    params: header string, dst []element
+    results: "[]element"
+  - doc: parseElement parses one "range[;q=weight]" element.
+    name: parseElement
+    params: raw string, order int
+    results: elem element, ok bool
+  - doc: |-
+      parseWeight parses the parameter section of an element, which must be
+      exactly one "q=" parameter.
+    name: parseWeight
+    params: params string
+    results: quality int, ok bool
+  - doc: |-
+      parseQuality parses an RFC 9110 qvalue into thousandths.
+
+      The grammar is narrow and this implementation is exactly as narrow: "2" is
+      refused, "0.5000" is refused (four fraction digits), and "1.5" is refused
+      because the grammar allows only zeros after a leading 1. A wider parser
+      would accept a header the sender's own stack would have refused, and the two
+      would disagree about what the client asked for.
+    name: parseQuality
+    params: text string
+    results: quality int, ok bool
+  - doc: wholeQuality maps the integer part of a qvalue to thousandths.
+    name: wholeQuality
+    params: whole byte
+    results: int
+  - doc: fractionQuality parses the fraction digits of a qvalue.
+    name: fractionQuality
+    params: whole byte, frac string
+    results: quality int, ok bool
+  - doc: |-
+      fractionDigits reads up to qualityScale ASCII digits as an integer in
+      thousandths, padding the absent positions with zero so "8" is 800.
+    name: fractionDigits
+    params: frac string
+    results: value int, ok bool
+  - doc: |-
+      validRange reports whether text is a language range this parser will carry.
+
+      The alphabet is ASCII letters, digits, "-" and "*" — the BCP 47 subtag
+      alphabet plus RFC 4647's wildcard. Anything else is not a range any client
+      meant to send, and carrying it would only give the matcher something that
+      cannot match.
+    name: validRange
+    params: text string
+    results: bool
+  - doc: isRangeByte reports whether b may appear in a language range.
+    name: isRangeByte
+    params: b byte
+    results: bool
+  - name: Plain
+    params: text string
+    results: EntryValue
+  - name: PluralForms
+    params: forms map[string]string
+    results: EntryValue
+  - doc: |-
+      failLoad wraps a filesystem or codec cause onto
+      [corei18n.CatalogLoadFailed], keeping the cause IN THE CHAIN rather than
+      flattening it into a field.
+
+      That distinction is the whole reason this helper exists instead of a
+      String("cause", err.Error()): a caller needs to tell "there is no catalogue
+      directory" from "the catalogue will not compile", and the only thing that
+      answers that is errors.Is(err, fs.ErrNotExist). Rendering the cause into a
+      field loses it — the text survives and the sentinel does not. Same shape and
+      same reason as internal/service/data/vfs.failRead.
+    name: failLoad
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - name: LoadFS
+    params: fsys fs.FS, dir string, format codec.Format, fallback corei18n.TagValue
+    results: store *Store, err error
+  - doc: readCatalogues decodes every regular file in entries into a catalogue.
+    name: readCatalogues
+    params: fsys fs.FS, dir string, entries []fs.DirEntry, decoder codec.Codec
+    results: catalogues map[corei18n.TagValue]Catalogue, err error
+  - doc: tagFromFilename parses the base name of a catalogue file into a [corei18n.TagValue].
+    name: tagFromFilename
+    params: name string
+    results: tag corei18n.TagValue, err error
+  - doc: |-
+      readCatalogue reads one file and converts its decoded shape into a
+      [Catalogue].
+    name: readCatalogue
+    params: fsys fs.FS, name string, decoder codec.Codec
+    results: catalogue Catalogue, err error
+  - doc: entriesFrom converts a decoded catalogue file into [EntryValue] values.
+    name: entriesFrom
+    params: file string, raw map[string]any
+    results: catalogue Catalogue, err error
+  - doc: |-
+      entryFrom converts one decoded value into an [EntryValue].
+
+      Exactly two shapes are accepted. Anything else — a number, a boolean, a
+      list, a nested map — is refused BY SHAPE rather than coerced, because every
+      coercion here has a plausible wrong answer: a YAML `1.0` is a float and
+      would become "1", a `no` is a boolean and would become "false", and both
+      would render as a translation the file does not contain.
+    name: entryFrom
+    params: file, key string, value any
+    results: entry EntryValue, err error
+  - doc: countedEntry converts a decoded nested object into a counted [EntryValue].
+    name: countedEntry
+    params: file, key string, forms map[string]any
+    results: entry EntryValue, err error
+  - name: NewMessage
+    params: text string
+    results: message corei18n.MessageValue, err error
+  - name: NewPluralMessage
+    params: forms map[corei18n.Form]string
+    results: message corei18n.MessageValue, err error
+  - doc: |-
+      compileForms compiles every category in forms except corei18n.FormOther,
+      sorted ascending so the stored order does not depend on Go's map iteration
+      and two identical catalogues compile to identical messages.
+    name: compileForms
+    params: forms map[corei18n.Form]string
+    results: compiled []corei18n.FormPatternValue, err error
+  - doc: |-
+      compileSorted compiles the already-ordered categories, skipping the
+      mandatory one its caller has already compiled.
+    name: compileSorted
+    params: kinds []corei18n.Form, forms map[corei18n.Form]string
+    results: compiled []corei18n.FormPatternValue, err error
+  - doc: |-
+      refused reports whether any zero-weight element refuses tag, by RFC 4647
+      §3.3.1 basic filtering: the range is a subtag-prefix of the tag.
+    name: refused
+    params: elems []element, tag corei18n.TagValue
+    results: bool
+  - doc: |-
+      subtagPrefixFold reports whether prefix is whole, or is whole truncated at a
+      subtag boundary, comparing ASCII case-insensitively.
+
+      "en" is a subtag prefix of "en-GB" and of "EN"; it is not one of "eng",
+      because "eng" is a different language and a prefix test that ignored the
+      boundary would make it one.
+    name: subtagPrefixFold
+    params: whole, prefix string
+    results: bool
+  - doc: |-
+      sortByQuality orders elems by descending quality, keeping header order for
+      ties.
+
+      It is an insertion sort rather than sort.SliceStable because the input is at
+      most maxRanges long and lives in the caller's stack array: handing it to
+      sort.Interface would move it to the heap and put an allocation on the
+      request path to sort six elements.
+    name: sortByQuality
+    params: elems []element
+  - name: NewNegotiator
+    params: supported []corei18n.TagValue, fallback corei18n.TagValue
+    results: negotiator *Negotiator, err error
+  - doc: |-
+      compilePattern parses text into a compiled [corei18n.PatternValue], or
+      returns [corei18n.InvalidPattern].
+
+      # The syntax, and everything it deliberately is not
+
+      A pattern is literal text with named placeholders: "You have {count} new
+      {kind} messages". A literal brace is written "{{" or "}}". That is the
+      entire grammar.
+
+      Refused BY NAME, each because the alternative is a language:
+
+        - Positional placeholders ("{0}", "%s", "%1$s"). A translator reorders a
+          sentence — that is most of the job — and a positional argument that
+          moves changes meaning silently. A name cannot.
+        - Format specifiers ("{count:03d}", "%.2f"). This domain does not format
+          numbers (see corei18n.Args); a specifier would announce that it does.
+        - Nested or select constructs — ICU MessageFormat's "{n, plural, one{…}}"
+          and "{gender, select, …}". Plural selection here is the corei18n.Form
+          the renderer picks from the language's own CLDR rules, so the message
+          body never has to encode a rule; and ICU MessageFormat is a parser
+          inside a translation file, which is a place nobody reviews a parser.
+        - Function or filter calls ("{name|upper}"). Case mapping is language
+          dependent — Turkish dotless i is the standing example — and this domain
+          ships no case mapper, so it must not appear to.
+        - Comments, whitespace trimming, and conditionals.
+
+      A pattern is compiled ONCE, when the catalogue is built. A render never
+      parses, which is both why a malformed translation fails at startup and why
+      the hot path has nothing to fail at. The compiled value — and the grammar a
+      placeholder NAME is held to, corei18n.ValidPlaceholder — are the core's;
+      reading the text is this package's (ADR 0160: a wire format is a mechanism).
+    name: compilePattern
+    params: text string
+    results: compiled corei18n.PatternValue, err error
+  - doc: compileBraced compiles a pattern that contains at least one brace.
+    name: compileBraced
+    params: text string
+    results: compiled corei18n.PatternValue, err error
+  - name: Rules
+    params: tag corei18n.TagValue
+    results: plural PluralValue, ok bool
+  - name: SupportedTags
+    results: "[]corei18n.TagValue"
+  - doc: |-
+      supportedList renders [SupportedTags] as a space-separated string for an
+      error field.
+    name: supportedList
+    results: string
+  - doc: |-
+      requireRules resolves tag or returns [corei18n.UnsupportedLanguage] naming it and the
+      supported set.
+    name: requireRules
+    params: tag corei18n.TagValue
+    results: plural PluralValue, err error
+  - doc: |-
+      pluralGermanic is the rule shared by English, German and Dutch.
+
+      CLDR (en, de, nl): one: i = 1 and v = 0; other.
+
+      The "v = 0" half is why [corei18n.CountValue] carries a display precision: "1.0
+      files" is `other` in English, and a rule that read only the value could not
+      tell it from "1 file".
+    name: pluralGermanic
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      pluralFrench is the rule of French.
+
+      CLDR (fr): one: i = 0,1; many: e = 0 and i != 0 and i % 1000000 = 0 and
+      v = 0 or e != 0..5; other.
+
+      The `many` clause is implemented at e = 0: this domain ships no
+      compact-decimal formatter, so the exponent operand is 0 for every quantity
+      that can reach here and the "or e != 0..5" half can never fire.
+    name: pluralFrench
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      pluralSpanish is the rule of Spanish.
+
+      CLDR (es): one: n = 1; many: e = 0 and i != 0 and i % 1000000 = 0 and v = 0
+      or e != 0..5; other.
+
+      Its singular is written on n rather than on i and v, so "1,0" IS `one` in
+      Spanish where "1.0" is `other` in English. The two clauses look
+      interchangeable and are not.
+
+      The `many` clause is implemented at e = 0 — see [pluralFrench].
+    name: pluralSpanish
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      pluralItalian is the rule of Italian.
+
+      CLDR (it): one: i = 1 and v = 0; many: e = 0 and i != 0 and
+      i % 1000000 = 0 and v = 0 or e != 0..5; other.
+
+      The `many` clause is implemented at e = 0 — see [pluralFrench].
+    name: pluralItalian
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      pluralPortuguese is the rule of Portuguese as CLDR spells `pt`.
+
+      CLDR (pt): one: i = 0..1; many: e = 0 and i != 0 and i % 1000000 = 0 and
+      v = 0 or e != 0..5; other.
+
+      The `many` clause is implemented at e = 0 — see [pluralFrench].
+    name: pluralPortuguese
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      pluralEuropeanPortuguese is the rule of Portuguese as CLDR spells `pt_PT`.
+
+      CLDR (pt_PT): one: i = 1 and v = 0; many: e = 0 and i != 0 and
+      i % 1000000 = 0 and v = 0 or e != 0..5; other.
+
+      It differs from [pluralPortuguese] in the singular alone — "0 ficheiros" is
+      `other` in Portugal and `one` in Brazil — and it is the reason [Rules]
+      resolves the exact tag before the language subtag. Folding the two would
+      change the article in front of every zero on a European Portuguese page.
+
+      The `many` clause is implemented at e = 0 — see [pluralFrench].
+    name: pluralEuropeanPortuguese
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      isRomanceMany implements the compact-decimal `many` clause shared by fr, es,
+      it and pt, restricted to e = 0: i != 0 and i % 1000000 = 0 and v = 0.
+    name: isRomanceMany
+    params: count corei18n.CountValue
+    results: bool
+  - doc: |-
+      pluralPolish is the rule of Polish.
+
+      CLDR (pl):
+
+      	one:  i = 1 and v = 0
+      	few:  v = 0 and i % 10 = 2..4 and i % 100 != 12..14
+      	many: v = 0 and i != 1 and i % 10 = 0..1
+      	      or v = 0 and i % 10 = 5..9
+      	      or v = 0 and i % 100 = 12..14
+      	other
+
+      Every clause carries "v = 0", so any quantity with visible decimals is
+      `other` — 1,5 pliku. This is the shape an English-rules fallback gets wrong
+      on nearly every number: 2, 3 and 4 are `few`, 5 through 21 are `many`, and
+      English has neither category.
+    name: pluralPolish
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      isSlavicFew implements "i % 10 = 2..4 and i % 100 != teenLow..14", the `few`
+      clause Polish and Russian share except for where their teen exception
+      starts.
+    name: isSlavicFew
+    params: mod10, mod100, teenLow uint64
+    results: bool
+  - doc: |-
+      isSlavicManyTail implements the two `many` sub-clauses Polish and Russian
+      share: "i % 10 = 5..9" or "i % 100 = teenLow..14".
+    name: isSlavicManyTail
+    params: mod10, mod100, teenLow uint64
+    results: bool
+  - doc: |-
+      pluralRussian is the rule of Russian.
+
+      CLDR (ru):
+
+      	one:  v = 0 and i % 10 = 1 and i % 100 != 11
+      	few:  v = 0 and i % 10 = 2..4 and i % 100 != 12..14
+      	many: v = 0 and i % 10 = 0
+      	      or v = 0 and i % 10 = 5..9
+      	      or v = 0 and i % 100 = 11..14
+      	other
+
+      It differs from Polish where it looks identical: 21 is `one` in Russian and
+      `many` in Polish, and 0 is `many` in both but by different clauses.
+    name: pluralRussian
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - doc: |-
+      pluralArabic is the rule of Arabic, and the only entry in this table that
+      uses all six categories.
+
+      CLDR (ar):
+
+      	zero: n = 0
+      	one:  n = 1
+      	two:  n = 2
+      	few:  n % 100 = 3..10
+      	many: n % 100 = 11..99
+      	other
+
+      Its clauses are written on n rather than on i and v, so a quantity with a
+      non-zero fraction matches none of them and is `other` — 3,5 is not `few`.
+    name: pluralArabic
+    params: count corei18n.CountValue
+    results: corei18n.Form
+  - name: NewPrinter
+    params: catalog corei18n.Catalog, tag corei18n.TagValue
+    results: printer *Printer, err error
+  - doc: buildChain assembles the resolution order and resolves each step's rules.
+    name: buildChain
+    params: catalog corei18n.Catalog, tag corei18n.TagValue
+    results: chain []link, err error
+  - doc: |-
+      appendLineage appends tag and each of its parents to chain, skipping any
+      already present and resolving each one's plural rules.
+    name: appendLineage
+    params: chain []link, tag corei18n.TagValue
+    results: extended []link, err error
+  - doc: hasLink reports whether chain already looks tag up.
+    name: hasLink
+    params: chain []link, tag corei18n.TagValue
+    results: bool
+  - name: NewStore
+    params: fallback corei18n.TagValue, catalogues map[corei18n.TagValue]Catalogue
+    results: store *Store, err error
+  - doc: |-
+      compileCatalogues compiles every language's entries, in a deterministic
+      order so the FIRST defect reported for a given input is always the same one.
+    name: compileCatalogues
+    params: catalogues map[corei18n.TagValue]Catalogue
+    results: compiled map[corei18n.TagValue]map[corei18n.Key]corei18n.MessageValue, err error
+  - doc: compileCatalogue compiles one language's entries.
+    name: compileCatalogue
+    params: tag corei18n.TagValue, catalogue Catalogue
+    results: messages map[corei18n.Key]corei18n.MessageValue, err error
+  - doc: |-
+      compileEntry validates a key, compiles its patterns and — for a counted
+      entry — checks it against the language's own categories.
+    name: compileEntry
+    params: tag corei18n.TagValue, key corei18n.Key, entry EntryValue, rules PluralValue
+    results: message corei18n.MessageValue, err error
+  - doc: compilePlain compiles an uncounted entry.
+    name: compilePlain
+    params: tag corei18n.TagValue, key corei18n.Key, text string
+    results: message corei18n.MessageValue, err error
+  - doc: |-
+      compileCounted compiles a counted entry and checks it against the
+      categories the language's rules can produce.
+    name: compileCounted
+    params: tag corei18n.TagValue, key corei18n.Key, forms map[string]string, rules PluralValue
+    results: message corei18n.MessageValue, err error
+  - doc: |-
+      parseForms turns the CLDR category NAMES a catalogue file carries into
+      [corei18n.Form] values.
+    name: parseForms
+    params: tag corei18n.TagValue, key corei18n.Key, forms map[string]string
+    results: byForm map[corei18n.Form]string, err error
+  - doc: |-
+      requireComplete reports [corei18n.TranslationIncomplete] for the first category the
+      language's rules can produce and the message does not carry.
+    name: requireComplete
+    params: tag corei18n.TagValue, key corei18n.Key, message corei18n.MessageValue, rules PluralValue
+    results: error
+  - doc: sortedTagKeys returns a catalogue map's languages in canonical order.
+    name: sortedTagKeys
+    params: catalogues map[corei18n.TagValue]Catalogue
+    results: "[]corei18n.TagValue"
+  - doc: sortedTags returns the compiled map's languages in canonical order.
+    name: sortedTags
+    params: compiled map[corei18n.TagValue]map[corei18n.Key]corei18n.MessageValue
+    results: "[]corei18n.TagValue"
+  - doc: compareTags orders two tags by their canonical spelling.
+    name: compareTags
+    params: a, b corei18n.TagValue
+    results: int
+  - name: ParseTag
+    params: text string
+    results: tag corei18n.TagValue, err error
+  - doc: |-
+      placeSubtags assigns the subtags after the language to the script and the
+      region positions, in the only order BCP 47 permits: a four-character subtag
+      is the script, and only before a region; a two- or three-character one is
+      the region, and only once. Anything else — a variant, an extension
+      singleton, a private-use marker, a repeated or an out-of-order subtag — has
+      no position in the subset, and placed is false.
+    name: placeSubtags
+    params: rest []string
+    results: script, region string, placed bool
+imports:
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corei18n: github.com/kitsunium/sdk/internal/core/app/i18n
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+  maps: maps
+  path: path
+  slices: slices
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/i18n
+  name: i18n
+  purpose: Package i18n — the RFC 9110 Accept-Language header parser.
+types:
+  - fields:
+      - doc: |-
+          Pattern is the message body when the entry is not counted. It is
+          ignored when Forms is non-nil.
+        name: Pattern
+        type: string
+      - doc: |-
+          Forms maps CLDR category names — "zero", "one", "two", "few", "many",
+          "other" — to patterns. A non-nil Forms marks the entry counted, even
+          when it holds a single category.
+        name: Forms
+        type: map[string]string
+    kind: struct
+    name: EntryValue
+  - kind: named
+    name: Catalogue
+    underlying: map[corei18n.Key]EntryValue
+  - doc: element is one parsed Accept-Language entry.
+    fields:
+      - doc: text is the language range, with parameters and whitespace removed.
+        name: text
+        type: string
+      - doc: |-
+          quality is the q parameter in thousandths, so the comparison is
+          integer: "q=0.8" is 800. A float would sort two headers that differ
+          only in trailing zeros differently on some inputs, for no benefit.
+        name: quality
+        type: int
+      - doc: |-
+          order is the element's position in the header, which breaks quality
+          ties. RFC 9110 gives no tie rule; header order is the only information
+          available and is what every client intends.
+        name: order
+        type: int
+    kind: struct
+    name: element
+  - fields:
+      - doc: supported is the set a negotiation may return, in the caller's order.
+        name: supported
+        type: "[]corei18n.TagValue"
+      - doc: fallback is returned when nothing in the header matches.
+        name: fallback
+        type: corei18n.TagValue
+    kind: struct
+    methods:
+      - doc: |-
+          lookup implements RFC 4647 §3.4 over the supported set: the longest
+          supported tag that equals a truncation of the range.
+
+          Truncating the range and comparing is the same relation as asking whether
+          the tag is a subtag-prefix of the range, so this needs no parsing and no
+          allocation at all — which is why a negotiation costs no garbage per request.
+        name: lookup
+        params: rangeText string
+        recv: n *Negotiator
+        results: best corei18n.TagValue, ok bool
+      - name: Supported
+        recv: n *Negotiator
+        results: "[]corei18n.TagValue"
+      - name: Negotiate
+        params: header string
+        recv: n *Negotiator
+        results: corei18n.TagValue
+      - doc: |-
+          selectTag walks the sorted elements and returns the first supported tag a
+          positive-weight range selects and no zero-weight range refuses.
+        name: selectTag
+        params: elems []element
+        recv: n *Negotiator
+        results: corei18n.TagValue
+    name: Negotiator
+  - doc: |-
+      patternCompiler accumulates the spans of one pattern. It exists so the
+      literal run and the placeholder list are advanced by named steps rather than
+      by a closure capturing three variables.
+    fields:
+      - doc: parts is the span list being built.
+        name: parts
+        type: "[]corei18n.PartValue"
+      - doc: lit accumulates the literal run that has not been flushed yet.
+        name: lit
+        type: strings.Builder
+    kind: struct
+    methods:
+      - doc: |-
+          step consumes the brace construct starting at pos and reports how many bytes
+          it occupied.
+        name: step
+        params: text string, pos int
+        recv: c *patternCompiler
+        results: advance int, err error
+      - doc: placeholder consumes "{name}" at pos.
+        name: placeholder
+        params: text string, pos int
+        recv: c *patternCompiler
+        results: advance int, err error
+      - doc: flush moves the accumulated literal run into the span list.
+        name: flush
+        recv: c *patternCompiler
+      - doc: done flushes the trailing literal and returns the compiled pattern.
+        name: done
+        recv: c *patternCompiler
+        results: compiled corei18n.PatternValue, err error
+    name: patternCompiler
+  - fields:
+      - doc: |-
+          forms is the set of categories this language's rules can produce,
+          ascending by Form value. It is what NewStore checks a plural message
+          against, so an incomplete translation is refused at load.
+        name: forms
+        type: "[]corei18n.Form"
+      - doc: |-
+          rule picks the category for a quantity. It is nil for a language with
+          no plural distinction at all — Japanese, Chinese — where a function
+          returning a constant would be that constant written the long way.
+        name: rule
+        type: corei18n.PluralRule
+    kind: struct
+    methods:
+      - name: Forms
+        recv: p PluralValue
+        results: "[]corei18n.Form"
+      - name: Select
+        params: count corei18n.CountValue
+        recv: p PluralValue
+        results: corei18n.Form
+      - name: Valid
+        recv: p PluralValue
+        results: bool
+    name: PluralValue
+  - fields:
+      - doc: |-
+          catalog is the message source. It is the port, not the concrete Store,
+          so a caller can render from anything that implements it.
+        name: catalog
+        type: corei18n.Catalog
+      - doc: |-
+          tag is the language that was requested — what a caller puts in
+          Content-Language or an html lang attribute.
+        name: tag
+        type: corei18n.TagValue
+      - doc: chain is the resolution order, most specific first.
+        name: chain
+        type: "[]link"
+    kind: struct
+    methods:
+      - name: Tag
+        recv: p *Printer
+        results: corei18n.TagValue
+      - name: Render
+        params: key corei18n.Key, args corei18n.Args
+        recv: p *Printer
+        results: rendered string, err error
+      - name: RenderCount
+        params: key corei18n.Key, count corei18n.CountValue, args corei18n.Args
+        recv: p *Printer
+        results: rendered string, err error
+      - doc: |-
+          resolve walks the chain and returns the first message found together with
+          the plural rules of the language that held it.
+        name: resolve
+        params: key corei18n.Key
+        recv: p *Printer
+        results: message corei18n.MessageValue, rules PluralValue, ok bool
+      - doc: |-
+          notFound builds the [corei18n.MessageNotFound] refusal, naming the key and
+          the languages that were tried.
+        name: notFound
+        params: key corei18n.Key
+        recv: p *Printer
+        results: error
+    name: Printer
+  - doc: |-
+      link is one step of a [Printer]'s resolution chain: a language to look in,
+      paired with the plural rules of THAT language.
+
+      Pairing them is the whole design. When the English message answers a Polish
+      request, the form must be selected with English rules, because the English
+      message carries `one` and `other` and nothing else — see the package comment
+      of internal/core/app/i18n.
+    fields:
+      - doc: tag is the language to look the key up in.
+        name: tag
+        type: corei18n.TagValue
+      - doc: rules are that language's CLDR plural rules, resolved once.
+        name: rules
+        type: PluralValue
+    kind: struct
+    name: link
+  - fields:
+      - doc: |-
+          fallback is the language a key is looked for in when the requested one
+          does not hold it. It is never the zero tag: NewStore refuses that.
+        name: fallback
+        type: corei18n.TagValue
+      - doc: byTag holds one compiled message map per language.
+        name: byTag
+        type: map[corei18n.TagValue]map[corei18n.Key]corei18n.MessageValue
+      - doc: tags is the sorted key set of byTag, computed once.
+        name: tags
+        type: "[]corei18n.TagValue"
+    kind: struct
+    methods:
+      - name: Lookup
+        params: tag corei18n.TagValue, key corei18n.Key
+        recv: s *Store
+        results: message corei18n.MessageValue, ok bool
+      - name: Tags
+        recv: s *Store
+        results: "[]corei18n.TagValue"
+      - name: Keys
+        params: tag corei18n.TagValue
+        recv: s *Store
+        results: "[]corei18n.Key"
+      - name: Fallback
+        recv: s *Store
+        results: corei18n.TagValue
+      - name: Missing
+        params: tag corei18n.TagValue
+        recv: s *Store
+        results: "[]corei18n.Key"
+    name: Store
+vars:
+  - doc: |-
+      The category sets, shared by the languages that agree on them. They are
+      package-level so the table holds one slice header per family rather than one
+      backing array per language.
+    grouped: true
+    items:
+      - doc: |-
+          formsOtherOnly is the set of a language with no plural distinction at
+          all — Japanese, Chinese.
+        name: formsOtherOnly
+        value: "[]corei18n.Form{corei18n.FormOther}"
+      - doc: formsOneOther is the Germanic set.
+        name: formsOneOther
+        value: "[]corei18n.Form{corei18n.FormOther, corei18n.FormOne}"
+      - doc: |-
+          formsOneManyOther is the Romance set, whose `many` is the
+          compact-decimal category.
+        name: formsOneManyOther
+        value: "[]corei18n.Form{corei18n.FormOther, corei18n.FormOne, corei18n.FormMany}"
+      - doc: formsSlavic is the Polish and Russian set.
+        name: formsSlavic
+        value: "[]corei18n.Form{corei18n.FormOther, corei18n.FormOne, corei18n.FormFew, corei18n.FormMany}"
+      - doc: formsArabic is the only set in this table that uses all six.
+        name: formsArabic
+        value: |-
+          []corei18n.Form{
+          		corei18n.FormOther, corei18n.FormZero, corei18n.FormOne,
+          		corei18n.FormTwo, corei18n.FormFew, corei18n.FormMany,
+          	}
+      - doc: |-
+          rulesByTag is the supported set, keyed by CANONICAL TAG.
+
+          Resolution is exact-tag first, then the bare language subtag, so "fr-CA"
+          finds "fr" and "pt-PT" finds its own entry rather than "pt"'s — CLDR
+          gives European Portuguese a different singular from Brazilian, and
+          collapsing them would be the same silent substitution the whole table
+          exists to refuse.
+
+          The keys are the INPUT of a lookup — a tag a request or a filename
+          carried — not an enumeration the SDK owns, which is why they are
+          strings.
+        name: rulesByTag
+        value: |-
+          map[string]PluralValue{
+          		"ar":    {forms: formsArabic, rule: pluralArabic},
+          		"de":    {forms: formsOneOther, rule: pluralGermanic},
+          		"en":    {forms: formsOneOther, rule: pluralGermanic},
+          		"es":    {forms: formsOneManyOther, rule: pluralSpanish},
+          		"fr":    {forms: formsOneManyOther, rule: pluralFrench},
+          		"it":    {forms: formsOneManyOther, rule: pluralItalian},
+          		"ja":    {forms: formsOtherOnly},
+          		"nl":    {forms: formsOneOther, rule: pluralGermanic},
+          		"pl":    {forms: formsSlavic, rule: pluralPolish},
+          		"pt":    {forms: formsOneManyOther, rule: pluralPortuguese},
+          		"pt-PT": {forms: formsOneManyOther, rule: pluralEuropeanPortuguese},
+          		"ru":    {forms: formsSlavic, rule: pluralRussian},
+          		"zh":    {forms: formsOtherOnly},
+          	}
+    name: formsOtherOnly
+  - doc: The three interfaces a Store satisfies.
+    grouped: true
+    items:
+      - name: _
+        type: corei18n.Catalog
+        value: (*Store)(nil)
+      - name: _
+        type: corei18n.KeyLister
+        value: (*Store)(nil)
+      - name: _
+        type: corei18n.Fallbacker
+        value: (*Store)(nil)
+    name: _

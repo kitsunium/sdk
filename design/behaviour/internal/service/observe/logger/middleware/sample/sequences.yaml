@@ -1,0 +1,56 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - opt:
+          do:
+            - return: nil, coresample.RateInvalid
+          when: rate <= 0
+      - opt:
+          do:
+            - return: nil, coresample.DownstreamNil
+          when: downstream == nil
+      - return: "&sampleSink{downstream: downstream, rate: uint64(rate)}, nil"
+  - of: (*sampleSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sampleSink).Write
+        kind: self
+      - id: s.counter.Add
+        kind: value
+      - id: s.downstream.Write
+        kind: value
+    steps:
+      - bind: count
+        eval: s.counter.Add(1)
+        to: s.counter.Add
+      - opt:
+          do:
+            - return: s.downstream.Write(ctx, rec, p)
+              to: s.downstream.Write
+          when: count%s.rate == 0
+      - return: 0, nil
+  - of: (*sampleSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sampleSink).Flush
+        kind: self
+      - id: s.downstream.Flush
+        kind: value
+    steps:
+      - return: s.downstream.Flush(ctx)
+        to: s.downstream.Flush
+  - of: (*sampleSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sampleSink).Close
+        kind: self
+      - id: s.downstream.Close
+        kind: value
+    steps:
+      - return: s.downstream.Close()
+        to: s.downstream.Close

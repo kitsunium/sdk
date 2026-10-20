@@ -1,0 +1,261 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      FlameRoot is the name of a flame graph's root frame, which stands for the
+      whole profile.
+    items:
+      - name: FlameRoot
+        type: string
+        value: "\"root\""
+    name: FlameRoot
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - FlameRoot
+      - FoldedValue
+      - OwnerCostValue
+      - FunctionCostValue
+      - FlameNodeValue
+    name: folded.go
+  - decls:
+      - GoroutineValue
+      - GoroutineGroupValue
+    name: goroutine.go
+  - decls:
+      - ProfileValue
+      - SampleTypeValue
+      - SampleValue
+      - FrameValue
+    name: profile.go
+imports:
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/profiling
+  name: profiling
+  purpose: "Package profiling — range 0.3.89.*, allocated to the engine (ADR 0121 service/observe/profiling block) and declared here since ADR 0160: the engine returns these and declares none."
+types:
+  - fields:
+      - doc: |-
+          Flame is the flame graph, rooted at [FlameRoot], its children the
+          outermost frames; nil when Total is zero.
+        name: Flame
+        type: "*FlameNodeValue"
+      - doc: Owners holds each owner's cost, the costliest first.
+        name: Owners
+        type: "[]OwnerCostValue"
+      - doc: |-
+          Top holds the costliest functions: by flat cost, then cumulative, then
+          name.
+        name: Top
+        type: "[]FunctionCostValue"
+      - doc: SampleType is what was folded.
+        name: SampleType
+        type: SampleTypeValue
+      - doc: Total is the sum of every sample's value.
+        name: Total
+        type: int64
+      - doc: |-
+          Unattributed is the part of Total charged to nobody. Total is exactly
+          Unattributed plus every owner's Value.
+        name: Unattributed
+        type: int64
+    kind: struct
+    name: FoldedValue
+  - fields:
+      - doc: Owner is the name Attribute returned.
+        name: Owner
+        type: string
+      - doc: Top holds the owner's costliest functions.
+        name: Top
+        type: "[]FunctionCostValue"
+      - doc: Value is the sum of the samples charged to the owner.
+        name: Value
+        type: int64
+    kind: struct
+    name: OwnerCostValue
+  - fields:
+      - doc: Function is the function's name, as the runtime spells it.
+        name: Function
+        type: string
+      - doc: File and StartLine say where it is defined, when the profile knows.
+        name: File
+        type: string
+      - doc: Flat is the cost of samples whose innermost frame is the function.
+        name: Flat
+        type: int64
+      - doc: |-
+          Cum is the cost of samples with the function anywhere on the stack,
+          each sample counted once however many times the function recurses.
+        name: Cum
+        type: int64
+      - doc: StartLine is the function's first line; zero when unknown.
+        name: StartLine
+        type: int
+    kind: struct
+    name: FunctionCostValue
+  - fields:
+      - doc: Name is the function's name; [FlameRoot] for the root.
+        name: Name
+        type: string
+      - doc: Children are the functions it called, costliest first.
+        name: Children
+        type: "[]*FlameNodeValue"
+      - doc: Value is the cost of every sample through this path.
+        name: Value
+        type: int64
+    kind: struct
+    name: FlameNodeValue
+  - fields:
+      - doc: Labels are the goroutine's pprof labels.
+        name: Labels
+        type: map[string]string
+      - doc: |-
+          CreatedBy is the frame of the go statement that started the goroutine;
+          zero for the main goroutine and for those the runtime starts itself.
+        name: CreatedBy
+        type: FrameValue
+      - doc: |-
+          State is the runtime's word for what the goroutine does: "running",
+          "runnable", "syscall", or what it waits on — "select", "chan receive",
+          "IO wait", "sleep", "sync.Mutex.Lock".
+        name: State
+        type: string
+      - doc: Stack is the goroutine's stack, innermost frame first.
+        name: Stack
+        type: "[]FrameValue"
+      - doc: |-
+          Waiting is how long the goroutine has been blocked, to the minute the
+          runtime reports; zero under a minute or when it is not blocked.
+        name: Waiting
+        type: time.Duration
+      - doc: ID is the goroutine's number.
+        name: ID
+        type: int64
+      - doc: |-
+          Creator is the number of the goroutine that ran the go statement; zero
+          when the dump does not say.
+        name: Creator
+        type: int64
+      - doc: LockedToThread says the goroutine is locked to its OS thread.
+        name: LockedToThread
+        type: bool
+    kind: struct
+    name: GoroutineValue
+  - fields:
+      - doc: |-
+          Labels holds the grouping labels the goroutines carry, by key; a key
+          they do not carry is absent.
+        name: Labels
+        type: map[string]string
+      - doc: State is the goroutines' state.
+        name: State
+        type: string
+      - doc: |-
+          Top is the innermost frame that is not the runtime's own machinery —
+          the code that asked to wait — or the innermost frame when every frame
+          is the runtime's.
+        name: Top
+        type: string
+      - doc: Stack is one member's stack, innermost first.
+        name: Stack
+        type: "[]FrameValue"
+      - doc: Count is how many goroutines share the group.
+        name: Count
+        type: int
+    kind: struct
+    name: GoroutineGroupValue
+  - fields:
+      - doc: |-
+          Time is when the collection started; zero when the profile does not
+          say.
+        name: Time
+        type: time.Time
+      - doc: |-
+          SampleTypes names what each of a sample's values measures, in order:
+          {cpu nanoseconds}, {inuse_space bytes}.
+        name: SampleTypes
+        type: "[]SampleTypeValue"
+      - doc: Samples are the measured stacks.
+        name: Samples
+        type: "[]SampleValue"
+      - doc: Comments are the profile's free-text comments.
+        name: Comments
+        type: "[]string"
+      - doc: |-
+          PeriodType and Period say how often a sample is taken: every Period
+          PeriodType — 10 000 000 nanoseconds of CPU, 524 288 bytes allocated.
+        name: PeriodType
+        type: SampleTypeValue
+      - doc: |-
+          DefaultSampleType is the sample type a viewer shows first; empty when
+          the profile does not say, and the last sample type is the convention.
+        name: DefaultSampleType
+        type: string
+      - doc: Duration is how long the collection lasted; zero when not recorded.
+        name: Duration
+        type: time.Duration
+      - doc: Period is the sampling period, in PeriodType's unit.
+        name: Period
+        type: int64
+    kind: struct
+    name: ProfileValue
+  - fields:
+      - doc: "Type is what is measured: \"cpu\", \"samples\", \"inuse_space\"."
+        name: Type
+        type: string
+      - doc: "Unit is its unit: \"nanoseconds\", \"count\", \"bytes\"."
+        name: Unit
+        type: string
+    kind: struct
+    name: SampleTypeValue
+  - fields:
+      - doc: |-
+          Labels are the pprof labels of the goroutine, by key: set with
+          pprof.Do or pprof.SetGoroutineLabels. A CPU profile carries them; a
+          heap profile does not.
+        name: Labels
+        type: map[string][]string
+      - doc: |-
+          NumLabels are the numeric labels, by key — a heap sample's "bytes",
+          the size of each object it counts.
+        name: NumLabels
+        type: map[string][]int64
+      - doc: |-
+          Stack is the sample's call stack, innermost frame first. A call the
+          compiler inlined is a frame of its own, before the frame it was
+          inlined into.
+        name: Stack
+        type: "[]FrameValue"
+      - doc: Values holds one value per ProfileValue.SampleTypes entry.
+        name: Values
+        type: "[]int64"
+    kind: struct
+    name: SampleValue
+  - fields:
+      - doc: |-
+          Function is the function's name as the runtime spells it —
+          "pkg.(*T).Method", "pkg.F.func1", "pkg.G[...]" — or empty for a frame
+          no symbol was found for.
+        name: Function
+        type: string
+      - doc: File is the function's source file, as recorded when it was compiled.
+        name: File
+        type: string
+      - doc: Line is the line executing in this frame; zero when unknown.
+        name: Line
+        type: int
+      - doc: |-
+          StartLine is the line the function starts at; zero when unknown, and
+          always zero in a goroutine dump, which does not print it.
+        name: StartLine
+        type: int
+      - doc: |-
+          Address is the program counter of an unsymbolized frame; zero
+          otherwise.
+        name: Address
+        type: uint64
+    kind: struct
+    name: FrameValue

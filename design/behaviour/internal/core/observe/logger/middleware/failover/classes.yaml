@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover
+  name: failover
+  purpose: "Package failover declares the codes and sentinels of the logger's failover middleware, internal/service/observe/logger/middleware/failover: range 0.3.19.*, allocated to that engine (ADR 0005 service/observe/logger/middleware/failover block) and declared here since ADR 0160, so the engine declares none."
+types: []

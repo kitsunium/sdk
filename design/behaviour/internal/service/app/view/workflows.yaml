@@ -1,0 +1,55 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: unconditionalCalls
+    steps:
+      - var:
+          name: called
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: called
+                    value: append(called, call.Name)
+                init:
+                  bind: call, isCall
+                  eval: node.(*parse.TemplateNode)
+                when: isCall
+          key: _
+          range: list.Nodes
+          value: node
+      - return: called
+  - of: reachesItself
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: callee == origin
+            - opt:
+                do:
+                  - continue: true
+                when: seen[callee]
+            - set: seen[callee]
+              value: "true"
+            - opt:
+                do:
+                  - return: "true"
+                when: reachesItself(origin, callee, calls, seen)
+          key: _
+          range: calls[current]
+          value: callee
+      - return: "false"
+  - of: reachableStruct
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: reachable(field.Type, visiting)
+          key: field
+          range: typ.Fields()
+      - return: "false"

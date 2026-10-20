@@ -1,0 +1,223 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - PeerIdentityValue
+      - SPKI
+      - Verify
+      - Identity
+      - FilesConfig
+      - materialInvalid
+      - NewIdentity
+      - LoadReloadable
+      - sanOf
+      - modTime
+      - readPair
+      - (*Identity).reload
+      - seen
+      - (*Identity).Certificate
+      - (*Identity).Leaf
+      - (*Identity).Roots
+      - (*Identity).ReloadFailures
+      - (*Identity).verifyPeer
+      - (*Identity).base
+      - (*Identity).ServerConfig
+      - (*Identity).ClientConfig
+      - PeerOf
+      - Deadline
+    name: identity.go
+  - decls:
+      - Load
+      - readMaterial
+      - wrapMaterial
+    name: tlsid.go
+functions:
+  - name: SPKI
+    params: c *x509.Certificate
+    results: "[32]byte"
+  - doc: |-
+      materialInvalid is the one refusal of unusable TLS material: it names the
+      field at fault and why, and never the material itself.
+    name: materialInvalid
+    params: field, why string
+    results: error
+  - name: NewIdentity
+    params: get func() (*tls.Certificate, error), roots *x509.CertPool
+    results: "*Identity, error"
+  - name: LoadReloadable
+    params: f FilesConfig
+    results: "*Identity, error"
+  - doc: |-
+      sanOf flattens a certificate's URI and DNS SANs into one comparable
+      string, so a reload can refuse a renewal that names anything else.
+    name: sanOf
+    params: c *x509.Certificate
+    results: string
+  - doc: |-
+      modTime is the newest modification time among files; a file that cannot
+      be stated does not count, so a transient absence never triggers a reload.
+    name: modTime
+    params: files ...string
+    results: time.Time
+  - doc: |-
+      readPair loads a certificate and its key and parses the leaf, refusing a
+      pair that does not match.
+    name: readPair
+    params: certFile, keyFile string
+    results: "*tls.Certificate, *x509.Certificate, error"
+  - doc: |-
+      seen reports whether a roots file's bytes were already merged, so the
+      same file read again does not grow the pool.
+    name: seen
+    params: all [][]byte, b []byte
+    results: bool
+  - name: PeerOf
+    params: cs tls.ConnectionState
+    results: PeerIdentityValue, bool
+  - name: Deadline
+    params: peer PeerIdentityValue, opened time.Time, maxAge time.Duration
+    results: time.Time
+  - name: Load
+    params: p corenet.IdentityFileParams
+    results: id corenet.IdentityValue, err error
+  - doc: |-
+      readMaterial reads one optional PEM file, distinguishing "not configured"
+      from "configured but unreadable".
+    name: readMaterial
+    params: path, field string
+    results: raw []byte, err error
+  - doc: |-
+      wrapMaterial reports a material-loading failure as the core sentinel, so the
+      domain code survives whatever the filesystem returned.
+    name: wrapMaterial
+    params: cause error, field, path string
+    results: error
+imports:
+  atomic: sync/atomic
+  bytes: bytes
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  os: os
+  sha256: crypto/sha256
+  strings: strings
+  sync: sync
+  time: time
+  tls: crypto/tls
+  url: net/url
+  x509: crypto/x509
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/tlsid
+  name: tlsid
+  purpose: Package tlsid loads TLS and mutual-TLS material into the opaque, redacting identity declared by internal/core/net (ADR 0029).
+types:
+  - fields:
+      - doc: Leaf is the peer's verified certificate.
+        name: Leaf
+        type: "*x509.Certificate"
+      - doc: |-
+          Chain is the chain the standard verifier built, leaf first; empty
+          when tls.ConnectionState.VerifiedChains is, as under the identity's
+          own VerifyConnection, which verifies the chain itself (see PeerOf).
+        name: Chain
+        type: "[]*x509.Certificate"
+      - doc: SPKI is the SHA-256 of the leaf's SubjectPublicKeyInfo.
+        name: SPKI
+        type: "[32]byte"
+      - doc: URIs are the leaf's URI SANs.
+        name: URIs
+        type: "[]*url.URL"
+      - doc: "NotAfter is when the leaf expires: a connection is closed by then."
+        name: NotAfter
+        type: time.Time
+    kind: struct
+    name: PeerIdentityValue
+  - kind: named
+    name: Verify
+    underlying: func(peer PeerIdentityValue) error
+  - fields:
+      - name: get
+        type: func() (*tls.Certificate, error)
+      - name: roots
+        type: atomic.Pointer[x509.CertPool]
+      - name: failures
+        type: atomic.Int64
+      - doc: For an identity read from files.
+        name: mu
+        type: sync.Mutex
+      - name: files
+        type: "*FilesConfig"
+      - name: cur
+        type: "*tls.Certificate"
+      - name: spki
+        type: "[32]byte"
+      - name: san
+        type: string
+      - name: stamp
+        type: time.Time
+      - name: refusedAt
+        type: time.Time
+      - name: checked
+        type: time.Time
+      - name: rootsSeen
+        type: "[][]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          reload is the file identity's source: at most every Files.Every it looks
+          at the files, and swaps in a renewal that keeps the key and the SAN.
+        name: reload
+        recv: id *Identity
+        results: "*tls.Certificate, error"
+      - name: Certificate
+        recv: id *Identity
+        results: "*tls.Certificate, error"
+      - name: Leaf
+        recv: id *Identity
+        results: "*x509.Certificate, error"
+      - name: Roots
+        recv: id *Identity
+        results: "*x509.CertPool"
+      - name: ReloadFailures
+        recv: id *Identity
+        results: int64
+      - doc: |-
+          verifyPeer runs the full x509 verification, roots and extended key usage,
+          before the caller's check reads anything of the certificate (ADR 0174 D1).
+        name: verifyPeer
+        params: cs tls.ConnectionState, usage x509.ExtKeyUsage, check Verify
+        recv: id *Identity
+        results: error
+      - doc: |-
+          base is the configuration both ends share: TLS 1.3 only, no session
+          resumption, and the certificate asked of the identity at every handshake
+          so a reload is picked up without rebuilding the config.
+        name: base
+        recv: id *Identity
+        results: "*tls.Config"
+      - name: ServerConfig
+        params: check Verify
+        recv: id *Identity
+        results: "*tls.Config"
+      - name: ClientConfig
+        params: check Verify
+        recv: id *Identity
+        results: "*tls.Config"
+    name: Identity
+  - fields:
+      - doc: CertFile holds the certificate, its chain may follow it.
+        name: CertFile
+        type: string
+      - doc: KeyFile holds its private key.
+        name: KeyFile
+        type: string
+      - doc: RootsFile holds the roots, trusted as RootCAs AND ClientCAs.
+        name: RootsFile
+        type: string
+      - doc: Every bounds how often the files are looked at; 0 is one second.
+        name: Every
+        type: time.Duration
+    kind: struct
+    name: FilesConfig

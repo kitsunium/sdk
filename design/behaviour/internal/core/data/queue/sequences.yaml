@@ -1,0 +1,118 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: PolicyValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: PolicyValue.Validate
+        kind: self
+      - id: errs
+        kind: package
+      - id: p.validateRetryGrowth
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+                			errs.String("field", "VisibilityTimeout"),
+                			errs.Int64("value_ns", int64(p.VisibilityTimeout)))
+              to: errs
+          when: p.VisibilityTimeout <= 0 || p.VisibilityTimeout > MaxDeadlineOffset
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+                			errs.String("field", "MaxDeliveries"), errs.Int("value", p.MaxDeliveries))
+              to: errs
+          when: p.MaxDeliveries <= 0
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+                			errs.String("field", "MaxMessageBytes"), errs.Int("value", p.MaxMessageBytes))
+              to: errs
+          when: p.MaxMessageBytes < 0
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+                			errs.String("field", "RetryDelay"),
+                			errs.Int64("value_ns", int64(p.RetryDelay)))
+              to: errs
+          when: p.RetryDelay > MaxDeadlineOffset
+      - return: p.validateRetryGrowth()
+        to: p.validateRetryGrowth
+  - of: PolicyValue.validateRetryGrowth
+    participants:
+      - id: caller
+        kind: actor
+      - id: PolicyValue.validateRetryGrowth
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: p.MaxRetryDelay == 0
+      - var:
+          name: problem
+          type: string
+      - switch:
+          cases:
+            - case: p.MaxRetryDelay < 0
+              do:
+                - set: problem
+                  value: "\"negative\""
+            - case: p.MaxRetryDelay > MaxDeadlineOffset
+              do:
+                - set: problem
+                  value: "\"past MaxDeadlineOffset\""
+            - case: p.RetryDelay <= 0
+              do:
+                - set: problem
+                  value: "\"no RetryDelay to grow from\""
+            - case: p.MaxRetryDelay < p.RetryDelay
+              do:
+                - set: problem
+                  value: "\"below RetryDelay\""
+            - default: true
+              do:
+                - return: nil
+      - return: |-
+          errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+          		errs.String("field", "MaxRetryDelay"), errs.String("problem", problem),
+          		errs.Int64("value_ns", int64(p.MaxRetryDelay)))
+        to: errs
+  - of: PolicyValue.Normalized
+    steps:
+      - opt:
+          do:
+            - set: p.RetryDelay
+              value: "0"
+          when: p.RetryDelay < 0
+      - opt:
+          do:
+            - set: p.MaxMessageBytes
+              value: DefaultMaxMessageBytes
+          when: p.MaxMessageBytes == 0
+      - return: p
+  - of: DoNotRetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: DoNotRetry
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code: CodeNotRetryable, Reason: "NOT_RETRYABLE",
+          		Public:   "The message cannot be processed and was dead-lettered without a retry",
+          		Private:  "core/data/queue: a handler declared a failure no retry can fix; the engine dead-letters the message at once with the handler's own cause",
+          		ExitCode: exitDataErr,
+          	})
+        to: errs

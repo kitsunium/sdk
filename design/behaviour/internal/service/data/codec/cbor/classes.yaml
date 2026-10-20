@@ -1,0 +1,3281 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The properties a decode plan can have.
+    grouped: true
+    items:
+      - doc: |-
+          planBinary is set when *T implements encoding.BinaryUnmarshaler: a
+          byte string is handed to UnmarshalBinary.
+        name: planBinary
+        type: planFlag
+        value: 1 << iota
+      - doc: |-
+          planNullable is set for slices, maps, pointers and interfaces, which
+          null sets to nil; null leaves any other value as it is.
+        name: planNullable
+      - doc: |-
+          planKeyCheck is set when a map's key type can hold a value Go cannot
+          hash — an interface inside it — so each key is checked first.
+        name: planKeyCheck
+    name: planBinary
+  - doc: The range a float of seconds must fall in to be an epoch time.
+    grouped: true
+    items:
+      - doc: "maxEpochSeconds is 2^63: from there up, the seconds overflow an int64."
+        name: maxEpochSeconds
+        type: float64
+        value: 0x1p63
+      - doc: nanosPerSecond scales a fraction of a second to nanoseconds.
+        name: nanosPerSecond
+        type: float64
+        value: "1e9"
+    name: maxEpochSeconds
+  - doc: The thresholds of a struct's field lookup.
+    grouped: true
+    items:
+      - doc: |-
+          linearLookupMax is the field count up to which a key is looked up by
+          scanning the fields, which beats hashing it.
+        name: linearLookupMax
+        type: int
+        value: "8"
+      - doc: smallFieldSet is how many fields a bit set on the stack can track.
+        name: smallFieldSet
+        type: int
+        value: "64"
+    name: linearLookupMax
+  - doc: The reading policy of the stream decoder.
+    grouped: true
+    items:
+      - doc: minReadSize is the least free space handed to a Read.
+        name: minReadSize
+        type: int
+        value: "512"
+      - doc: |-
+          maxEmptyReads is how many Reads may return no byte and no error before
+          the reader is treated as stuck, as bufio treats one.
+        name: maxEmptyReads
+        type: int
+        value: "100"
+    name: minReadSize
+  - doc: |-
+      maxIndirections bounds the pointers and interfaces followed between two
+      containers. A chain that long is a cycle — an interface holding a pointer
+      to itself — and not data.
+    items:
+      - name: maxIndirections
+        type: int
+        value: "32"
+    name: maxIndirections
+  - doc: The bookkeeping of a map's order.
+    grouped: true
+    items:
+      - doc: |-
+          smallMapPairs is how many pairs a map can have before the bookkeeping
+          of its order leaves the stack, and before an insertion sort stops
+          beating the general one.
+        name: smallMapPairs
+        type: int
+        value: "16"
+      - doc: |-
+          keyPrefixBytes is how many leading bytes of an encoded key are compared
+          as one integer before the whole keys are.
+        name: keyPrefixBytes
+        type: int
+        value: "8"
+    name: smallMapPairs
+  - doc: "maxHeadBytes is the longest head: an initial byte and eight argument bytes."
+    items:
+      - name: maxHeadBytes
+        type: int
+        value: "9"
+    name: maxHeadBytes
+  - doc: privatePrefix opens every Private line this package writes.
+    items:
+      - name: privatePrefix
+        type: string
+        value: "\"service/data/codec/cbor: \""
+    name: privatePrefix
+  - doc: The struct tags a field's key and options are read from, and the options.
+    grouped: true
+    items:
+      - doc: cborTagKey is the struct tag read first.
+        name: cborTagKey
+        type: string
+        value: "\"cbor\""
+      - doc: jsonTagKey is the struct tag read when a field has no cbor tag.
+        name: jsonTagKey
+        type: string
+        value: "\"json\""
+      - doc: skipTagName excludes a field from the wire.
+        name: skipTagName
+        type: string
+        value: "\"-\""
+      - doc: optionOmitEmpty omits a field whose value encodes as an empty CBOR item.
+        name: optionOmitEmpty
+        type: string
+        value: "\"omitempty\""
+      - doc: optionOmitZero omits a field holding its type's zero value.
+        name: optionOmitZero
+        type: string
+        value: "\"omitzero\""
+      - doc: optionKeyAsInt keys a field by the integer its name spells.
+        name: optionKeyAsInt
+        type: string
+        value: "\"keyasint\""
+      - doc: optionToArray, on the blank field `_`, encodes the struct as an array.
+        name: optionToArray
+        type: string
+        value: "\"toarray\""
+      - doc: |-
+          structOptionsField is the blank field whose cbor tag carries the
+          struct-level options.
+        name: structOptionsField
+        type: string
+        value: "\"_\""
+    name: cborTagKey
+  - doc: The properties a struct field can have.
+    grouped: true
+    items:
+      - doc: flagKeyAsInt keys the field by its integer name.
+        name: flagKeyAsInt
+        type: fieldFlag
+        value: 1 << iota
+      - doc: |-
+          flagTagged is set when a tag named or configured the field, which makes
+          it dominate an untagged field of the same name at the same depth.
+        name: flagTagged
+      - doc: flagOmitEmpty is the omitempty option.
+        name: flagOmitEmpty
+      - doc: flagOmitZero is the omitzero option.
+        name: flagOmitZero
+    name: flagKeyAsInt
+  - doc: |-
+      The bounds every decode enforces before it allocates anything. They are
+      the values the codec has always enforced: an array or a map may hold a
+      million entries and nest thirty-two deep.
+    grouped: true
+    items:
+      - doc: maxCBORArrayElements caps the element count of any single array.
+        name: maxCBORArrayElements
+        type: int
+        value: 1 << 20
+      - doc: maxCBORMapPairs caps the pair count of any single map.
+        name: maxCBORMapPairs
+        type: int
+        value: 1 << 20
+      - doc: |-
+          maxCBORNestedLevels caps how deeply arrays, maps and tags may nest, each
+          counting one level. The encoder refuses to write deeper than it.
+        name: maxCBORNestedLevels
+        type: int
+        value: "32"
+      - doc: |-
+          maxCBORStringChunks caps the chunks of one indefinite-length string, the
+          same bound as an array's elements.
+        name: maxCBORStringChunks
+        type: int
+        value: 1 << 20
+    name: maxCBORArrayElements
+  - doc: What a frame of the validator's stack holds open.
+    grouped: true
+    items:
+      - doc: frameArray is an array, definite or indefinite.
+        name: frameArray
+        type: frameKind
+        value: iota
+      - doc: frameMap is a map, its items counted one per key and one per value.
+        name: frameMap
+      - doc: frameChunks is an indefinite-length string awaiting its chunks.
+        name: frameChunks
+      - doc: frameTag is a tag awaiting the one data item it encloses.
+        name: frameTag
+    name: frameArray
+  - doc: |-
+      The eight major types, already shifted into the high three bits of an
+      initial byte (RFC 8949 §3.1), so a head is `byte(major) | info`.
+    grouped: true
+    items:
+      - doc: "majorUnsigned is major type 0: an unsigned integer."
+        name: majorUnsigned
+        type: majorType
+        value: iota << majorShift
+      - doc: "majorNegative is major type 1: the negative integer −1−n."
+        name: majorNegative
+      - doc: "majorBytes is major type 2: a byte string."
+        name: majorBytes
+      - doc: "majorText is major type 3: a UTF-8 text string."
+        name: majorText
+      - doc: "majorArray is major type 4: an array of data items."
+        name: majorArray
+      - doc: "majorMap is major type 5: a map of pairs of data items."
+        name: majorMap
+      - doc: "majorTag is major type 6: a tag number and the data item it encloses."
+        name: majorTag
+      - doc: "majorSimple is major type 7: simple values and floating-point numbers."
+        name: majorSimple
+    name: majorUnsigned
+  - doc: The layout of an initial byte and the meaning of its low five bits.
+    grouped: true
+    items:
+      - doc: majorShift is where the major type sits in an initial byte.
+        name: majorShift
+        type: uint
+        value: "5"
+      - doc: majorMask selects the major type of an initial byte.
+        name: majorMask
+        type: byte
+        value: "0xe0"
+      - doc: infoMask selects the additional information of an initial byte.
+        name: infoMask
+        type: byte
+        value: "0x1f"
+      - doc: infoDirectMax is the largest argument the initial byte carries itself.
+        name: infoDirectMax
+        type: byte
+        value: "23"
+      - doc: |-
+          info1Byte announces a one-byte argument (and, in major type 7, a
+          simple value in the extension byte).
+        name: info1Byte
+        type: byte
+        value: "24"
+      - doc: info2Bytes announces a two-byte argument, or a half-precision float.
+        name: info2Bytes
+        type: byte
+        value: "25"
+      - doc: info4Bytes announces a four-byte argument, or a single-precision float.
+        name: info4Bytes
+        type: byte
+        value: "26"
+      - doc: info8Bytes announces an eight-byte argument, or a double-precision float.
+        name: info8Bytes
+        type: byte
+        value: "27"
+      - doc: |-
+          infoReservedMin is the first of the three values RFC 8949 §3 reserves:
+          an item using 28, 29 or 30 is not well-formed.
+        name: infoReservedMin
+        type: byte
+        value: "28"
+      - doc: infoReservedMax is the last reserved additional information value.
+        name: infoReservedMax
+        type: byte
+        value: "30"
+      - doc: |-
+          infoIndefinite is an indefinite length in major types 2 to 5, and the
+          "break" stop code in major type 7.
+        name: infoIndefinite
+        type: byte
+        value: "31"
+    name: majorShift
+  - doc: The four simple values RFC 8949 §3.3 assigns, consecutive from 20.
+    grouped: true
+    items:
+      - doc: simpleFalse is the simple value false.
+        name: simpleFalse
+        type: byte
+        value: iota + firstAssignedSimple
+      - doc: simpleTrue is the simple value true.
+        name: simpleTrue
+      - doc: simpleNull is the simple value null.
+        name: simpleNull
+      - doc: simpleUndefined is the simple value undefined, which decodes as null.
+        name: simpleUndefined
+    name: simpleFalse
+  - doc: The bounds around the assigned simple values.
+    grouped: true
+    items:
+      - doc: firstAssignedSimple is the first simple value RFC 8949 assigns, false.
+        name: firstAssignedSimple
+        type: byte
+        value: "20"
+      - doc: |-
+          minExtendedSimple is the smallest simple value the one-byte extension
+          may carry: below it the two-byte form is not well-formed.
+        name: minExtendedSimple
+        type: uint64
+        value: "32"
+    name: firstAssignedSimple
+  - doc: Single bytes and three-byte floats the encoder writes verbatim.
+    grouped: true
+    items:
+      - doc: nullByte is the encoded null.
+        name: nullByte
+        value: byte(majorSimple) | simpleNull
+      - doc: falseByte is the encoded false.
+        name: falseByte
+        value: byte(majorSimple) | simpleFalse
+      - doc: trueByte is the encoded true.
+        name: trueByte
+        value: byte(majorSimple) | simpleTrue
+      - doc: breakByte is the stop code closing an indefinite-length item.
+        name: breakByte
+        value: byte(majorSimple) | infoIndefinite
+      - doc: float16Head opens a half-precision float.
+        name: float16Head
+        value: byte(majorSimple) | info2Bytes
+      - doc: float32Head opens a single-precision float.
+        name: float32Head
+        value: byte(majorSimple) | info4Bytes
+      - doc: float64Head opens a double-precision float.
+        name: float64Head
+        value: byte(majorSimple) | info8Bytes
+      - doc: halfNaN is the one NaN the encoder writes, 0xf97e00 (RFC 8949 §4.2.2).
+        name: halfNaN
+        type: uint16
+        value: "0x7e00"
+      - doc: halfPosInf is +Infinity as a half-precision float.
+        name: halfPosInf
+        type: uint16
+        value: "0x7c00"
+      - doc: halfNegInf is −Infinity as a half-precision float.
+        name: halfNegInf
+        type: uint16
+        value: "0xfc00"
+    name: nullByte
+  - doc: The tag numbers this codec interprets; every other tag is transparent.
+    grouped: true
+    items:
+      - doc: tagDateTime encloses an RFC 3339 date/time text string (RFC 8949 §3.4.1).
+        name: tagDateTime
+        type: uint64
+        value: iota
+      - doc: tagEpoch encloses an epoch-based date/time number (RFC 8949 §3.4.2).
+        name: tagEpoch
+      - doc: tagPositiveBignum encloses the magnitude n of a bignum (RFC 8949 §3.4.3).
+        name: tagPositiveBignum
+      - doc: tagNegativeBignum encloses the n of the negative bignum −1−n.
+        name: tagNegativeBignum
+    name: tagDateTime
+  - doc: |-
+      The IEEE 754 binary16 and binary64 layouts the half-precision decoder maps
+      between (RFC 8949 Appendix D).
+    grouped: true
+    items:
+      - doc: halfSignBit selects the sign of a binary16.
+        name: halfSignBit
+        type: uint16
+        value: "0x8000"
+      - doc: halfMantissaBits is the width of a binary16 significand.
+        name: halfMantissaBits
+        type: uint
+        value: "10"
+      - doc: halfExponentMask selects the five exponent bits once shifted down.
+        name: halfExponentMask
+        type: uint16
+        value: "0x1f"
+      - doc: halfMantissaMask selects the ten significand bits of a binary16.
+        name: halfMantissaMask
+        type: uint16
+        value: "0x3ff"
+      - doc: halfExponentBias is the binary16 exponent bias.
+        name: halfExponentBias
+        type: uint64
+        value: "15"
+      - doc: "halfSubnormalExponent scales a subnormal binary16 significand: 2^−24."
+        name: halfSubnormalExponent
+        type: int
+        value: "-24"
+      - doc: doubleExponentBias is the binary64 exponent bias.
+        name: doubleExponentBias
+        type: uint64
+        value: "1023"
+      - doc: doubleMantissaBits is the width of a binary64 significand.
+        name: doubleMantissaBits
+        type: uint
+        value: "52"
+      - doc: doubleExponentAllOnes is the binary64 exponent of infinities and NaNs.
+        name: doubleExponentAllOnes
+        type: uint64
+        value: "0x7ff"
+      - doc: signShiftHalfToDouble moves the binary16 sign bit to the binary64 one.
+        name: signShiftHalfToDouble
+        type: uint
+        value: "48"
+      - doc: |-
+          mantissaShiftHalfToDouble left-aligns a binary16 significand in a
+          binary64 one, which keeps a NaN payload and its quiet bit.
+        name: mantissaShiftHalfToDouble
+        value: doubleMantissaBits - halfMantissaBits
+    name: halfSignBit
+files:
+  - decls:
+      - Codec
+      - cborCodec
+      - New
+      - (*cborCodec).Name
+      - (*cborCodec).MIMETypes
+      - (*cborCodec).Extensions
+      - (*cborCodec).Marshal
+      - (*cborCodec).Unmarshal
+      - (*cborCodec).Append
+      - (*cborCodec).NewEncoder
+      - (*cborCodec).NewDecoder
+      - keepScratch
+    name: codec.go
+  - decls:
+      - decodeStates
+      - decodeState
+      - sequence
+      - unmarshalItem
+      - (*decodeState).decodeTarget
+      - pointerTarget
+      - (*decodeState).peek
+      - (*decodeState).corrupt
+      - (*decodeState).note
+      - (*decodeState).mismatch
+      - (*decodeState).noteMismatch
+      - describeTarget
+      - describeHead
+      - describeSimple
+      - isNull
+      - (*decodeState).take
+      - (*decodeState).stringBytes
+      - (*decodeState).joinChunks
+      - (*decodeState).chunksLength
+      - (*decodeState).skip
+      - (*decodeState).skipString
+      - (*decodeState).skipEntries
+      - (*decodeState).skipUntilBreak
+      - newSequence
+      - (*decodeState).next
+      - (*decodeState).entryCount
+      - floatOf
+    name: decode.go
+  - decls:
+      - (*decodeState).decodeAny
+      - integerAny
+      - (*decodeState).stringAny
+      - (*decodeState).arrayAny
+      - (*decodeState).closeIndefinite
+      - (*decodeState).mapAny
+      - (*decodeState).textPair
+      - (*decodeState).keyAny
+      - (*decodeState).mapAnyGeneric
+      - untypedPairs
+      - (*decodeState).entryAny
+      - hashableAny
+      - mapHint
+      - (*decodeState).tagAny
+      - (*decodeState).timeAny
+      - (*decodeState).simpleAny
+      - (*decodeState).bignumContent
+    name: decode_any.go
+  - decls:
+      - byteSliceDecoder.decode
+      - (*decodeState).storeBytes
+      - (*decodeState).storeBignumBytes
+      - byteArrayDecoder.decode
+      - (*decodeState).copyBytes
+      - sliceDecoder.decode
+      - (*decodeState).fillSlice
+      - prepareSlice
+      - arrayDecoder.decode
+      - (*decodeState).fillArray
+      - (*decodeState).arrayElement
+      - zeroFrom
+      - mapDecoder.decode
+      - (*decodeState).knownMapEntries
+      - stringKeyedEntries
+      - stringKeyedEntry
+      - (*decodeState).anyEntry
+      - (*decodeState).textEntry
+      - (*decodeState).readText
+      - (*decodeState).mapEntries
+      - (*decodeState).mapEntry
+      - (*decodeState).keyUsable
+    name: decode_container.go
+  - decls:
+      - planBinary
+      - decodePlans
+      - decoder
+      - boolDecoder
+      - intDecoder
+      - uintDecoder
+      - floatDecoder
+      - stringDecoder
+      - timeDecoder
+      - bigIntDecoder
+      - rawDecoder
+      - refusedDecoder
+      - pointerDecoder
+      - emptyInterfaceDecoder
+      - interfaceDecoder
+      - byteSliceDecoder
+      - byteArrayDecoder
+      - sliceDecoder
+      - arrayDecoder
+      - mapDecoder
+      - structDecoder
+      - decodePlan
+      - planFlag
+      - decodePlanner
+      - decodePlanFor
+      - loadDecodePlan
+      - (*decodePlan).has
+      - (*decodePlanner).plan
+      - (*decodePlanner).fill
+      - interfaceKind
+      - (*decodePlanner).fillKind
+      - sliceKind
+      - arrayKind
+      - (*decodePlanner).fillPointer
+      - (*decodePlanner).fillMap
+      - mayHoldUnhashable
+      - structMayHoldUnhashable
+      - hashable
+      - allHashable
+      - (*decodeState).begin
+      - (*decodeState).skipTags
+      - (*decodeState).unmarshalBinary
+      - (*decodeState).noteCause
+      - addressedMethods
+      - rawDecoder.decode
+      - refusedDecoder.decode
+      - pointerDecoder.decode
+      - (*decodeState).peekPastTags
+      - emptyInterfaceDecoder.decode
+      - interfaceDecoder.decode
+    name: decode_plan.go
+  - decls:
+      - maxEpochSeconds
+      - boolDecoder.decode
+      - intDecoder.decode
+      - uintDecoder.decode
+      - floatDecoder.decode
+      - stringDecoder.decode
+      - (*decodeState).signedValue
+      - (*decodeState).unsignedValue
+      - (*decodeState).floatValue
+      - (*decodeState).bignumFloat
+      - (*decodeState).readBignum
+      - bigInt64
+      - bigUint64
+      - timeDecoder.decode
+      - (*decodeState).timeValue
+      - (*decodeState).epochTime
+      - (*decodeState).textTime
+      - (*decodeState).floatTime
+      - (*decodeState).skipAllTags
+      - bigIntDecoder.decode
+      - (*decodeState).bigValue
+      - setValue
+    name: decode_scalar.go
+  - decls:
+      - linearLookupMax
+      - stringType
+      - decodeFields
+      - decodeField
+      - fieldSet
+      - (*decodePlanner).fillStruct
+      - (*decodeFields).indexNames
+      - (*decodeFields).byText
+      - (*decodeFields).exact
+      - (*decodeFields).folded
+      - (*decodeFields).byInt
+      - newFieldSet
+      - (*fieldSet).has
+      - (*fieldSet).add
+      - structDecoder.decode
+      - (*decodeState).structFromMap
+      - (*decodeState).structEntry
+      - (*decodeState).fieldIndex
+      - lookupText
+      - (*decodeState).intField
+      - (*decodeState).decodeField
+      - fieldTarget
+      - (*decodeState).structFromArray
+    name: decode_struct.go
+  - decls:
+      - minReadSize
+      - cborDecoder
+      - (*cborDecoder).Decode
+      - (*cborDecoder).More
+      - (*cborDecoder).nextItem
+      - (*cborDecoder).fill
+      - (*cborDecoder).compact
+      - (*cborDecoder).read
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxIndirections
+      - walkDepth
+      - walkDepth.enter
+      - walkDepth.follow
+      - appendValue
+      - appendScalar
+      - appendNumber
+      - appendAnySlice
+      - appendBool
+      - appendInt
+      - appendFloat64
+      - appendFloat32
+      - specialFloat
+      - infinityHalf
+      - appendHalf
+      - appendText
+      - appendBytes
+      - appendTime
+    name: encode.go
+  - decls:
+      - pointerEncoder
+      - interfaceEncoder
+      - byteSequenceEncoder
+      - sequenceEncoder
+      - refusedEncoder
+      - pointerEncoder.encode
+      - pointerEncoder.empty
+      - interfaceEncoder.encode
+      - interfaceEncoder.empty
+      - byteSequenceEncoder.encode
+      - byteSequenceEncoder.empty
+      - sequenceEncoder.encode
+      - sequenceEncoder.empty
+      - refusedEncoder.encode
+      - refusedEncoder.empty
+    name: encode_kinds.go
+  - decls:
+      - smallMapPairs
+      - pairSpan
+      - mapEncoder
+      - bigIntEncoder
+      - mapEncoder.encode
+      - mapEncoder.empty
+      - appendKnownMap
+      - appendStringAnyMap
+      - appendStringStringMap
+      - openStringMap
+      - compareTextKeys
+      - appendSortedPairs
+      - appendPair
+      - keyPrefix
+      - comparePairs
+      - reorderPairs
+      - sortPairs
+      - bigIntEncoder.encode
+      - bigIntEncoder.empty
+      - appendBigInt
+      - appendBignum
+    name: encode_map.go
+  - decls:
+      - encodePlans
+      - kindEncoder
+      - zeroFunc
+      - encodePlan
+      - encodeField
+      - mapHolders
+      - encodePlanner
+      - encodePlanFor
+      - loadEncodePlan
+      - (*encodePlanner).plan
+      - (*encodePlanner).fill
+      - (*encodePlanner).fillKind
+      - (*encodePlanner).fillPointer
+      - (*encodePlanner).fillSequence
+      - (*encodePlanner).fillMap
+      - newHolders
+      - releaseHolders
+      - refuse
+      - pointerCycle
+      - asMethods
+    name: encode_plan.go
+  - decls:
+      - boolEncoder
+      - intEncoder
+      - uintEncoder
+      - floatEncoder
+      - stringEncoder
+      - boolEncoder.encode
+      - boolEncoder.empty
+      - intEncoder.encode
+      - intEncoder.empty
+      - uintEncoder.encode
+      - uintEncoder.empty
+      - floatEncoder.encode
+      - floatEncoder.empty
+      - stringEncoder.encode
+      - stringEncoder.empty
+    name: encode_scalar.go
+  - decls:
+      - timeEncoder
+      - cborMarshalerEncoder
+      - binaryMarshalerEncoder
+      - timeEncoder.encode
+      - timeEncoder.empty
+      - cborMarshalerEncoder.encode
+      - cborMarshalerEncoder.empty
+      - binaryMarshalerEncoder.encode
+      - binaryMarshalerEncoder.empty
+      - marshalBinary
+    name: encode_special.go
+  - decls:
+      - maxHeadBytes
+      - structEncoder
+      - structArrayEncoder
+      - (*encodePlanner).fillStruct
+      - (*encodePlanner).encodeFieldOf
+      - fieldKey
+      - structEncoder.encode
+      - structEncoder.empty
+      - appendField
+      - rewriteMapHead
+      - structArrayEncoder.encode
+      - structArrayEncoder.empty
+      - fieldValue
+      - (*encodeField).omitted
+      - zeroNoFields
+      - zeroFuncFor
+      - zeroThroughInterface
+      - zeroThroughPointer
+      - zeroByMethod
+      - zeroByAddress
+      - zeroByValue
+    name: encode_struct.go
+  - decls:
+      - cborEncoder
+      - (*cborEncoder).Encode
+      - (*cborEncoder).write
+      - (*cborEncoder).Close
+    name: encoder.go
+  - decls:
+      - privatePrefix
+      - encodeFailure
+      - encodeCause
+      - malformed
+      - decodeCause
+    name: errors.go
+  - decls:
+      - cborTagKey
+      - fieldFlag
+      - flagKeyAsInt
+      - structField
+      - structLayout
+      - embedded
+      - (*structField).has
+      - layoutOf
+      - collectFields
+      - appendFields
+      - recordEmbedded
+      - onWire
+      - fieldTag
+      - newStructField
+      - optionFlag
+      - derefType
+      - canonicalIntKeys
+      - dominantFields
+      - compareDominance
+      - boolOrder
+      - sameKey
+      - dominates
+      - compareIndex
+      - hasToArray
+    name: fields.go
+  - decls:
+      - _
+    name: kinds_compliance.go
+  - decls:
+      - maxCBORArrayElements
+      - frameArray
+      - frameKind
+      - validFrame
+      - validator
+      - validateItem
+      - (*validator).resume
+      - (*validator).step
+      - (*validator).admissible
+      - frameKind.constrains
+      - (*validator).admissibleIn
+      - tagAdmits
+      - isFloatHead
+      - (*validator).accept
+      - isDefiniteString
+      - (*validator).payload
+      - (*validator).countChild
+      - (*validator).bounded
+      - (*validator).place
+      - (*validator).openContainer
+      - (*validator).nestEmpty
+      - (*validator).push
+      - (*validator).tooDeep
+      - (*validator).finishChild
+      - (*validator).closeIndefinite
+    name: validate.go
+  - decls:
+      - majorUnsigned
+      - majorShift
+      - simpleFalse
+      - firstAssignedSimple
+      - nullByte
+      - tagDateTime
+      - halfSignBit
+      - majorType
+      - itemHead
+      - appendHead
+      - readHead
+      - argumentWidth
+      - readUint
+      - halfToFloat64
+    name: wire.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: |-
+      keepScratch returns buf to the shared pool, keeping the larger backing
+      array the encoding may have grown into; the pool's cap-discard rule then
+      drops it when it is oversized, as it drops any buffer.
+    name: keepScratch
+    params: buf *bytes.Buffer, encoded []byte
+  - doc: unmarshalItem decodes the validated data item data into v.
+    name: unmarshalItem
+    params: data []byte, v any
+    results: error
+  - doc: |-
+      pointerTarget returns the value v points to, refusing anything but a
+      non-nil pointer.
+    name: pointerTarget
+    params: v any
+    results: reflect.Value, error
+  - doc: describeTarget names a target type, and the struct field holding it.
+    name: describeTarget
+    params: field string, t reflect.Type
+    results: string
+  - doc: describeHead names the kind of data item a head opens.
+    name: describeHead
+    params: h itemHead
+    results: string
+  - doc: describeSimple names a simple value or a floating-point number.
+    name: describeSimple
+    params: h itemHead
+    results: string
+  - doc: isNull reports whether h is null or undefined, which decode alike.
+    name: isNull
+    params: h itemHead
+    results: bool
+  - doc: newSequence starts iterating the container whose head h was just read.
+    name: newSequence
+    params: h itemHead
+    results: sequence
+  - doc: floatOf returns the value of the float head h.
+    name: floatOf
+    params: h itemHead
+    results: float64
+  - doc: integerAny is the default Go value of an integer head.
+    name: integerAny
+    params: h itemHead
+    results: any
+  - doc: |-
+      untypedPairs yields the pairs of texts with their keys as any, for a map
+      that turned out to need keys of every type.
+    name: untypedPairs
+    params: texts map[string]any
+    results: iter.Seq2[any, any]
+  - doc: |-
+      hashableAny reports whether a default Go value can be a map key: every
+      one can except the slices, the maps and big.Int.
+    name: hashableAny
+    params: key any
+    results: bool
+  - doc: |-
+      mapHint sizes a new map for the container h: its pair count, or nothing
+      for an indefinite one.
+    name: mapHint
+    params: h itemHead
+    results: int
+  - doc: |-
+      prepareSlice sizes the slice v to count elements, reusing its backing
+      array when it is large enough and zeroing the elements it reuses. An empty
+      array gives an empty, non-nil slice.
+    name: prepareSlice
+    params: v reflect.Value, t reflect.Type, count int
+  - doc: zeroFrom zeroes the elements of the array v from index from on.
+    name: zeroFrom
+    params: v reflect.Value, from int
+  - doc: |-
+      stringKeyedEntries decodes the pairs of seq into a map keyed by strings,
+      each value read by value.
+    name: stringKeyedEntries
+    params: d *decodeState, m map[string]V, seq *sequence, value func() (V, bool, error)
+    results: error
+    typeParams: V any
+  - doc: |-
+      stringKeyedEntry decodes one pair into m, leaving it out when the key or
+      the value cannot be stored.
+    name: stringKeyedEntry
+    params: d *decodeState, m map[string]V, value func() (V, bool, error)
+    results: error
+    typeParams: V any
+  - doc: |-
+      decodePlanFor returns the plan of t, building and publishing it on first
+      use.
+    name: decodePlanFor
+    params: t reflect.Type
+    results: "*decodePlan"
+  - doc: loadDecodePlan returns the published plan of t, if any.
+    name: loadDecodePlan
+    params: t reflect.Type
+    results: "*decodePlan, bool"
+  - doc: |-
+      interfaceKind picks the decoder of an interface type: the default Go
+      value for an empty interface, the held pointer's value for any other.
+    name: interfaceKind
+    params: t reflect.Type
+    results: decoder
+  - doc: sliceKind picks the decoder of a slice type.
+    name: sliceKind
+    params: t reflect.Type
+    results: decoder
+  - doc: arrayKind picks the decoder of an array type.
+    name: arrayKind
+    params: t reflect.Type
+    results: decoder
+  - doc: |-
+      mayHoldUnhashable reports whether a value of the comparable type t can
+      still hold something Go cannot hash: an interface, directly or inside an
+      array or a struct.
+    name: mayHoldUnhashable
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      structMayHoldUnhashable reports whether any field of t may hold a value
+      Go cannot hash.
+    name: structMayHoldUnhashable
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      hashable reports whether v can be a Go map key: nothing inside it is a
+      slice, a map or a func.
+    name: hashable
+    params: v reflect.Value
+    results: bool
+  - doc: allHashable reports whether the n values part returns are all hashable.
+    name: allHashable
+    params: n int, part func(int) reflect.Value
+    results: bool
+  - doc: addressedMethods returns v's address as the interface I, when v has one.
+    name: addressedMethods
+    params: v reflect.Value
+    results: I, bool
+    typeParams: I any
+  - doc: bigInt64 is n's int64 value, or 0 for no bignum.
+    name: bigInt64
+    params: n *big.Int
+    results: int64
+  - doc: bigUint64 is n's uint64 value, or 0 for no bignum.
+    name: bigUint64
+    params: n *big.Int
+    results: uint64
+  - doc: |-
+      setValue stores x into v, through its address when it has one, so a
+      struct-sized value is copied once and never boxed.
+    name: setValue
+    params: v reflect.Value, x T
+    typeParams: T any
+  - doc: newFieldSet returns an empty set for a struct of n fields.
+    name: newFieldSet
+    params: n int
+    results: fieldSet
+  - doc: lookupText finds the field the text key content names.
+    name: lookupText
+    params: fs *decodeFields, content []byte, err error
+    results: int, bool, error
+  - doc: |-
+      fieldTarget follows index from the struct v to a settable field,
+      allocating every nil embedded pointer on the way. ok is false when one of
+      them cannot be set.
+    name: fieldTarget
+    params: v reflect.Value, index []int
+    results: field reflect.Value, ok bool
+  - doc: |-
+      appendValue appends the encoding of x to b. The dynamic types an untyped
+      document is made of are encoded without reflection.
+    name: appendValue
+    params: b []byte, x any, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      appendScalar encodes x when it is nil or one of the common scalar types.
+      handled is false for any other type.
+    name: appendScalar
+    params: b []byte, x any
+    results: encoded []byte, handled bool, err error
+  - doc: |-
+      appendNumber encodes x when it is one of the common number types, or a
+      time.Time.
+    name: appendNumber
+    params: b []byte, x any
+    results: encoded []byte, handled bool
+  - doc: appendAnySlice appends an array of untyped values.
+    name: appendAnySlice
+    params: b []byte, s []any, at walkDepth
+    results: "[]byte, error"
+  - doc: appendBool appends true or false.
+    name: appendBool
+    params: b []byte, v bool
+    results: "[]byte"
+  - doc: |-
+      appendInt appends a signed integer: major type 0 for n ≥ 0, and major type
+      1 carrying −1−n otherwise, which reaches math.MinInt64 without overflow.
+    name: appendInt
+    params: b []byte, n int64
+    results: "[]byte"
+  - doc: |-
+      appendFloat64 appends a double-precision float; NaN and the infinities
+      take their half-precision form, as fxamacker/cbor wrote them.
+    name: appendFloat64
+    params: b []byte, f float64
+    results: "[]byte"
+  - doc: |-
+      appendFloat32 appends a single-precision float; NaN and the infinities
+      take their half-precision form.
+    name: appendFloat32
+    params: b []byte, f float32
+    results: "[]byte"
+  - doc: specialFloat returns the half-precision encoding of NaN or an infinity.
+    name: specialFloat
+    params: f float64
+    results: half uint16, ok bool
+  - doc: infinityHalf is the half-precision infinity of the sign of f.
+    name: infinityHalf
+    params: f float64
+    results: uint16
+  - doc: appendHalf appends a half-precision float given by its bits.
+    name: appendHalf
+    params: b []byte, half uint16
+    results: "[]byte"
+  - doc: |-
+      appendText appends a text string, refusing one that is not UTF-8: RFC 8949
+      §5.3.1 makes such an item invalid, and the decoder refuses it.
+    name: appendText
+    params: b []byte, s string
+    results: "[]byte, error"
+  - doc: appendBytes appends a byte string; a nil slice is null.
+    name: appendBytes
+    params: b, data []byte
+    results: "[]byte"
+  - doc: |-
+      appendTime appends a time.Time as its integer Unix seconds, or null for
+      the zero time. The fraction of a second is not written — the encoding the
+      codec has always produced, kept so a reader of its output sees no change.
+    name: appendTime
+    params: b []byte, t time.Time
+    results: "[]byte"
+  - doc: |-
+      appendKnownMap encodes v without reflection when it is exactly a
+      map[string]any or a map[string]string.
+    name: appendKnownMap
+    params: b []byte, v reflect.Value, at walkDepth
+    results: encoded []byte, handled bool, err error
+  - doc: |-
+      appendStringAnyMap appends an untyped document's map, its keys in the
+      deterministic order.
+    name: appendStringAnyMap
+    params: b []byte, m map[string]any, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      appendStringStringMap appends a map of strings, its keys in the
+      deterministic order.
+    name: appendStringStringMap
+    params: b []byte, m map[string]string, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      openStringMap writes the head of a map keyed by strings — null for a nil
+      one — and returns its keys in the deterministic order: shorter first, then
+      bytewise, which is the bytewise order of their encodings, the length being
+      in the head. A nil map or a refusal returns no key. The keys are collected
+      into buf, which a small map does not outgrow.
+    name: openStringMap
+    params: b []byte, m map[string]V, at walkDepth, buf []string
+    results: opened []byte, inner walkDepth, keys []string, err error
+    typeParams: V any
+  - doc: |-
+      compareTextKeys orders two text keys as their encodings order: the shorter
+      first, since the length opens the head, then bytewise.
+    name: compareTextKeys
+    params: a, b string
+    results: int
+  - doc: |-
+      appendSortedPairs appends every pair of the non-empty map v, then reorders
+      them by encoded key.
+    name: appendSortedPairs
+    params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      appendPair appends one key and its value, and says where they lie relative
+      to start.
+    name: appendPair
+    params: b []byte, holders *mapHolders, p *encodePlan, at walkDepth, start int
+    results: encoded []byte, span pairSpan, err error
+  - doc: |-
+      keyPrefix reads up to the first keyPrefixBytes bytes of an encoded key as a
+      big-endian integer, zero-padded.
+    name: keyPrefix
+    params: key []byte
+    results: uint64
+  - doc: comparePairs orders two pairs by their encoded keys.
+    name: comparePairs
+    params: region []byte, x, y *pairSpan
+    results: int
+  - doc: |-
+      reorderPairs sorts the pairs written at b[start:] by their encoded keys,
+      refusing two equal keys, and rewrites them in that order.
+    name: reorderPairs
+    params: b []byte, start int, spans []pairSpan
+    results: "[]byte, error"
+  - doc: |-
+      sortPairs orders spans by encoded key: an insertion sort for a small map,
+      which is most of them, and the general sort beyond.
+    name: sortPairs
+    params: region []byte, spans []pairSpan
+  - doc: appendBigInt appends n in the shortest form that holds it.
+    name: appendBigInt
+    params: b []byte, n *big.Int, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      appendBignum appends tag over the magnitude, as a byte string. The tag is
+      one level of nesting, as the decoder counts it.
+    name: appendBignum
+    params: b []byte, tag uint64, magnitude []byte, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      encodePlanFor returns the plan of t, building and publishing it on first
+      use.
+    name: encodePlanFor
+    params: t reflect.Type
+    results: "*encodePlan"
+  - doc: loadEncodePlan returns the published plan of t, if any.
+    name: loadEncodePlan
+    params: t reflect.Type
+    results: "*encodePlan, bool"
+  - doc: newHolders returns the pool of key and value holders of the map type t.
+    name: newHolders
+    params: t reflect.Type
+    results: "*recycler.Pool[*mapHolders]"
+  - doc: |-
+      releaseHolders clears the holders, so the pool keeps no reference to a
+      map's keys and values, and returns them to pool.
+    name: releaseHolders
+    params: pool *recycler.Pool[*mapHolders], holders *mapHolders
+  - doc: refuse makes p a plan that encodes nothing and says why.
+    name: refuse
+    params: p *encodePlan, refusal string
+  - doc: |-
+      pointerCycle reports whether following t's pointer chain comes back to t,
+      or does not end within maxIndirections levels.
+    name: pointerCycle
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      asMethods returns v as the interface I, through v's address when I's
+      methods have pointer receivers, and through an addressable copy when v
+      itself is not addressable.
+    name: asMethods
+    params: v reflect.Value
+    results: I, bool
+    typeParams: I any
+  - doc: |-
+      marshalBinary calls v's MarshalBinary, through its address when the method
+      has a pointer receiver, and wraps its failure.
+    name: marshalBinary
+    params: v reflect.Value, p *encodePlan
+    results: "[]byte, error"
+  - doc: fieldKey encodes a field's key once, when the plan is built.
+    name: fieldKey
+    params: f *structField
+    results: "[]byte, error"
+  - doc: |-
+      appendField appends one key/value pair, unless the field is omitted or
+      promoted through a nil embedded pointer.
+    name: appendField
+    params: b []byte, v reflect.Value, f *encodeField, at walkDepth
+    results: encoded []byte, wrote bool, err error
+  - doc: |-
+      rewriteMapHead makes the map head at b[start:] count written pairs instead
+      of declared ones, moving the pairs left when the head shrinks.
+    name: rewriteMapHead
+    params: b []byte, start, headLen, written, declared int
+    results: "[]byte"
+  - doc: |-
+      fieldValue follows index from the struct v to a field, through embedded
+      structs and pointers to them. ok is false when one of those pointers is nil.
+    name: fieldValue
+    params: v reflect.Value, index []int
+    results: field reflect.Value, ok bool
+  - doc: |-
+      zeroNoFields answers omitzero for a toarray struct the way fxamacker/cbor
+      did: zero only when the struct has no field on the wire.
+    name: zeroNoFields
+    params: v reflect.Value
+    results: bool, error
+  - doc: |-
+      zeroFuncFor picks the omitzero question for t: the type's own IsZero when
+      it declares one, reflect's zero value test otherwise — encoding/json's
+      rule since Go 1.24.
+    name: zeroFuncFor
+    params: t reflect.Type
+    results: zeroFunc
+  - doc: |-
+      zeroThroughInterface is omitzero for an interface type declaring IsZero:
+      nil, or holding a nil pointer, is zero; otherwise the method decides.
+    name: zeroThroughInterface
+    params: v reflect.Value
+    results: bool, error
+  - doc: |-
+      zeroThroughPointer is omitzero for a pointer type declaring IsZero: nil is
+      zero; otherwise the method decides.
+    name: zeroThroughPointer
+    params: v reflect.Value
+    results: bool, error
+  - doc: zeroByMethod calls the value's own IsZero.
+    name: zeroByMethod
+    params: v reflect.Value
+    results: bool, error
+  - doc: |-
+      zeroByAddress calls IsZero through the value's address, or through an
+      addressable copy when the value has none.
+    name: zeroByAddress
+    params: v reflect.Value
+    results: bool, error
+  - doc: zeroByValue is reflect's zero value test.
+    name: zeroByValue
+    params: v reflect.Value
+    results: bool, error
+  - doc: |-
+      encodeFailure is the MARSHAL_FAILED error for a refusal the encoder
+      reached itself; detail says what was refused.
+    name: encodeFailure
+    params: detail string
+    results: error
+  - doc: |-
+      encodeCause is the MARSHAL_FAILED error wrapping cause — a writer's, or a
+      MarshalBinary's or MarshalCBOR's failure. An SDK error keeps its own code
+      and reason: origin wins.
+    name: encodeCause
+    params: cause error, detail string
+    results: error
+  - doc: |-
+      malformed is the UNMARSHAL_FAILED error for input refused at offset off:
+      not well-formed, not valid, or past a bound.
+    name: malformed
+    params: off int, detail string
+    results: error
+  - doc: |-
+      decodeCause is the UNMARSHAL_FAILED error wrapping cause — a reader's,
+      or an UnmarshalBinary's or UnmarshalCBOR's failure — or, with a nil cause,
+      the refusal of an item the target cannot hold. An SDK error keeps its own
+      code and reason: origin wins.
+    name: decodeCause
+    params: cause error, detail string
+    results: error
+  - doc: layoutOf resolves the wire shape of the struct type t.
+    name: layoutOf
+    params: t reflect.Type
+    results: structLayout
+  - doc: |-
+      collectFields gathers every candidate field of t, level by level through
+      embedded structs. An embedded type is descended once, at the shallowest
+      level it appears; two of the same type at one level cancel each other.
+    name: collectFields
+    params: t reflect.Type
+    results: "[]*structField"
+  - doc: |-
+      appendFields appends the candidate fields declared by t, reached at path
+      prefix, and records its embedded structs in next for the following level.
+    name: appendFields
+    params: t reflect.Type, prefix []int, fields []*structField, next embedded
+    results: "[]*structField, embedded"
+  - doc: recordEmbedded adds path to the paths at which typ is embedded.
+    name: recordEmbedded
+    params: next embedded, typ reflect.Type, path []int
+    results: embedded
+  - doc: |-
+      onWire reports whether f can carry a field: an exported field, or an
+      embedded struct (or pointer to one) whose exported fields are promoted.
+    name: onWire
+    params: f reflect.StructField
+    results: bool
+  - doc: fieldTag returns the field's cbor tag, or its json tag when it has none.
+    name: fieldTag
+    params: f reflect.StructField
+    results: string
+  - doc: |-
+      newStructField builds the candidate for the Go field f, keyed by name (or
+      its Go name when the tag names none) with the comma-separated options.
+    name: newStructField
+    params: f reflect.StructField, name, tag, options string, path []int
+    results: "*structField"
+  - doc: |-
+      optionFlag maps a tag option to the flag it sets, or 0 for an option this
+      codec does not know, which is ignored as fxamacker/cbor ignored it.
+    name: optionFlag
+    params: option string
+    results: fieldFlag
+  - doc: derefType strips every pointer level from t.
+    name: derefType
+    params: t reflect.Type
+    results: reflect.Type
+  - doc: |-
+      canonicalIntKeys parses the name of every keyasint field into its integer
+      and rewrites the name in canonical decimal, so "01", "+1" and "1" are one
+      key. A name that is not an integer refuses the whole type.
+    name: canonicalIntKeys
+    params: fields []*structField
+    results: "[]*structField, string"
+  - doc: |-
+      dominantFields keeps, for each key, the one field that wins it: the
+      shallowest, and at equal depth the only tagged one. A key no field wins
+      outright is dropped, as encoding/json drops it.
+    name: dominantFields
+    params: fields []*structField
+    results: "[]*structField"
+  - doc: |-
+      compareDominance orders candidates by key, then integer keys first, then
+      shallowest first, then tagged first.
+    name: compareDominance
+    params: a, b *structField
+    results: int
+  - doc: "boolOrder sorts true before false: −1 for true, 0 for false."
+    name: boolOrder
+    params: first bool
+    results: int
+  - doc: sameKey reports whether a and b compete for one key.
+    name: sameKey
+    params: a, b *structField
+    results: bool
+  - doc: dominates reports whether a, sorted before b, wins the key outright.
+    name: dominates
+    params: a, b *structField
+    results: bool
+  - doc: |-
+      compareIndex orders fields by their path, which is declaration order with
+      an embedded struct's fields where the struct is declared.
+    name: compareIndex
+    params: a, b *structField
+    results: int
+  - doc: hasToArray reports whether t's blank field `_` carries the toarray option.
+    name: hasToArray
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      validateItem checks that data opens with one complete, well-formed and
+      valid data item nesting at most limit levels, and returns its length.
+      Bytes after the item are the caller's to judge.
+    name: validateItem
+    params: data []byte, limit int
+    results: n int, err error
+  - doc: |-
+      tagAdmits reports whether a tag numbered tag may enclose the item whose
+      head is h: a text string for tag 0, an integer or a float for tag 1, a byte
+      string for the bignum tags 2 and 3, and anything for every other tag.
+    name: tagAdmits
+    params: tag uint64, h itemHead
+    results: bool
+  - doc: |-
+      isFloatHead reports whether h opens a half-, single- or double-precision
+      floating-point number.
+    name: isFloatHead
+    params: h itemHead
+    results: bool
+  - doc: |-
+      isDefiniteString reports whether h opens a byte or text string of definite
+      length, the only items whose payload follows their head.
+    name: isDefiniteString
+    params: h itemHead
+    results: bool
+  - doc: |-
+      appendHead appends the shortest head for major and the argument n — the
+      preferred serialization of RFC 8949 §4.1, which every integer, length,
+      count and tag number this encoder writes uses.
+    name: appendHead
+    params: b []byte, major majorType, n uint64
+    results: "[]byte"
+  - doc: |-
+      readHead decodes the head starting at data[off]. ok is false when data
+      ends before the head does. Additional information 28 to 31 carries no
+      argument and is returned as read, for the caller to judge.
+    name: readHead
+    params: data []byte, off int
+    results: h itemHead, ok bool
+  - doc: |-
+      argumentWidth is how many extension bytes the additional information
+      info announces: 1, 2, 4 or 8 for 24..27 and none otherwise.
+    name: argumentWidth
+    params: info byte
+    results: int
+  - doc: |-
+      readUint reads the big-endian argument the additional information info
+      announces from the start of b, which the caller has checked is long enough.
+    name: readUint
+    params: b []byte, info byte
+    results: uint64
+  - doc: |-
+      halfToFloat64 widens an IEEE 754 binary16 to a float64 exactly. A NaN keeps
+      its payload and quiet bit; signed zeros and subnormals keep their sign.
+    name: halfToFloat64
+    params: half uint16
+    results: float64
+imports:
+  big: math/big
+  binary: encoding/binary
+  bytes: bytes
+  cmp: cmp
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  corecbor: github.com/kitsunium/sdk/internal/core/data/codec/cbor
+  encoding: encoding
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  iter: iter
+  maps: maps
+  math: math
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/cbor
+  name: cbor
+  purpose: Package cbor is the SDK's CBOR codec (RFC 8949), written on the standard library alone.
+types:
+  - doc: cborCodec is the concrete Codec implementation for CBOR.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*cborCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*cborCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*cborCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal serialises v as CBOR bytes. The encoding is built in a pooled
+          scratch buffer and copied once into a slice of exactly its length.
+        name: Marshal
+        params: v any
+        recv: "*cborCodec"
+        results: encoded []byte, err error
+      - doc: |-
+          Unmarshal parses data as exactly one CBOR data item into v, which must be
+          a non-nil pointer. The whole of data is validated before v is touched.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*cborCodec"
+        results: error
+      - doc: |-
+          Append encodes v and appends the bytes to dst. Implements the optional
+          codec.Appender interface: the encoding is written straight into dst, with
+          no intermediate buffer. On failure dst is returned at its original length.
+        name: Append
+        params: dst []byte, v any
+        recv: "*cborCodec"
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder writing one data item per
+          Encode.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*cborCodec"
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder reading one data item per
+          Decode, validated under the same bounds as Unmarshal.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*cborCodec"
+        results: codec.Decoder
+    name: cborCodec
+  - doc: decodeState is one decode pass over a validated data item.
+    fields:
+      - doc: data is the validated data item.
+        name: data
+        type: "[]byte"
+      - doc: off is the offset of the next unread head.
+        name: "off"
+        type: int
+      - doc: first is the first item that could not be stored; nil while none.
+        name: first
+        type: error
+      - doc: |-
+          failures counts the items that could not be stored, so a caller can
+          tell whether one item it decoded did.
+        name: failures
+        type: int
+      - doc: field names the struct field being filled, for the failure message.
+        name: field
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          decodeTarget decodes the whole item into target, the value Unmarshal's
+          pointer points to.
+        name: decodeTarget
+        params: target reflect.Value
+        recv: d *decodeState
+        results: error
+      - doc: peek reads the head at the cursor without consuming it.
+        name: peek
+        recv: d *decodeState
+        results: itemHead, error
+      - doc: |-
+          corrupt is the error of the walk finding what validation refuses. It cannot
+          happen on validated input; it exists so that a defect is an error and not
+          a panic.
+        name: corrupt
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          note records an item that could not be stored. Only the first is kept,
+          and detail is only built for it.
+        name: note
+        params: detail func() string
+        recv: d *decodeState
+      - doc: |-
+          mismatch records that the item at the cursor, whose head is h, cannot be
+          stored into a value of type t, and skips it.
+        name: mismatch
+        params: h itemHead, t reflect.Type
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          noteMismatch records that an item already consumed, whose head was h,
+          could not be stored into a value of type t.
+        name: noteMismatch
+        params: h itemHead, t reflect.Type
+        recv: d *decodeState
+      - doc: take consumes the next n bytes, which alias the input.
+        name: take
+        params: n uint64
+        recv: d *decodeState
+        results: "[]byte, error"
+      - doc: |-
+          stringBytes consumes the byte or text string whose head h is at the cursor
+          and returns its content. fresh is false when the content aliases the
+          input, true when an indefinite string's chunks were joined into new memory.
+        name: stringBytes
+        params: h itemHead
+        recv: d *decodeState
+        results: content []byte, fresh bool, err error
+      - doc: |-
+          joinChunks consumes an indefinite string's chunks and their break, and
+          returns them joined.
+        name: joinChunks
+        recv: d *decodeState
+        results: "[]byte, error"
+      - doc: |-
+          chunksLength adds up the lengths of the chunks at the cursor, consuming
+          nothing, so the joined string is allocated once.
+        name: chunksLength
+        recv: d *decodeState
+        results: int, error
+      - doc: skip consumes one whole data item.
+        name: skip
+        recv: d *decodeState
+        results: error
+      - doc: skipString consumes a string's payload, or its chunks and break.
+        name: skipString
+        params: h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: skipEntries consumes an array's or a map's entries.
+        name: skipEntries
+        params: h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: skipUntilBreak consumes items up to and including a break.
+        name: skipUntilBreak
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          next reports whether another entry of s follows, consuming the break that
+          ends an indefinite container.
+        name: next
+        params: s *sequence
+        recv: d *decodeState
+        results: bool, error
+      - doc: |-
+          entryCount is how many entries the container whose head h was just read
+          holds: its count, or for an indefinite one the entries before its break,
+          counted without consuming them.
+        name: entryCount
+        params: h itemHead
+        recv: d *decodeState
+        results: int, error
+      - doc: decodeAny decodes the item at the cursor into its default Go value.
+        name: decodeAny
+        recv: d *decodeState
+        results: any, error
+      - doc: |-
+          stringAny decodes a byte string to a []byte the caller owns, or a text
+          string to a string.
+        name: stringAny
+        params: h itemHead
+        recv: d *decodeState
+        results: any, error
+      - doc: arrayAny decodes an array to a []any.
+        name: arrayAny
+        params: h itemHead
+        recv: d *decodeState
+        results: any, error
+      - doc: |-
+          closeIndefinite consumes the break of the indefinite container h once its
+          counted entries are read.
+        name: closeIndefinite
+        params: h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          mapAny decodes a map to a map[string]any while every key is a text
+          string, switching to a map[any]any at the first key that is not.
+        name: mapAny
+        params: h itemHead
+        recv: d *decodeState
+        results: any, error
+      - doc: |-
+          textPair decodes one pair of a map still decoded as a map[string]any.
+          switched is true, with the pair's key and its value unread, when the key
+          is not a text string.
+        name: textPair
+        params: m map[string]any
+        recv: d *decodeState
+        results: switched bool, key any, err error
+      - doc: |-
+          keyAny decodes a map key. stored is false when the key could not be
+          decoded — the failure is recorded and the key consumed.
+        name: keyAny
+        recv: d *decodeState
+        results: key any, stored bool, err error
+      - doc: |-
+          mapAnyGeneric goes on decoding a map as a map[any]any, from the pairs
+          decoded so far and the first key that is not text.
+        name: mapAnyGeneric
+        params: texts map[string]any, key any, seq *sequence
+        recv: d *decodeState
+        results: any, error
+      - doc: |-
+          entryAny decodes the value of key into m. The value is skipped when the
+          key was not stored — its failure is already recorded — or when it cannot
+          be a Go map key.
+        name: entryAny
+        params: m map[any]any, key any, stored bool
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          tagAny decodes a tag: 0 and 1 to a time.Time, 2 and 3 to a big.Int, and
+          any other tag to its content.
+        name: tagAny
+        params: h itemHead
+        recv: d *decodeState
+        results: any, error
+      - doc: |-
+          timeAny decodes a tag 0 or 1 content to a time.Time, or records it as not
+          decodable and returns nil.
+        name: timeAny
+        recv: d *decodeState
+        results: any, error
+      - doc: simpleAny is the default Go value of a major type 7 head, already consumed.
+        name: simpleAny
+        params: h itemHead
+        recv: d *decodeState
+        results: any
+      - doc: |-
+          bignumContent consumes the byte string of a bignum tagged tag and returns
+          its value: n for tag 2, −1−n for tag 3.
+        name: bignumContent
+        params: tag uint64
+        recv: d *decodeState
+        results: "*big.Int, error"
+      - doc: storeBytes consumes the byte string h opens into a new slice set on v.
+        name: storeBytes
+        params: v reflect.Value, h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: storeBignumBytes consumes a bignum tag and hands its byte string to store.
+        name: storeBignumBytes
+        params: v reflect.Value, h itemHead, store func(reflect.Value, itemHead) error
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          copyBytes consumes the byte string h opens into the array v: extra bytes
+          are dropped and missing ones zeroed.
+        name: copyBytes
+        params: v reflect.Value, h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: fillSlice consumes the array h opens into the slice v, sized to it.
+        name: fillSlice
+        params: v reflect.Value, p *decodePlan, h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          fillArray consumes the array h opens into the Go array v: elements past
+          v's length are skipped, and v's elements past the input's are zeroed.
+        name: fillArray
+        params: v reflect.Value, p *decodePlan, h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: arrayElement stores the next element into v[i], or skips it past v's end.
+        name: arrayElement
+        params: v reflect.Value, p *decodePlan, i int
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          knownMapEntries decodes the pairs of seq without reflection when v is
+          exactly a map[string]any or a map[string]string.
+        name: knownMapEntries
+        params: v reflect.Value, seq *sequence
+        recv: d *decodeState
+        results: handled bool, err error
+      - doc: |-
+          anyEntry decodes a map value untyped; stored is false when anything inside
+          it could not be decoded.
+        name: anyEntry
+        recv: d *decodeState
+        results: value any, stored bool, err error
+      - doc: textEntry decodes a map value as a string.
+        name: textEntry
+        recv: d *decodeState
+        results: value string, stored bool, err error
+      - doc: |-
+          readText consumes an item stored into a string of type t: a text string's
+          content, past any transparent tag. Null stores nothing, which for a fresh
+          key or value is the empty string; anything else is recorded and skipped.
+        name: readText
+        params: t reflect.Type
+        recv: d *decodeState
+        results: text string, stored bool, err error
+      - doc: |-
+          mapEntries decodes the pairs of seq through the key and value plans. The
+          key and value are decoded into two values reused across pairs and zeroed
+          before each one; SetMapIndex copies them into the map.
+        name: mapEntries
+        params: v reflect.Value, p *decodePlan, seq *sequence
+        recv: d *decodeState
+        results: error
+      - doc: mapEntry decodes one pair into the map v.
+        name: mapEntry
+        params: v reflect.Value, p *decodePlan, key, value reflect.Value
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          keyUsable reports whether key can be inserted into a Go map. Only a key
+          type with an interface inside is checked; a key that would panic the map
+          is recorded as a failure.
+        name: keyUsable
+        params: p *decodePlan, key reflect.Value
+        recv: d *decodeState
+        results: bool
+      - doc: |-
+          begin positions the cursor on the item a kind plan stores: past every tag
+          it does not interpret — all but the bignums — and it deals with the cases
+          every kind shares: null, which zeroes a nullable value and leaves any
+          other as it is, and a byte string for a BinaryUnmarshaler. done reports
+          that nothing is left to do.
+        name: begin
+        params: v reflect.Value, p *decodePlan
+        recv: d *decodeState
+        results: h itemHead, done bool, err error
+      - doc: |-
+          skipTags consumes the tag heads at the cursor, stopping at a bignum's,
+          which integer and byte targets read, and returns the head that follows.
+        name: skipTags
+        recv: d *decodeState
+        results: itemHead, error
+      - doc: unmarshalBinary hands the byte string h opens to v's UnmarshalBinary.
+        name: unmarshalBinary
+        params: v reflect.Value, p *decodePlan, h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: noteCause records a failure returned by a type's own decoding method.
+        name: noteCause
+        params: cause error, detail string
+        recv: d *decodeState
+      - doc: |-
+          peekPastTags returns the head of the item the tags at the cursor enclose,
+          consuming nothing.
+        name: peekPastTags
+        recv: d *decodeState
+        results: itemHead, error
+      - doc: |-
+          signedValue consumes the item h opens and returns it as an int64. fits is
+          false — and the item still consumed — when it is not an integer or does
+          not fit an int64.
+        name: signedValue
+        params: h itemHead
+        recv: d *decodeState
+        results: n int64, fits bool, err error
+      - doc: |-
+          unsignedValue consumes the item h opens and returns it as a uint64. fits
+          is false — and the item still consumed — when it is not a non-negative
+          integer that fits a uint64.
+        name: unsignedValue
+        params: h itemHead
+        recv: d *decodeState
+        results: n uint64, fits bool, err error
+      - doc: |-
+          floatValue consumes the item h opens and returns it as a float64: a float
+          as it is, an integer converted. fits is false — and the item still
+          consumed — when it is not a number this codec reads as one.
+        name: floatValue
+        params: h itemHead
+        recv: d *decodeState
+        results: f float64, fits bool, err error
+      - doc: |-
+          bignumFloat reads a bignum and converts it when it fits 64 bits — a
+          uint64 for tag 2, an int64 for tag 3 — as fxamacker/cbor converted it.
+        name: bignumFloat
+        params: h itemHead
+        recv: d *decodeState
+        results: f float64, fits bool, err error
+      - doc: |-
+          readBignum consumes the item h opens. When it is a bignum (tag 2 or 3) its
+          value is returned; any other tag gives nil.
+        name: readBignum
+        params: h itemHead
+        recv: d *decodeState
+        results: "*big.Int, error"
+      - doc: |-
+          timeValue consumes the item h opens and returns the time it holds. stored
+          is false, the failure recorded and the item consumed, when it holds none.
+        name: timeValue
+        params: h itemHead
+        recv: d *decodeState
+        results: instant time.Time, stored bool, err error
+      - doc: "epochTime finishes an integer epoch time: t when the seconds fit an int64."
+        name: epochTime
+        params: h itemHead, t time.Time, fits bool, err error
+        recv: d *decodeState
+        results: time.Time, bool, error
+      - doc: textTime parses an RFC 3339 date/time text string.
+        name: textTime
+        params: h itemHead
+        recv: d *decodeState
+        results: time.Time, bool, error
+      - doc: |-
+          floatTime converts float seconds to a time: NaN and the infinities to the
+          zero time, an out-of-range value to a recorded failure.
+        name: floatTime
+        params: h itemHead, seconds float64
+        recv: d *decodeState
+        results: time.Time, bool, error
+      - doc: |-
+          skipAllTags consumes every tag head at the cursor and returns the head of
+          the enclosed item.
+        name: skipAllTags
+        recv: d *decodeState
+        results: itemHead, error
+      - doc: |-
+          bigValue consumes the item h opens and returns it as a big.Int, or nil —
+          the failure recorded — when it is not an integer.
+        name: bigValue
+        params: h itemHead
+        recv: d *decodeState
+        results: "*big.Int, error"
+      - doc: structFromMap decodes the map h opens into the struct v.
+        name: structFromMap
+        params: v reflect.Value, p *decodePlan, h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: structEntry decodes one pair into the field its key names, or skips it.
+        name: structEntry
+        params: v reflect.Value, p *decodePlan, seen *fieldSet
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          fieldIndex consumes a map key and finds the field it names. A key that
+          cannot name a field — a byte string, a tag, an integer beyond int64 — is
+          recorded as a failure and finds none.
+        name: fieldIndex
+        params: p *decodePlan
+        recv: d *decodeState
+        results: idx int, found bool, err error
+      - doc: intField finds the keyasint field the integer key h names.
+        name: intField
+        params: p *decodePlan, h itemHead
+        recv: d *decodeState
+        results: int, bool, error
+      - doc: |-
+          decodeField decodes the next item into the field f of the struct v,
+          allocating the embedded pointers on its path.
+        name: decodeField
+        params: v reflect.Value, f *decodeField
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          structFromArray decodes the array h opens into a toarray struct, which
+          requires exactly one element per field.
+        name: structFromArray
+        params: v reflect.Value, p *decodePlan, h itemHead
+        recv: d *decodeState
+        results: error
+    name: decodeState
+  - doc: sequence iterates the entries of an array or a map whose head was read.
+    fields:
+      - doc: left is how many entries a definite container still holds.
+        name: left
+        type: uint64
+      - doc: indefinite is true when a break ends the container.
+        name: indefinite
+        type: bool
+    kind: struct
+    name: sequence
+  - doc: decoder stores data items into the values of one kind of plan.
+    kind: named
+    name: decoder
+    underlying: |-
+      interface {
+      	// decode stores the item at the cursor into v, a settable value of the
+      	// plan's type. It returns an error only when the walk itself breaks; an
+      	// item the value cannot hold is recorded on d and skipped.
+      	decode(d *decodeState, v reflect.Value, p *decodePlan) error
+      }
+  - doc: boolDecoder stores true or false.
+    kind: struct
+    methods:
+      - doc: decode decodes true or false.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: boolDecoder
+        results: error
+    name: boolDecoder
+  - doc: intDecoder stores an integer into a signed integer of any width.
+    kind: struct
+    methods:
+      - doc: decode decodes an integer into a signed integer of any width.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: intDecoder
+        results: error
+    name: intDecoder
+  - doc: uintDecoder stores a non-negative integer into an unsigned integer.
+    kind: struct
+    methods:
+      - doc: |-
+          decode decodes a non-negative integer into an unsigned integer of any
+          width.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: uintDecoder
+        results: error
+    name: uintDecoder
+  - doc: floatDecoder stores a float or an integer into a float32 or a float64.
+    kind: struct
+    methods:
+      - doc: decode decodes a float or an integer into a float32 or a float64.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: floatDecoder
+        results: error
+    name: floatDecoder
+  - doc: stringDecoder stores a text string.
+    kind: struct
+    methods:
+      - doc: |-
+          decode decodes a text string. A byte string is refused, as
+          fxamacker/cbor refused it.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: stringDecoder
+        results: error
+    name: stringDecoder
+  - doc: timeDecoder stores an RFC 3339 string or Unix seconds into a time.Time.
+    kind: struct
+    methods:
+      - doc: |-
+          decode decodes into a time.Time: an RFC 3339 text string, or Unix
+          seconds as an integer or a float — tagged 0, 1 or with any other tag, or
+          untagged. Null leaves the time as it is; NaN and the infinities give the
+          zero time (RFC 8949 §3.4.2).
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: timeDecoder
+        results: error
+    name: timeDecoder
+  - doc: bigIntDecoder stores an integer or a bignum into a big.Int.
+    kind: struct
+    methods:
+      - doc: decode decodes an integer or a bignum into a big.Int.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: bigIntDecoder
+        results: error
+    name: bigIntDecoder
+  - doc: rawDecoder hands the whole item to a type's own UnmarshalCBOR.
+    kind: struct
+    methods:
+      - doc: |-
+          decode hands a type with its own UnmarshalCBOR the whole item, tags and
+          null included, as fxamacker/cbor did.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: rawDecoder
+        results: error
+    name: rawDecoder
+  - doc: refusedDecoder records that nothing can be stored into the type.
+    kind: struct
+    methods:
+      - doc: |-
+          decode records that nothing can be stored into the plan's type;
+          null still leaves it as it is.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: refusedDecoder
+        results: error
+    name: refusedDecoder
+  - doc: pointerDecoder stores null as nil and anything else into the pointee.
+    kind: struct
+    methods:
+      - doc: |-
+          decode stores null as a nil pointer, and anything else into the
+          pointed-to value, allocating it when the pointer is nil.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: pointerDecoder
+        results: error
+    name: pointerDecoder
+  - doc: emptyInterfaceDecoder stores the item's default Go value into an any.
+    kind: struct
+    methods:
+      - doc: |-
+          decode stores the item's default Go value into an empty
+          interface; null sets it to nil.
+        name: decode
+        params: d *decodeState, v reflect.Value, _ *decodePlan
+        recv: emptyInterfaceDecoder
+        results: error
+    name: emptyInterfaceDecoder
+  - doc: interfaceDecoder stores into the value an interface with methods holds.
+    kind: struct
+    methods:
+      - doc: |-
+          decode stores an item into an interface with methods: null sets
+          it to nil; anything else goes into the value its non-nil pointer points
+          to. The codec cannot invent a value that satisfies the interface.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: interfaceDecoder
+        results: error
+    name: interfaceDecoder
+  - doc: byteSliceDecoder stores bytes into a []byte.
+    kind: struct
+    methods:
+      - doc: |-
+          decode decodes a byte string — or an array of small integers, or
+          a bignum's magnitude — into a []byte. The result never aliases the input.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: byteSliceDecoder
+        results: error
+    name: byteSliceDecoder
+  - doc: byteArrayDecoder stores bytes into a [N]byte.
+    kind: struct
+    methods:
+      - doc: |-
+          decode decodes a byte string — or an array of small integers, or
+          a bignum's magnitude — into a [N]byte, zeroing what the input leaves out.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: byteArrayDecoder
+        results: error
+    name: byteArrayDecoder
+  - doc: sliceDecoder stores an array into a slice.
+    kind: struct
+    methods:
+      - doc: decode decodes an array into a slice.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: sliceDecoder
+        results: error
+    name: sliceDecoder
+  - doc: arrayDecoder stores an array into a Go array.
+    kind: struct
+    methods:
+      - doc: decode decodes an array into a Go array.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: arrayDecoder
+        results: error
+    name: arrayDecoder
+  - doc: mapDecoder stores a map into a Go map.
+    kind: struct
+    methods:
+      - doc: |-
+          decode decodes a map into a Go map, which it allocates when nil and
+          otherwise adds to. A key or value that cannot be stored leaves its pair
+          out; a later pair with an equal key replaces an earlier one.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: mapDecoder
+        results: error
+    name: mapDecoder
+  - doc: structDecoder stores a map, or an array for toarray, into a struct.
+    kind: struct
+    methods:
+      - doc: decode decodes a map into a struct, or an array into a toarray one.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: structDecoder
+        results: error
+    name: structDecoder
+  - doc: decodePlan is how data items are stored into values of one Go type.
+    fields:
+      - doc: kind stores an item.
+        name: kind
+        type: decoder
+      - doc: typ is the planned type.
+        name: typ
+        type: reflect.Type
+      - doc: |-
+          elem is the plan of a slice's, an array's or a map's elements, or of
+          the type a pointer points to.
+        name: elem
+        type: "*decodePlan"
+      - doc: key is the plan of a map's keys.
+        name: key
+        type: "*decodePlan"
+      - doc: fields are a struct's fields on the wire.
+        name: fields
+        type: "*decodeFields"
+      - doc: holders recycles the key and value a map's pairs are decoded into.
+        name: holders
+        type: "*recycler.Pool[*mapHolders]"
+      - doc: refusal says why no item can be stored into the type.
+        name: refusal
+        type: string
+      - doc: flags are the plan's properties.
+        name: flags
+        type: planFlag
+    kind: struct
+    methods:
+      - doc: has reports whether the plan carries flag.
+        name: has
+        params: flag planFlag
+        recv: p *decodePlan
+        results: bool
+    name: decodePlan
+  - doc: planFlag is one boolean property of a decode plan.
+    kind: named
+    name: planFlag
+    underlying: uint8
+  - doc: decodePlanner resolves the plans of one type graph, as encodePlanner does.
+    fields:
+      - doc: local holds the plans of this resolution.
+        name: local
+        type: map[reflect.Type]*decodePlan
+    kind: struct
+    methods:
+      - doc: |-
+          plan returns the plan of t: the published one, the one being built in
+          this resolution, or a new one.
+        name: plan
+        params: t reflect.Type
+        recv: pl *decodePlanner
+        results: "*decodePlan"
+      - doc: |-
+          fill decides how items are stored into p.typ: pointers and interfaces
+          first, then the types with a decoding of their own, then the kind.
+        name: fill
+        params: p *decodePlan
+        recv: pl *decodePlanner
+      - doc: fillKind plans a type by its kind.
+        name: fillKind
+        params: p *decodePlan
+        recv: pl *decodePlanner
+      - doc: |-
+          fillPointer plans a pointer. A pointer type that points back to itself is
+          refused: allocating along it would never end.
+        name: fillPointer
+        params: p *decodePlan
+        recv: pl *decodePlanner
+      - doc: fillMap plans a map from the plans of its key and value types.
+        name: fillMap
+        params: p *decodePlan
+        recv: pl *decodePlanner
+      - doc: fillStruct plans a struct from its wire layout.
+        name: fillStruct
+        params: p *decodePlan
+        recv: pl *decodePlanner
+    name: decodePlanner
+  - doc: decodeFields is a struct's fields as the decoder looks them up.
+    fields:
+      - doc: list is the fields on the wire, in declaration order.
+        name: list
+        type: "[]decodeField"
+      - doc: byName indexes the text-keyed fields of a struct with many of them.
+        name: byName
+        type: map[string]int
+      - doc: toArray is the toarray option.
+        name: toArray
+        type: bool
+    kind: struct
+    methods:
+      - doc: indexNames builds the name index of a struct with many fields.
+        name: indexNames
+        recv: fs *decodeFields
+      - doc: "byText finds the field a text key names: exactly, then ignoring case."
+        name: byText
+        params: key []byte
+        recv: fs *decodeFields
+        results: int, bool
+      - doc: exact finds the field whose key is exactly key.
+        name: exact
+        params: key []byte
+        recv: fs *decodeFields
+        results: int, bool
+      - doc: folded finds the first field whose key equals key ignoring case.
+        name: folded
+        params: key []byte
+        recv: fs *decodeFields
+        results: int, bool
+      - doc: byInt finds the keyasint field keyed by n.
+        name: byInt
+        params: n int64
+        recv: fs *decodeFields
+        results: int, bool
+    name: decodeFields
+  - doc: decodeField is one struct field as the decoder fills it.
+    fields:
+      - doc: name is the text key.
+        name: name
+        type: string
+      - doc: nameBytes is the text key as bytes, for comparing with the input.
+        name: nameBytes
+        type: "[]byte"
+      - doc: "path names the field in failure messages: \"Type.key\"."
+        name: path
+        type: string
+      - doc: index is the path from the struct to the field.
+        name: index
+        type: "[]int"
+      - doc: plan stores into the field.
+        name: plan
+        type: "*decodePlan"
+      - doc: nameInt is the key of a keyasint field.
+        name: nameInt
+        type: int64
+      - doc: keyAsInt is true when the field's key is the integer nameInt.
+        name: keyAsInt
+        type: bool
+    kind: struct
+    name: decodeField
+  - doc: |-
+      fieldSet records which fields a map has already set, so a repeated key
+      keeps its first value.
+    fields:
+      - doc: small holds the set of a struct with up to 64 fields.
+        name: small
+        type: uint64
+      - doc: large holds the set of a larger struct.
+        name: large
+        type: "[]bool"
+    kind: struct
+    methods:
+      - doc: has reports whether field i was set.
+        name: has
+        params: i int
+        recv: s *fieldSet
+        results: bool
+      - doc: add records field i as set.
+        name: add
+        params: i int
+        recv: s *fieldSet
+    name: fieldSet
+  - doc: cborDecoder reads CBOR data items from a reader, one per Decode.
+    fields:
+      - doc: r is the stream.
+        name: r
+        type: io.Reader
+      - doc: |-
+          err is the failure that ends the stream: a malformed item or a failing
+          reader. Decode returns it from then on.
+        name: err
+        type: error
+      - doc: buf holds bytes read and not yet decoded, from buf[off] on.
+        name: buf
+        type: "[]byte"
+      - doc: off is where the next item starts in buf.
+        name: "off"
+        type: int
+      - doc: |-
+          done is set by the first failure or the end of the stream: More reports
+          false from then on, as it always has.
+        name: done
+        type: bool
+      - doc: walk validates the next item, keeping its place across reads.
+        name: walk
+        type: validator
+    kind: struct
+    methods:
+      - doc: |-
+          Decode reads the next data item into v. It returns io.EOF, unwrapped, when
+          the stream ends between items, and UNMARSHAL_FAILED when it ends inside
+          one. An item that is well-formed but does not fit v is consumed, so the
+          next Decode reads the item after it.
+        name: Decode
+        params: v any
+        recv: d *cborDecoder
+        results: error
+      - doc: |-
+          More reports whether Decode may still return an item: false once the
+          stream has ended or a Decode has failed.
+        name: More
+        recv: d *cborDecoder
+        results: bool
+      - doc: |-
+          nextItem validates the next item, reading until it is whole, and returns
+          its length.
+        name: nextItem
+        recv: d *cborDecoder
+        results: int, error
+      - doc: fill reads more of the stream into the buffer.
+        name: fill
+        recv: d *cborDecoder
+        results: error
+      - doc: |-
+          compact moves the unread bytes to the front of the buffer. It moves each
+          item at most once: after the first read of an item, it starts at 0.
+        name: compact
+        recv: d *cborDecoder
+      - doc: |-
+          read reads once into the buffer's free space, which it doubles when it
+          runs short. A reader returning no byte and no error is retried, then
+          reported as stuck.
+        name: read
+        recv: d *cborDecoder
+        results: int, error
+    name: cborDecoder
+  - doc: walkDepth is where the encoder stands in the value it walks.
+    fields:
+      - doc: nest counts the arrays, maps and tags open around the current item.
+        name: nest
+        type: int
+      - doc: hops counts the pointers and interfaces followed since the last one.
+        name: hops
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          enter is the depth inside one more array, map or tag, refused past the
+          nesting the decoder accepts.
+        name: enter
+        recv: w walkDepth
+        results: walkDepth, error
+      - doc: follow is the depth past one more pointer or interface.
+        name: follow
+        recv: w walkDepth
+        results: walkDepth, error
+    name: walkDepth
+  - doc: |-
+      pointerEncoder writes null for a nil pointer and the pointed-to value
+      otherwise.
+    kind: struct
+    methods:
+      - doc: encode appends null for nil, the pointed-to value otherwise.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+        recv: pointerEncoder
+        results: "[]byte, error"
+      - doc: empty is true for a nil pointer.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: pointerEncoder
+        results: bool, error
+    name: pointerEncoder
+  - doc: |-
+      interfaceEncoder writes null for a nil interface and its dynamic value
+      otherwise.
+    kind: struct
+    methods:
+      - doc: encode appends null for nil, the dynamic value otherwise.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, at walkDepth
+        recv: interfaceEncoder
+        results: "[]byte, error"
+      - doc: empty is true for a nil interface.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: interfaceEncoder
+        results: bool, error
+    name: interfaceEncoder
+  - doc: byteSequenceEncoder writes a []byte or a [N]byte as a byte string.
+    kind: struct
+    methods:
+      - doc: encode appends a byte string; a nil slice is null.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: byteSequenceEncoder
+        results: "[]byte, error"
+      - doc: empty is true when the byte string has no element.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: byteSequenceEncoder
+        results: bool, error
+    name: byteSequenceEncoder
+  - doc: |-
+      sequenceEncoder writes a slice or an array of anything but bytes as an
+      array.
+    kind: struct
+    methods:
+      - doc: encode appends an array; a nil slice is null.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+        recv: sequenceEncoder
+        results: "[]byte, error"
+      - doc: empty is true when the array has no element.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: sequenceEncoder
+        results: bool, error
+    name: sequenceEncoder
+  - doc: refusedEncoder fails the encoding of a type CBOR cannot carry.
+    kind: struct
+    methods:
+      - doc: encode fails with the refusal the plan was built with.
+        name: encode
+        params: b []byte, _ reflect.Value, p *encodePlan, _ walkDepth
+        recv: refusedEncoder
+        results: "[]byte, error"
+      - doc: "empty is never true: the encoding fails anyway."
+        name: empty
+        params: _ reflect.Value, _ *encodePlan
+        recv: refusedEncoder
+        results: bool, error
+    name: refusedEncoder
+  - doc: pairSpan locates one encoded pair, relative to the start of the first.
+    fields:
+      - doc: |-
+          prefix is the key's first keyPrefixBytes bytes, big-endian, zero-padded.
+          Encoded items are prefix-free, so two keys that differ are ordered by
+          their prefixes unless both run past them.
+        name: prefix
+        type: uint64
+      - doc: key is where the pair's key starts.
+        name: key
+        type: int
+      - doc: value is where the pair's value starts, and its key ends.
+        name: value
+        type: int
+      - doc: end is where the pair ends.
+        name: end
+        type: int
+    kind: struct
+    name: pairSpan
+  - doc: mapEncoder writes a map with its pairs in order.
+    kind: struct
+    methods:
+      - doc: encode appends a map; a nil map is null.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+        recv: mapEncoder
+        results: "[]byte, error"
+      - doc: empty is true when the map has no element.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: mapEncoder
+        results: bool, error
+    name: mapEncoder
+  - doc: bigIntEncoder writes a big.Int as an integer or a bignum.
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends a big.Int as an integer when it fits one — major type 0 or
+          1 — and as a bignum, tag 2 or 3 over its magnitude, otherwise.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, at walkDepth
+        recv: bigIntEncoder
+        results: "[]byte, error"
+      - doc: "empty is never true: a big.Int is always written."
+        name: empty
+        params: _ reflect.Value, _ *encodePlan
+        recv: bigIntEncoder
+        results: bool, error
+    name: bigIntEncoder
+  - doc: kindEncoder encodes the values of one kind of plan.
+    kind: named
+    name: kindEncoder
+    underlying: |-
+      interface {
+      	// encode appends the encoding of v, a value of the plan's type, to b.
+      	encode(b []byte, v reflect.Value, p *encodePlan, at walkDepth) ([]byte, error)
+      	// empty reports whether v encodes as an empty CBOR item — false, 0,
+      	// 0.0, an empty string or container, null — which omitempty omits.
+      	empty(v reflect.Value, p *encodePlan) (bool, error)
+      }
+  - doc: zeroFunc reports whether v is its type's zero value, which omitzero omits.
+    kind: named
+    name: zeroFunc
+    underlying: func(v reflect.Value) (bool, error)
+  - doc: encodePlan is how the values of one Go type are encoded.
+    fields:
+      - doc: kind encodes a value and answers omitempty.
+        name: kind
+        type: kindEncoder
+      - doc: zero answers omitzero.
+        name: zero
+        type: zeroFunc
+      - doc: typ is the planned type.
+        name: typ
+        type: reflect.Type
+      - doc: |-
+          elem is the plan of a slice's, an array's or a map's elements, or of
+          the type a pointer points to.
+        name: elem
+        type: "*encodePlan"
+      - doc: key is the plan of a map's keys.
+        name: key
+        type: "*encodePlan"
+      - doc: holders recycles the key and value a map's pairs are copied into.
+        name: holders
+        type: "*recycler.Pool[*mapHolders]"
+      - doc: fields are a struct's fields on the wire.
+        name: fields
+        type: "[]encodeField"
+      - doc: refusal says why no value of the type can be encoded.
+        name: refusal
+        type: string
+      - doc: omittable counts the struct fields carrying omitempty.
+        name: omittable
+        type: int
+    kind: struct
+    name: encodePlan
+  - doc: encodeField is one struct field as the encoder writes it.
+    fields:
+      - doc: "key is the field's encoded key: a text string, or an integer."
+        name: key
+        type: "[]byte"
+      - doc: index is the path from the struct to the field.
+        name: index
+        type: "[]int"
+      - doc: plan encodes the field's value.
+        name: plan
+        type: "*encodePlan"
+      - doc: flags are the field's options.
+        name: flags
+        type: fieldFlag
+    kind: struct
+    methods:
+      - doc: omitted reports whether the field's options leave v out of the encoding.
+        name: omitted
+        params: v reflect.Value
+        recv: f *encodeField
+        results: bool, error
+    name: encodeField
+  - doc: |-
+      mapHolders is a map key and a map value, reused across the pairs of the
+      maps of one type.
+    fields:
+      - doc: key receives each pair's key.
+        name: key
+        type: reflect.Value
+      - doc: value receives each pair's value.
+        name: value
+        type: reflect.Value
+    kind: struct
+    name: mapHolders
+  - doc: |-
+      encodePlanner resolves the plans of one type graph. Plans are built in a
+      private map, so a recursive type finds its own plan while it is being
+      built, and published only once every plan of the graph is complete.
+    fields:
+      - doc: local holds the plans of this resolution.
+        name: local
+        type: map[reflect.Type]*encodePlan
+    kind: struct
+    methods:
+      - doc: |-
+          plan returns the plan of t: the published one, the one being built in
+          this resolution, or a new one.
+        name: plan
+        params: t reflect.Type
+        recv: pl *encodePlanner
+        results: "*encodePlan"
+      - doc: |-
+          fill decides how values of p.typ are encoded. Pointers come first, then
+          the types with an encoding of their own, then the kind.
+        name: fill
+        params: p *encodePlan
+        recv: pl *encodePlanner
+      - doc: fillKind plans a type by its kind.
+        name: fillKind
+        params: p *encodePlan
+        recv: pl *encodePlanner
+      - doc: |-
+          fillPointer plans a pointer: null when nil, the pointed-to value otherwise.
+          A pointer type that points back to itself refuses every value, and so does
+          a pointer to a type CBOR cannot carry.
+        name: fillPointer
+        params: p *encodePlan
+        recv: pl *encodePlanner
+      - doc: |-
+          fillSequence plans a slice or an array: a byte string when its elements
+          are bytes, an array of encoded elements otherwise.
+        name: fillSequence
+        params: p *encodePlan
+        recv: pl *encodePlanner
+      - doc: fillMap plans a map from the plans of its key and value types.
+        name: fillMap
+        params: p *encodePlan
+        recv: pl *encodePlanner
+      - doc: |-
+          fillStruct plans a struct from its wire layout. A field of a type CBOR
+          cannot carry refuses the whole struct, as fxamacker/cbor did.
+        name: fillStruct
+        params: p *encodePlan
+        recv: pl *encodePlanner
+      - doc: "encodeFieldOf resolves one field: its encoded key and its plan."
+        name: encodeFieldOf
+        params: f *structField
+        recv: pl *encodePlanner
+        results: field encodeField, refusal string
+    name: encodePlanner
+  - doc: boolEncoder encodes a bool.
+    kind: struct
+    methods:
+      - doc: encode appends true or false.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: boolEncoder
+        results: "[]byte, error"
+      - doc: empty is true for false.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: boolEncoder
+        results: bool, error
+    name: boolEncoder
+  - doc: intEncoder encodes a signed integer of any width.
+    kind: struct
+    methods:
+      - doc: encode appends major type 0 or 1 in the shortest head.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: intEncoder
+        results: "[]byte, error"
+      - doc: empty is true for 0.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: intEncoder
+        results: bool, error
+    name: intEncoder
+  - doc: uintEncoder encodes an unsigned integer of any width.
+    kind: struct
+    methods:
+      - doc: encode appends major type 0 in the shortest head.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: uintEncoder
+        results: "[]byte, error"
+      - doc: empty is true for 0.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: uintEncoder
+        results: bool, error
+    name: uintEncoder
+  - doc: floatEncoder encodes a float32 as a single and a float64 as a double.
+    kind: struct
+    methods:
+      - doc: encode appends a single for a float32 and a double for a float64.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: floatEncoder
+        results: "[]byte, error"
+      - doc: empty is true for 0 and −0.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: floatEncoder
+        results: bool, error
+    name: floatEncoder
+  - doc: stringEncoder encodes a string as a text string.
+    kind: struct
+    methods:
+      - doc: encode appends a text string, refusing one that is not UTF-8.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: stringEncoder
+        results: "[]byte, error"
+      - doc: empty is true when the string has no element.
+        name: empty
+        params: v reflect.Value, _ *encodePlan
+        recv: stringEncoder
+        results: bool, error
+    name: stringEncoder
+  - doc: timeEncoder encodes a time.Time as Unix seconds, or null when zero.
+    kind: struct
+    methods:
+      - doc: encode appends Unix seconds, or null for the zero time.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: timeEncoder
+        results: "[]byte, error"
+      - doc: "empty is never true: the zero time is written as null, not omitted, as before."
+        name: empty
+        params: _ reflect.Value, _ *encodePlan
+        recv: timeEncoder
+        results: bool, error
+    name: timeEncoder
+  - doc: cborMarshalerEncoder writes what a type's MarshalCBOR returns.
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends what MarshalCBOR returns, once it is checked to be exactly
+          one well-formed, valid data item that fits the nesting left.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+        recv: cborMarshalerEncoder
+        results: "[]byte, error"
+      - doc: "empty is never true: the type writes its own item."
+        name: empty
+        params: _ reflect.Value, _ *encodePlan
+        recv: cborMarshalerEncoder
+        results: bool, error
+    name: cborMarshalerEncoder
+  - doc: binaryMarshalerEncoder writes what MarshalBinary returns as a byte string.
+    kind: struct
+    methods:
+      - doc: encode appends what MarshalBinary returns as a byte string.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, _ walkDepth
+        recv: binaryMarshalerEncoder
+        results: "[]byte, error"
+      - doc: empty is true when MarshalBinary returns no byte.
+        name: empty
+        params: v reflect.Value, p *encodePlan
+        recv: binaryMarshalerEncoder
+        results: bool, error
+    name: binaryMarshalerEncoder
+  - doc: structEncoder writes a struct as a map of its fields.
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends the struct as a map. The head is written for every field;
+          when omitempty, omitzero or a nil embedded pointer leaves some out, it is
+          rewritten — shorter when the count crosses a head width.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+        recv: structEncoder
+        results: "[]byte, error"
+      - doc: |-
+          empty is true when every field carries omitempty and every field is
+          empty — the encoding would be an empty map.
+        name: empty
+        params: v reflect.Value, p *encodePlan
+        recv: structEncoder
+        results: bool, error
+    name: structEncoder
+  - doc: structArrayEncoder writes a toarray struct as an array of its fields.
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends a toarray struct: one element per field, in declaration
+          order, null for one promoted through a nil embedded pointer.
+        name: encode
+        params: b []byte, v reflect.Value, p *encodePlan, at walkDepth
+        recv: structArrayEncoder
+        results: "[]byte, error"
+      - doc: "empty is true for a toarray struct with no field: an empty array."
+        name: empty
+        params: _ reflect.Value, p *encodePlan
+        recv: structArrayEncoder
+        results: bool, error
+    name: structArrayEncoder
+  - doc: cborEncoder writes CBOR data items to a writer, one per Encode.
+    fields:
+      - doc: w receives each encoded item.
+        name: w
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Encode encodes v and writes it as one data item.
+        name: Encode
+        params: v any
+        recv: e *cborEncoder
+        results: error
+      - doc: write hands one encoded item to the writer.
+        name: write
+        params: b []byte
+        recv: e *cborEncoder
+        results: error
+      - doc: "Close is a no-op: the encoder owns no state and does not own the writer."
+        name: Close
+        recv: "*cborEncoder"
+        results: error
+    name: cborEncoder
+  - doc: fieldFlag is one boolean property of a struct field.
+    kind: named
+    name: fieldFlag
+    underlying: uint8
+  - doc: structField is one field a struct puts on the wire.
+    fields:
+      - doc: |-
+          name is the key: the tag's name or the Go name, or for a keyasint field
+          the canonical decimal form of its integer.
+        name: name
+        type: string
+      - doc: index is the path from the struct to the field, through embedded ones.
+        name: index
+        type: "[]int"
+      - doc: typ is the field's Go type.
+        name: typ
+        type: reflect.Type
+      - doc: nameInt is the key of a keyasint field.
+        name: nameInt
+        type: int64
+      - doc: flags are the field's properties.
+        name: flags
+        type: fieldFlag
+    kind: struct
+    methods:
+      - doc: has reports whether the field carries flag.
+        name: has
+        params: flag fieldFlag
+        recv: f *structField
+        results: bool
+    name: structField
+  - doc: structLayout is the wire shape of one struct type.
+    fields:
+      - doc: fields are the fields on the wire, in declaration order.
+        name: fields
+        type: "[]*structField"
+      - doc: |-
+          refusal, when not empty, says why no value of the type can be encoded
+          or decoded: a keyasint field whose name is not an integer.
+        name: refusal
+        type: string
+      - doc: "toArray is the toarray option: the struct is a CBOR array."
+        name: toArray
+        type: bool
+    kind: struct
+    name: structLayout
+  - doc: |-
+      embedded is the set of paths at which one embedded struct type appears at
+      the level being resolved.
+    kind: named
+    name: embedded
+    underlying: map[reflect.Type][][]int
+  - doc: frameKind says what a validator frame holds open.
+    kind: named
+    methods:
+      - doc: |-
+          constrains reports whether a frame of this kind constrains the items it
+          holds: an indefinite string its chunks, a tag its content.
+        name: constrains
+        recv: k frameKind
+        results: bool
+    name: frameKind
+    underlying: uint8
+  - doc: |-
+      validFrame is one item the validator has opened and not yet closed. It is
+      sixteen bytes, because every Unmarshal zeroes a stack of them.
+    fields:
+      - doc: |-
+          count is how many more items a definite array or map (two per pair) or
+          a tag (one) is owed — or, for an indefinite array, map or string, how
+          many items or chunks it has held so far, against their bounds. Only a
+          break closes an indefinite frame, so it is never owed anything.
+        name: count
+        type: uint64
+      - doc: |-
+          tag is the number of a frameTag, saturated at math.MaxUint8: only tags
+          0 to 3 constrain their content (RFC 8949 §5.3.2), so every larger
+          number means the same thing here.
+        name: tag
+        type: uint8
+      - doc: kind is what was opened.
+        name: kind
+        type: frameKind
+      - doc: major is the major type of a frameChunks string, which its chunks share.
+        name: major
+        type: majorType
+      - doc: indefinite is true when only a break closes the frame.
+        name: indefinite
+        type: bool
+    kind: struct
+    name: validFrame
+  - doc: |-
+      validator checks one data item. It is resumable: when the bytes run out
+      inside the item it says so and keeps its place, and a later call with more
+      bytes — always starting at the item's first byte — goes on from there. The
+      stream decoder relies on that to read each byte once however the item
+      arrives; Unmarshal, which holds the whole item, calls it once.
+    fields:
+      - doc: |-
+          stack holds the open frames: one slot more than the nesting bound,
+          because an indefinite string is a frame that cannot hold another.
+        name: stack
+        type: "[maxCBORNestedLevels + 1]validFrame"
+      - doc: depth is the number of open frames.
+        name: depth
+        type: int
+      - doc: |-
+          limit is the nesting bound this walk enforces, at most
+          maxCBORNestedLevels.
+        name: limit
+        type: int
+      - doc: off is the offset of the next unread head, from the item's first byte.
+        name: "off"
+        type: int
+      - doc: complete is set once the item's last byte has been read.
+        name: complete
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          resume validates as much of the item as data holds. complete reports
+          whether the item has been read to its end; false with a nil error means
+          data ends inside it.
+        name: resume
+        params: data []byte
+        recv: v *validator
+        results: complete bool, err error
+      - doc: |-
+          step reads the next head. progressed is false, with a nil error, when
+          data ends before the head or before a definite string's payload does —
+          in which case nothing was consumed.
+        name: step
+        params: data []byte
+        recv: v *validator
+        results: progressed bool, err error
+      - doc: |-
+          admissible applies the rules a head is subject to, on its own and in the
+          frame it opens into.
+        name: admissible
+        params: h itemHead
+        recv: v *validator
+        results: error
+      - doc: |-
+          admissibleIn applies the rules the open frame top places on the head h of
+          the next item inside it.
+        name: admissibleIn
+        params: top *validFrame, h itemHead
+        recv: v *validator
+        results: error
+      - doc: |-
+          accept consumes the item whose head is h: the head, and the payload of a
+          definite string once all of it is present.
+        name: accept
+        params: data []byte, h itemHead
+        recv: v *validator
+        results: progressed bool, err error
+      - doc: |-
+          payload returns the length of the payload of the definite string whose
+          head is h, once all of it is present, after checking that a text string is
+          UTF-8.
+        name: payload
+        params: data []byte, h itemHead
+        recv: v *validator
+        results: length int, ready bool, err error
+      - doc: |-
+          countChild counts one more item against the bound of top, the open
+          indefinite frame that holds it.
+        name: countChild
+        params: top *validFrame
+        recv: v *validator
+        results: error
+      - doc: bounded returns the refusal described by detail when count exceeds bound.
+        name: bounded
+        params: count uint64, bound int, detail string
+        recv: v *validator
+        results: error
+      - doc: |-
+          place records the item whose head h was just consumed: an indefinite
+          string, an array, a map or a tag opens a frame; anything else is a whole
+          item.
+        name: place
+        params: h itemHead
+        recv: v *validator
+        results: error
+      - doc: |-
+          openContainer opens the array or map whose head is h, after bounding its
+          count and its depth. An empty definite container is whole at once.
+        name: openContainer
+        params: h itemHead
+        recv: v *validator
+        results: error
+      - doc: |-
+          nestEmpty accounts for an empty definite array or map: it nests one level
+          like any container, and is whole as soon as it is read.
+        name: nestEmpty
+        recv: v *validator
+        results: error
+      - doc: |-
+          push opens a frame. A counted frame — an array, a map or a tag — is one
+          level of nesting and is refused past the limit.
+        name: push
+        params: f validFrame, counted bool
+        recv: v *validator
+        results: error
+      - doc: tooDeep is the refusal of an item nesting past the limit.
+        name: tooDeep
+        recv: v *validator
+        results: error
+      - doc: |-
+          finishChild records that one item has been read to its end, closing every
+          definite frame that item completes, and the whole walk when it was the
+          top-level item.
+        name: finishChild
+        recv: v *validator
+      - doc: |-
+          closeIndefinite handles a break code: it closes the innermost frame, which
+          must be an indefinite-length one, and a map only after a whole pair.
+        name: closeIndefinite
+        recv: v *validator
+        results: error
+    name: validator
+  - doc: majorType is the high three bits of an initial byte (RFC 8949 §3.1).
+    kind: named
+    name: majorType
+    underlying: byte
+  - doc: "itemHead is one decoded head: the initial byte and its argument."
+    fields:
+      - doc: |-
+          arg is the argument — a value, a length, a count or a tag number. For
+          additional information 0..23 it is the additional information itself.
+        name: arg
+        type: uint64
+      - doc: size is how many bytes the head occupies, the initial byte included.
+        name: size
+        type: int
+      - doc: major is the major type.
+        name: major
+        type: majorType
+      - doc: info is the additional information.
+        name: info
+        type: byte
+    kind: struct
+    name: itemHead
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME /
+      extension tables.
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&cborCodec{})
+      - doc: ": MIME table hoisted."
+        name: mimeTypes
+        value: "[]string{\"application/cbor\"}"
+      - doc: ": extension table hoisted for the same reason."
+        name: extensions
+        value: "[]string{\".cbor\"}"
+    name: Codec
+  - doc: |-
+      decodeStates recycles the state of a decode pass: the plans' functions
+      take it by pointer, which would otherwise allocate it on every Unmarshal.
+    items:
+      - name: decodeStates
+        value: |-
+          recycler.NewPool(func() *decodeState {
+          	//: zeroed, as every state is before it is put back.
+          	return &decodeState{}
+          })
+    name: decodeStates
+  - doc: Package-level caches and the interfaces the decoder honours.
+    grouped: true
+    items:
+      - doc: decodePlans maps a reflect.Type to its published *decodePlan.
+        name: decodePlans
+        type: sync.Map
+      - doc: |-
+          binaryUnmarshalerType is encoding.BinaryUnmarshaler, handed a byte
+          string.
+        name: binaryUnmarshalerType
+        value: reflect.TypeFor[encoding.BinaryUnmarshaler]()
+      - doc: |-
+          cborUnmarshalerType is the method set fxamacker/cbor called an
+          Unmarshaler: a type that reads its own CBOR keeps doing so.
+        name: cborUnmarshalerType
+        value: reflect.TypeFor[interface{ UnmarshalCBOR(data []byte) error }]()
+      - doc: scalarDecoders are the decoders of the kinds that need no other plan.
+        name: scalarDecoders
+        value: |-
+          map[reflect.Kind]decoder{
+          		reflect.Bool:    boolDecoder{},
+          		reflect.Int:     intDecoder{},
+          		reflect.Int8:    intDecoder{},
+          		reflect.Int16:   intDecoder{},
+          		reflect.Int32:   intDecoder{},
+          		reflect.Int64:   intDecoder{},
+          		reflect.Uint:    uintDecoder{},
+          		reflect.Uint8:   uintDecoder{},
+          		reflect.Uint16:  uintDecoder{},
+          		reflect.Uint32:  uintDecoder{},
+          		reflect.Uint64:  uintDecoder{},
+          		reflect.Float32: floatDecoder{},
+          		reflect.Float64: floatDecoder{},
+          		reflect.String:  stringDecoder{},
+          	}
+    name: decodePlans
+  - doc: stringType is the Go string type, for the failures of a string target.
+    items:
+      - name: stringType
+        value: reflect.TypeFor[string]()
+    name: stringType
+  - doc: Package-level caches and the types the planner recognises.
+    grouped: true
+    items:
+      - doc: encodePlans maps a reflect.Type to its published *encodePlan.
+        name: encodePlans
+        type: sync.Map
+      - doc: timeType is time.Time, encoded as Unix seconds.
+        name: timeType
+        value: reflect.TypeFor[time.Time]()
+      - doc: bigIntType is big.Int, encoded as an integer or a bignum.
+        name: bigIntType
+        value: reflect.TypeFor[big.Int]()
+      - doc: binaryMarshalerType is encoding.BinaryMarshaler, encoded as a byte string.
+        name: binaryMarshalerType
+        value: reflect.TypeFor[encoding.BinaryMarshaler]()
+      - doc: |-
+          cborMarshalerType is the method set fxamacker/cbor called a Marshaler:
+          a type that writes its own CBOR keeps doing so.
+        name: cborMarshalerType
+        value: reflect.TypeFor[interface{ MarshalCBOR() ([]byte, error) }]()
+      - doc: isZeroerType is the method omitzero consults when a type declares it.
+        name: isZeroerType
+        value: reflect.TypeFor[interface{ IsZero() bool }]()
+      - doc: scalarEncoders are the kind encoders that need no other plan.
+        name: scalarEncoders
+        value: |-
+          map[reflect.Kind]kindEncoder{
+          		reflect.Bool:    boolEncoder{},
+          		reflect.Int:     intEncoder{},
+          		reflect.Int8:    intEncoder{},
+          		reflect.Int16:   intEncoder{},
+          		reflect.Int32:   intEncoder{},
+          		reflect.Int64:   intEncoder{},
+          		reflect.Uint:    uintEncoder{},
+          		reflect.Uint8:   uintEncoder{},
+          		reflect.Uint16:  uintEncoder{},
+          		reflect.Uint32:  uintEncoder{},
+          		reflect.Uint64:  uintEncoder{},
+          		reflect.Float32: floatEncoder{},
+          		reflect.Float64: floatEncoder{},
+          		reflect.String:  stringEncoder{},
+          	}
+    name: encodePlans
+  - doc: |-
+      Compile-time assertions that every kind encoder and every decoder still
+      answers its interface. They matter here because the plans reach most of
+      them through a map keyed by reflect.Kind: a method renamed or dropped would
+      not fail to compile at the map, and the plan for that kind would be missing
+      a method only at run time.
+    grouped: true
+    items:
+      - name: _
+        type: kindEncoder
+        value: boolEncoder{}
+      - name: _
+        type: kindEncoder
+        value: intEncoder{}
+      - name: _
+        type: kindEncoder
+        value: uintEncoder{}
+      - name: _
+        type: kindEncoder
+        value: floatEncoder{}
+      - name: _
+        type: kindEncoder
+        value: stringEncoder{}
+      - name: _
+        type: kindEncoder
+        value: timeEncoder{}
+      - name: _
+        type: kindEncoder
+        value: bigIntEncoder{}
+      - name: _
+        type: kindEncoder
+        value: cborMarshalerEncoder{}
+      - name: _
+        type: kindEncoder
+        value: binaryMarshalerEncoder{}
+      - name: _
+        type: kindEncoder
+        value: pointerEncoder{}
+      - name: _
+        type: kindEncoder
+        value: interfaceEncoder{}
+      - name: _
+        type: kindEncoder
+        value: byteSequenceEncoder{}
+      - name: _
+        type: kindEncoder
+        value: sequenceEncoder{}
+      - name: _
+        type: kindEncoder
+        value: mapEncoder{}
+      - name: _
+        type: kindEncoder
+        value: structEncoder{}
+      - name: _
+        type: kindEncoder
+        value: structArrayEncoder{}
+      - name: _
+        type: kindEncoder
+        value: refusedEncoder{}
+      - name: _
+        type: decoder
+        value: boolDecoder{}
+      - name: _
+        type: decoder
+        value: intDecoder{}
+      - name: _
+        type: decoder
+        value: uintDecoder{}
+      - name: _
+        type: decoder
+        value: floatDecoder{}
+      - name: _
+        type: decoder
+        value: stringDecoder{}
+      - name: _
+        type: decoder
+        value: timeDecoder{}
+      - name: _
+        type: decoder
+        value: bigIntDecoder{}
+      - name: _
+        type: decoder
+        value: rawDecoder{}
+      - name: _
+        type: decoder
+        value: refusedDecoder{}
+      - name: _
+        type: decoder
+        value: pointerDecoder{}
+      - name: _
+        type: decoder
+        value: emptyInterfaceDecoder{}
+      - name: _
+        type: decoder
+        value: interfaceDecoder{}
+      - name: _
+        type: decoder
+        value: byteSliceDecoder{}
+      - name: _
+        type: decoder
+        value: byteArrayDecoder{}
+      - name: _
+        type: decoder
+        value: sliceDecoder{}
+      - name: _
+        type: decoder
+        value: arrayDecoder{}
+      - name: _
+        type: decoder
+        value: mapDecoder{}
+      - name: _
+        type: decoder
+        value: structDecoder{}
+    name: _

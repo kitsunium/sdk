@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/concur/snapshot
+  name: snapshot
+  purpose: "Package snapshot holds read-mostly shared state copy-on-write: readers Load the current value with one atomic load — no lock, no allocation — and writers publish a whole new value, serialised so that a read-modify-write never loses a concurrent one."
+types: []

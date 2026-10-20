@@ -1,0 +1,744 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: formatUUID
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatUUID
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - bind: hexStr
+        eval: hex.EncodeToString(b)
+        to: hex
+      - return: |-
+          hexStr[0:hexSeg1End] + "-" + hexStr[hexSeg1End:hexSeg2End] + "-" +
+          		hexStr[hexSeg2End:hexSeg3End] + "-" + hexStr[hexSeg3End:hexSeg4End] + "-" +
+          		hexStr[hexSeg4End:hexFull]
+  - of: setUUIDBits
+    steps:
+      - set: b[uuidVersionIdx]
+        value: (b[uuidVersionIdx] & uuidVersionMask) | versionHighNibble
+      - set: b[uuidVariantIdx]
+        value: (b[uuidVariantIdx] & uuidVariantMask) | uuidVariantBits
+  - of: putUint48BE
+    steps:
+      - loop:
+          do:
+            - bind: shift
+              eval: (tsBytes - 1 - i) * bitsPerByte
+            - set: dst[i]
+              value: byte(v >> shift)
+          key: i
+          range: tsBytes
+  - of: crockford32Encode
+    steps:
+      - var:
+          name: out
+          type: "[crockfordChars]byte"
+      - loop:
+          do:
+            - bind: v
+              eval: "0"
+            - loop:
+                do:
+                  - bind: realIdx
+                    eval: i*bitsPerChar + j - crockfordPadBits
+                  - bind: bit
+                    eval: "0"
+                  - opt:
+                      do:
+                        - set: bit
+                          value: int((b[realIdx/bitsPerByte] >> (bitsPerByte - 1 - realIdx%bitsPerByte)) & 1)
+                      when: realIdx >= 0
+                  - set: v
+                    value: v<<1 | bit
+                key: j
+                range: bitsPerChar
+            - set: out[i]
+              value: alphabet[v]
+          key: i
+          range: crockfordChars
+      - return: string(out[:])
+  - of: crockford32Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: crockford32Decode
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                			errs.String("rule", "length"), errs.Int("length", len(s)))
+          when: len(s) != crockfordChars
+      - loop:
+          do:
+            - bind: v
+              eval: strings.IndexByte(alphabet, s[i])
+              to: strings
+            - opt:
+                do:
+                  - return: |-
+                      raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                      				errs.String("rule", "alphabet"), errs.Int("offset", i))
+                when: v < 0
+            - opt:
+                do:
+                  - return: |-
+                      raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                      				errs.String("rule", "overflow"))
+                when: i == 0 && v >= crockfordFirstCharLimit
+            - loop:
+                do:
+                  - bind: realIdx
+                    eval: i*bitsPerChar + j - crockfordPadBits
+                  - opt:
+                      do:
+                        - continue: true
+                      when: realIdx < 0
+                  - bind: bit
+                    eval: byte(v>>(bitsPerChar-1-j)) & 1
+                  - op: "|="
+                    set: raw[realIdx/bitsPerByte]
+                    value: bit << (bitsPerByte - 1 - realIdx%bitsPerByte)
+                key: j
+                range: bitsPerChar
+          key: i
+          range: crockfordChars
+      - return: raw, nil
+  - of: parseUUID
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseUUID
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                			errs.String("rule", "uuid_length"), errs.Int("length", len(s)))
+          when: len(s) != dashedUUIDLen
+      - var:
+          name: packed
+          type: "[hexFull]byte"
+      - bind: next
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: |-
+                            raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                            					errs.String("rule", "uuid_separator"), errs.Int("offset", i))
+                      when: s[i] != '-'
+                  - continue: true
+                when: isUUIDDashIndex(i)
+            - set: packed[next]
+              value: s[i]
+            - op: ++
+              set: next
+          key: i
+          range: dashedUUIDLen
+      - opt:
+          do:
+            - return: |-
+                raw, errs.Wrap(decErr, errs.WrapParams{
+                			Code:    coreid.CodeIDMalformed,
+                			Reason:  "ID_MALFORMED",
+                			Public:  "The identifier is not well formed for its scheme",
+                			Private: "service/app/id: parseUUID found a non-hexadecimal digit in the dashed form",
+                		}, errs.String("rule", "uuid_alphabet"))
+          init:
+            bind: _, decErr
+            eval: hex.Decode(raw[:], packed[:])
+            to: hex
+          when: decErr != nil
+      - return: raw, nil
+  - of: isUUIDDashIndex
+    steps:
+      - return: i == uuidDash1 || i == uuidDash2 || i == uuidDash3 || i == uuidDash4
+  - of: ksuidGen.Scheme
+    steps:
+      - return: "\"ksuid\""
+  - of: ksuidGen.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: ksuidGen.New
+        kind: self
+      - id: binary.BigEndian.PutUint32
+        kind: value
+      - id: rand
+        kind: stdlib
+      - id: base62Encode
+        kind: internal
+    steps:
+      - var:
+          name: b
+          type: "[ksuidRawLen]byte"
+      - bind: secs
+        eval: clock.System.Now().Unix() - ksuidEpoch
+      - opt:
+          do:
+            - return: "\"\", coreid.TimestampRange"
+          when: secs < 0 || secs > math.MaxUint32
+      - eval: binary.BigEndian.PutUint32(b[:ksuidTimeBytes], uint32(secs))
+        to: binary.BigEndian.PutUint32
+      - set: _, _
+        to: rand
+        value: rand.Read(b[ksuidTimeBytes:])
+      - return: base62Encode(b[:]), nil
+        to: base62Encode
+  - of: ParseKSUID
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseKSUID
+        kind: self
+      - id: base62Decode
+        kind: internal
+      - id: time.Unix(secs, 0).UTC
+        kind: value
+    steps:
+      - bind: raw, decErr
+        eval: base62Decode(s)
+        to: base62Decode
+      - opt:
+          do:
+            - return: time.Time{}, payload, decErr
+          when: decErr != nil
+      - bind: secs
+        eval: int64(binary.BigEndian.Uint32(raw[:ksuidTimeBytes])) + ksuidEpoch
+      - eval: copy(payload[:], raw[ksuidTimeBytes:])
+      - return: time.Unix(secs, 0).UTC(), payload, nil
+        to: time.Unix(secs, 0).UTC
+  - of: base62Encode
+    steps:
+      - var:
+          name: work
+          type: "[ksuidRawLen]byte"
+      - eval: copy(work[:], b)
+      - var:
+          name: out
+          type: "[ksuidChars]byte"
+      - loop:
+          cond: i >= 0
+          do:
+            - bind: rem
+              eval: "0"
+            - loop:
+                do:
+                  - bind: cur
+                    eval: rem<<bitsPerByte | int(work[j])
+                  - set: work[j]
+                    value: byte(cur / base62Radix)
+                  - set: rem
+                    value: cur % base62Radix
+                key: j
+                range: work
+            - set: out[i]
+              value: base62Alphabet[rem]
+          init: i := ksuidChars - 1
+          post: i--
+      - return: string(out[:])
+  - of: buildBase62Reverse
+    steps:
+      - var:
+          name: table
+          type: "[base62ReverseLen]int8"
+      - loop:
+          do:
+            - set: table[i]
+              value: "-1"
+          key: i
+          range: table
+      - loop:
+          do:
+            - set: table[base62Alphabet[value]]
+              value: int8(value)
+          key: value
+          range: len(base62Alphabet)
+      - return: table
+  - of: NewNanoID
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreid.InvalidSize, errs.WrapParams{}, errs.Int("size", size))
+          when: size <= 0
+      - return: "nanoIDGen{size: size}, nil"
+  - of: nanoIDGen.Scheme
+    steps:
+      - return: "\"nanoid\""
+  - of: nanoIDGen.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: nanoIDGen.New
+        kind: self
+      - id: randomFromAlphabet
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]byte, g.length())
+      - eval: randomFromAlphabet(out, nanoIDAlphabet)
+        to: randomFromAlphabet
+      - return: string(out), nil
+  - of: nanoIDGen.length
+    steps:
+      - opt:
+          do:
+            - return: nanoIDDefaultSize
+          when: g.size <= 0
+      - return: g.size
+  - of: randomFromAlphabet
+    participants:
+      - id: caller
+        kind: actor
+      - id: randomFromAlphabet
+        kind: self
+      - id: pow2MaskFor
+        kind: internal
+      - id: rand
+        kind: stdlib
+    steps:
+      - bind: mask
+        eval: pow2MaskFor(len(alphabet))
+        to: pow2MaskFor
+      - bind: buf
+        eval: make([]byte, len(dst))
+      - bind: filled
+        eval: "0"
+      - loop:
+          cond: filled < len(dst)
+          do:
+            - set: _, _
+              to: rand
+              value: rand.Read(buf)
+            - loop:
+                do:
+                  - bind: idx
+                    eval: int(b) & mask
+                  - opt:
+                      do:
+                        - continue: true
+                      when: idx >= len(alphabet)
+                  - set: dst[filled]
+                    value: alphabet[idx]
+                  - op: ++
+                    set: filled
+                  - opt:
+                      do:
+                        - break: true
+                      when: filled == len(dst)
+                key: _
+                range: buf
+                value: b
+  - of: pow2MaskFor
+    steps:
+      - bind: mask
+        eval: "1"
+      - loop:
+          cond: mask < n
+          do:
+            - op: <<=
+              set: mask
+              value: "1"
+      - return: mask - 1
+  - of: NewSnowflake
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSnowflake
+        kind: self
+      - id: newSnowflake
+        kind: internal
+    steps:
+      - return: newSnowflake(node&maxNode, clock.System)
+        to: newSnowflake
+  - of: newDefaultSnowflake
+    steps:
+      - return: "&snowflakeGen{clk: clk, derive: true}"
+  - of: newSnowflake
+    steps:
+      - return: "&snowflakeGen{clk: clk, node: node & maxNode}"
+  - of: (*snowflakeGen).Scheme
+    steps:
+      - return: "\"snowflake\""
+  - of: (*snowflakeGen).New
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*snowflakeGen).New
+        kind: self
+      - id: g.tillNext
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - set: g.node, g.derive
+              value: defaultNode(), false
+          when: g.derive
+      - bind: now
+        eval: g.clk.Now().UnixMilli() - snowflakeEpoch
+      - opt:
+          do:
+            - return: "\"\", coreid.ClockBackwards"
+          when: now < g.lastMS
+      - alt:
+          - do:
+              - set: g.seq
+                value: (g.seq + 1) & maxSeq
+              - opt:
+                  do:
+                    - bind: next, waitErr
+                      eval: g.tillNext(now)
+                      to: g.tillNext
+                    - opt:
+                        do:
+                          - set: g.seq
+                            value: maxSeq
+                          - return: "\"\", waitErr"
+                        when: waitErr != nil
+                    - set: now
+                      value: next
+                  when: g.seq == 0
+            when: now == g.lastMS
+          - do:
+              - set: g.seq
+                value: "0"
+            else: true
+      - set: g.lastMS
+        value: now
+      - bind: packed
+        eval: (now << timeShift) | (g.node << nodeShift) | g.seq
+      - return: strconv.FormatInt(packed, decimalBase), nil
+        to: strconv
+  - of: (*snowflakeGen).tillNext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*snowflakeGen).tillNext
+        kind: self
+      - id: runtime
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: now
+              eval: g.clk.Now().UnixMilli() - snowflakeEpoch
+            - opt:
+                do:
+                  - return: now, nil
+                when: now > prev
+            - opt:
+                do:
+                  - return: 0, coreid.ClockBackwards
+                when: now < prev
+            - opt:
+                do:
+                  - eval: runtime.Gosched()
+                    to: runtime
+                when: spins%goschedEvery == goschedEvery-1
+          key: spins
+          range: maxTillNextSpins
+      - return: 0, coreid.ClockStalled
+  - of: defaultNode
+    participants:
+      - id: caller
+        kind: actor
+      - id: defaultNode
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: host, hostErr
+        eval: os.Hostname()
+        to: os
+      - opt:
+          do:
+            - set: host
+              value: "\"\""
+          when: hostErr != nil
+      - bind: seed
+        eval: host + ":" + strconv.Itoa(os.Getpid())
+      - bind: sum
+        eval: fnvOffset
+      - loop:
+          do:
+            - op: ^=
+              set: sum
+              value: uint64(seed[i])
+            - op: "*="
+              set: sum
+              value: fnvPrime
+          key: i
+          range: len(seed)
+      - return: int64(sum) & maxNode
+  - of: NewTypeID
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTypeID
+        kind: self
+      - id: validateTypePrefix
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, vErr
+          init:
+            bind: vErr
+            eval: validateTypePrefix(prefix)
+            to: validateTypePrefix
+          when: vErr != nil
+      - return: "typeIDGen{prefix: prefix}, nil"
+  - of: typeIDGen.Scheme
+    steps:
+      - return: "\"typeid\""
+  - of: typeIDGen.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: typeIDGen.New
+        kind: self
+      - id: putUint48BE
+        kind: internal
+      - id: rand
+        kind: stdlib
+      - id: setUUIDBits
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", coreid.InvalidPrefix"
+          when: g.prefix == ""
+      - var:
+          name: b
+          type: "[uuidRawLen]byte"
+      - eval: putUint48BE(b[:], clock.System.Now().UnixMilli())
+        to: putUint48BE
+      - set: _, _
+        to: rand
+        value: rand.Read(b[tsBytes:])
+      - eval: setUUIDBits(b[:], uuidVersion7)
+        to: setUUIDBits
+      - return: g.prefix + typeIDSeparator + crockford32Encode(b[:], typeIDAlphabet), nil
+  - of: FormatTypeID
+    participants:
+      - id: caller
+        kind: actor
+      - id: FormatTypeID
+        kind: self
+      - id: validateTypePrefix
+        kind: internal
+      - id: parseUUID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", vErr"
+          init:
+            bind: vErr
+            eval: validateTypePrefix(prefix)
+            to: validateTypePrefix
+          when: vErr != nil
+      - bind: raw, parseErr
+        eval: parseUUID(uuid)
+        to: parseUUID
+      - opt:
+          do:
+            - return: "\"\", parseErr"
+          when: parseErr != nil
+      - return: prefix + typeIDSeparator + crockford32Encode(raw[:], typeIDAlphabet), nil
+  - of: ParseTypeID
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseTypeID
+        kind: self
+      - id: validateTypePrefix
+        kind: internal
+      - id: crockford32Decode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                "", "", errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                			errs.String("rule", "length"), errs.Int("length", len(s)))
+          when: len(s) < typeIDMinLen
+      - bind: cut
+        eval: len(s) - crockfordChars - len(typeIDSeparator)
+      - opt:
+          do:
+            - return: |-
+                "", "", errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                			errs.String("rule", "separator"), errs.Int("offset", cut))
+          when: s[cut:cut+len(typeIDSeparator)] != typeIDSeparator
+      - set: prefix
+        value: s[:cut]
+      - opt:
+          do:
+            - return: "\"\", \"\", vErr"
+          init:
+            bind: vErr
+            eval: validateTypePrefix(prefix)
+            to: validateTypePrefix
+          when: vErr != nil
+      - bind: raw, decErr
+        eval: crockford32Decode(s[cut+len(typeIDSeparator):], typeIDAlphabet)
+        to: crockford32Decode
+      - opt:
+          do:
+            - return: "\"\", \"\", decErr"
+          when: decErr != nil
+      - return: prefix, formatUUID(raw[:]), nil
+  - of: validateTypePrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateTypePrefix
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coreid.InvalidPrefix, errs.WrapParams{}, errs.String("rule", "empty"))
+              to: errs
+          when: prefix == ""
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreid.InvalidPrefix, errs.WrapParams{},
+                			errs.String("rule", "too_long"), errs.Int("length", len(prefix)))
+              to: errs
+          when: len(prefix) > typeIDMaxPrefix
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: legalPrefixByte(prefix[i], i, len(prefix))
+            - return: |-
+                errs.Wrap(coreid.InvalidPrefix, errs.WrapParams{},
+                			errs.String("rule", "charset"), errs.Int("offset", i))
+              to: errs
+          key: i
+          range: len(prefix)
+      - return: nil
+  - of: legalPrefixByte
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: c >= 'a' && c <= 'z'
+      - return: c == typeIDSeparator[0] && i > 0 && i < total-1
+  - of: ulidGen.Scheme
+    steps:
+      - return: "\"ulid\""
+  - of: ulidGen.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: ulidGen.New
+        kind: self
+      - id: putUint48BE
+        kind: internal
+      - id: rand
+        kind: stdlib
+      - id: crockford32
+        kind: internal
+    steps:
+      - var:
+          name: b
+          type: "[uuidRawLen]byte"
+      - eval: putUint48BE(b[:], clock.System.Now().UnixMilli())
+        to: putUint48BE
+      - set: _, _
+        to: rand
+        value: rand.Read(b[tsBytes:])
+      - return: crockford32(b[:]), nil
+        to: crockford32
+  - of: crockford32
+    participants:
+      - id: caller
+        kind: actor
+      - id: crockford32
+        kind: self
+      - id: crockford32Encode
+        kind: internal
+    steps:
+      - return: crockford32Encode(b, ulidAlphabet)
+        to: crockford32Encode
+  - of: uuidv4Gen.Scheme
+    steps:
+      - return: "\"uuidv4\""
+  - of: uuidv4Gen.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: uuidv4Gen.New
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: setUUIDBits
+        kind: internal
+      - id: formatUUID
+        kind: internal
+    steps:
+      - var:
+          name: b
+          type: "[uuidRawLen]byte"
+      - set: _, _
+        to: rand
+        value: rand.Read(b[:])
+      - eval: setUUIDBits(b[:], uuidVersion4)
+        to: setUUIDBits
+      - return: formatUUID(b[:]), nil
+        to: formatUUID
+  - of: uuidv7Gen.Scheme
+    steps:
+      - return: "\"uuidv7\""
+  - of: uuidv7Gen.New
+    participants:
+      - id: caller
+        kind: actor
+      - id: uuidv7Gen.New
+        kind: self
+      - id: putUint48BE
+        kind: internal
+      - id: rand
+        kind: stdlib
+      - id: setUUIDBits
+        kind: internal
+      - id: formatUUID
+        kind: internal
+    steps:
+      - var:
+          name: b
+          type: "[uuidRawLen]byte"
+      - eval: putUint48BE(b[:], clock.System.Now().UnixMilli())
+        to: putUint48BE
+      - set: _, _
+        to: rand
+        value: rand.Read(b[tsBytes:])
+      - eval: setUUIDBits(b[:], uuidVersion7)
+        to: setUUIDBits
+      - return: formatUUID(b[:]), nil
+        to: formatUUID

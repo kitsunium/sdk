@@ -1,0 +1,148 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: kdfID is the only key-derivation id shipped now; it pins the cost params.
+    items:
+      - name: kdfID
+        type: string
+        value: "\"pbkdf2-sha256\""
+    name: kdfID
+  - doc: aeadID is the only AEAD id shipped now.
+    items:
+      - name: aeadID
+        type: corecrypto.Algorithm
+        value: "\"aes-256-gcm\""
+    name: aeadID
+  - doc: version is the wire grammar version literal.
+    items:
+      - name: version
+        type: string
+        value: "\"v=1\""
+    name: version
+  - doc: magic is the leading envelope tag.
+    items:
+      - name: magic
+        type: string
+        value: "\"kenv\""
+    name: magic
+  - doc: |-
+      iterations is the fixed PBKDF2 work factor pinned to kdfID. The envelope
+      carries no iterations field, so this constant IS the wire contract: an
+      envelope written at any other cost is not a `pbkdf2-sha256` envelope even
+      though it frames identically. Test_iterations pins it against a golden
+      vector produced at this value.
+    items:
+      - name: iterations
+        type: int
+        value: "600000"
+    name: iterations
+  - doc: saltLen is the salt length in bytes generated per envelope.
+    items:
+      - name: saltLen
+        type: int
+        value: "32"
+    name: saltLen
+  - doc: |-
+      fieldCount is the number of segments in a well-formed envelope after
+      splitting on "$" (the leading empty segment is included).
+    items:
+      - name: fieldCount
+        type: int
+        value: "7"
+    name: fieldCount
+  - doc: |-
+      Field indices into the "$"-split envelope string. The leading empty segment
+      is index 0, so the first meaningful field is index 1.
+    grouped: true
+    items:
+      - name: fieldMagic
+        type: int
+        value: iota + 1
+      - name: fieldVer
+      - name: fieldKDF
+      - name: fieldSalt
+      - name: fieldAEAD
+      - name: fieldBox
+    name: fieldMagic
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - kdfID
+      - aeadID
+      - version
+      - magic
+      - iterations
+      - saltLen
+      - fieldCount
+      - fieldMagic
+      - WrapKey
+      - wrapKey
+      - UnwrapKey
+      - unwrapKey
+      - deriveKEK
+      - header
+      - parseEnvelope
+      - validFraming
+    name: keyenvelope.go
+functions:
+  - name: WrapKey
+    params: passphrase []byte, dek corecrypto.Key
+    results: envelope string, err error
+  - doc: |-
+      wrapKey is WrapKey with the KDF work factor supplied explicitly. Only
+      WrapKey calls it in production, always with iterations; the suite calls it
+      with a cheap factor for the cases that do not depend on the cost.
+    name: wrapKey
+    params: passphrase []byte, dek corecrypto.Key, iters int
+    results: envelope string, err error
+  - name: UnwrapKey
+    params: passphrase []byte, envelope string
+    results: dek corecrypto.Key, err error
+  - doc: |-
+      unwrapKey is UnwrapKey with the KDF work factor supplied explicitly. Only
+      UnwrapKey calls it in production, always with iterations; the suite calls it
+      with a cheap factor for the cases that do not depend on the cost.
+    name: unwrapKey
+    params: passphrase []byte, envelope string, iters int
+    results: dek corecrypto.Key, err error
+  - doc: |-
+      deriveKEK derives the KEK from passphrase and salt over iters rounds of
+      stdlib PBKDF2-SHA256, returning the wrapped Key and any derivation error
+      (unreachable with our pinned, valid parameters). The intermediate plaintext
+      is wiped before return.
+    name: deriveKEK
+    params: passphrase, salt []byte, iters int
+    results: kek corecrypto.Key, err error
+  - doc: |-
+      header renders the envelope header (everything up to and including the box
+      separator); it doubles as the AEAD AAD so a tampered header fails the open.
+    name: header
+    params: b64salt string
+    results: "[]byte"
+  - doc: |-
+      parseEnvelope decodes envelope into its salt and sealed box, validating the
+      frozen grammar; any structural fault yields InvalidKeyEnvelope.
+    name: parseEnvelope
+    params: envelope string
+    results: salt, box []byte, err error
+  - doc: |-
+      validFraming reports whether the "$"-split parts carry the frozen segment
+      count, magic, version, and the only shipped kdf and aead ids.
+    name: validFraming
+    params: parts []string
+    results: bool
+imports:
+  base64: encoding/base64
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  pbkdf2: crypto/pbkdf2
+  rand: crypto/rand
+  sha256: crypto/sha256
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope
+  name: keyenvelope
+  purpose: Package keyenvelope wraps a symmetric DEK at rest under a passphrase.
+types: []

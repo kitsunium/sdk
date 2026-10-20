@@ -1,0 +1,320 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      capturedMails is how many deliveries the capture transport keeps: one,
+      which the mailer reads at once — the mailbox keeps what the Studio shows.
+    items:
+      - name: capturedMails
+        type: int
+        value: "1"
+    name: capturedMails
+files:
+  - decls:
+      - sdkClock
+      - clockOf
+      - sdkClock.NewTimer
+      - sdkClock.NewTicker
+    name: clock.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - capturedMails
+      - Enable
+      - validate
+      - capture
+      - parseSMTP
+      - newSMTP
+      - tlsName
+      - sentinels
+      - refused
+      - messageOf
+      - addressOf
+    name: mailengine.go
+  - decls:
+      - _
+    name: mailengine_compliance.go
+  - decls:
+      - spool
+      - open
+      - backoffOf
+      - deferrerOf
+      - observeOf
+      - events
+      - eventOf
+      - attemptFrom
+      - spool.Send
+      - spool.SendWithID
+      - spool.DeadLetters
+      - spool.Run
+      - spool.Close
+    name: spool.go
+  - decls:
+      - transport
+      - captured
+      - attempts
+      - transport.Send
+      - (*captured).Send
+      - (*captured).Composed
+      - attempts.Send
+    name: transport.go
+functions:
+  - doc: |-
+      clockOf is c as the SDK's spool takes it, nil — the spool's own, the
+      system's — for none.
+    name: clockOf
+    params: c plug.Clock
+    results: clock.Timed
+  - name: Enable
+  - doc: |-
+      validate is the SDK's verdict on msg, a mail.Message: what the spool
+      would refuse it for.
+    name: validate
+    params: msg plug.MailValue
+    results: error
+  - doc: |-
+      capture is the SDK's capture transport, keeping the last message it
+      composed.
+
+      IFACE-PLUGIN: kit reaches a transport through plug.MailSink; this is
+      its implementation.
+    name: capture
+    results: plug.MailSink
+  - doc: |-
+      parseSMTP reads url with the SDK's mail.ParseURL, which refuses what its
+      SMTP transport would: the relay it names, its configuration — which holds
+      the password — handed on to newSMTP and never kept.
+    name: parseSMTP
+    params: url string
+    results: plug.MailRelayValue, error
+  - doc: |-
+      newSMTP is the SDK's SMTP transport to relay, as parseSMTP read it. It
+      dials nothing.
+
+      IFACE-PLUGIN: kit reaches a transport through plug.MailSink; this is
+      its implementation.
+    name: newSMTP
+    params: relay *plug.MailRelayValue
+    results: plug.MailSink, error
+  - doc: "tlsName is the TLS mode as the URL spells it: starttls, implicit or none."
+    name: tlsName
+    params: mode mail.TLSMode
+    results: string
+  - doc: |-
+      refused reports whether err, or an error it wraps, is the SDK's sentinel
+      of kind.
+    name: refused
+    params: err error, kind plug.MailRefusal
+    results: bool
+  - doc: |-
+      messageOf is the SDK's mail v holds; the zero mail for any other value,
+      which the SDK refuses.
+    name: messageOf
+    params: v plug.MailValue
+    results: mail.Message
+  - doc: addressOf is the SDK's sender v holds; none for any other value.
+    name: addressOf
+    params: v plug.MailValue
+    results: mail.Address
+  - doc: |-
+      open opens the SDK's spool over cfg. An outbox on a database takes the
+      SDK's broker the queue subsystem opened there (queueengine.BrokerOf) and the
+      database's transaction manager the store subsystem opened, a Deferrer
+      that is an Aborter too (storeengine.SQLOf); without one, the spool tells the
+      mailbox a mail was queued when Send returns.
+
+      IFACE-PLUGIN: kit reaches a mailer's outbox through plug.MailSpool; this
+      is its implementation.
+    name: open
+    params: cfg *plug.MailSpoolConfig
+    results: plug.MailSpool, error
+  - doc: |-
+      backoffOf is the SDK's exponential backoff at cfg's bounds: the wait
+      after a failed attempt, from BackoffBase, doubling, up to BackoffMax.
+    name: backoffOf
+    params: cfg *plug.MailSpoolConfig
+    results: resilience.Backoff
+  - doc: |-
+      deferrerOf is the transaction manager of db, a database the store
+      subsystem opened, as the spool defers on it: a Deferrer that is an Aborter
+      too, as the SDK's is; nil otherwise.
+    name: deferrerOf
+    params: db plug.Database
+    results: sql.Deferrer
+  - doc: observeOf is fn as the spool tells it each event, nil for none.
+    name: observeOf
+    params: fn func(e *plug.MailEventValue)
+    results: func(mailspool.Event)
+  - doc: eventOf is the spool's event kind k as kit's core reads it.
+    name: eventOf
+    params: k mailspool.EventKind
+    results: plug.MailEvent
+  - doc: attemptFrom is the attempt the spool put in ctx.
+    name: attemptFrom
+    params: ctx context.Context
+    results: plug.MailAttemptValue, bool
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errors: errors
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  mail: github.com/kitsunium/sdk/pkg/v1/app/mail
+  mailspool: github.com/kitsunium/sdk/pkg/v1/app/mail/spool
+  net: net
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  queueengine: github.com/kitsunium/sdk/framework/internal/app/queueengine
+  resilience: github.com/kitsunium/sdk/pkg/v1/app/resilience
+  sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+  storeengine: github.com/kitsunium/sdk/framework/internal/app/storeengine
+  strconv: strconv
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/mailengine
+  name: mailengine
+  purpose: "Package mailengine is what framework/app/mail plugs into kit: the outbox the framework's mailers keep — the SDK's mail spool, on the database that keeps the mailer's service in the queue subsystem's sealed broker, else in the data directory or in memory — and the transports that empty it, the SDK's SMTP transport and its capture transport (ADR 0179 §1, step 6)."
+types:
+  - doc: |-
+      sdkClock is the app's clock, as kit's core hands it (plug.Clock), as the
+      SDK's engine stamps and waits on it: the same instants and the same
+      timers, a test's manual clock included.
+    fields:
+      - name: ""
+        role: embedded
+        type: plug.Clock
+    kind: struct
+    methods:
+      - doc: NewTimer is the clock's timer, as the SDK's.
+        name: NewTimer
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Timer
+      - doc: NewTicker is the clock's ticker, as the SDK's.
+        name: NewTicker
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Ticker
+    name: sdkClock
+  - doc: spool is the SDK's mail spool as kit's core uses it.
+    fields:
+      - name: s
+        type: "*mailspool.Spool"
+    kind: struct
+    methods:
+      - doc: Send puts msg, a mail.Message, in the outbox.
+        name: Send
+        params: ctx context.Context, msg plug.MailValue
+        recv: s spool
+        results: string, error
+      - doc: SendWithID puts msg, a mail.Message, in the outbox under id.
+        name: SendWithID
+        params: ctx context.Context, id string, msg plug.MailValue
+        recv: s spool
+        results: error
+      - doc: DeadLetters counts up to maxLetters of the outbox's dead letters.
+        name: DeadLetters
+        params: ctx context.Context, maxLetters int
+        recv: s spool
+        results: int, error
+      - doc: Run hands each mail to the transport until ctx ends.
+        name: Run
+        params: ctx context.Context
+        recv: s spool
+        results: error
+      - doc: Close releases the outbox.
+        name: Close
+        recv: s spool
+        results: error
+    name: spool
+  - doc: transport is the SDK's SMTP transport as kit's core uses it.
+    fields:
+      - name: t
+        type: mail.Transport
+    kind: struct
+    methods:
+      - doc: Send delivers msg, a mail.Message.
+        name: Send
+        params: ctx context.Context, msg plug.MailValue
+        recv: t transport
+        results: error
+    name: transport
+  - doc: |-
+      captured is the SDK's capture transport as kit's core uses it: it
+      delivers nothing and keeps the last message it composed.
+    fields:
+      - name: t
+        type: mail.FullTransport
+    kind: struct
+    methods:
+      - doc: Send composes msg, a mail.Message, and keeps it.
+        name: Send
+        params: ctx context.Context, msg plug.MailValue
+        recv: c *captured
+        results: error
+      - doc: Composed is the last message the transport composed, nil for none.
+        name: Composed
+        recv: c *captured
+        results: "[]byte"
+    name: captured
+  - doc: |-
+      attempts is the transport the spool hands each attempt to: kit's core's
+      attempt, told the attempt the spool's context carries.
+    fields:
+      - name: run
+        type: func(ctx context.Context, msg plug.MailValue, attempt plug.MailAttemptValue) error
+    kind: struct
+    methods:
+      - doc: Send runs kit's attempt of msg, with the attempt the spool put in ctx.
+        name: Send
+        params: ctx context.Context, msg mail.Message
+        recv: a attempts
+        results: error
+    name: attempts
+vars:
+  - doc: sentinels are the SDK's sentinels of each refusal kit tells apart.
+    items:
+      - name: sentinels
+        value: |-
+          map[plug.MailRefusal]error{
+          	plug.MailRefusalClosed:      mailspool.Closed,
+          	plug.MailRefusalUnencodable: mailspool.MessageUnencodable,
+          	plug.MailRefusalInvalidURL:  mail.InvalidURL,
+          }
+    name: sentinels
+  - doc: |-
+      : Asserts at compile time that a mailer's outbox and its transports are
+      what plug describes, that the transport the spool hands each attempt to is
+      the SDK's, and that the app's clock is the SDK's.
+    grouped: true
+    items:
+      - name: _
+        type: plug.MailSpool
+        value: spool{}
+      - name: _
+        type: plug.MailSink
+        value: transport{}
+      - name: _
+        type: plug.MailSink
+        value: (*captured)(nil)
+      - name: _
+        type: plug.MailCaptureSource
+        value: (*captured)(nil)
+      - name: _
+        type: mail.Transport
+        value: attempts{}
+      - name: _
+        type: clock.Timed
+        value: sdkClock{}
+    name: _
+  - doc: events are the spool's events kit's core tells apart.
+    items:
+      - name: events
+        value: |-
+          map[mailspool.EventKind]plug.MailEvent{
+          	mailspool.EventQueued:       plug.MailEventQueued,
+          	mailspool.EventSent:         plug.MailEventSent,
+          	mailspool.EventRetrying:     plug.MailEventRetrying,
+          	mailspool.EventDeadLettered: plug.MailEventDeadLettered,
+          	mailspool.EventDuplicate:    plug.MailEventDuplicate,
+          }
+    name: events

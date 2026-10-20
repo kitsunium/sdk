@@ -1,0 +1,1363 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewMem
+    steps:
+      - return: |-
+          &memFS{nodes: map[string]*memNode{
+          		rootName: {mode: fs.ModeDir | rootPerm},
+          	}}
+  - of: (*memFS).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).Open
+        kind: self
+      - id: corevfs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: node, found
+        eval: m.nodes[name]
+      - opt:
+          do:
+            - return: nil, failRead(notExist("open", name), kerrs.String("path", name))
+          when: "!found"
+      - opt:
+          do:
+            - return: "&memDir{info: infoOf(name, node), entries: m.entriesLocked(name)}, nil"
+          when: node.mode.IsDir()
+      - return: "&memFile{info: infoOf(name, node), data: slices.Clone(node.data)}, nil"
+  - of: (*memFS).Stat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).Stat
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: infoOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: node, found
+        eval: m.nodes[name]
+      - opt:
+          do:
+            - return: nil, failRead(notExist("stat", name), kerrs.String("path", name))
+          when: "!found"
+      - return: infoOf(name, node), nil
+        to: infoOf
+  - of: (*memFS).ReadDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).ReadDir
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: m.entriesLocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: node, found
+        eval: m.nodes[name]
+      - opt:
+          do:
+            - return: nil, failRead(notExist("readdir", name), kerrs.String("path", name))
+          when: "!found"
+      - opt:
+          do:
+            - return: |-
+                nil, failRead(&fs.PathError{Op: "readdir", Path: name, Err: fs.ErrInvalid},
+                			kerrs.String("path", name))
+          when: "!node.mode.IsDir()"
+      - return: m.entriesLocked(name), nil
+        to: m.entriesLocked
+  - of: (*memFS).ReadFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).ReadFile
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: node, found
+        eval: m.nodes[name]
+      - opt:
+          do:
+            - return: nil, failRead(notExist("open", name), kerrs.String("path", name))
+          when: "!found"
+      - opt:
+          do:
+            - return: |-
+                nil, failRead(&fs.PathError{Op: "read", Path: name, Err: fs.ErrInvalid},
+                			kerrs.String("path", name))
+          when: node.mode.IsDir()
+      - return: slices.Clone(node.data), nil
+        to: slices
+  - of: (*memFS).entriesLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).entriesLocked
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: names
+        eval: make([]string, 0, len(m.nodes))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: names
+                    value: append(names, candidate)
+                when: path.Dir(candidate) == dir && candidate != rootName
+          key: candidate
+          range: maps.Keys(m.nodes)
+      - eval: slices.Sort(names)
+        to: slices
+      - bind: entries
+        eval: make([]fs.DirEntry, 0, len(names))
+      - loop:
+          do:
+            - set: entries
+              value: append(entries, fs.FileInfoToDirEntry(infoOf(name, m.nodes[name])))
+          key: _
+          range: names
+          value: name
+      - return: entries
+  - of: infoOf
+    steps:
+      - return: "memInfo{name: path.Base(name), size: int64(len(node.data)), mode: node.mode}"
+  - of: notExist
+    steps:
+      - return: "&fs.PathError{Op: op, Path: name, Err: fs.ErrNotExist}"
+  - of: (*memFS).dirExistsLocked
+    steps:
+      - bind: node, found
+        eval: m.nodes[dir]
+      - return: found && node.mode.IsDir()
+  - of: (*memFS).blockedAncestorLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).blockedAncestorLocked
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.Split(path.Dir(name), "/")
+        to: strings
+      - loop:
+          do:
+            - bind: prefix
+              eval: strings.Join(parts[:i+1], "/")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: prefix == rootName
+            - bind: existing, found
+              eval: m.nodes[prefix]
+            - opt:
+                do:
+                  - continue: true
+                when: "!found"
+            - opt:
+                do:
+                  - return: prefix, true
+                when: "!existing.mode.IsDir()"
+          key: i
+          range: parts
+      - return: "\"\", false"
+  - of: (*memDir).Stat
+    steps:
+      - return: d.info, nil
+  - of: (*memDir).Read
+    steps:
+      - return: "0, failRead(&fs.PathError{Op: \"read\", Path: d.info.name, Err: fs.ErrInvalid})"
+  - of: (*memDir).Close
+    steps:
+      - return: nil
+  - of: (*memDir).ReadDir
+    steps:
+      - bind: remaining
+        eval: d.entries[d.offset:]
+      - opt:
+          do:
+            - set: d.offset
+              value: len(d.entries)
+            - return: remaining, nil
+          when: n <= 0
+      - opt:
+          do:
+            - return: nil, io.EOF
+          when: len(remaining) == 0
+      - opt:
+          do:
+            - set: "n"
+              value: len(remaining)
+          when: n > len(remaining)
+      - op: +=
+        set: d.offset
+        value: "n"
+      - return: remaining[:n], nil
+  - of: (*memFile).Stat
+    steps:
+      - return: f.info, nil
+  - of: (*memFile).Read
+    steps:
+      - opt:
+          do:
+            - return: 0, io.EOF
+          when: f.offset >= len(f.data)
+      - bind: copied
+        eval: copy(p, f.data[f.offset:])
+      - op: +=
+        set: f.offset
+        value: copied
+      - return: copied, nil
+  - of: (*memFile).Close
+    steps:
+      - return: nil
+  - of: memInfo.Name
+    steps:
+      - return: i.name
+  - of: memInfo.Size
+    steps:
+      - return: i.size
+  - of: memInfo.Mode
+    steps:
+      - return: i.mode
+  - of: memInfo.ModTime
+    steps:
+      - return: time.Time{}
+  - of: memInfo.IsDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: memInfo.IsDir
+        kind: self
+      - id: i.mode.IsDir
+        kind: value
+    steps:
+      - return: i.mode.IsDir()
+        to: i.mode.IsDir
+  - of: memInfo.Sys
+    steps:
+      - return: nil
+  - of: (*memFS).WriteFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).WriteFile
+        kind: self
+      - id: guardNameAndPerm
+        kind: internal
+      - id: m.checkFileTargetLocked
+        kind: internal
+      - id: m.storeLocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: guardNameAndPerm(name, perm)
+            to: guardNameAndPerm
+          when: guardErr != nil
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: placeErr
+          init:
+            bind: placeErr
+            eval: m.checkFileTargetLocked(name)
+            to: m.checkFileTargetLocked
+          when: placeErr != nil
+      - eval: m.storeLocked(name, data, perm)
+        to: m.storeLocked
+      - return: nil
+  - of: (*memFS).WriteAtomic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).WriteAtomic
+        kind: self
+      - id: guardNameAndPerm
+        kind: internal
+      - id: m.checkFileTargetLocked
+        kind: internal
+      - id: m.storeLocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: guardNameAndPerm(name, perm)
+            to: guardNameAndPerm
+          when: guardErr != nil
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: placeErr
+          init:
+            bind: placeErr
+            eval: m.checkFileTargetLocked(name)
+            to: m.checkFileTargetLocked
+          when: placeErr != nil
+      - eval: m.storeLocked(name, data, perm)
+        to: m.storeLocked
+      - return: nil
+  - of: (*memFS).checkFileTargetLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).checkFileTargetLocked
+        kind: self
+      - id: m.blockedAncestorLocked
+        kind: internal
+      - id: verdict
+        kind: internal
+      - id: failWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: verdict(corevfs.NotRegularFile, kerrs.String("path", blocker))
+              to: verdict
+          init:
+            bind: blocker, blocked
+            eval: m.blockedAncestorLocked(name)
+            to: m.blockedAncestorLocked
+          when: blocked
+      - opt:
+          do:
+            - return: failWrite(notExist("open", path.Dir(name)), kerrs.String("path", name))
+              to: failWrite
+          when: "!m.dirExistsLocked(path.Dir(name))"
+      - bind: existing, found
+        eval: m.nodes[name]
+      - opt:
+          do:
+            - return: nil
+          when: "!found"
+      - opt:
+          do:
+            - return: verdict(corevfs.NotRegularFile, kerrs.String("path", name))
+              to: verdict
+          when: existing.mode.IsDir()
+      - return: nil
+  - of: (*memFS).storeLocked
+    steps:
+      - bind: mode
+        eval: perm
+      - opt:
+          do:
+            - set: mode
+              value: existing.mode
+          init:
+            bind: existing, found
+            eval: m.nodes[name]
+          when: found
+      - set: m.nodes[name]
+        value: "&memNode{mode: mode, data: slices.Clone(data)}"
+  - of: (*memFS).MkdirAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).MkdirAll
+        kind: self
+      - id: guardNameAndPerm
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: verdict
+        kind: internal
+      - id: m.createChainLocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: guardNameAndPerm(name, perm)
+            to: guardNameAndPerm
+          when: guardErr != nil
+      - lock:
+          mutex: m.mu
+      - bind: parts
+        eval: strings.Split(name, "/")
+        to: strings
+      - loop:
+          do:
+            - bind: prefix
+              eval: strings.Join(parts[:i+1], "/")
+              to: strings
+            - bind: existing, found
+              eval: m.nodes[prefix]
+            - opt:
+                do:
+                  - return: verdict(corevfs.NotRegularFile, kerrs.String("path", prefix))
+                    to: verdict
+                when: found && !existing.mode.IsDir()
+          key: i
+          range: parts
+      - eval: m.createChainLocked(parts, perm)
+        to: m.createChainLocked
+      - return: nil
+  - of: (*memFS).createChainLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).createChainLocked
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: prefix
+              eval: strings.Join(parts[:i+1], "/")
+              to: strings
+            - opt:
+                do:
+                  - set: m.nodes[prefix]
+                    value: "&memNode{mode: fs.ModeDir | perm}"
+                init:
+                  bind: _, found
+                  eval: m.nodes[prefix]
+                when: "!found"
+          key: i
+          range: parts
+  - of: (*memFS).Remove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).Remove
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: failWrite
+        kind: internal
+      - id: verdict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidateWritePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - lock:
+          mutex: m.mu
+      - bind: node, found
+        eval: m.nodes[name]
+      - opt:
+          do:
+            - return: failWrite(notExist("remove", name), kerrs.String("path", name))
+              to: failWrite
+          when: "!found"
+      - opt:
+          do:
+            - return: verdict(corevfs.DirectoryNotEmpty, kerrs.String("path", name))
+              to: verdict
+          when: node.mode.IsDir() && m.hasChildrenLocked(name)
+      - eval: delete(m.nodes, name)
+      - return: nil
+  - of: (*memFS).RemoveAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memFS).RemoveAll
+        kind: self
+      - id: corevfs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidateWritePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - lock:
+          mutex: m.mu
+      - bind: prefix
+        eval: name + "/"
+      - bind: doomed
+        eval: make([]string, 0, len(m.nodes))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: doomed
+                    value: append(doomed, candidate)
+                when: candidate == name || strings.HasPrefix(candidate, prefix)
+          key: candidate
+          range: maps.Keys(m.nodes)
+      - loop:
+          do:
+            - eval: delete(m.nodes, candidate)
+          key: _
+          range: doomed
+          value: candidate
+      - return: nil
+  - of: NewOS
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewOS
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: disk.nativeOps
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, coreproc.UnsupportedPlatform
+          when: "!platformNative"
+      - bind: handle, openErr
+        eval: os.OpenRoot(root)
+        to: os
+      - opt:
+          do:
+            - return: nil, failRoot(openErr, kerrs.String("root", root))
+          when: openErr != nil
+      - bind: disk
+        eval: "&osFS{root: handle, read: handle.FS()}"
+      - set: disk.ops
+        to: disk.nativeOps
+        value: disk.nativeOps()
+      - return: disk, nil
+  - of: (*osFS).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).Close
+        kind: self
+      - id: o.root.Close
+        kind: value
+      - id: failRoot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: failRoot(closeErr, kerrs.String("op", "close"))
+              to: failRoot
+          init:
+            bind: closeErr
+            eval: o.root.Close()
+            to: o.root.Close
+          when: closeErr != nil
+      - return: nil
+  - of: failRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: failRoot
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:     corevfs.CodeRootUnavailable,
+          		Reason:   "ROOT_UNAVAILABLE",
+          		Public:   "The filesystem root could not be opened",
+          		Private:  "service/data/vfs: os.OpenRoot failed — the path is absent, is not a directory, or is not searchable by this process",
+          		ExitCode: exitConfig,
+          	}, fields...)
+        to: kerrs
+  - of: (*osFS).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).Open
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: o.read.Open
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - bind: opened, openErr
+        eval: o.read.Open(name)
+        to: o.read.Open
+      - opt:
+          do:
+            - return: nil, failRead(openErr, kerrs.String("path", name))
+          when: openErr != nil
+      - return: opened, nil
+  - of: (*osFS).Stat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).Stat
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: o.root.Stat
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - bind: stat, statErr
+        eval: o.root.Stat(name)
+        to: o.root.Stat
+      - opt:
+          do:
+            - return: nil, failRead(statErr, kerrs.String("path", name))
+          when: statErr != nil
+      - return: stat, nil
+  - of: (*osFS).ReadDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).ReadDir
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: fs
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - bind: listed, readErr
+        eval: fs.ReadDir(o.read, name)
+        to: fs
+      - opt:
+          do:
+            - return: nil, failRead(readErr, kerrs.String("path", name))
+          when: readErr != nil
+      - return: listed, nil
+  - of: (*osFS).ReadFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).ReadFile
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: o.root.ReadFile
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidatePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - bind: content, readErr
+        eval: o.root.ReadFile(name)
+        to: o.root.ReadFile
+      - opt:
+          do:
+            - return: nil, failRead(readErr, kerrs.String("path", name))
+          when: readErr != nil
+      - return: content, nil
+  - of: (*osFS).guardFileTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).guardFileTarget
+        kind: self
+      - id: guardNameAndPerm
+        kind: internal
+      - id: o.root.Lstat
+        kind: value
+      - id: o.classifyBlocked
+        kind: internal
+      - id: refuseKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: guardNameAndPerm(name, perm)
+            to: guardNameAndPerm
+          when: guardErr != nil
+      - bind: info, statErr
+        eval: o.root.Lstat(name)
+        to: o.root.Lstat
+      - opt:
+          do:
+            - return: nil
+          when: errors.Is(statErr, fs.ErrNotExist)
+      - opt:
+          do:
+            - return: o.classifyBlocked(name, statErr)
+              to: o.classifyBlocked
+          when: statErr != nil
+      - return: refuseKind(name, info.Mode(), info.Mode().IsRegular())
+        to: refuseKind
+  - of: (*osFS).guardDirTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).guardDirTarget
+        kind: self
+      - id: guardNameAndPerm
+        kind: internal
+      - id: o.root.Lstat
+        kind: value
+      - id: o.classifyBlocked
+        kind: internal
+      - id: refuseKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: guardNameAndPerm(name, perm)
+            to: guardNameAndPerm
+          when: guardErr != nil
+      - bind: info, statErr
+        eval: o.root.Lstat(name)
+        to: o.root.Lstat
+      - opt:
+          do:
+            - return: nil
+          when: errors.Is(statErr, fs.ErrNotExist)
+      - opt:
+          do:
+            - return: o.classifyBlocked(name, statErr)
+              to: o.classifyBlocked
+          when: statErr != nil
+      - return: refuseKind(name, info.Mode(), info.Mode().IsDir())
+        to: refuseKind
+  - of: (*osFS).blockedAncestor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).blockedAncestor
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: o.root.Stat
+        kind: value
+    steps:
+      - bind: parts
+        eval: strings.Split(path.Dir(name), "/")
+        to: strings
+      - loop:
+          do:
+            - bind: prefix
+              eval: strings.Join(parts[:i+1], "/")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: prefix == "."
+            - bind: info, statErr
+              eval: o.root.Stat(prefix)
+              to: o.root.Stat
+            - opt:
+                do:
+                  - continue: true
+                when: statErr != nil
+            - opt:
+                do:
+                  - return: prefix, true
+                when: "!info.IsDir()"
+          key: i
+          range: parts
+      - return: "\"\", false"
+  - of: (*osFS).classifyBlocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).classifyBlocked
+        kind: self
+      - id: o.blockedAncestor
+        kind: internal
+      - id: verdict
+        kind: internal
+      - id: failWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: verdict(corevfs.NotRegularFile, kerrs.String("path", blocker))
+              to: verdict
+          init:
+            bind: blocker, blocked
+            eval: o.blockedAncestor(name)
+            to: o.blockedAncestor
+          when: blocked
+      - return: failWrite(cause, kerrs.String("path", name))
+        to: failWrite
+  - of: guardNameAndPerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: guardNameAndPerm
+        kind: self
+      - id: corevfs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidateWritePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - return: corevfs.ValidatePerm(perm)
+        to: corevfs
+  - of: refuseKind
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseKind
+        kind: self
+      - id: verdict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: verdict(corevfs.PathEscaped, kerrs.String("path", name))
+              to: verdict
+          when: mode&fs.ModeSymlink != 0
+      - opt:
+          do:
+            - return: nil
+          when: acceptable
+      - return: verdict(corevfs.NotRegularFile, kerrs.String("path", name))
+        to: verdict
+  - of: (*osFS).WriteAtomic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).WriteAtomic
+        kind: self
+      - id: o.guardFileTarget
+        kind: internal
+      - id: publish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: o.guardFileTarget(name, perm)
+            to: o.guardFileTarget
+          when: guardErr != nil
+      - return: publish(o.ops, name, data, perm)
+        to: publish
+  - of: publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: publish
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: tempPath
+        kind: internal
+      - id: failPublish
+        kind: internal
+      - id: writeAndSync
+        kind: internal
+      - id: discard
+        kind: internal
+      - id: syncPublished
+        kind: internal
+    steps:
+      - bind: dir
+        eval: path.Dir(name)
+        to: path
+      - bind: tempName, nameErr
+        eval: tempPath(dir)
+        to: tempPath
+      - opt:
+          do:
+            - return: failPublish(nameErr, kerrs.String("path", name))
+              to: failPublish
+          when: nameErr != nil
+      - bind: file, createErr
+        eval: ops.create(tempName, perm)
+      - opt:
+          do:
+            - return: failPublish(createErr, kerrs.String("path", name))
+              to: failPublish
+          when: createErr != nil
+      - opt:
+          do:
+            - return: discard(ops, tempName, name, writeErr)
+              to: discard
+          init:
+            bind: writeErr
+            eval: writeAndSync(file, data)
+            to: writeAndSync
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: discard(ops, tempName, name, renameErr)
+              to: discard
+          init:
+            bind: renameErr
+            eval: ops.rename(tempName, name)
+          when: renameErr != nil
+      - return: syncPublished(ops, dir, name)
+        to: syncPublished
+  - of: writeAndSync
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeAndSync
+        kind: self
+      - id: file.Write
+        kind: internal
+      - id: cmp
+        kind: stdlib
+      - id: file.Sync
+        kind: internal
+      - id: file.Close
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: cmp.Or(writeErr, file.Close())
+              to: cmp
+          init:
+            bind: _, writeErr
+            eval: file.Write(data)
+            to: file.Write
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: cmp.Or(syncErr, file.Close())
+              to: cmp
+          init:
+            bind: syncErr
+            eval: file.Sync()
+            to: file.Sync
+          when: syncErr != nil
+      - return: file.Close()
+        to: file.Close
+  - of: syncPublished
+    participants:
+      - id: caller
+        kind: actor
+      - id: syncPublished
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: syncErr
+        eval: ops.syncDir(dir)
+      - opt:
+          do:
+            - return: nil
+          when: syncErr == nil
+      - return: |-
+          kerrs.Wrap(syncErr, kerrs.WrapParams{
+          		Code:     corevfs.CodeDirectorySyncFailed,
+          		Reason:   "DIRECTORY_SYNC_FAILED",
+          		Public:   "The file was published but the directory entry was not flushed",
+          		Private:  "service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back",
+          		ExitCode: exitIOErr,
+          	}, kerrs.String("path", name))
+        to: kerrs
+  - of: discard
+    participants:
+      - id: caller
+        kind: actor
+      - id: discard
+        kind: self
+      - id: failPublish
+        kind: internal
+    steps:
+      - bind: removeErr
+        eval: ops.remove(tempName)
+      - return: failPublish(cmp.Or(cause, removeErr), kerrs.String("path", name))
+        to: failPublish
+  - of: tempPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: tempPath
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: path
+        kind: stdlib
+    steps:
+      - var:
+          name: raw
+          type: "[tempNameBytes]byte"
+      - bind: _, randErr
+        eval: rand.Read(raw[:])
+        to: rand
+      - opt:
+          do:
+            - return: "\"\", randErr"
+          when: randErr != nil
+      - return: path.Join(dir, tempPrefix+hex.EncodeToString(raw[:])+tempSuffix), nil
+        to: path
+  - of: (*osFS).nativeOps
+    steps:
+      - return: |-
+          atomicOps{
+          		create: func(name string, perm fs.FileMode) (tempFile, error) {
+          			//: O_EXCL turns a name collision into an error instead of an
+          			//: overwrite of somebody else's in-flight publication.
+          			file, openErr := o.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+          			//: never hand back a non-nil interface holding a nil *os.File.
+          			if openErr != nil {
+          				//: the caller reports PublishFailed.
+          				return nil, openErr
+          			}
+          			//: a real handle.
+          			return file, nil
+          		},
+          		rename:  o.root.Rename,
+          		remove:  o.root.Remove,
+          		syncDir: o.syncDir,
+          	}
+  - of: (*osFS).syncDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).syncDir
+        kind: self
+      - id: o.root.Open
+        kind: value
+      - id: syncDirHandle
+        kind: internal
+      - id: handle.Close
+        kind: value
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: handle, openErr
+        eval: o.root.Open(dir)
+        to: o.root.Open
+      - opt:
+          do:
+            - return: openErr
+          when: openErr != nil
+      - bind: syncErr
+        eval: syncDirHandle(handle)
+        to: syncDirHandle
+      - bind: closeErr
+        eval: handle.Close()
+        to: handle.Close
+      - return: cmp.Or(syncErr, closeErr)
+        to: cmp
+  - of: (*osFS).WriteFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).WriteFile
+        kind: self
+      - id: o.guardFileTarget
+        kind: internal
+      - id: o.root.WriteFile
+        kind: value
+      - id: failWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: o.guardFileTarget(name, perm)
+            to: o.guardFileTarget
+          when: guardErr != nil
+      - opt:
+          do:
+            - return: failWrite(writeErr, kerrs.String("path", name))
+              to: failWrite
+          init:
+            bind: writeErr
+            eval: o.root.WriteFile(name, data, perm)
+            to: o.root.WriteFile
+          when: writeErr != nil
+      - return: nil
+  - of: (*osFS).MkdirAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).MkdirAll
+        kind: self
+      - id: o.guardDirTarget
+        kind: internal
+      - id: o.root.MkdirAll
+        kind: value
+      - id: o.classifyBlocked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: guardErr
+          init:
+            bind: guardErr
+            eval: o.guardDirTarget(name, perm)
+            to: o.guardDirTarget
+          when: guardErr != nil
+      - opt:
+          do:
+            - return: o.classifyBlocked(name, mkErr)
+              to: o.classifyBlocked
+          init:
+            bind: mkErr
+            eval: o.root.MkdirAll(name, perm)
+            to: o.root.MkdirAll
+          when: mkErr != nil
+      - return: nil
+  - of: (*osFS).Remove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).Remove
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: o.root.Remove
+        kind: value
+      - id: o.classifyRemove
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidateWritePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - opt:
+          do:
+            - return: o.classifyRemove(name, rmErr)
+              to: o.classifyRemove
+          init:
+            bind: rmErr
+            eval: o.root.Remove(name)
+            to: o.root.Remove
+          when: rmErr != nil
+      - return: nil
+  - of: (*osFS).classifyRemove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).classifyRemove
+        kind: self
+      - id: o.root.Lstat
+        kind: value
+      - id: fs
+        kind: stdlib
+      - id: verdict
+        kind: internal
+      - id: failWrite
+        kind: internal
+    steps:
+      - bind: info, statErr
+        eval: o.root.Lstat(name)
+        to: o.root.Lstat
+      - opt:
+          do:
+            - bind: entries, readErr
+              eval: fs.ReadDir(o.read, name)
+              to: fs
+            - opt:
+                do:
+                  - return: verdict(corevfs.DirectoryNotEmpty, kerrs.String("path", name))
+                    to: verdict
+                when: readErr == nil && len(entries) > 0
+          when: statErr == nil && info.IsDir()
+      - return: failWrite(cause, kerrs.String("path", name))
+        to: failWrite
+  - of: (*osFS).RemoveAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*osFS).RemoveAll
+        kind: self
+      - id: corevfs
+        kind: package
+      - id: o.root.RemoveAll
+        kind: value
+      - id: failWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: pathErr
+          init:
+            bind: pathErr
+            eval: corevfs.ValidateWritePath(name)
+            to: corevfs
+          when: pathErr != nil
+      - opt:
+          do:
+            - return: failWrite(rmErr, kerrs.String("path", name))
+              to: failWrite
+          init:
+            bind: rmErr
+            eval: o.root.RemoveAll(name)
+            to: o.root.RemoveAll
+          when: rmErr != nil
+      - return: nil
+  - of: syncDirHandle
+    participants:
+      - id: caller
+        kind: actor
+      - id: syncDirHandle
+        kind: self
+      - id: dir.Sync
+        kind: value
+    steps:
+      - return: dir.Sync()
+        to: dir.Sync
+  - of: verdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: verdict
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.Wrap(sentinel, kerrs.WrapParams{}, fields...)
+        to: kerrs
+  - of: failRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: failRead
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:     corevfs.CodeReadFailed,
+          		Reason:   "READ_FAILED",
+          		Public:   "The filesystem could not read that path",
+          		Private:  "core/data/vfs: open, stat or readdir failed; the *fs.PathError cause is wrapped, not replaced, so errors.Is against fs.ErrNotExist still answers",
+          		ExitCode: exitIOErr,
+          	}, fields...)
+        to: kerrs
+  - of: failWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: failWrite
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:     corevfs.CodeWriteFailed,
+          		Reason:   "WRITE_FAILED",
+          		Public:   "The filesystem could not write that path",
+          		Private:  "core/data/vfs: create, write, mkdir or remove failed; the *fs.PathError cause is wrapped, not replaced",
+          		ExitCode: exitIOErr,
+          	}, fields...)
+        to: kerrs
+  - of: failPublish
+    participants:
+      - id: caller
+        kind: actor
+      - id: failPublish
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:     corevfs.CodePublishFailed,
+          		Reason:   "PUBLISH_FAILED",
+          		Public:   "The filesystem could not publish that file",
+          		Private:  "core/data/vfs: atomic publication aborted; the previous content is intact and the temporary was removed — the operation is safe to retry",
+          		ExitCode: exitIOErr,
+          	}, fields...)
+        to: kerrs

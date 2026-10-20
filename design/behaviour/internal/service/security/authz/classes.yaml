@@ -1,0 +1,337 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: outcomeDeny labels a refusal produced by an explicit Deny decision.
+    items:
+      - name: outcomeDeny
+        type: string
+        value: "\"deny\""
+    name: outcomeDeny
+  - doc: |-
+      outcomeAbstain labels a refusal produced by an evaluation in which every
+      policy abstained — the closed-world default, not a rule that fired.
+    items:
+      - name: outcomeAbstain
+        type: string
+        value: "\"abstain\""
+    name: outcomeAbstain
+  - doc: |-
+      outcomeUnevaluable labels a refusal produced by a policy that could not be
+      evaluated: a missing attribute, a kind mismatch, a misconfiguration, or an
+      error from a caller-written policy.
+    items:
+      - name: outcomeUnevaluable
+        type: string
+        value: "\"unevaluable\""
+    name: outcomeUnevaluable
+files:
+  - decls:
+      - RuleValue
+      - NewABAC
+      - evaluateRules
+    name: abac.go
+  - decls:
+      - outcomeDeny
+      - outcomeAbstain
+      - outcomeUnevaluable
+      - Check
+      - outcomeLabel
+      - denied
+      - causeReason
+      - causeCode
+      - Must
+      - MustCondition
+    name: authz.go
+  - decls:
+      - Not
+      - AllOf
+      - AnyOf
+      - foldConditions
+      - checkedMembers
+    name: combinators.go
+  - decls:
+      - DenyOverrides
+      - evaluateAll
+      - foldResult
+      - misconfigured
+    name: combine.go
+  - decls:
+      - AttrEquals
+      - AttrIsTrue
+      - AttrAtLeast
+      - AttrContains
+      - AttrMatchesSubject
+      - lookupAttr
+    name: conditions.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - GrantValue
+    name: grant_value.go
+  - decls:
+      - PermissionValue
+      - NewRBAC
+      - evaluateRBAC
+      - attrFault
+      - indexGrants
+    name: rbac.go
+  - decls:
+      - RBACConfig
+    name: rbac_config.go
+  - decls:
+      - validateRBAC
+      - validateGrant
+      - validateRules
+      - validateRule
+      - grantFault
+      - ruleFault
+      - conditionFault
+      - kindName
+    name: validate.go
+functions:
+  - name: NewABAC
+    params: rules ...RuleValue
+    results: policy coreauthz.Policy, err error
+  - doc: evaluateRules folds the matching rules under deny-overrides.
+    name: evaluateRules
+    params: rules []RuleValue, request coreauthz.RequestValue
+    results: decision coreauthz.Decision, err error
+  - name: Check
+    params: ctx context.Context, policy coreauthz.Policy, request coreauthz.RequestValue
+    results: error
+  - doc: outcomeLabel names a non-granting decision for the operator's field.
+    name: outcomeLabel
+    params: decision coreauthz.Decision
+    results: string
+  - doc: |-
+      denied builds the one refusal this package returns.
+
+      The core sentinel is the wrap ORIGIN, so its code, reason, public and
+      private win under errs' origin-wins rule; cause travels as fields. That
+      direction is deliberate and is the whole security property: were cause the
+      origin, an [coreauthz.AttributeMissing] from a condition would set the code
+      a framework routes on, and its message would become the one the client sees
+      — which is how a refusal starts explaining which attribute to forge.
+    name: denied
+    params: request coreauthz.RequestValue, outcome string, cause error
+    results: error
+  - doc: |-
+      causeReason renders the cause's SCREAMING_SNAKE reason, falling back to its
+      message for an error that is not an *errs.Error — a caller-written policy
+      may return anything.
+    name: causeReason
+    params: cause error
+    results: string
+  - doc: causeCode renders the cause's dotted quad, or "-" when it has none.
+    name: causeCode
+    params: cause error
+    results: string
+  - name: Must
+    params: policy coreauthz.Policy, err error
+    results: coreauthz.Policy
+  - name: MustCondition
+    params: condition coreauthz.Condition, err error
+    results: coreauthz.Condition
+  - name: Not
+    params: inner coreauthz.Condition
+    results: condition coreauthz.Condition, err error
+  - name: AllOf
+    params: conditions ...coreauthz.Condition
+    results: condition coreauthz.Condition, err error
+  - name: AnyOf
+    params: conditions ...coreauthz.Condition
+    results: condition coreauthz.Condition, err error
+  - doc: |-
+      foldConditions evaluates every member and combines the answers. conjunction
+      selects the operator AND its identity: true folds with AND, false with OR.
+    name: foldConditions
+    params: members []coreauthz.Condition, request coreauthz.RequestValue, conjunction bool
+    results: holds bool, err error
+  - doc: |-
+      checkedMembers refuses an empty or nil-bearing condition set and returns a
+      defensive copy of a valid one.
+    name: checkedMembers
+    params: name string, conditions []coreauthz.Condition
+    results: members []coreauthz.Condition, err error
+  - name: DenyOverrides
+    params: policies ...coreauthz.Policy
+    results: coreauthz.Policy
+  - doc: |-
+      evaluateAll runs every member and folds the results under deny-overrides.
+      Split out of the closure so the loop stays inside the function-length budget
+      and can be read as one case analysis.
+    name: evaluateAll
+    params: ctx context.Context, members []coreauthz.Policy, request coreauthz.RequestValue
+    results: decision coreauthz.Decision, err error
+  - doc: foldResult maps the accumulated grant flag onto the final decision.
+    name: foldResult
+    params: granted bool
+    results: coreauthz.Decision
+  - doc: |-
+      misconfigured builds the PolicyMisconfigured refusal for a member that could
+      not be evaluated as assembled, naming its position in the composition.
+    name: misconfigured
+    params: index int, detail string
+    results: error
+  - name: AttrEquals
+    params: key, want string
+    results: condition coreauthz.Condition, err error
+  - name: AttrIsTrue
+    params: key string
+    results: condition coreauthz.Condition, err error
+  - name: AttrAtLeast
+    params: key string, lo int64
+    results: condition coreauthz.Condition, err error
+  - name: AttrContains
+    params: key, want string
+    results: condition coreauthz.Condition, err error
+  - name: AttrMatchesSubject
+    params: key string
+    results: condition coreauthz.Condition, err error
+  - doc: |-
+      lookupAttr resolves key and asserts its kind, reporting the two failures
+      that must never be reported as false.
+    name: lookupAttr
+    params: request coreauthz.RequestValue, key string, want coreauthz.AttrKind
+    results: attr coreauthz.AttrValue, err error
+  - name: NewRBAC
+    params: cfg RBACConfig
+    results: policy coreauthz.Policy, err error
+  - doc: evaluateRBAC answers one request against the indexed grant table.
+    name: evaluateRBAC
+    params: holders map[PermissionValue][]string, rolesAttr string, request coreauthz.RequestValue
+    results: decision coreauthz.Decision, err error
+  - doc: |-
+      attrFault builds an attribute-shaped refusal with the diagnostic fields an
+      operator needs to fix the producing side.
+    name: attrFault
+    params: sentinel *errs.Error, key string, want, got coreauthz.AttrKind
+    results: error
+  - doc: |-
+      indexGrants inverts the role → permissions table into permission → roles.
+
+      The inversion is what keeps evaluation independent of the table's size: a
+      request costs one map lookup plus a scan of the roles that confer exactly
+      that permission, which is one or two in every realistic table, rather than a
+      walk of every role the subject holds against every grant.
+    name: indexGrants
+    params: grants []GrantValue
+    results: map[PermissionValue][]string
+  - doc: validateRBAC refuses a grant table that could never grant correctly.
+    name: validateRBAC
+    params: cfg RBACConfig
+    results: error
+  - doc: validateGrant refuses one row of the grant table.
+    name: validateGrant
+    params: index int, grant GrantValue
+    results: error
+  - doc: validateRules refuses a rule set that could never decide correctly.
+    name: validateRules
+    params: rules []RuleValue
+    results: error
+  - doc: validateRule refuses one attribute rule.
+    name: validateRule
+    params: index int, rule RuleValue
+    results: error
+  - doc: grantFault builds the GrantInvalid refusal, naming the offending row.
+    name: grantFault
+    params: detail string, index int, role string
+    results: error
+  - doc: ruleFault builds the RuleInvalid refusal, naming the offending rule.
+    name: ruleFault
+    params: detail string, index int, name string
+    results: error
+  - doc: |-
+      conditionFault builds the ConditionInvalid refusal for a condition
+      constructor that cannot honour its arguments.
+    name: conditionFault
+    params: detail, attribute string
+    results: error
+  - doc: kindName renders an AttrKind for a diagnostic field.
+    name: kindName
+    params: kind coreauthz.AttrKind
+    results: string
+imports:
+  context: context
+  coreauthz: github.com/kitsunium/sdk/internal/core/security/authz
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/security/authz
+  name: authz
+  purpose: Package authz — hosts the attribute-based evaluator.
+types:
+  - fields:
+      - doc: |-
+          Name identifies the rule in diagnostics. It is required, it is written
+          into the refusal's PRIVATE side and its fields, and it never reaches the
+          wire — a public message naming the rule that refused tells the caller
+          how many rules there are and which one to work around.
+        name: Name
+        type: string
+      - doc: |-
+          Action and Resource select the requests this rule is about, by byte
+          equality. A rule that does not match is not evaluated at all, so its
+          condition never runs on a request it was not written for.
+        name: Action
+        type: string
+      - doc: Resource is the KIND of thing, matching [PermissionValue.Resource].
+        name: Resource
+        type: string
+      - doc: |-
+          Effect is what the rule decides when [RuleValue.When] holds:
+          [coreauthz.Allow] or [coreauthz.Deny]. [coreauthz.Abstain] — which is
+          the zero value, so an unset Effect lands here — is refused at
+          construction, because a rule that abstains when it fires is a rule that
+          does nothing.
+        name: Effect
+        type: coreauthz.Decision
+      - doc: |-
+          When is the predicate. It is required: a rule with no condition fires on
+          every matching request, and the caller who wants that writes the
+          always-true predicate themselves so it shows up in the diff.
+        name: When
+        type: coreauthz.Condition
+    kind: struct
+    name: RuleValue
+  - fields:
+      - doc: Role is the name the subject's roles attribute will contain.
+        name: Role
+        type: string
+      - doc: |-
+          Permissions is what holding Role confers. An empty list is refused: a
+          role that grants nothing is a wiring mistake that fails closed silently.
+        name: Permissions
+        type: "[]PermissionValue"
+    kind: struct
+    name: GrantValue
+  - fields:
+      - doc: Action is the verb, spelled exactly as the request will spell it.
+        name: Action
+        type: string
+      - doc: |-
+          Resource is the KIND of thing — "article", not "article/42". Instance
+          facts belong in the request's attributes, where an ABAC rule reads them.
+        name: Resource
+        type: string
+    kind: struct
+    name: PermissionValue
+  - fields:
+      - doc: |-
+          RolesAttr names the request attribute carrying the subject's roles, as
+          a [coreauthz.KindStrings] value.
+
+          It has NO default, and an empty one is refused. Defaulting it to "roles"
+          would be the SDK inventing the one piece of vocabulary it has no way to
+          know — the application's — and a caller who spelled it "groups" would
+          get an evaluator that silently found no roles on every request. Naming
+          it is one line; guessing it wrong is an outage or a hole depending on
+          which way the mistake falls.
+        name: RolesAttr
+        type: string
+      - doc: Grants is the role → permissions table. An empty table is refused.
+        name: Grants
+        type: "[]GrantValue"
+    kind: struct
+    name: RBACConfig

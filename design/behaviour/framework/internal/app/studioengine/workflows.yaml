@@ -1,0 +1,41 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: ownFunc
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: m[k]
+                    value: append(m[k], node)
+                when: k != "" && !slices.Contains(m[k], node)
+          key: _
+          range: "[]string{fn, profiling.CanonicalName(fn)}"
+          value: k
+  - of: (*funcOwners).owner
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: ns[0], true
+                      when: len(ns) == 1
+                  - return: "\"\", false"
+                init:
+                  bind: ns
+                  eval: o.entries[k]
+                when: len(ns) > 0
+            - opt:
+                do:
+                  - return: ns[0], true
+                init:
+                  bind: ns
+                  eval: o.code[k]
+                when: len(ns) == 1
+          key: _
+          range: "[]string{fn, profiling.CanonicalName(fn)}"
+          value: k
+      - return: "\"\", false"

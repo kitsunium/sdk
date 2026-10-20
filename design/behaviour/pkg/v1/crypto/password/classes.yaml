@@ -1,0 +1,32 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: PBKDF2SHA256 is PBKDF2-SHA256 — the stdlib password stretcher (RFC 8018).
+    items:
+      - name: PBKDF2SHA256
+        type: Algorithm
+        value: "\"pbkdf2-sha256\""
+    name: PBKDF2SHA256
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Algorithm
+      - PBKDF2SHA256
+      - Hash
+    name: password.go
+functions:
+  - name: Hash
+    params: a Algorithm, password []byte
+    results: phc string, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto/password
+  name: password
+  purpose: "Package password is the password-storage facade: slow, salted, self-describing hashes with transparent upgrade-on-verify."
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

@@ -1,0 +1,657 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Listen
+    participants:
+      - id: caller
+        kind: actor
+      - id: Listen
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+      - id: net
+        kind: stdlib
+      - id: enablePasscred
+        kind: internal
+    steps:
+      - bind: dir, err
+        eval: os.MkdirTemp("", "sdnotify-")
+        to: os
+      - opt:
+          do:
+            - return: nil, "", wrapListen(err, "")
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: the success path transfers ownership of the dir to the listener.
+          		if err != nil {
+          			//: join the cleanup error so a failed removal is not silently lost.
+          			err = errors.Join(err, os.RemoveAll(dir))
+          		}
+          	}()
+      - bind: path
+        eval: filepath.Join(dir, "notify")
+        to: filepath
+      - bind: conn, err
+        eval: "net.ListenUnixgram(\"unixgram\", &net.UnixAddr{Name: path, Net: \"unixgram\"})"
+        to: net
+      - opt:
+          do:
+            - return: nil, "", wrapListen(err, path)
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: only tear the socket down when the constructor is failing.
+          		if err != nil {
+          			//: join the close error so a failed close is surfaced, not dropped.
+          			err = errors.Join(err, conn.Close())
+          		}
+          	}()
+      - opt:
+          do:
+            - return: nil, "", err
+          init:
+            bind: err
+            eval: enablePasscred(conn)
+            op: =
+            to: enablePasscred
+          when: err != nil
+      - return: "&listener{conn: conn, path: path, tempDir: dir}, path, nil"
+  - of: enablePasscred
+    participants:
+      - id: caller
+        kind: actor
+      - id: enablePasscred
+        kind: self
+      - id: conn.SyscallConn
+        kind: value
+      - id: wrapListen
+        kind: internal
+      - id: raw.Control
+        kind: value
+    steps:
+      - bind: raw, err
+        eval: conn.SyscallConn()
+        to: conn.SyscallConn
+      - opt:
+          do:
+            - return: wrapListen(err, "")
+              to: wrapListen
+          when: err != nil
+      - var:
+          name: sockErr
+          type: error
+      - bind: ctrlErr
+        eval: |-
+          raw.Control(func(fd uintptr) {
+          		//: SO_PASSCRED at SOL_SOCKET requests per-message sender credentials.
+          		sockErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1)
+          	})
+        to: raw.Control
+      - opt:
+          do:
+            - return: wrapListen(ctrlErr, "")
+              to: wrapListen
+          when: ctrlErr != nil
+      - opt:
+          do:
+            - return: wrapListen(sockErr, "")
+              to: wrapListen
+          when: sockErr != nil
+      - return: nil
+  - of: (*listener).Recv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listener).Recv
+        kind: self
+      - id: l.conn.ReadMsgUnix
+        kind: value
+      - id: parsePayload
+        kind: internal
+      - id: senderPID
+        kind: internal
+    steps:
+      - bind: buf
+        eval: make([]byte, payloadBufSize)
+      - bind: oob
+        eval: make([]byte, oobBufSize)
+      - bind: n, oobn, recvFlags, _, err
+        eval: l.conn.ReadMsgUnix(buf, oob)
+        to: l.conn.ReadMsgUnix
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, wrapListen(err, l.path)
+          when: err != nil
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, wrapInvalid(nil, errs.String("reason", "datagram truncated"))
+          when: recvFlags&syscall.MSG_TRUNC != 0 || n == len(buf)
+      - set: value, err
+        to: parsePayload
+        value: parsePayload(string(buf[:n]))
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, err
+          when: err != nil
+      - bind: pid, ok
+        eval: senderPID(oob[:oobn])
+        to: senderPID
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, wrapCredMismatch()
+          when: "!ok"
+      - set: value.SenderPID
+        value: pid
+      - return: value, nil
+  - of: wrapCredMismatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapCredMismatch
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:     coreproc.CodeCredentialMismatch,
+          		Reason:   "CREDENTIAL_MISMATCH",
+          		Public:   "Datagram sender credentials did not match",
+          		Private:  "service/proc/systemd/notify.Recv: SO_PASSCRED sender pid is not the expected supervised process",
+          		ExitCode: exitNoPerm,
+          	})
+        to: errs
+  - of: senderPID
+    participants:
+      - id: caller
+        kind: actor
+      - id: senderPID
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(oob) == 0
+      - bind: scms, err
+        eval: syscall.ParseSocketControlMessage(oob)
+        to: syscall
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil
+      - loop:
+          do:
+            - bind: cred, perr
+              eval: syscall.ParseUnixCredentials(&scms[i])
+              to: syscall
+            - opt:
+                do:
+                  - continue: true
+                when: perr != nil
+            - return: int(cred.Pid), true
+          key: i
+          range: scms
+      - return: 0, false
+  - of: (*listener).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listener).Close
+        kind: self
+      - id: l.conn.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+      - id: wrapListen
+        kind: internal
+    steps:
+      - bind: err
+        eval: l.conn.Close()
+        to: l.conn.Close
+      - opt:
+          do:
+            - set: err
+              to: errors
+              value: errors.Join(err, os.RemoveAll(l.tempDir))
+          when: l.tempDir != ""
+      - opt:
+          do:
+            - set: err
+              to: errors
+              value: errors.Join(err, os.Remove(l.path))
+          when: l.tempDir == "" && l.path != "" && !strings.HasPrefix(l.path, "\x00")
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: wrapListen(err, l.path)
+        to: wrapListen
+  - of: wrapListen
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapListen
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeListenFailed,
+          		Reason:   "LISTEN_FAILED",
+          		Public:   "Could not create the sd_notify listener socket",
+          		Private:  "service/proc/systemd/notify.Listen: creating or binding the AF_UNIX datagram socket failed",
+          		ExitCode: exitOSErr,
+          	}, errs.String("socket", path))
+        to: errs
+  - of: Notify
+    participants:
+      - id: caller
+        kind: actor
+      - id: Notify
+        kind: self
+      - id: NotifyContext
+        kind: internal
+    steps:
+      - return: NotifyContext(context.Background(), state)
+        to: NotifyContext
+  - of: NotifyContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: NotifyContext
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: net
+        kind: stdlib
+      - id: wrapNotify
+        kind: internal
+      - id: encodePayload
+        kind: internal
+      - id: writeDatagram
+        kind: internal
+    steps:
+      - bind: raw, ok
+        eval: os.LookupEnv(envNotifySocket)
+        to: os
+      - opt:
+          do:
+            - return: nil
+          when: "!ok || raw == \"\""
+      - bind: addr
+        eval: "&net.UnixAddr{Name: resolveAddr(raw), Net: \"unixgram\"}"
+      - bind: conn, err
+        eval: net.DialUnix("unixgram", nil, addr)
+        to: net
+      - opt:
+          do:
+            - return: wrapNotify(err, raw)
+              to: wrapNotify
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: close always runs; capture its error only when none preceded it.
+          		if closeErr := conn.Close(); closeErr != nil && err == nil {
+          			//: a clean send followed by a failed close still reports NotifyFailed.
+          			err = wrapNotify(closeErr, raw)
+          		}
+          	}()
+      - bind: payload, err
+        eval: encodePayload(state)
+        to: encodePayload
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: writeDatagram(ctx, conn, payload, raw)
+        to: writeDatagram
+  - of: writeDatagram
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeDatagram
+        kind: self
+      - id: boundWrite
+        kind: internal
+      - id: wrapNotify
+        kind: internal
+      - id: conn.Write
+        kind: internal
+    steps:
+      - bind: stop, err
+        eval: boundWrite(ctx, conn)
+        to: boundWrite
+      - opt:
+          do:
+            - return: wrapNotify(err, socket)
+              to: wrapNotify
+          when: err != nil
+      - opt:
+          do:
+            - defer: stop()
+          when: stop != nil
+      - set: _, err
+        to: conn.Write
+        value: conn.Write([]byte(payload))
+      - opt:
+          do:
+            - return: wrapNotify(errors.Join(err, ctx.Err()), socket)
+              to: wrapNotify
+          when: err != nil
+      - return: nil
+  - of: boundWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundWrite
+        kind: self
+      - id: ctx.Deadline
+        kind: value
+      - id: conn.SetWriteDeadline
+        kind: internal
+      - id: context
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: ctx.Done() == nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: conn.SetWriteDeadline(deadline)
+                  to: conn.SetWriteDeadline
+                when: err != nil
+          init:
+            bind: deadline, ok
+            eval: ctx.Deadline()
+            to: ctx.Deadline
+          when: ok
+      - return: |-
+          context.AfterFunc(ctx, func() {
+          		//: nothing can be returned from here, and nothing needs to be: a
+          		//: refusal means the write is already returning with its own fault.
+          		if err := conn.SetWriteDeadline(time.Now()); err != nil {
+          			//: the write reports what went wrong.
+          			return
+          		}
+          	}), nil
+        to: context
+  - of: wrapNotify
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapNotify
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeNotifyFailed,
+          		Reason:   "NOTIFY_FAILED",
+          		Public:   "Could not send the sd_notify datagram",
+          		Private:  "service/proc/systemd/notify: writing to $NOTIFY_SOCKET failed",
+          		ExitCode: exitOSErr,
+          	}, errs.String("socket", socket))
+        to: errs
+  - of: Ready
+    participants:
+      - id: caller
+        kind: actor
+      - id: Ready
+        kind: self
+      - id: Notify
+        kind: internal
+    steps:
+      - return: "Notify(map[string]string{\"READY\": \"1\"})"
+        to: Notify
+  - of: ReadyContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadyContext
+        kind: self
+      - id: NotifyContext
+        kind: internal
+    steps:
+      - return: "NotifyContext(ctx, map[string]string{\"READY\": \"1\"})"
+        to: NotifyContext
+  - of: StatusContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: StatusContext
+        kind: self
+      - id: NotifyContext
+        kind: internal
+    steps:
+      - return: "NotifyContext(ctx, map[string]string{\"STATUS\": msg})"
+        to: NotifyContext
+  - of: Reloading
+    participants:
+      - id: caller
+        kind: actor
+      - id: Reloading
+        kind: self
+      - id: Notify
+        kind: internal
+    steps:
+      - return: "Notify(map[string]string{\"RELOADING\": \"1\"})"
+        to: Notify
+  - of: Stopping
+    participants:
+      - id: caller
+        kind: actor
+      - id: Stopping
+        kind: self
+      - id: Notify
+        kind: internal
+    steps:
+      - return: "Notify(map[string]string{\"STOPPING\": \"1\"})"
+        to: Notify
+  - of: Status
+    participants:
+      - id: caller
+        kind: actor
+      - id: Status
+        kind: self
+      - id: Notify
+        kind: internal
+    steps:
+      - return: "Notify(map[string]string{\"STATUS\": msg})"
+        to: Notify
+  - of: Watchdog
+    participants:
+      - id: caller
+        kind: actor
+      - id: Watchdog
+        kind: self
+      - id: Notify
+        kind: internal
+    steps:
+      - return: "Notify(map[string]string{\"WATCHDOG\": \"1\"})"
+        to: Notify
+  - of: MainPID
+    participants:
+      - id: caller
+        kind: actor
+      - id: MainPID
+        kind: self
+      - id: Notify
+        kind: internal
+    steps:
+      - return: "Notify(map[string]string{\"MAINPID\": strconv.Itoa(pid)})"
+        to: Notify
+  - of: wrapInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeInvalidNotification,
+          		Reason:   "INVALID_NOTIFICATION",
+          		Public:   "Received sd_notify datagram is malformed",
+          		Private:  "service/proc/systemd/notify.Recv: datagram did not parse into NAME=value fields",
+          		ExitCode: exitDataErr,
+          	}, field)
+        to: errs
+  - of: resolveAddr
+    steps:
+      - opt:
+          do:
+            - return: "\"\\x00\" + raw[1:]"
+          when: strings.HasPrefix(raw, "@")
+      - return: raw
+  - of: encodePayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodePayload
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "\"\", wrapInvalid(nil, errs.String(\"name\", name))"
+                when: strings.Contains(name, "\n") || strings.Contains(name, "=")
+            - opt:
+                do:
+                  - return: "\"\", wrapInvalid(nil, errs.String(\"value\", value))"
+                when: strings.ContainsRune(value, '\n')
+            - eval: b.WriteString(name)
+              to: b.WriteString
+            - eval: b.WriteByte('=')
+              to: b.WriteByte
+            - eval: b.WriteString(value)
+              to: b.WriteString
+            - eval: b.WriteByte('\n')
+              to: b.WriteByte
+          key: name
+          range: state
+          value: value
+      - return: b.String(), nil
+        to: b.String
+  - of: parsePayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: parsePayload
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: mainPIDFromState
+        kind: internal
+    steps:
+      - bind: state
+        eval: make(map[string]string)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: line == ""
+            - bind: name, val, found
+              eval: strings.Cut(line, "=")
+              to: strings
+            - opt:
+                do:
+                  - return: coreproc.NotificationValue{}, wrapInvalid(nil, errs.String("line", line))
+                when: "!found"
+            - set: state[name]
+              value: val
+          key: line
+          range: strings.SplitSeq(body, "\n")
+      - bind: mainPID, err
+        eval: mainPIDFromState(state)
+        to: mainPIDFromState
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, err
+          when: err != nil
+      - return: |-
+          coreproc.NotificationValue{
+          		State:   state,
+          		Status:  state["STATUS"],
+          		MainPID: mainPID,
+          	}, nil
+  - of: mainPIDFromState
+    participants:
+      - id: caller
+        kind: actor
+      - id: mainPIDFromState
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw, ok
+        eval: state["MAINPID"]
+      - opt:
+          do:
+            - return: 0, nil
+          when: "!ok"
+      - bind: parsed, convErr
+        eval: strconv.Atoi(raw)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, wrapInvalid(convErr, errs.String("mainpid", raw))
+          when: convErr != nil
+      - return: parsed, nil
+  - of: watchdogInterval
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchdogInterval
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: raw == ""
+      - bind: usec, err
+        eval: strconv.ParseInt(raw, decimalBase, int64Bits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || usec <= 0
+      - return: time.Duration(usec) * time.Microsecond, true
+  - of: WatchdogInterval
+    participants:
+      - id: caller
+        kind: actor
+      - id: WatchdogInterval
+        kind: self
+      - id: watchdogInterval
+        kind: internal
+    steps:
+      - return: watchdogInterval(os.Getenv(envWatchdogUsec))
+        to: watchdogInterval

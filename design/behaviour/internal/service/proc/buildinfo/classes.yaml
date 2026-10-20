@@ -1,0 +1,176 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Values the Go toolchain writes into debug.BuildInfo.
+    grouped: true
+    items:
+      - doc: |-
+          develVersion is the version of a module built from a directory that
+          carries none: a workspace module, a directory replacement, or a main
+          module built outside version control.
+        name: develVersion
+        type: string
+        value: "\"(devel)\""
+      - doc: |-
+          dirtySuffix is the build metadata Go appends to a main module's version
+          when its working tree had uncommitted changes (Go 1.24 and later).
+        name: dirtySuffix
+        type: string
+        value: "\"+dirty\""
+      - doc: The settings Go stamps for a main module built inside a VCS checkout.
+        name: settingRevision
+        type: string
+        value: "\"vcs.revision\""
+      - name: settingTime
+        type: string
+        value: "\"vcs.time\""
+      - name: settingModified
+        type: string
+        value: "\"vcs.modified\""
+      - doc: settingVCSPrefix opens every one of them, and only them.
+        name: settingVCSPrefix
+        type: string
+        value: "\"vcs\""
+      - doc: settingTrue is how a boolean setting spells true.
+        name: settingTrue
+        type: string
+        value: "\"true\""
+    name: develVersion
+files:
+  - decls:
+      - develVersion
+      - BuildValue
+      - ModuleValue
+      - (*BuildValue).Module
+      - ReadBuild
+      - ParseBuild
+      - mainModule
+      - stamp
+      - dependency
+      - pseudoCommit
+      - fromVersion
+    name: build.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: ReadBuild
+    results: build BuildValue, ok bool
+  - name: ParseBuild
+    params: info *debug.BuildInfo
+    results: BuildValue
+  - doc: |-
+      mainModule describes the main module: its version as released or as a
+      commit, then the version-control stamp, which is authoritative where it
+      exists because it carries the full revision and the exact commit time.
+    name: mainModule
+    params: main *debug.Module, settings []debug.BuildSetting
+    results: ModuleValue
+  - doc: stamp applies one version-control setting to the main module.
+    name: stamp
+    params: described *ModuleValue, setting debug.BuildSetting
+  - doc: |-
+      dependency describes one dependency, following its replacement: the code
+      built for it is the replacement's, so the version and the directory are too.
+    name: dependency
+    params: dep *debug.Module
+    results: ModuleValue
+  - doc: |-
+      pseudoCommit returns the commit a pseudo-version names and its time.
+      IsPseudoVersion has already recognised the shape, so the revision always
+      reads; the time does not when the stamp's fourteen digits are no instant —
+      a thirteenth month — and is then left zero, which is the honest reading of
+      a time that does not parse.
+    name: pseudoCommit
+    params: version string
+    results: revision string, at time.Time
+  - doc: fromVersion reads a recorded version into a release or a commit.
+    name: fromVersion
+    params: path, version string
+    results: ModuleValue
+imports:
+  debug: runtime/debug
+  semver: github.com/kitsunium/sdk/internal/kernel/semver
+  strings: strings
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/buildinfo
+  name: buildinfo
+  purpose: Package buildinfo is what the running binary was built from, read from the build information the Go toolchain embedded in it.
+types:
+  - fields:
+      - doc: GoVersion is the toolchain that built the binary, e.g. "go1.27.1".
+        name: GoVersion
+        type: string
+      - doc: |-
+          Path is the import path of the main package, e.g.
+          "github.com/acme/app/cmd/server".
+        name: Path
+        type: string
+      - doc: Main is the main module.
+        name: Main
+        type: ModuleValue
+      - doc: |-
+          Deps are the dependencies linked into the binary, in the order the
+          toolchain recorded them.
+        name: Deps
+        type: "[]ModuleValue"
+    kind: struct
+    methods:
+      - name: Module
+        params: path string
+        recv: b *BuildValue
+        results: found ModuleValue, ok bool
+    name: BuildValue
+  - fields:
+      - doc: |-
+          Time is the commit's time, when known: the main module's vcs.time
+          stamp, or the timestamp a pseudo-version carries. Zero otherwise.
+        name: Time
+        type: time.Time
+      - doc: |-
+          Path is the module path the build required, e.g.
+          "github.com/kitsunium/sdk".
+        name: Path
+        type: string
+      - doc: |-
+          Version is the released version the code came from, e.g. "v0.4.6", or
+          "" when there is none to tell: a pseudo-version (a commit, in Revision),
+          a module built from a local directory, or a main module built without
+          one. A "+dirty" suffix is not kept here; it is what Modified says.
+        name: Version
+        type: string
+      - doc: |-
+          Revision is the version-control commit the code came from, when known:
+          the main module's vcs.revision stamp (a full object name), or the
+          commit a pseudo-version names (its twelve-character prefix).
+        name: Revision
+        type: string
+      - doc: |-
+          Dir is the directory a replace directive pointed the module at, as the
+          toolchain recorded it — relative to the main module, or to the
+          workspace root in workspace mode — or "" when it was not replaced by a
+          directory. A workspace module is Local with no Dir: the toolchain does
+          not record where it was.
+        name: Dir
+        type: string
+      - doc: |-
+          Replacement is the module path a replace directive substituted, when it
+          substituted another module rather than a directory; Version is then
+          that module's.
+        name: Replacement
+        type: string
+      - doc: |-
+          Local reports that the code came from a directory on the build machine
+          rather than from a published version: a directory replacement, a
+          workspace module, or a main module built inside its own source tree.
+        name: Local
+        type: bool
+      - doc: |-
+          Modified reports that the build included uncommitted changes: the main
+          module's vcs.modified stamp, or the "+dirty" its version carried. The
+          toolchain records nothing of the kind for a dependency.
+        name: Modified
+        type: bool
+    kind: struct
+    name: ModuleValue

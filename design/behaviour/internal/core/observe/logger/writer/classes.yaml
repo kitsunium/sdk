@@ -1,0 +1,533 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          ConsoleStderr writes to os.Stderr. It is the zero value, so a
+          ConsoleConfig{} targets stderr by default: a caller who has not named a
+          stream has not made a choice, and stdout may be the process's protocol
+          channel (ADR 0030). The order of this block is load-bearing — the zero
+          value is the contract, not the name that happens to come first.
+        name: ConsoleStderr
+        type: ConsoleStream
+        value: iota
+      - doc: ConsoleStdout writes to os.Stdout. Reachable only by naming it.
+        name: ConsoleStdout
+    name: ConsoleStderr
+files:
+  - decls:
+      - ClickHouseConfig
+    name: config_clickhouse.go
+  - decls:
+      - CloudWatchConfig
+    name: config_cloudwatch.go
+  - decls:
+      - ConsoleStream
+      - ConsoleStderr
+      - ConsoleConfig
+    name: config_console.go
+  - decls:
+      - FileConfig
+    name: config_file.go
+  - decls:
+      - MySQLConfig
+    name: config_mysql.go
+  - decls:
+      - RedisStreamConfig
+    name: config_redis.go
+  - decls:
+      - RotFileConfig
+    name: config_rotfile.go
+  - decls:
+      - S3Config
+    name: config_s3.go
+  - decls:
+      - CredentialValue
+      - NewCredentialValue
+      - CredentialValue.AccessKeyID
+      - CredentialValue.SecretAccessKey
+      - CredentialValue.SessionToken
+      - CredentialValue.String
+      - CredentialValue.GoString
+    name: credentials.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - conflictText
+    name: errors.go
+  - decls:
+      - registry
+      - Register
+      - publishFactory
+      - Lookup
+      - Open
+      - Available
+    name: registry.go
+  - decls:
+      - Name
+      - Name.String
+      - Name.Known
+      - Config
+    name: writer.go
+  - decls:
+      - Spec
+    name: writer_spec.go
+functions:
+  - name: NewCredentialValue
+    params: accessKeyID, secretAccessKey, sessionToken string
+    results: CredentialValue
+  - doc: |-
+      conflictText renders a registry conflict for the boot panic that reports it:
+      the typed error's header and Public, then each field it carries, quoted.
+      Error() never renders a field (rule 4), and the panic is the only place an
+      operator learns WHICH Name collided.
+    name: conflictText
+    params: err error
+    results: string
+  - name: Register
+    params: f Factory
+    results: Factory
+  - doc: |-
+      publishFactory inserts (name → f) into the registry. Returns a non-nil error
+      when name is already registered to a different factory; the caller turns it
+      into a boot-time panic. Re-registering the SAME factory is idempotent
+      (interface == compares the factory pointers). The check and the insert are
+      one atomic step of the kernel table.
+    name: publishFactory
+    params: name Name, f Factory
+    results: error
+  - name: Lookup
+    params: n Name
+    results: f Factory, ok bool
+  - name: Open
+    params: n Name, cfg Config
+    results: sink corelogger.Sink, err error
+  - name: Available
+    results: "[]Name"
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  strconv: strconv
+  strings: strings
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+  name: writer
+  purpose: Package writer — range 0.2.3.* (ADR 0012 core/observe/logger/writer block).
+types:
+  - fields:
+      - doc: |-
+          Address is the ClickHouse native-protocol endpoint (host:port, default
+          port 9000); required.
+        name: Address
+        type: string
+      - doc: Database is the target database (required).
+        name: Database
+        type: string
+      - doc: Table is the destination table for log rows (required).
+        name: Table
+        type: string
+      - doc: |-
+          Credentials yields the DB login on demand and is REQUIRED: a nil provider
+          is rejected with the adapter's ClientInitFailed. AccessKeyID() is the
+          ClickHouse username and SecretAccessKey() is the password (the redacting
+          CredentialValue is reused so the password never leaks into %v/%#v).
+        name: Credentials
+        type: CredentialProvider
+      - doc: |-
+          MaxRows forces a flush once the pending block reaches this many rows; a
+          non-positive value applies the dbsink shell's default.
+        name: MaxRows
+        type: int
+      - doc: |-
+          FlushEvery bounds how long a partial block waits before the insert; the
+          zero value flushes only on an explicit Flush / Close.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          BufferSize is the async ring capacity; a non-positive value applies
+          async's default. The producer never blocks on the database.
+        name: BufferSize
+        type: int
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every failed block insert seen by
+          the background drainer.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: ClickHouseConfig
+  - fields:
+      - doc: Group is the CloudWatch Logs log-group name (required).
+        name: Group
+        type: string
+      - doc: Stream is the log-stream name within the group (required).
+        name: Stream
+        type: string
+      - doc: Region is the AWS region of the log group (required).
+        name: Region
+        type: string
+      - doc: |-
+          Endpoint optionally overrides the CloudWatch Logs endpoint URL. Empty uses
+          the default AWS endpoint; set it for a LocalStack integration test.
+        name: Endpoint
+        type: string
+      - doc: |-
+          Credentials yields short-lived AWS credentials on demand and is REQUIRED:
+          a nil provider is rejected with ClientInitFailed. The AWS default
+          credential chain is intentionally not wired (it would pull the heavyweight
+          aws config module into every consumer).
+        name: Credentials
+        type: CredentialProvider
+      - doc: |-
+          FlushEvery bounds how long a batch waits before the PutLogEvents call;
+          the zero value flushes only on an explicit Flush / Close.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking buffer saturated. Wire it to a metric counter.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every failed PutLogEvents call seen
+          by the background drainer.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: CloudWatchConfig
+  - kind: named
+    name: ConsoleStream
+    underlying: uint8
+  - fields:
+      - doc: Stream selects stderr (default) or stdout.
+        name: Stream
+        type: ConsoleStream
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+    kind: struct
+    name: ConsoleConfig
+  - fields:
+      - doc: |-
+          Path is the destination file; it is opened O_APPEND|O_CREATE|O_WRONLY
+          (+ O_NOFOLLOW on Linux) with mode 0600.
+        name: Path
+        type: string
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+    kind: struct
+    name: FileConfig
+  - fields:
+      - doc: |-
+          SocketPath is the MySQL Unix domain socket (e.g.
+          /var/run/mysqld/mysqld.sock); required — the adapter builds a net=unix DSN
+          from it. TCP is intentionally not exposed here (local-protocol policy).
+        name: SocketPath
+        type: string
+      - doc: Database is the target schema (required).
+        name: Database
+        type: string
+      - doc: Table is the destination table for log rows (required).
+        name: Table
+        type: string
+      - doc: |-
+          Credentials yields the DB login on demand and is REQUIRED: a nil provider
+          is rejected with the adapter's ClientInitFailed. The redacting
+          CredentialValue is reused as-is — AccessKeyID() is the MySQL username and
+          SecretAccessKey() is the password (SessionToken is unused). Reusing the
+          existing redacting type avoids a second secret abstraction; the password
+          never appears in %v/%#v or an error.
+        name: Credentials
+        type: CredentialProvider
+      - doc: |-
+          MaxRows forces a flush once the pending batch reaches this many rows; a
+          non-positive value applies the dbsink shell's default.
+        name: MaxRows
+        type: int
+      - doc: |-
+          FlushEvery bounds how long a partial batch waits before the INSERT; the
+          zero value flushes only on an explicit Flush / Close.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          BufferSize is the async ring capacity; a non-positive value applies
+          async's default. The producer never blocks on the database.
+        name: BufferSize
+        type: int
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated (database slower than producers).
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every failed batch INSERT seen by
+          the background drainer. Without it those errors are lost.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: MySQLConfig
+  - fields:
+      - doc: |-
+          SocketPath is the Redis Unix domain socket (e.g. /var/run/redis/redis.sock);
+          required — the adapter dials net=unix from it.
+        name: SocketPath
+        type: string
+      - doc: Stream is the Redis stream key entries are XADDed to (required).
+        name: Stream
+        type: string
+      - doc: |-
+          MaxLen, when positive, caps the stream length via XADD MAXLEN ~ (the
+          approximate trim that lets Redis evict in whole macro-nodes). Zero leaves
+          the stream untrimmed (the operator manages retention).
+        name: MaxLen
+        type: int
+      - doc: |-
+          Credentials yields the DB login on demand. A nil provider means no AUTH
+          (a socket-local Redis with no password); when set, AccessKeyID() is the
+          ACL username (empty for the default user) and SecretAccessKey() is the
+          password (reused redacting CredentialValue keeps it out of %v/%#v).
+        name: Credentials
+        type: CredentialProvider
+      - doc: |-
+          MaxRows forces a flush once the pending batch reaches this many entries; a
+          non-positive value applies the dbsink shell's default.
+        name: MaxRows
+        type: int
+      - doc: |-
+          FlushEvery bounds how long a partial batch waits before the pipelined
+          XADD run; the zero value flushes only on an explicit Flush / Close.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          BufferSize is the async ring capacity; a non-positive value applies
+          async's default. The producer never blocks on Redis.
+        name: BufferSize
+        type: int
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every failed XADD batch seen by the
+          background drainer.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: RedisStreamConfig
+  - fields:
+      - doc: |-
+          Path is the active destination file; it is opened
+          O_APPEND|O_CREATE|O_WRONLY (+ O_NOFOLLOW on Linux) with mode 0600.
+        name: Path
+        type: string
+      - doc: |-
+          MaxBytes is the size threshold: a Write that would push the active file
+          past MaxBytes triggers a rotation first. A non-positive MaxBytes disables
+          size-based rotation (the file grows unbounded).
+        name: MaxBytes
+        type: int64
+      - doc: |-
+          MaxBackups caps how many rotated siblings (Path.1 … Path.N) are kept; the
+          oldest is dropped once the cap is reached. MaxBackups == 0 keeps all.
+        name: MaxBackups
+        type: int
+      - doc: Compress gzips each rotated file (Path.1 -> Path.1.gz) with mode 0600.
+        name: Compress
+        type: bool
+      - doc: |-
+          MaxAgeDays prunes rotated siblings whose on-disk modification time is
+          older than this many days, evaluated after every rotation (manual or
+          size-triggered) against the injected Clock. A non-positive MaxAgeDays
+          disables calendar pruning, preserving the prior count-only behavior.
+        name: MaxAgeDays
+        type: int
+      - doc: |-
+          Clock is the time source used for MaxAgeDays calendar pruning; the zero
+          value (nil) falls back to clock.System. Injectable so tests prune
+          deterministically without sleeping.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          RotateEvery, when strictly positive, starts a background ticker that
+          forces a rotation on each interval regardless of size — the "archive
+          every 24h" policy. A non-positive value (the zero default) disables the
+          ticker entirely: no goroutine is spawned and rotation stays size- and
+          manual-triggered. The ticker is joined on Close.
+        name: RotateEvery
+        type: time.Duration
+      - doc: |-
+          OnError is invoked once for an interval-rotation (tick) failure, surfaced
+          on the next Write under the mutex. A failing tick happens on the daemon
+          goroutine where no caller can see it, so without this hook the operator
+          has no signal an "archive every 24h" policy is broken; the callback gives
+          a path to emit a counter or log to a fallback sink. nil disables the
+          callback. The triggering record is still written either way — the hook
+          reports the failure, it does not gate the write.
+        name: OnError
+        type: func(err error)
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+    kind: struct
+    name: RotFileConfig
+  - fields:
+      - doc: Bucket is the destination S3 bucket name (required).
+        name: Bucket
+        type: string
+      - doc: Region is the AWS region of the bucket (required).
+        name: Region
+        type: string
+      - doc: Prefix is an optional key prefix prepended to every uploaded object.
+        name: Prefix
+        type: string
+      - doc: |-
+          Endpoint optionally overrides the S3 endpoint URL (path-style). Empty uses
+          the default AWS endpoint; set it for S3-compatible backends (MinIO,
+          GovCloud) or a LocalStack integration test.
+        name: Endpoint
+        type: string
+      - doc: |-
+          Credentials yields short-lived AWS credentials on demand and is REQUIRED:
+          a nil provider is rejected with ClientInitFailed. The AWS default
+          credential chain is intentionally not wired (it would pull the heavyweight
+          aws config module into every consumer).
+        name: Credentials
+        type: CredentialProvider
+      - doc: |-
+          FlushEvery bounds how long a batch waits before upload; the zero value
+          uploads only on an explicit Flush / Close.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          MaxBatchBytes caps the in-memory batch before a forced upload; the zero
+          value applies the factory's default.
+        name: MaxBatchBytes
+        type: int
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking buffer saturated. Wire it to a metric counter;
+          the hot path never blocks on a slow upload, so drops are how
+          back-pressure surfaces.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for every failed batch upload seen by
+          the background drainer. Without it those errors are lost (the producer
+          cannot be blocked on a network failure).
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: S3Config
+  - fields:
+      - doc: |-
+          accessKeyID / secretAccessKey / sessionToken hold SigV4 material; all
+          unexported so the only way out is the explicit accessors below.
+        name: accessKeyID
+        type: string
+      - name: secretAccessKey
+        type: string
+      - name: sessionToken
+        type: string
+    kind: struct
+    methods:
+      - name: AccessKeyID
+        recv: c CredentialValue
+        results: string
+      - name: SecretAccessKey
+        recv: c CredentialValue
+        results: string
+      - name: SessionToken
+        recv: c CredentialValue
+        results: string
+      - name: String
+        recv: c CredentialValue
+        results: string
+      - name: GoString
+        recv: c CredentialValue
+        results: string
+    name: CredentialValue
+  - kind: named
+    methods:
+      - name: String
+        recv: n Name
+        results: string
+      - name: Known
+        recv: n Name
+        results: bool
+    name: Name
+    underlying: string
+  - alias: true
+    doc: |-
+      Config is the opaque per-writer configuration payload. Each Factory
+      type-asserts it to its concrete config (e.g. logger.FileConfig); a wrong
+      concrete type MUST be rejected with the shared WriterConfigInvalid sentinel
+      rather than panic.
+    kind: alias
+    name: Config
+    underlying: any
+  - fields:
+      - doc: Name is the registered writer key resolved against the registry.
+        name: Name
+        type: Name
+      - doc: |-
+          Config is the writer's concrete config value (ConsoleConfig, FileConfig,
+          S3Config, CloudWatchConfig); the resolved factory type-asserts it.
+        name: Config
+        type: Config
+    kind: struct
+    name: Spec
+vars:
+  - doc: |-
+      registry maps each writer Name to its Factory — the kernel's read-mostly,
+      copy-on-write table (kernel/plugin.Registry, ADR 0159): writer packages
+      register exactly ONCE at import time and every other access is a lock-free
+      Lookup (ADR 0011) — the same read-mostly shape the codec registry has. What
+      stays here is the domain's refusal: the empty Name and the conflict's code.
+    items:
+      - name: registry
+        type: plugin.Registry[Name, Factory]
+    name: registry

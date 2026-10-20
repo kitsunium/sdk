@@ -1,0 +1,67 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: nullRegisteredClaim
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: claim, true
+                init:
+                  bind: raw, present
+                  eval: members[claim]
+                when: present && bytes.Equal(raw, []byte("null"))
+          key: _
+          range: |-
+            [...]string{
+            		coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimAudience,
+            		coretoken.ClaimExpiry, coretoken.ClaimNotBefore, coretoken.ClaimIssuedAt,
+            		coretoken.ClaimID,
+            	}
+          value: claim
+      - return: "\"\", false"
+  - of: selectable
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: slices.ContainsFunc(group, func(member boundKeyValue) bool { return member.usable })
+          key: _
+          range: index
+          value: group
+      - return: "false"
+  - of: nonUTF8VerifierKnob
+    steps:
+      - bind: names
+        eval: "[...]string{\"Issuer\", \"Audience\", \"RequireType\"}"
+      - bind: values
+        eval: "[...]string{cfg.Issuer, cfg.Audience, cfg.RequireType}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: names[i]
+                when: "!utf8.ValidString(value)"
+          key: i
+          range: values
+          value: value
+      - return: "\"\""
+  - of: nonUTF8Knob
+    steps:
+      - bind: names
+        eval: "[...]string{\"Issuer\", \"Type\", \"KeyID\"}"
+      - bind: values
+        eval: "[...]string{cfg.Issuer, cfg.Type, cfg.KeyID}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: names[i]
+                when: "!utf8.ValidString(value)"
+          key: i
+          range: values
+          value: value
+      - return: "\"\""

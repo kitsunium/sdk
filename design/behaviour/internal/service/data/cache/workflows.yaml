@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*tagIndex).remove
+    steps:
+      - bind: tags, found
+        eval: t.byKey[key]
+      - opt:
+          do:
+            - return: ""
+          when: "!found"
+      - loop:
+          do:
+            - bind: bucket
+              eval: t.byTag[tag]
+            - eval: delete(bucket, key)
+            - opt:
+                do:
+                  - eval: delete(t.byTag, tag)
+                when: len(bucket) == 0
+          key: _
+          range: tags
+          value: tag
+      - eval: delete(t.byKey, key)

@@ -1,0 +1,229 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewID
+    steps:
+      - opt:
+          do:
+            - return: ID{}, InvalidID
+          when: len(raw) != IDLen
+      - var:
+          name: buf
+          type: "[IDLen]byte"
+      - eval: copy(buf[:], raw)
+      - return: "ID{raw: buf[:]}, nil"
+  - of: ParseID
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseID
+        kind: self
+      - id: canonicalEncoding.DecodeString
+        kind: value
+      - id: NewID
+        kind: internal
+    steps:
+      - bind: raw, decodeErr
+        eval: canonicalEncoding.DecodeString(encoded)
+        to: canonicalEncoding.DecodeString
+      - opt:
+          do:
+            - return: ID{}, InvalidID
+          when: decodeErr != nil
+      - return: NewID(raw)
+        to: NewID
+  - of: ID.Reveal
+    participants:
+      - id: caller
+        kind: actor
+      - id: ID.Reveal
+        kind: self
+      - id: canonicalEncoding.EncodeToString
+        kind: value
+    steps:
+      - return: canonicalEncoding.EncodeToString(i.raw)
+        to: canonicalEncoding.EncodeToString
+  - of: ID.Digest
+    participants:
+      - id: caller
+        kind: actor
+      - id: ID.Digest
+        kind: self
+      - id: sha256
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: len(i.raw) == 0
+      - bind: sum
+        eval: sha256.Sum256(i.raw)
+        to: sha256
+      - return: hex.EncodeToString(sum[:])
+        to: hex
+  - of: ID.Equal
+    steps:
+      - return: subtle.ConstantTimeCompare(i.raw, other.raw) == 1
+  - of: ID.IsZero
+    steps:
+      - return: len(i.raw) == 0
+  - of: ID.String
+    steps:
+      - return: "\"<redacted>\""
+  - of: ID.GoString
+    steps:
+      - return: "\"<redacted>\""
+  - of: NewSessionValue
+    steps:
+      - opt:
+          do:
+            - return: SessionValue{}, InvalidID
+          when: state.ID.IsZero()
+      - bind: idle
+        eval: state.IdleExpiry
+      - opt:
+          do:
+            - set: idle
+              value: state.AbsoluteExpiry
+          when: idle.After(state.AbsoluteExpiry)
+      - return: |-
+          SessionValue{
+          		id:             state.ID,
+          		subject:        state.Subject,
+          		createdAt:      state.CreatedAt,
+          		lastSeen:       state.LastSeen,
+          		absoluteExpiry: state.AbsoluteExpiry,
+          		idleExpiry:     idle,
+          		data:           maps.Clone(state.Data),
+          	}, nil
+  - of: SessionValue.ID
+    steps:
+      - return: s.id
+  - of: SessionValue.Subject
+    steps:
+      - return: s.subject
+  - of: SessionValue.CreatedAt
+    steps:
+      - return: s.createdAt
+  - of: SessionValue.LastSeen
+    steps:
+      - return: s.lastSeen
+  - of: SessionValue.ExpiresAt
+    steps:
+      - opt:
+          do:
+            - return: s.idleExpiry
+          when: s.idleExpiry.Before(s.absoluteExpiry)
+      - return: s.absoluteExpiry
+  - of: SessionValue.LiveAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.LiveAt
+        kind: self
+      - id: now.Before
+        kind: value
+    steps:
+      - return: now.Before(s.ExpiresAt())
+        to: now.Before
+  - of: SessionValue.IsZero
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.IsZero
+        kind: self
+      - id: s.id.IsZero
+        kind: internal
+    steps:
+      - return: s.id.IsZero()
+        to: s.id.IsZero
+  - of: SessionValue.Get
+    steps:
+      - set: value, ok
+        value: s.data[key]
+      - return: value, ok
+  - of: SessionValue.Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.Set
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - bind: next
+        eval: s
+      - set: next.data
+        to: maps
+        value: maps.Clone(s.data)
+      - opt:
+          do:
+            - set: next.data
+              value: make(map[string]string, 1)
+          when: next.data == nil
+      - set: next.data[key]
+        value: value
+      - return: next
+  - of: SessionValue.Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.Delete
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - bind: next
+        eval: s
+      - set: next.data
+        to: maps
+        value: maps.Clone(s.data)
+      - eval: delete(next.data, key)
+      - return: next
+  - of: SessionValue.Keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.Keys
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Sorted(maps.Keys(s.data))
+        to: slices
+  - of: SessionValue.Data
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.Data
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - return: maps.Clone(s.data)
+        to: maps
+  - of: SessionValue.String
+    steps:
+      - bind: bound
+        eval: "\"anon\""
+      - opt:
+          do:
+            - set: bound
+              value: "\"bound\""
+          when: s.subject != ""
+      - return: |-
+          "session.Session{" + bound + " keys:" + strconv.Itoa(len(s.data)) +
+          		" expires:" + s.ExpiresAt().UTC().Format(time.RFC3339) + "}"
+  - of: SessionValue.GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.GoString
+        kind: self
+      - id: s.String
+        kind: internal
+    steps:
+      - return: s.String()
+        to: s.String

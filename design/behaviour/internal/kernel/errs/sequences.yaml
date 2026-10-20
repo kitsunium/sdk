@@ -1,0 +1,1037 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: CodeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: CodeOf
+        kind: self
+      - id: deepestError
+        kind: internal
+    steps:
+      - bind: deepest
+        eval: deepestError(err)
+        to: deepestError
+      - opt:
+          do:
+            - return: 0, false
+          when: deepest == nil
+      - return: deepest.code, true
+  - of: ReasonOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReasonOf
+        kind: self
+      - id: deepestError
+        kind: internal
+    steps:
+      - bind: deepest
+        eval: deepestError(err)
+        to: deepestError
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: deepest == nil
+      - return: deepest.reason, true
+  - of: PublicOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: PublicOf
+        kind: self
+      - id: deepestError
+        kind: internal
+    steps:
+      - bind: deepest
+        eval: deepestError(err)
+        to: deepestError
+      - opt:
+          do:
+            - return: "\"\""
+          when: deepest == nil
+      - return: deepest.public
+  - of: PrivateOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: PrivateOf
+        kind: self
+      - id: deepestError
+        kind: internal
+    steps:
+      - bind: deepest
+        eval: deepestError(err)
+        to: deepestError
+      - opt:
+          do:
+            - return: "\"\""
+          when: deepest == nil
+      - return: deepest.private
+  - of: FieldsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: FieldsOf
+        kind: self
+      - id: layer.Fields
+        kind: internal
+    steps:
+      - bind: layer, ok
+        eval: errors.AsType[*Error](err)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - return: layer.Fields()
+        to: layer.Fields
+  - of: HTTPStatusOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: HTTPStatusOf
+        kind: self
+      - id: deepestError
+        kind: internal
+      - id: deepest.HTTPStatus
+        kind: internal
+    steps:
+      - bind: deepest
+        eval: deepestError(err)
+        to: deepestError
+      - opt:
+          do:
+            - return: defaultHTTPStatus
+          when: deepest == nil
+      - return: deepest.HTTPStatus()
+        to: deepest.HTTPStatus
+  - of: ExitCodeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ExitCodeOf
+        kind: self
+      - id: deepestError
+        kind: internal
+      - id: deepest.ExitCode
+        kind: internal
+    steps:
+      - bind: deepest
+        eval: deepestError(err)
+        to: deepestError
+      - opt:
+          do:
+            - return: defaultExitCode
+          when: deepest == nil
+      - return: deepest.ExitCode()
+        to: deepest.ExitCode
+  - of: Pack
+    steps:
+      - return: Code(mm)<<shiftMajor | Code(ll)<<shiftLayer | Code(pp)<<shiftPackage | Code(ss)
+  - of: Code.Major
+    steps:
+      - return: Major(c >> shiftMajor)
+  - of: Code.Layer
+    steps:
+      - return: Layer(c >> shiftLayer)
+  - of: Code.Package
+    steps:
+      - return: PkgCode(c >> shiftPackage)
+  - of: Code.Serial
+    steps:
+      - return: Serial(c)
+  - of: Code.String
+    steps:
+      - return: |-
+          itoaDecimal(uint8(c.Major())) + "." +
+          		itoaDecimal(uint8(c.Layer())) + "." +
+          		itoaDecimal(uint8(c.Package())) + "." +
+          		itoaDecimal(uint8(c.Serial()))
+  - of: Code.Padded
+    steps:
+      - return: |-
+          itoaPadded3(uint8(c.Major())) + "." +
+          		itoaPadded3(uint8(c.Layer())) + "." +
+          		itoaPadded3(uint8(c.Package())) + "." +
+          		itoaPadded3(uint8(c.Serial()))
+  - of: itoaDecimal
+    participants:
+      - id: caller
+        kind: actor
+      - id: itoaDecimal
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - return: strconv.Itoa(int(octet))
+        to: strconv
+  - of: itoaPadded3
+    participants:
+      - id: caller
+        kind: actor
+      - id: itoaPadded3
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: octet < padThreshold10
+              do:
+                - return: "\"00\" + strconv.Itoa(int(octet))"
+            - case: octet < padThreshold100
+              do:
+                - return: "\"0\" + strconv.Itoa(int(octet))"
+            - default: true
+              do:
+                - return: strconv.Itoa(int(octet))
+                  to: strconv
+  - of: WithHTTPStatus
+    steps:
+      - return:
+          closure:
+            params: e *Error
+            steps:
+              - set: e.httpOverride
+                value: status
+  - of: WithExitCode
+    steps:
+      - return:
+          closure:
+            params: e *Error
+            steps:
+              - set: e.exitOverride
+                value: code
+  - of: NewError
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewError
+        kind: self
+      - id: Define
+        kind: internal
+    steps:
+      - return: Define(code, reason, public, private, opts...)
+        to: Define
+  - of: NewRuntime
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRuntime
+        kind: self
+      - id: validateDefineArgs
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: bad
+          init:
+            bind: bad
+            eval: validateDefineArgs(code, reason, public, private)
+            to: validateDefineArgs
+          when: bad != nil
+      - bind: copied
+        eval: slices.Clone(fields)
+        to: slices
+      - return: "&Error{code: code, reason: reason, public: public, private: private, fields: copied}"
+  - of: Define
+    participants:
+      - id: caller
+        kind: actor
+      - id: Define
+        kind: self
+      - id: validateDefineArgs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: err.Error()
+          init:
+            bind: err
+            eval: validateDefineArgs(code, reason, public, private)
+            to: validateDefineArgs
+          when: err != nil
+      - bind: sentinel
+        eval: "&Error{code: code, reason: reason, public: public, private: private}"
+      - loop:
+          do:
+            - eval: opt(sentinel)
+          key: _
+          range: opts
+          value: opt
+      - return: sentinel
+  - of: Static
+    steps:
+      - return: "&Error{code: code, reason: reason, public: public, private: private, httpOverride: http, exitOverride: exit}"
+  - of: newValidationError
+    steps:
+      - return: "&Error{code: code, reason: reason, public: public}"
+  - of: Wrap
+    participants:
+      - id: caller
+        kind: actor
+      - id: Wrap
+        kind: self
+      - id: newFromStdlibCause
+        kind: internal
+      - id: wrapSDKCause
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: newFromStdlibCause(nil, params, fields)
+              to: newFromStdlibCause
+          when: cause == nil
+      - opt:
+          do:
+            - return: newFromStdlibCause(nil, params, fields)
+              to: newFromStdlibCause
+          init:
+            bind: typed, ok
+            eval: cause.(*Error)
+          when: ok && typed == nil
+      - opt:
+          do:
+            - return: wrapSDKCause(cause, inner, params, fields)
+              to: wrapSDKCause
+          init:
+            bind: inner, ok
+            eval: errors.AsType[*Error](cause)
+          when: ok
+      - return: newFromStdlibCause(cause, params, fields)
+        to: newFromStdlibCause
+  - of: wrapSDKCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapSDKCause
+        kind: self
+      - id: appendTrail
+        kind: internal
+    steps:
+      - bind: newTrail, trunc
+        eval: appendTrail(inner, params.Code)
+        to: appendTrail
+      - return: |-
+          &Error{
+          		code:           inner.code,
+          		reason:         inner.reason,
+          		public:         inner.public,
+          		private:        inner.private,
+          		fields:         slices.Concat(inner.fields, fields),
+          		trail:          newTrail,
+          		trailTruncated: trunc,
+          		httpOverride:   inner.httpOverride,
+          		exitOverride:   inner.exitOverride,
+          		source:         cause,
+          	}
+  - of: newFromStdlibCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: newFromStdlibCause
+        kind: self
+      - id: validateDefineArgs
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                &Error{
+                			code:    CodeInvalidWrapParams,
+                			reason:  "INVALID_WRAP_PARAMS",
+                			public:  "internal wrap failure",
+                			private: "Wrap received invalid params: " + bad.Public(),
+                			source:  cause,
+                		}
+          init:
+            bind: bad
+            eval: validateDefineArgs(params.Code, params.Reason, params.Public, params.Private)
+            to: validateDefineArgs
+          when: bad != nil
+      - bind: copied
+        eval: slices.Clone(fields)
+        to: slices
+      - return: |-
+          &Error{
+          		code:         params.Code,
+          		reason:       params.Reason,
+          		public:       params.Public,
+          		private:      params.Private,
+          		fields:       copied,
+          		exitOverride: params.ExitCode,
+          		source:       cause,
+          	}
+  - of: (*Error).Code
+    steps:
+      - return: e.code
+  - of: (*Error).Reason
+    steps:
+      - return: e.reason
+  - of: (*Error).Public
+    steps:
+      - return: e.public
+  - of: (*Error).Private
+    steps:
+      - return: e.private
+  - of: (*Error).Fields
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Error).Fields
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(e.fields)
+        to: slices
+  - of: (*Error).Trail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Error).Trail
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(e.trail)
+        to: slices
+  - of: (*Error).TrailTruncated
+    steps:
+      - return: e.trailTruncated
+  - of: (*Error).Is
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Error).Is
+        kind: self
+      - id: e.matchesPrefix
+        kind: internal
+      - id: e.matchesSentinel
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: e.matchesPrefix(pm)
+              to: e.matchesPrefix
+          init:
+            bind: pm, ok
+            eval: target.(*PrefixMatcher)
+          when: ok
+      - opt:
+          do:
+            - return: e.matchesSentinel(te, target)
+              to: e.matchesSentinel
+          init:
+            bind: te, ok
+            eval: target.(*Error)
+          when: ok
+      - return: e == target
+  - of: (*Error).matchesPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Error).matchesPrefix
+        kind: self
+      - id: pm.Mask
+        kind: internal
+    steps:
+      - bind: prefix
+        eval: pm.Prefix() & pm.Mask()
+      - bind: mask
+        eval: pm.Mask()
+        to: pm.Mask
+      - opt:
+          do:
+            - return: "true"
+          when: e.code&mask == prefix
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: trailCode&mask == prefix
+          key: _
+          range: e.trail
+          value: trailCode
+      - return: "false"
+  - of: (*Error).matchesSentinel
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: te.code != 0 && e.code == te.code && e.reason == te.reason
+      - return: e == target
+  - of: (*Error).Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Error).Error
+        kind: self
+      - id: builder.Grow
+        kind: value
+      - id: builder.WriteByte
+        kind: value
+      - id: builder.WriteString
+        kind: value
+      - id: builder.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"[\" + e.code.String() + \" \" + e.reason + \"] \" + e.public"
+          when: len(e.trail) == 0
+      - var:
+          name: builder
+          type: strings.Builder
+      - eval: builder.Grow(errorBuilderInitialCap + errorBuilderPerTrailEntry*len(e.trail))
+        to: builder.Grow
+      - eval: builder.WriteByte('[')
+        to: builder.WriteByte
+      - eval: builder.WriteString(e.code.String())
+        to: builder.WriteString
+      - loop:
+          do:
+            - eval: builder.WriteString(" <- ")
+              to: builder.WriteString
+            - eval: builder.WriteString(trailCode.String())
+              to: builder.WriteString
+          key: _
+          range: e.trail
+          value: trailCode
+      - opt:
+          do:
+            - eval: builder.WriteString(" (truncated)")
+              to: builder.WriteString
+          when: e.trailTruncated
+      - eval: builder.WriteByte(' ')
+        to: builder.WriteByte
+      - eval: builder.WriteString(e.reason)
+        to: builder.WriteString
+      - eval: builder.WriteString("] ")
+        to: builder.WriteString
+      - eval: builder.WriteString(e.public)
+        to: builder.WriteString
+      - return: builder.String()
+        to: builder.String
+  - of: (*Error).Source
+    steps:
+      - return: e.source
+  - of: (*Error).Unwrap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Error).Unwrap
+        kind: self
+      - id: e.Source
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: e == nil
+      - return: e.Source()
+        to: e.Source
+  - of: (*Error).HTTPStatus
+    steps:
+      - opt:
+          do:
+            - return: e.httpOverride
+          when: e.httpOverride != 0
+      - return: defaultHTTPStatus
+  - of: (*Error).ExitCode
+    steps:
+      - opt:
+          do:
+            - return: e.exitOverride
+          when: e.exitOverride != 0
+      - return: defaultExitCode
+  - of: HasCode
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil
+      - return: |-
+          errCodeMatches(err, c) ||
+          		hasCodeInSingleUnwrap(err, c) ||
+          		hasCodeInMultiUnwrap(err, c)
+  - of: errCodeMatches
+    participants:
+      - id: caller
+        kind: actor
+      - id: errCodeMatches
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: sdkErr, ok
+        eval: err.(*Error)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - opt:
+          do:
+            - return: "true"
+          when: sdkErr.code == c
+      - return: slices.Contains(sdkErr.trail, c)
+        to: slices
+  - of: hasCodeInSingleUnwrap
+    participants:
+      - id: caller
+        kind: actor
+      - id: hasCodeInSingleUnwrap
+        kind: self
+      - id: HasCode
+        kind: internal
+    steps:
+      - bind: unwrapper, ok
+        eval: err.(interface{ Unwrap() error })
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - return: HasCode(unwrapper.Unwrap(), c)
+        to: HasCode
+  - of: NewFieldValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewFieldValue
+        kind: self
+      - id: String
+        kind: internal
+    steps:
+      - return: String(key, val)
+        to: String
+  - of: String
+    steps:
+      - return: "FieldValue{key: key, kind: fieldString, str: val}"
+  - of: Int
+    steps:
+      - return: "FieldValue{key: key, kind: fieldInt, num: int64(val)}"
+  - of: Int64
+    steps:
+      - return: "FieldValue{key: key, kind: fieldInt, num: val}"
+  - of: Bool
+    steps:
+      - return: "FieldValue{key: key, kind: fieldBool, bl: val}"
+  - of: Float
+    steps:
+      - return: "FieldValue{key: key, kind: fieldFloat, fl: val}"
+  - of: FieldValue.Key
+    steps:
+      - return: f.key
+  - of: FieldValue.StringValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: FieldValue.StringValue
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: fieldInvalid
+              do:
+                - return: "\"\""
+            - case: fieldString
+              do:
+                - return: f.str
+            - case: fieldInt
+              do:
+                - return: strconv.FormatInt(f.num, decimalBase)
+                  to: strconv
+            - case: fieldBool
+              do:
+                - return: strconv.FormatBool(f.bl)
+                  to: strconv
+            - case: fieldFloat
+              do:
+                - return: strconv.FormatFloat(f.fl, floatFormat, floatPrec, floatBitSize)
+                  to: strconv
+            - default: true
+              do:
+                - return: "\"\""
+          "on": f.kind
+  - of: ParseCode
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseCode
+        kind: self
+      - id: scanOctets
+        kind: internal
+      - id: Pack
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, parseFailure(s, "length outside ["+itoaDecimal(uint8(codeStringMinLen))+","+itoaDecimal(uint8(codeStringMaxLen))+"]")
+          when: len(s) < codeStringMinLen || len(s) > codeStringMaxLen
+      - bind: octets, perr
+        eval: scanOctets(s)
+        to: scanOctets
+      - opt:
+          do:
+            - return: 0, perr
+          when: perr != nil
+      - set: c
+        to: Pack
+        value: |-
+          Pack(
+          		Major(octets[octetIdxMajor]),
+          		Layer(octets[octetIdxLayer]),
+          		PkgCode(octets[octetIdxPackage]),
+          		Serial(octets[octetIdxSerial]),
+          	)
+      - opt:
+          do:
+            - return: 0, parseFailure(s, "0.0.0.0 is the reserved zero sentinel")
+          when: c == 0
+      - return: c, nil
+  - of: scanOctets
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanOctets
+        kind: self
+      - id: parseOctet
+        kind: internal
+    steps:
+      - var:
+          name: segStart
+          type: int
+      - var:
+          name: segIdx
+          type: int
+      - loop:
+          cond: i <= len(s)
+          do:
+            - bind: atEnd
+              eval: i == len(s)
+            - opt:
+                do:
+                  - continue: true
+                when: "!atEnd && s[i] != '.'"
+            - bind: seg
+              eval: s[segStart:i]
+            - opt:
+                do:
+                  - return: octets, parseFailure(s, "more than "+itoaDecimal(uint8(codeSegmentCount))+" segments")
+                when: segIdx > codeSegmentLastIdx
+            - bind: octet, ok
+              eval: parseOctet(seg)
+              to: parseOctet
+            - opt:
+                do:
+                  - return: octets, parseFailure(s, "segment "+seg+" invalid")
+                when: "!ok"
+            - set: octets[segIdx]
+              value: octet
+            - op: ++
+              set: segIdx
+            - set: segStart
+              value: i + 1
+          init: i := 0
+          post: i++
+      - opt:
+          do:
+            - return: octets, parseFailure(s, "expected "+itoaDecimal(uint8(codeSegmentCount))+" segments")
+          when: segIdx != codeSegmentCount
+      - return: octets, nil
+  - of: parseOctet
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseOctet
+        kind: self
+      - id: digitsToOctet
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(seg) == 0 || len(seg) > codeSegmentMaxDigits || (len(seg) > 1 && seg[0] == '0')
+      - bind: value, vok
+        eval: digitsToOctet(seg)
+        to: digitsToOctet
+      - opt:
+          do:
+            - return: 0, false
+          when: "!vok"
+      - return: value, true
+  - of: parseFailure
+    steps:
+      - bind: shown
+        eval: input
+      - opt:
+          do:
+            - set: shown
+              value: shown[:inputEchoMax] + "..."
+          when: len(shown) > inputEchoMax
+      - return: |-
+          &Error{
+          		code:    CodeInvalidCodeString,
+          		reason:  "INVALID_CODE_STRING",
+          		public:  "invalid code string",
+          		private: "ParseCode(" + shown + "): " + detail,
+          	}
+  - of: NewPrefixMatcher
+    steps:
+      - return: "&PrefixMatcher{prefix: prefix, mask: mask}"
+  - of: (*PrefixMatcher).String
+    steps:
+      - return: "\"PrefixMatcher{prefix=\" + p.prefix.String() + \", mask=\" + p.mask.String() + \"}\""
+  - of: (*PrefixMatcher).Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PrefixMatcher).Error
+        kind: self
+      - id: p.String
+        kind: internal
+    steps:
+      - return: p.String()
+        to: p.String
+  - of: (*PrefixMatcher).Prefix
+    steps:
+      - return: p.prefix
+  - of: (*PrefixMatcher).Mask
+    steps:
+      - return: p.mask
+  - of: RegistryMarker
+    steps:
+      - return: registrySentinel
+  - of: appendTrail
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTrail
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - var:
+          name: existing
+          type: "[]Code"
+      - var:
+          name: inheritedTrunc
+          type: bool
+      - opt:
+          do:
+            - set: existing
+              value: cause.trail
+            - set: inheritedTrunc
+              value: cause.trailTruncated
+          when: cause != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, inheritedTrunc
+                when: len(existing) == 0
+            - return: slices.Clone(existing), inheritedTrunc
+              to: slices
+          when: next == 0
+      - opt:
+          do:
+            - return: append(slices.Clone(existing), next), inheritedTrunc
+          when: len(existing)+1 <= maxTrailLen
+      - set: trail
+        value: make([]Code, 0, maxTrailLen)
+      - set: trail
+        value: append(trail, existing[0])
+      - set: trail
+        value: append(trail, existing[len(existing)-(maxTrailLen-trailReserveTail):]...)
+      - set: trail
+        value: append(trail, next)
+      - return: trail, true
+  - of: TrailOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: TrailOf
+        kind: self
+      - id: target.Trail
+        kind: internal
+    steps:
+      - bind: target, ok
+        eval: errors.AsType[*Error](err)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - return: target.Trail()
+        to: target.Trail
+  - of: validateDefineArgs
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateDefineArgs
+        kind: self
+      - id: validateCode
+        kind: internal
+      - id: validateReason
+        kind: internal
+      - id: validatePublic
+        kind: internal
+      - id: validatePrivate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: vErr
+          init:
+            bind: vErr
+            eval: validateCode(code)
+            to: validateCode
+          when: vErr != nil
+      - opt:
+          do:
+            - return: vErr
+          init:
+            bind: vErr
+            eval: validateReason(reason)
+            to: validateReason
+          when: vErr != nil
+      - opt:
+          do:
+            - return: vErr
+          init:
+            bind: vErr
+            eval: validatePublic(public)
+            to: validatePublic
+          when: vErr != nil
+      - opt:
+          do:
+            - return: vErr
+          init:
+            bind: vErr
+            eval: validatePrivate(private)
+            to: validatePrivate
+          when: vErr != nil
+      - return: nil
+  - of: validateCode
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateCode
+        kind: self
+      - id: newValidationError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidCode, "INVALID_CODE",
+                			fmt.Sprintf("code must be non-zero, got %d", int(uint32(code))))
+              to: newValidationError
+          when: code == 0
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidCode, "INVALID_CODE",
+                			fmt.Sprintf("code must fit int32 positive range, got %#08x", uint32(code)))
+              to: newValidationError
+          when: uint32(code) > maxInt32Positive
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      newValidationError(CodeInvalidCode, "INVALID_CODE",
+                      				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code.String()))
+                    to: newValidationError
+                init:
+                  bind: _, allowed
+                  eval: metaCodeAllowed[code]
+                when: "!allowed"
+          when: code.Layer() == 0
+      - return: nil
+  - of: validateReason
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateReason
+        kind: self
+      - id: newValidationError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidReason, "INVALID_REASON",
+                			fmt.Sprintf("reason %q must match %s", reason, reasonPattern))
+              to: newValidationError
+          when: "!isScreamingSnake(reason)"
+      - return: nil
+  - of: validatePublic
+    participants:
+      - id: caller
+        kind: actor
+      - id: validatePublic
+        kind: self
+      - id: newValidationError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+                			"public must not be empty")
+              to: newValidationError
+          when: public == ""
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+                			fmt.Sprintf("public exceeds %d runes (got %d)",
+                				maxPublicRunes, utf8.RuneCountInString(public)))
+              to: newValidationError
+          when: utf8.RuneCountInString(public) > maxPublicRunes
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+                			"public must not contain a newline")
+              to: newValidationError
+          when: containsNewline(public)
+      - return: nil
+  - of: validatePrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: validatePrivate
+        kind: self
+      - id: newValidationError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                newValidationError(CodeInvalidPrivate, "INVALID_PRIVATE",
+                			"private must not be empty")
+              to: newValidationError
+          when: private == ""
+      - return: nil
+  - of: isValidReasonRune
+    steps:
+      - opt:
+          do:
+            - return: r >= 'A' && r <= 'Z'
+          when: i == 0
+      - return: isUpperLetter(r) || isDigit(r) || r == '_'
+  - of: isUpperLetter
+    steps:
+      - return: r >= 'A' && r <= 'Z'
+  - of: isDigit
+    steps:
+      - return: r >= '0' && r <= '9'

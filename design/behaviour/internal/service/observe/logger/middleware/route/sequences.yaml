@@ -1,0 +1,160 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*routerSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*routerSink).Write
+        kind: self
+      - id: entry.Sink.Write
+        kind: value
+      - id: s.fallback.Write
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: entry.Sink.Write(ctx, rec, p)
+                    to: entry.Sink.Write
+                when: entry.When(rec)
+          key: _
+          range: s.entries
+          value: entry
+      - opt:
+          do:
+            - return: s.fallback.Write(ctx, rec, p)
+              to: s.fallback.Write
+          when: s.fallback != nil
+      - return: 0, coreroute.NoMatch
+  - of: (*routerSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*routerSink).Flush
+        kind: self
+      - id: entry.Sink.Flush
+        kind: value
+      - id: s.fallback.Flush
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: collected
+        eval: make([]error, 0, len(s.entries)+1)
+      - bind: seen
+        eval: make(map[corelogger.Sink]struct{}, len(s.entries)+1)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[entry.Sink]
+                when: dup
+            - set: seen[entry.Sink]
+              value: struct{}{}
+            - opt:
+                do:
+                  - set: collected
+                    value: append(collected, ferr)
+                init:
+                  bind: ferr
+                  eval: entry.Sink.Flush(ctx)
+                  to: entry.Sink.Flush
+                when: ferr != nil
+          key: _
+          range: s.entries
+          value: entry
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: collected
+                    value: append(collected, ferr)
+                init:
+                  bind: ferr
+                  eval: s.fallback.Flush(ctx)
+                  to: s.fallback.Flush
+                when: ferr != nil
+          init:
+            bind: _, dup
+            eval: seen[s.fallback]
+          when: s.fallback != nil && !dup
+      - opt:
+          do:
+            - return: errors.Join(collected...)
+              to: errors
+          when: len(collected) > 0
+      - return: nil
+  - of: (*routerSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*routerSink).Close
+        kind: self
+      - id: entry.Sink.Close
+        kind: value
+      - id: s.fallback.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: collected
+        eval: make([]error, 0, len(s.entries)+1)
+      - bind: seen
+        eval: make(map[corelogger.Sink]struct{}, len(s.entries)+1)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[entry.Sink]
+                when: dup
+            - set: seen[entry.Sink]
+              value: struct{}{}
+            - opt:
+                do:
+                  - set: collected
+                    value: append(collected, cerr)
+                init:
+                  bind: cerr
+                  eval: entry.Sink.Close()
+                  to: entry.Sink.Close
+                when: cerr != nil
+          key: _
+          range: s.entries
+          value: entry
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: collected
+                    value: append(collected, cerr)
+                init:
+                  bind: cerr
+                  eval: s.fallback.Close()
+                  to: s.fallback.Close
+                when: cerr != nil
+          init:
+            bind: _, dup
+            eval: seen[s.fallback]
+          when: s.fallback != nil && !dup
+      - opt:
+          do:
+            - return: errors.Join(collected...)
+              to: errors
+          when: len(collected) > 0
+      - return: nil
+  - of: LevelAtLeast
+    steps:
+      - return:
+          closure:
+            params: r corelogger.RecordEvent
+            results: match bool
+            steps:
+              - return: r.Level >= min

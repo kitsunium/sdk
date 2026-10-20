@@ -1,0 +1,1478 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: doc.key
+    steps:
+      - return: d.ID
+  - of: (*heard).add
+    steps:
+      - lock:
+          mutex: h
+      - set: h.ids
+        value: append(h.ids, id)
+  - of: (*heard).has
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*heard).has
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: h
+      - return: slices.Contains(h.ids, id)
+        to: slices
+  - of: Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: Run
+        kind: self
+      - id: t.Run
+        kind: value
+    steps:
+      - loop:
+          do:
+            - eval: t.Run(b.Name+"/"+c.name, func(t *testing.T) { c.run(t, open(t, b, c.name, c.clocked)) })
+              to: t.Run
+          key: _
+          range: cases
+          value: c
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Setenv
+        kind: value
+      - id: app
+        kind: package
+      - id: svc.Store
+        kind: value
+      - id: svc.Subscribe
+        kind: value
+      - id: app.NewApp(App, svc).With
+        kind: value
+      - id: clock
+        kind: package
+      - id: a.With
+        kind: value
+      - id: a.Start
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: t.Cleanup
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - eval: t.Setenv("STORETEST_SMTP_URL", "")
+        to: t.Setenv
+      - eval: t.Setenv("STORETEST_SECRETS", "memory")
+        to: t.Setenv
+      - eval: t.Setenv("STORETEST_DATABASE_TIMEOUT", "1m")
+        to: t.Setenv
+      - bind: svc
+        eval: app.NewService("st-"+name, "A case of the framework's store conformance suite.")
+        to: app
+      - bind: docs
+        eval: |-
+          svc.Store("docs", doc.key,
+          		app.Unique("email", func(d doc) string { return d.Email }),
+          		app.Index("team", func(d doc) []string { return d.Teams }))
+        to: svc.Store
+      - bind: pages
+        eval: |-
+          svc.Store("pages", doc.key, app.Revisions(2),
+          		app.Unique("email", func(d doc) string { return d.Email }))
+        to: svc.Store
+      - bind: s
+        eval: |-
+          &suite{
+          		heard:     &heard{},
+          		docs:      docs,
+          		moved:     svc.Topic[doc]("moved"),
+          		lifecycle: svc.Workflow("lifecycle", docs, stateOf).Initial("new").When("ready", "new", "done", isReady),
+          		pages:     pages,
+          		pageFlow:  svc.Workflow("publishing", pages, stateOf).Initial("new").When("ready", "new", "done", isReady).On("hold", "new", "held"),
+          	}
+      - eval: svc.Subscribe("heard", s.moved, func(_ context.Context, d doc) error { s.heard.add(d.ID); return nil })
+        to: svc.Subscribe
+      - bind: a
+        eval: |-
+          app.NewApp(App, svc).With(append([]app.AppOption{
+          		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
+          	}, b.Options(t, App)...)...)
+        to: app.NewApp(App, svc).With
+      - opt:
+          do:
+            - set: s.clock
+              to: clock
+              value: clock.NewManualClock(epoch)
+            - set: a
+              to: a.With
+              value: a.With(app.Clock(s.clock))
+          when: clocked
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"start: %v\", err)"
+              to: t.Fatalf
+          init:
+            bind: err
+            eval: a.Start(t.Context())
+            to: a.Start
+          when: err != nil
+      - eval: |-
+          t.Cleanup(func() {
+          		ctx, cancel := context.WithTimeout(context.Background(), stopWait)
+          		defer cancel()
+          		if err := a.Stop(ctx); err != nil {
+          			t.Errorf("stop: %v", err)
+          		}
+          	})
+        to: t.Cleanup
+      - return: s
+  - of: stateOf
+    steps:
+      - return: "&d.State"
+  - of: isReady
+    steps:
+      - return: d.Ready
+  - of: code
+    steps:
+      - opt:
+          do:
+            - return: ke.Code
+          init:
+            bind: ke, ok
+            eval: errors.AsType[*app.Error](err)
+          when: ok
+      - return: "\"\""
+  - of: message
+    steps:
+      - opt:
+          do:
+            - return: ke.Message
+          init:
+            bind: ke, ok
+            eval: errors.AsType[*app.Error](err)
+          when: ok
+      - return: "\"\""
+  - of: expect
+    participants:
+      - id: caller
+        kind: actor
+      - id: expect
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - opt:
+          do:
+            - eval: "t.Errorf(\"%s: %v\", what, err)"
+              to: t.Errorf
+          when: code(err) != want
+  - of: must
+    participants:
+      - id: caller
+        kind: actor
+      - id: must
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Fatal
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - opt:
+          do:
+            - eval: t.Fatal(err)
+              to: t.Fatal
+          when: err != nil
+  - of: eventually
+    participants:
+      - id: caller
+        kind: actor
+      - id: eventually
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Fatalf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - loop:
+          cond: time.Now().Before(deadline)
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: cond()
+          init: deadline := time.Now().Add(waitFor)
+          post: time.Sleep(pollEvery)
+      - eval: t.Fatalf("timed out waiting for %s", what)
+        to: t.Fatalf
+  - of: idsOf
+    steps:
+      - bind: ids
+        eval: make([]string, 0, len(docs))
+      - loop:
+          do:
+            - set: ids
+              value: append(ids, d.ID)
+          key: _
+          range: docs
+          value: d
+      - return: ids
+  - of: setN
+    steps:
+      - return:
+          closure:
+            params: d *doc
+            results: error
+            steps:
+              - set: d.N
+                value: "n"
+              - return: nil
+  - of: writeModes
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeModes
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: expect
+        kind: internal
+      - id: s.docs.Update
+        kind: value
+      - id: t.Errorf
+        kind: value
+      - id: s.docs.Count
+        kind: value
+      - id: s.docs.Get
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.docs.Insert(ctx, doc{ID: \"a\", N: 1}))"
+        to: must
+      - eval: "expect(t, \"an insert over a taken key\", s.docs.Insert(ctx, doc{ID: \"a\", N: 2}), app.WireConflict)"
+        to: expect
+      - eval: "must(t, s.docs.Put(ctx, doc{ID: \"a\", N: putN}))"
+        to: must
+      - bind: got, err
+        eval: s.docs.Update(ctx, "a", func(d *doc) error { d.N++; return nil })
+        to: s.docs.Update
+      - opt:
+          do:
+            - eval: "t.Errorf(\"an update: %+v %v\", got, err)"
+              to: t.Errorf
+          when: err != nil || got.N != putN+1
+      - set: _, err
+        to: s.docs.Update
+        value: s.docs.Update(ctx, "none", func(*doc) error { return nil })
+      - eval: expect(t, "an update of nothing", err, app.WireNotFound)
+        to: expect
+      - set: _, err
+        to: s.docs.Update
+        value: s.docs.Update(ctx, "a", func(d *doc) error { d.ID = "b"; return nil })
+      - eval: expect(t, "an update that renames", err, app.WireInvalid)
+        to: expect
+      - opt:
+          do:
+            - eval: "t.Errorf(\"count: %d %v\", n, err)"
+              to: t.Errorf
+          init:
+            bind: n, err
+            eval: s.docs.Count(ctx)
+            to: s.docs.Count
+          when: err != nil || n != 1
+      - eval: must(t, s.docs.Delete(ctx, "a"))
+        to: must
+      - eval: expect(t, "a delete of nothing", s.docs.Delete(ctx, "a"), app.WireNotFound)
+        to: expect
+      - set: _, err
+        to: s.docs.Get
+        value: s.docs.Get(ctx, "a")
+      - eval: expect(t, "a get of nothing", err, app.WireNotFound)
+        to: expect
+  - of: oneInsertWins
+    participants:
+      - id: caller
+        kind: actor
+      - id: oneInsertWins
+        kind: self
+      - id: wg.Go
+        kind: value
+      - id: wg.Wait
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: results
+        eval: make([]error, writers)
+      - var:
+          name: wg
+          type: sync.WaitGroup
+      - loop:
+          do:
+            - eval: "wg.Go(func() { results[i] = s.docs.Insert(context.Background(), doc{ID: \"one\", N: i}) })"
+              to: wg.Go
+          key: i
+          range: writers
+      - eval: wg.Wait()
+        to: wg.Wait
+      - bind: won
+        eval: "0"
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: "\"\""
+                    do:
+                      - op: ++
+                        set: won
+                  - case: app.WireConflict
+                  - default: true
+                    do:
+                      - eval: "t.Errorf(\"an insert failed: %v\", err)"
+                        to: t.Errorf
+                "on": code(err)
+          key: _
+          range: results
+          value: err
+      - opt:
+          do:
+            - eval: t.Errorf("%d inserts won", won)
+              to: t.Errorf
+          when: won != 1
+  - of: updateIsAtomic
+    participants:
+      - id: caller
+        kind: actor
+      - id: updateIsAtomic
+        kind: self
+      - id: must
+        kind: internal
+      - id: wg.Go
+        kind: value
+      - id: wg.Wait
+        kind: value
+      - id: s.docs.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: "must(t, s.docs.Put(t.Context(), doc{ID: \"counter\"}))"
+        to: must
+      - bind: results
+        eval: make([]error, writers)
+      - var:
+          name: wg
+          type: sync.WaitGroup
+      - loop:
+          do:
+            - eval: |-
+                wg.Go(func() {
+                			_, results[i] = s.docs.Update(context.Background(), "counter", func(d *doc) error { d.N++; return nil })
+                		})
+              to: wg.Go
+          key: i
+          range: writers
+      - eval: wg.Wait()
+        to: wg.Wait
+      - eval: must(t, errors.Join(results...))
+        to: must
+      - opt:
+          do:
+            - eval: "t.Errorf(\"after %d updates: %+v %v\", writers, got, err)"
+              to: t.Errorf
+          init:
+            bind: got, err
+            eval: s.docs.Get(t.Context(), "counter")
+            to: s.docs.Get
+          when: err != nil || got.N != writers
+  - of: uniqueNamesItsIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: uniqueNamesItsIndex
+        kind: self
+      - id: must
+        kind: internal
+      - id: s.docs.Put
+        kind: value
+      - id: message
+        kind: internal
+      - id: t.Errorf
+        kind: value
+      - id: s.docs.Lookup
+        kind: value
+    steps:
+      - eval: "must(t, s.docs.Put(t.Context(), doc{ID: \"ada\", Email: \"ada@example.com\"}))"
+        to: must
+      - bind: err
+        eval: "s.docs.Put(t.Context(), doc{ID: \"eve\", Email: \"ada@example.com\"})"
+        to: s.docs.Put
+      - bind: said
+        eval: message(err)
+        to: message
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a second holder of a unique key: %v\", err)"
+              to: t.Errorf
+          when: code(err) != app.WireConflict || !strings.Contains(said, `"email"`) || strings.Contains(said, "ada@example.com")
+      - opt:
+          do:
+            - eval: "t.Errorf(\"lookup: %+v %v\", got, err)"
+              to: t.Errorf
+          init:
+            bind: got, err
+            eval: s.docs.Lookup(t.Context(), "email", "ada@example.com")
+            to: s.docs.Lookup
+          when: err != nil || got.ID != "ada"
+      - set: _, err
+        to: s.docs.Lookup
+        value: s.docs.Lookup(t.Context(), "email", "eve@example.com")
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a lookup of nobody: %v\", err)"
+              to: t.Errorf
+          when: code(err) != app.WireNotFound || strings.Contains(message(err), "eve@example.com")
+  - of: findInKeyOrder
+    participants:
+      - id: caller
+        kind: actor
+      - id: findInKeyOrder
+        kind: self
+      - id: must
+        kind: internal
+      - id: s.docs.Find
+        kind: value
+      - id: idsOf
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - loop:
+          do:
+            - eval: "must(t, s.docs.Put(t.Context(), doc{ID: id, Teams: []string{\"red\"}}))"
+              to: must
+          key: _
+          range: unorderedKeys
+          value: id
+      - bind: got, err
+        eval: s.docs.Find(t.Context(), "team", "red")
+        to: s.docs.Find
+      - opt:
+          do:
+            - eval: "t.Errorf(\"find: %v %v\", ids, err)"
+              to: t.Errorf
+          init:
+            bind: ids
+            eval: idsOf(got)
+            to: idsOf
+          when: err != nil || !slices.Equal(ids, orderedKeys)
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a find of nothing: %v %v\", none, err)"
+              to: t.Errorf
+          init:
+            bind: none, err
+            eval: s.docs.Find(t.Context(), "team", "blue")
+            to: s.docs.Find
+          when: err != nil || none == nil || len(none) != 0
+  - of: keysAreBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: keysAreBytes
+        kind: self
+      - id: s.docs.Insert
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: s.docs.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+      - id: s.docs.List
+        kind: value
+      - id: idsOf
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: "t.Fatalf(\"insert %q: %v\", k, err)"
+                    to: t.Fatalf
+                init:
+                  bind: err
+                  eval: "s.docs.Insert(t.Context(), doc{ID: k, N: i})"
+                  to: s.docs.Insert
+                when: err != nil
+          key: i
+          range: byteKeys
+          value: k
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: "t.Errorf(\"get %q: %+v %v\", k, got, err)"
+                    to: t.Errorf
+                init:
+                  bind: got, err
+                  eval: s.docs.Get(t.Context(), k)
+                  to: s.docs.Get
+                when: err != nil || got.N != i
+          key: i
+          range: byteKeys
+          value: k
+      - bind: all, err
+        eval: s.docs.List(t.Context())
+        to: s.docs.List
+      - opt:
+          do:
+            - eval: "t.Errorf(\"list in byte order: %q %v\", ids, err)"
+              to: t.Errorf
+          init:
+            bind: ids
+            eval: idsOf(all)
+            to: idsOf
+          when: err != nil || !slices.Equal(ids, byteOrder)
+  - of: documentAsWritten
+    participants:
+      - id: caller
+        kind: actor
+      - id: documentAsWritten
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: must
+        kind: internal
+      - id: s.docs.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: raw
+        eval: json.RawMessage(`{"b":1,"a":1.230e-5,"a":2}`)
+        to: json
+      - eval: "must(t, s.docs.Put(t.Context(), doc{ID: \"raw\", Raw: raw}))"
+        to: must
+      - opt:
+          do:
+            - eval: "t.Errorf(\"read back: %s %v\", got.Raw, err)"
+              to: t.Errorf
+          init:
+            bind: got, err
+            eval: s.docs.Get(t.Context(), "raw")
+            to: s.docs.Get
+          when: err != nil || !bytes.Equal(got.Raw, raw)
+  - of: transactions
+    participants:
+      - id: caller
+        kind: actor
+      - id: transactions
+        kind: self
+      - id: must
+        kind: internal
+      - id: rolledBack
+        kind: internal
+      - id: savepoint
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: "must(t, s.docs.Put(t.Context(), doc{ID: id, N: 1}))"
+              to: must
+          key: _
+          range: "[]string{\"kept\", \"gone\"}"
+          value: id
+      - eval: rolledBack(t, s)
+        to: rolledBack
+      - eval: savepoint(t, s)
+        to: savepoint
+  - of: rolledBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: rolledBack
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Fatalf
+        kind: value
+      - id: s.docs.Get
+        kind: value
+      - id: expect
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		if err := errors.Join(s.docs.Insert(ctx, doc{ID: "new"}), s.docs.Delete(ctx, "gone")); err != nil {
+          			return err
+          		}
+          		if _, err := s.docs.Update(ctx, "kept", setN(2)); err != nil {
+          			return err
+          		}
+          		if got, err := s.docs.Get(ctx, "kept"); err != nil || got.N != 2 {
+          			t.Errorf("inside the transaction: %+v %v", got, err)
+          		}
+          		return errRolled
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the rolled back transaction: %v\", err)"
+              to: t.Fatalf
+          when: "!errors.Is(err, errRolled)"
+      - set: _, err
+        to: s.docs.Get
+        value: s.docs.Get(ctx, "new")
+      - eval: expect(t, "a rolled back insert", err, app.WireNotFound)
+        to: expect
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a rolled back update: %+v %v\", got, err)"
+              to: t.Errorf
+          init:
+            bind: got, err
+            eval: s.docs.Get(ctx, "kept")
+            to: s.docs.Get
+          when: err != nil || got.N != 1
+      - set: _, err
+        to: s.docs.Get
+        value: s.docs.Get(ctx, "gone")
+      - eval: expect(t, "a rolled back delete", err, "")
+        to: expect
+  - of: savepoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: savepoint
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Fatalf
+        kind: value
+      - id: s.docs.Get
+        kind: value
+      - id: expect
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		if err := s.docs.Insert(ctx, doc{ID: "outer"}); err != nil {
+          			return err
+          		}
+          		inner := app.Transact(ctx, func(ctx context.Context) error {
+          			return errors.Join(s.docs.Insert(ctx, doc{ID: "inner"}), errRolled)
+          		})
+          		if !errors.Is(inner, errRolled) {
+          			t.Errorf("the savepoint: %v", inner)
+          		}
+          		return s.docs.Insert(ctx, doc{ID: "after"})
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the committed transaction: %v\", err)"
+              to: t.Fatalf
+          when: err != nil
+      - loop:
+          do:
+            - bind: _, err
+              eval: s.docs.Get(ctx, id)
+              to: s.docs.Get
+            - eval: expect(t, id+" after the commit", err, want)
+              to: expect
+          key: id
+          range: "map[string]string{\"outer\": \"\", \"after\": \"\", \"inner\": app.WireNotFound}"
+          value: want
+  - of: heldPublish
+    participants:
+      - id: caller
+        kind: actor
+      - id: heldPublish
+        kind: self
+      - id: must
+        kind: internal
+      - id: eventually
+        kind: internal
+      - id: app
+        kind: package
+      - id: t.Fatal
+        kind: value
+      - id: t.Error
+        kind: value
+    steps:
+      - eval: |-
+          must(t, app.Transact(t.Context(), func(ctx context.Context) error {
+          		return s.moved.Publish(ctx, doc{ID: "committed"})
+          	}))
+        to: must
+      - eval: eventually(t, "the committed message", func() bool { return s.heard.has("committed") })
+        to: eventually
+      - bind: err
+        eval: |-
+          app.Transact(t.Context(), func(ctx context.Context) error {
+          		return errors.Join(s.moved.Publish(ctx, doc{ID: "dropped"}), errRolled)
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: t.Fatal(err)
+              to: t.Fatal
+          when: "!errors.Is(err, errRolled)"
+      - eval: "must(t, s.moved.Publish(t.Context(), doc{ID: \"after\"}))"
+        to: must
+      - eval: eventually(t, "the message after", func() bool { return s.heard.has("after") })
+        to: eventually
+      - opt:
+          do:
+            - eval: t.Error("a rolled back publish was delivered")
+              to: t.Error
+          when: s.heard.has("dropped")
+  - of: ready
+    steps:
+      - set: d.Ready
+        value: "true"
+      - return: nil
+  - of: hooksAfterTheCommit
+    participants:
+      - id: caller
+        kind: actor
+      - id: hooksAfterTheCommit
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: s.lifecycle.Start
+        kind: value
+      - id: must
+        kind: internal
+      - id: app
+        kind: package
+      - id: t.Fatal
+        kind: value
+      - id: eventually
+        kind: internal
+      - id: s.docs.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - loop:
+          do:
+            - bind: _, err
+              eval: "s.lifecycle.Start(ctx, doc{ID: id})"
+              to: s.lifecycle.Start
+            - eval: must(t, err)
+              to: must
+          key: _
+          range: "[]string{\"rolled\", \"committed\"}"
+          value: id
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		_, err := s.docs.Update(ctx, "rolled", ready)
+          		return errors.Join(err, errRolled)
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: t.Fatal(err)
+              to: t.Fatal
+          when: "!errors.Is(err, errRolled)"
+      - eval: |-
+          must(t, app.Transact(ctx, func(ctx context.Context) error {
+          		_, err := s.docs.Update(ctx, "committed", ready)
+          		return err
+          	}))
+        to: must
+      - eval: |-
+          eventually(t, "the committed write's transition", func() bool {
+          		d, err := s.docs.Get(ctx, "committed")
+          		return err == nil && d.State == "done"
+          	})
+        to: eventually
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a rolled back write moved the workflow: %+v %v\", d, err)"
+              to: t.Errorf
+          init:
+            bind: d, err
+            eval: s.docs.Get(ctx, "rolled")
+            to: s.docs.Get
+          when: err != nil || d.State != "new" || d.Ready
+  - of: ns
+    participants:
+      - id: caller
+        kind: actor
+      - id: ns
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: s.pages.Revisions
+        kind: value
+      - id: t.Fatalf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - bind: revs, err
+        eval: s.pages.Revisions(t.Context(), key)
+        to: s.pages.Revisions
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the versions of %s: %v\", key, err)"
+              to: t.Fatalf
+          when: err != nil
+      - bind: out
+        eval: make([]string, 0, len(revs))
+      - loop:
+          do:
+            - set: out
+              value: append(out, strconv.FormatUint(r.Number, 10)+":"+strconv.Itoa(r.Value.N))
+          key: _
+          range: revs
+          value: r
+      - return: out
+  - of: expectVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: expectVersions
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: ns
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - opt:
+          do:
+            - eval: t.Errorf("versions %q %s, want %q", got, what, want)
+              to: t.Errorf
+          init:
+            bind: got
+            eval: ns(t, s, "p")
+            to: ns
+          when: "!slices.Equal(got, want)"
+  - of: revisions
+    participants:
+      - id: caller
+        kind: actor
+      - id: revisions
+        kind: self
+      - id: app
+        kind: package
+      - id: s.pageFlow.Start
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.pages.Update
+        kind: value
+      - id: expectVersions
+        kind: internal
+      - id: s.pages.Get
+        kind: value
+      - id: eventually
+        kind: internal
+      - id: transitionVersions
+        kind: internal
+      - id: s.pages.Revision
+        kind: value
+      - id: expect
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: app.WithUser(t.Context(), "u1", struct{}{})
+        to: app
+      - bind: _, err
+        eval: "s.pageFlow.Start(ctx, doc{ID: \"p\", N: 1})"
+        to: s.pageFlow.Start
+      - eval: must(t, err)
+        to: must
+      - loop:
+          cond: n <= pageUpdates
+          do:
+            - bind: _, err
+              eval: s.pages.Update(ctx, "p", setN(n))
+              to: s.pages.Update
+            - eval: must(t, err)
+              to: must
+          init: n := 2
+          post: n++
+      - eval: expectVersions(t, s, "after the updates", keptVersions)
+        to: expectVersions
+      - bind: cur, err
+        eval: s.pages.Get(ctx, "p")
+        to: s.pages.Get
+      - eval: must(t, err)
+        to: must
+      - eval: must(t, s.pages.Put(ctx, cur))
+        to: must
+      - eval: expectVersions(t, s, "after a write of the same record", keptVersions)
+        to: expectVersions
+      - set: _, err
+        to: s.pages.Update
+        value: s.pages.Update(ctx, "p", ready)
+      - eval: must(t, err)
+        to: must
+      - eval: |-
+          eventually(t, "the guard's transition", func() bool {
+          		d, err := s.pages.Get(ctx, "p")
+          		return err == nil && d.State == "done"
+          	})
+        to: eventually
+      - eval: transitionVersions(t, s)
+        to: transitionVersions
+      - set: _, err
+        to: s.pages.Revision
+        value: s.pages.Revision(ctx, "p", 1)
+      - eval: expect(t, "a pruned version", err, app.WireNotFound)
+        to: expect
+  - of: transitionVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: transitionVersions
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Context
+        kind: value
+      - id: s.pages.Revisions
+        kind: value
+      - id: must
+        kind: internal
+      - id: t.Errorf
+        kind: value
+      - id: s.pages.Diff
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: revs, err
+        eval: s.pages.Revisions(ctx, "p")
+        to: s.pages.Revisions
+      - eval: must(t, err)
+        to: must
+      - opt:
+          do:
+            - eval: "t.Errorf(\"after a write and a transition of the state: %+v\", revs)"
+              to: t.Errorf
+          when: len(revs) != len(keptVersions) || revs[0].Number != transitioned || revs[0].Value.State != "done" || revs[0].By != "u1" || revs[1].Number != transitioned-1
+      - bind: edits, err
+        eval: s.pages.Diff(ctx, "p", transitioned-2, transitioned)
+        to: s.pages.Diff
+      - eval: must(t, err)
+        to: must
+      - bind: said
+        eval: make([]string, 0, len(edits))
+      - loop:
+          do:
+            - set: said
+              value: append(said, strings.Join([]string{e.Op, e.Path, rawText(e.From), rawText(e.To)}, " "))
+          key: _
+          range: edits
+          value: e
+      - opt:
+          do:
+            - eval: t.Errorf("diff %q, want %q", said, transitionEdits)
+              to: t.Errorf
+          when: "!slices.Equal(said, transitionEdits)"
+  - of: rawText
+    steps:
+      - return: string(raw)
+  - of: revisionsRestore
+    participants:
+      - id: caller
+        kind: actor
+      - id: revisionsRestore
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.pages.Update
+        kind: value
+      - id: s.pages.Restore
+        kind: value
+      - id: t.Errorf
+        kind: value
+      - id: expect
+        kind: internal
+      - id: expectVersions
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.pages.Insert(ctx, doc{ID: \"p\", Email: \"a@example.com\", N: 1, State: \"new\"}))"
+        to: must
+      - bind: _, err
+        eval: s.pages.Update(ctx, "p", func(d *doc) error { d.Email, d.N, d.State = "b@example.com", 2, "done"; return nil })
+        to: s.pages.Update
+      - eval: must(t, err)
+        to: must
+      - bind: got, err
+        eval: s.pages.Restore(ctx, "p", 1, "/n")
+        to: s.pages.Restore
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a field restored: %+v %v\", got, err)"
+              to: t.Errorf
+          when: err != nil || got.N != 1 || got.Email != "b@example.com" || got.State != "done"
+      - eval: "must(t, s.pages.Insert(ctx, doc{ID: \"q\", Email: \"a@example.com\"}))"
+        to: must
+      - set: _, err
+        to: s.pages.Restore
+        value: s.pages.Restore(ctx, "p", 1)
+      - eval: expect(t, "a restore a unique index refuses", err, app.WireConflict)
+        to: expect
+      - eval: expectVersions(t, s, "after a refused restore", refusedRestore)
+        to: expectVersions
+      - eval: must(t, s.pages.Delete(ctx, "q"))
+        to: must
+      - set: got, err
+        to: s.pages.Restore
+        value: s.pages.Restore(ctx, "p", 1)
+      - opt:
+          do:
+            - eval: "t.Errorf(\"the whole version restored: %+v %v\", got, err)"
+              to: t.Errorf
+          when: err != nil || got.Email != "a@example.com" || got.State != "done"
+  - of: revisionsRollback
+    participants:
+      - id: caller
+        kind: actor
+      - id: revisionsRollback
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: s.pageFlow.Start
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.pages.Update
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Fatal
+        kind: value
+      - id: s.pages.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+      - id: ns
+        kind: internal
+      - id: rolledTransition
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: _, err
+        eval: "s.pageFlow.Start(ctx, doc{ID: \"p\", N: 1})"
+        to: s.pageFlow.Start
+      - eval: must(t, err)
+        to: must
+      - set: _, err
+        to: s.pages.Update
+        value: s.pages.Update(ctx, "p", setN(2))
+      - eval: must(t, err)
+        to: must
+      - set: err
+        to: app
+        value: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		_, err := s.pages.Update(ctx, "p", setN(rolledN))
+          		return errors.Join(err, errRolled)
+          	})
+      - opt:
+          do:
+            - eval: t.Fatal(err)
+              to: t.Fatal
+          when: "!errors.Is(err, errRolled)"
+      - opt:
+          do:
+            - eval: "t.Errorf(\"the record after the rollback: %+v %v\", got, err)"
+              to: t.Errorf
+          init:
+            bind: got, err
+            eval: s.pages.Get(ctx, "p")
+            to: s.pages.Get
+          when: err != nil || got.N != 2
+      - bind: versions
+        eval: ns(t, s, "p")
+        to: ns
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a rolled back write shows in the versions: %q\", versions)"
+              to: t.Errorf
+          when: slices.ContainsFunc(versions, func(v string) bool { return strings.HasSuffix(v, ":"+strconv.Itoa(rolledN)) })
+      - opt:
+          do:
+            - eval: "t.Errorf(\"the rollback pruned a version: %q\", versions)"
+              to: t.Errorf
+          when: versions[len(versions)-1] != "1:1"
+      - eval: rolledTransition(t, s)
+        to: rolledTransition
+  - of: rolledTransition
+    participants:
+      - id: caller
+        kind: actor
+      - id: rolledTransition
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Context
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Fatal
+        kind: value
+      - id: s.pages.Revisions
+        kind: value
+      - id: must
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		_, err := s.pageFlow.Fire(ctx, "p", "hold")
+          		return errors.Join(err, errRolled)
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: t.Fatal(err)
+              to: t.Fatal
+          when: "!errors.Is(err, errRolled)"
+      - bind: revs, err
+        eval: s.pages.Revisions(ctx, "p")
+        to: s.pages.Revisions
+      - eval: must(t, err)
+        to: must
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: "t.Errorf(\"version %d holds the state a rollback undid: %q\", r.Number, r.Value.State)"
+                    to: t.Errorf
+                when: r.Value.State != "new"
+          key: _
+          range: revs
+          value: r
+  - of: trash
+    participants:
+      - id: caller
+        kind: actor
+      - id: trash
+        kind: self
+      - id: trashDeletes
+        kind: internal
+      - id: trashUntrashes
+        kind: internal
+      - id: trashPurges
+        kind: internal
+      - id: trashNeedsRevisions
+        kind: internal
+    steps:
+      - eval: trashDeletes(t, s)
+        to: trashDeletes
+      - eval: trashUntrashes(t, s)
+        to: trashUntrashes
+      - eval: trashPurges(t, s)
+        to: trashPurges
+      - eval: trashNeedsRevisions(t, s)
+        to: trashNeedsRevisions
+  - of: trashDeletes
+    participants:
+      - id: caller
+        kind: actor
+      - id: trashDeletes
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.pages.Update
+        kind: value
+      - id: s.pages.Get
+        kind: value
+      - id: expect
+        kind: internal
+      - id: s.pages.List
+        kind: value
+      - id: t.Errorf
+        kind: value
+      - id: expectTrash
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.pages.Insert(ctx, doc{ID: \"p\", Email: \"a@example.com\", N: 1}))"
+        to: must
+      - bind: _, err
+        eval: s.pages.Update(ctx, "p", setN(2))
+        to: s.pages.Update
+      - eval: must(t, err)
+        to: must
+      - eval: must(t, s.pages.Delete(ctx, "p"))
+        to: must
+      - set: _, err
+        to: s.pages.Get
+        value: s.pages.Get(ctx, "p")
+      - eval: expect(t, "a read of a trashed page", err, app.WireNotFound)
+        to: expect
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a list after the deletion: %v %v\", idsOf(all), err)"
+              to: t.Errorf
+          init:
+            bind: all, err
+            eval: s.pages.List(ctx)
+            to: s.pages.List
+          when: err != nil || len(all) != 0
+      - eval: "expectTrash(t, s, \"after the deletion\", []app.Tombstone{{Key: \"p\", At: epoch, PurgeAt: epoch.Add(trashDays)}})"
+        to: expectTrash
+  - of: trashUntrashes
+    participants:
+      - id: caller
+        kind: actor
+      - id: trashUntrashes
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.pages.Untrash
+        kind: value
+      - id: expect
+        kind: internal
+      - id: t.Errorf
+        kind: value
+      - id: expectVersions
+        kind: internal
+      - id: expectTrash
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.pages.Insert(ctx, doc{ID: \"q\", Email: \"a@example.com\"}))"
+        to: must
+      - bind: _, err
+        eval: s.pages.Untrash(ctx, "p")
+        to: s.pages.Untrash
+      - eval: expect(t, "an untrash a unique index refuses", err, app.WireConflict)
+        to: expect
+      - eval: must(t, s.pages.Delete(ctx, "q"))
+        to: must
+      - bind: got, err
+        eval: s.pages.Untrash(ctx, "p")
+        to: s.pages.Untrash
+      - opt:
+          do:
+            - eval: "t.Errorf(\"the page untrashed: %+v %v\", got, err)"
+              to: t.Errorf
+          when: err != nil || got.N != 2 || got.Email != "a@example.com"
+      - eval: expectVersions(t, s, "after the untrash", []string{"2:2", "1:1"})
+        to: expectVersions
+      - set: _, err
+        to: s.pages.Untrash
+        value: s.pages.Untrash(ctx, "p")
+      - eval: expect(t, "an untrash of a page not in the trash", err, app.WireNotFound)
+        to: expect
+      - eval: "expectTrash(t, s, \"after the untrash\", []app.Tombstone{{Key: \"q\", At: epoch, PurgeAt: epoch.Add(trashDays)}})"
+        to: expectTrash
+  - of: trashPurges
+    participants:
+      - id: caller
+        kind: actor
+      - id: trashPurges
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: s.clock.Advance
+        kind: value
+      - id: must
+        kind: internal
+      - id: eventually
+        kind: internal
+      - id: expectTrash
+        kind: internal
+      - id: s.pages.Revisions
+        kind: value
+      - id: expect
+        kind: internal
+      - id: ns
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: s.clock.Advance(time.Hour)
+        to: s.clock.Advance
+      - eval: must(t, s.pages.Delete(ctx, "p"))
+        to: must
+      - eval: s.clock.Advance(trashDays - time.Second)
+        to: s.clock.Advance
+      - eval: |-
+          eventually(t, "q purged at its instant", func() bool {
+          		stones, err := s.pages.Trashed(ctx)
+          		return err == nil && len(stones) == 1 && stones[0].Key == "p"
+          	})
+        to: eventually
+      - eval: "expectTrash(t, s, \"a second before p's instant\", []app.Tombstone{{Key: \"p\", At: epoch.Add(time.Hour), PurgeAt: epoch.Add(time.Hour + trashDays)}})"
+        to: expectTrash
+      - eval: s.clock.Advance(time.Second)
+        to: s.clock.Advance
+      - eval: |-
+          eventually(t, "p purged at its instant", func() bool {
+          		stones, err := s.pages.Trashed(ctx)
+          		return err == nil && len(stones) == 0
+          	})
+        to: eventually
+      - bind: _, err
+        eval: s.pages.Revisions(ctx, "p")
+        to: s.pages.Revisions
+      - eval: expect(t, "the versions of a purged page", err, app.WireNotFound)
+        to: expect
+      - eval: "must(t, s.pages.Insert(ctx, doc{ID: \"p\", N: rewrittenN}))"
+        to: must
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a page written after its purge: %q, want version 1 again\", got)"
+              to: t.Errorf
+          init:
+            bind: got
+            eval: ns(t, s, "p")
+            to: ns
+          when: "!slices.Equal(got, []string{\"1:\" + strconv.Itoa(rewrittenN)})"
+  - of: trashNeedsRevisions
+    participants:
+      - id: caller
+        kind: actor
+      - id: trashNeedsRevisions
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.docs.Untrash
+        kind: value
+      - id: expect
+        kind: internal
+      - id: s.docs.Trashed
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.docs.Insert(ctx, doc{ID: \"d\"}))"
+        to: must
+      - eval: must(t, s.docs.Delete(ctx, "d"))
+        to: must
+      - bind: _, err
+        eval: s.docs.Untrash(ctx, "d")
+        to: s.docs.Untrash
+      - eval: expect(t, "an untrash on a store without revisions", err, app.WireInvalid)
+        to: expect
+      - set: _, err
+        to: s.docs.Trashed
+        value: s.docs.Trashed(ctx)
+      - eval: expect(t, "the trash of a store without revisions", err, app.WireInvalid)
+        to: expect
+      - eval: "must(t, s.docs.Insert(ctx, doc{ID: \"d\"}))"
+        to: must
+  - of: expectTrash
+    participants:
+      - id: caller
+        kind: actor
+      - id: expectTrash
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: s.pages.Trashed
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - bind: got, err
+        eval: s.pages.Trashed(t.Context())
+        to: s.pages.Trashed
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the trash %s: %v\", what, err)"
+              to: t.Fatalf
+          when: err != nil
+      - bind: same
+        eval: len(got) == len(want)
+      - loop:
+          cond: same && i < len(got)
+          do:
+            - set: same
+              value: got[i].Key == want[i].Key && got[i].At.Equal(want[i].At) && got[i].PurgeAt.Equal(want[i].PurgeAt)
+          init: i := 0
+          post: i++
+      - opt:
+          do:
+            - eval: "t.Errorf(\"the trash %s: %+v, want %+v\", what, got, want)"
+              to: t.Errorf
+          when: "!same"

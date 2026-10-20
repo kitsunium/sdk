@@ -1,0 +1,372 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      controllersFile is the cgroup v2 marker: its presence under the mount proves
+      the unified hierarchy is in use (cgroup v1 has no such file at the root).
+    items:
+      - name: controllersFile
+        type: string
+        value: "\"cgroup.controllers\""
+    name: controllersFile
+  - doc: |-
+      procsFile is the controller file that attaches a process to a group when its
+      pid is written, one pid per write (cgroup.procs).
+    items:
+      - name: procsFile
+        type: string
+        value: "\"cgroup.procs\""
+    name: procsFile
+  - doc: |-
+      unlimited is the literal cgroup v2 writes for "no limit" on the numeric
+      controller files (memory.max, pids.max, and the quota field of cpu.max).
+    items:
+      - name: unlimited
+        type: string
+        value: "\"max\""
+    name: unlimited
+  - doc: |-
+      controllerPerm is the mode for a freshly created control-group directory;
+      the kernel ignores the bits but mkdir requires a mode argument.
+    items:
+      - name: controllerPerm
+        type: os.FileMode
+        value: "0o755"
+    name: controllerPerm
+  - doc: decimalBase is the radix used when rendering pids and limit values.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: |-
+      killFile is the cgroup v2 interface file that, written "1", atomically SIGKILLs
+      every member of the group and its subtree (kernel >= 5.14).
+    items:
+      - name: killFile
+        type: string
+        value: "\"cgroup.kill\""
+    name: killFile
+  - doc: |-
+      freezeFile is the cgroup v2 interface file that quiesces ("1") or resumes ("0")
+      the whole group (kernel >= 5.2).
+    items:
+      - name: freezeFile
+        type: string
+        value: "\"cgroup.freeze\""
+    name: freezeFile
+  - doc: killTrigger is the value written to cgroup.kill to fire the atomic kill.
+    items:
+      - name: killTrigger
+        type: string
+        value: "\"1\""
+    name: killTrigger
+  - doc: |-
+      freezeOn / freezeOff are the values written to cgroup.freeze to stop or resume
+      the group.
+    grouped: true
+    items:
+      - name: freezeOn
+        type: string
+        value: "\"1\""
+      - name: freezeOff
+        type: string
+        value: "\"0\""
+    name: freezeOn
+  - doc: |-
+      exitUnavailable is sysexits.h EX_UNAVAILABLE (69), the exit status the
+      CGROUP_UNAVAILABLE sentinel carries; restated to wrap a cause with matching
+      semantics without re-Defining the central code.
+    items:
+      - name: exitUnavailable
+        type: int
+        value: "69"
+    name: exitUnavailable
+  - doc: |-
+      exitOSErr is sysexits.h EX_OSERR (71), the exit status the cgroup create /
+      write / delete sentinels carry; restated for the same reason.
+    items:
+      - name: exitOSErr
+        type: int
+        value: "71"
+    name: exitOSErr
+  - doc: |-
+      exitUsage is sysexits.h EX_USAGE (64), the exit status the INVALID_SPEC
+      sentinel carries; restated to wrap a rejected name without re-Defining the
+      central code.
+    items:
+      - name: exitUsage
+        type: int
+        value: "64"
+    name: exitUsage
+  - doc: |-
+      mountRoot is the canonical mount point of the unified cgroup v2 hierarchy.
+      Exposed as the default root so Option can override it for tests against a
+      delegated sub-tree.
+    items:
+      - name: mountRoot
+        type: string
+        value: "\"/sys/fs/cgroup\""
+    name: mountRoot
+files:
+  - decls:
+      - Available
+      - Create
+    name: cgroup.go
+  - decls:
+      - controllersFile
+      - procsFile
+      - unlimited
+      - controllerPerm
+      - decimalBase
+      - killFile
+      - freezeFile
+      - killTrigger
+      - freezeOn
+      - exitUnavailable
+      - exitOSErr
+      - exitUsage
+      - controlGroup
+      - available
+      - cgroupUnavailable
+      - createGroup
+      - validateName
+      - withinRoot
+      - invalidName
+      - notDelegated
+      - classifyCreate
+      - (*controlGroup).SetMemoryMax
+      - (*controlGroup).SetCPUMax
+      - (*controlGroup).SetPidsMax
+      - (*controlGroup).SetIOMax
+      - (*controlGroup).Add
+      - (*controlGroup).Kill
+      - (*controlGroup).Freeze
+      - (*controlGroup).Thaw
+      - (*controlGroup).writeFeature
+      - cgroupUnsupported
+      - (*controlGroup).Delete
+      - (*controlGroup).writeController
+      - maxOrValue
+    name: cgroup_linux.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - mountRoot
+      - groupConfig
+      - Option
+      - defaultConfig
+      - applyOptions
+      - WithRoot
+    name: option.go
+functions:
+  - name: Available
+    results: bool
+  - name: Create
+    params: name string, opts ...Option
+    results: g coreproc.Group, err error
+  - doc: |-
+      available reports whether the unified cgroup v2 hierarchy is mounted and a
+      sub-group can actually be created under it by the caller. It probes for the
+      cgroup.controllers marker, then confirms write access by creating and
+      removing a throwaway directory — the only honest test of delegation.
+    name: available
+    results: bool
+  - doc: |-
+      cgroupUnavailable wraps cause in the central CGROUP_UNAVAILABLE sentinel,
+      annotated with the offending path. It restates the sentinel's fields verbatim;
+      the code is never re-Defined here.
+    name: cgroupUnavailable
+    params: cause error, pathKey, pathVal string
+    results: error
+  - doc: |-
+      createGroup makes a new control-group directory named name under the
+      configured root and returns a controlGroup bound to it. It maps an absent
+      hierarchy to CgroupUnavailable and a failed mkdir to CgroupCreateFailed.
+    name: createGroup
+    params: name string, opts ...Option
+    results: g coreproc.Group, err error
+  - doc: |-
+      validateName rejects a control-group name that is not a single safe path
+      element: empty, ".", "..", or one carrying a path separator or traversal
+      segment could resolve outside the delegated root, so it returns the bare
+      INVALID_SPEC sentinel rather than letting filepath.Join escape the subtree.
+    name: validateName
+    params: name string
+    results: error
+  - doc: |-
+      withinRoot reports whether dir, already cleaned, is root itself or a strict
+      descendant of root. It guards the post-join path so a crafted name can never
+      land a control group outside the delegated subtree.
+    name: withinRoot
+    params: root, dir string
+    results: bool
+  - doc: |-
+      invalidName wraps the central INVALID_SPEC sentinel annotated with the
+      offending name. It restates the sentinel's fields verbatim; the code is never
+      re-Defined here.
+    name: invalidName
+    params: name string
+    results: error
+  - doc: |-
+      notDelegated reports whether a mkdir failure means the cgroup root was not
+      delegated to the caller — a permission denial (EACCES/EPERM) or a read-only
+      hierarchy (EROFS), both common in unprivileged containers — as opposed to a
+      genuine creation fault.
+    name: notDelegated
+    params: cause error
+    results: bool
+  - doc: |-
+      classifyCreate maps a mkdir failure to the right sentinel: a delegation denial
+      (permission or read-only mount) is reported as CgroupUnavailable, any other
+      fault as CgroupCreateFailed.
+    name: classifyCreate
+    params: cause error, dir string
+    results: error
+  - doc: |-
+      cgroupUnsupported wraps cause in the central UNSUPPORTED_PLATFORM sentinel,
+      annotated with the absent feature file: the running kernel predates cgroup.kill
+      / cgroup.freeze, so the caller should fall back. It restates the sentinel's
+      fields verbatim; the code is never re-Defined here.
+    name: cgroupUnsupported
+    params: cause error, file string
+    results: error
+  - doc: |-
+      maxOrValue renders v for a numeric controller file: a negative value becomes
+      the literal "max" (no limit), any other value its decimal form.
+    name: maxOrValue
+    params: v int64
+    results: string
+  - doc: |-
+      defaultConfig returns the baseline groupConfig used when no Option overrides
+      it: the new group is created directly under the unified cgroup v2 mount.
+    name: defaultConfig
+    results: groupConfig
+  - doc: applyOptions folds opts onto a fresh default config and returns the result.
+    name: applyOptions
+    params: opts []Option
+    results: groupConfig
+  - name: WithRoot
+    params: root string
+    results: Option
+imports:
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  os: os
+  strconv: strconv
+  strings: strings
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/cgroup
+  name: cgroup
+  purpose: Package cgroup — creates and manages cgroup v2 control groups.
+types:
+  - doc: |-
+      controlGroup is a handle to one cgroup v2 control group: its on-disk
+      directory under the unified hierarchy. It satisfies coreproc.Group; all
+      methods write the matching controller interface file or rmdir the directory.
+    fields:
+      - doc: dir is the absolute path of the control-group directory.
+        name: dir
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          SetMemoryMax writes memory.max; a negative bytes value writes "max" (no
+          limit). It returns CgroupWriteFailed when the controller is disabled or the
+          value is rejected.
+        name: SetMemoryMax
+        params: bytes int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetCPUMax writes cpu.max as "quota period"; a negative quota writes "max
+          <period>" (no CPU cap). It returns CgroupWriteFailed on a rejected value.
+        name: SetCPUMax
+        params: quota, period int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetPidsMax writes pids.max; a negative n writes "max" (no process cap). It
+          returns CgroupWriteFailed on a rejected value.
+        name: SetPidsMax
+        params: n int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetIOMax writes one io.max line verbatim, e.g. "8:0 rbps=1048576". It returns
+          CgroupWriteFailed when the io controller is disabled or the line is malformed.
+        name: SetIOMax
+        params: spec string
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Add moves the process pid into this group by writing pid to cgroup.procs. It
+          returns CgroupWriteFailed when the pid is invalid or attachment is refused.
+        name: Add
+        params: pid int
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Kill atomically SIGKILLs every process in the group by writing "1" to
+          cgroup.kill. Membership is tracked by control group, not process group, so a
+          member that called setsid is still killed — nothing escapes. An absent
+          cgroup.kill (kernel < 5.14) surfaces UnsupportedPlatform so callers can fall
+          back to a process-group kill.
+        name: Kill
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Freeze quiesces the whole group by writing "1" to cgroup.freeze, stopping every
+          member so a consistent signal sweep or snapshot can run. An absent
+          cgroup.freeze (kernel < 5.2) surfaces UnsupportedPlatform.
+        name: Freeze
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Thaw resumes a frozen group by writing "0" to cgroup.freeze. An absent
+          cgroup.freeze surfaces UnsupportedPlatform.
+        name: Thaw
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          writeFeature writes value to a kernel-version-gated interface file (cgroup.kill
+          / cgroup.freeze). An absent file (ENOENT) means the running kernel predates the
+          feature, surfaced as UnsupportedPlatform so callers can fall back; any other
+          failure is a CgroupWriteFailed.
+        name: writeFeature
+        params: name, value string
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Delete removes the (empty) control-group directory. Callers move processes
+          out first; a populated group yields CgroupDeleteFailed (EBUSY).
+        name: Delete
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          writeController writes value to the named controller interface file under the
+          group directory, wrapping any failure in CgroupWriteFailed annotated with the
+          file name. cgroup v2 interface files take a single write with no trailing
+          newline required.
+        name: writeController
+        params: name, value string
+        recv: g *controlGroup
+        results: error
+    name: controlGroup
+  - doc: |-
+      groupConfig accumulates the options applied to a Create call. It is
+      unexported (no public ROLE suffix needed) and built only via the Option
+      closures so callers cannot construct an inconsistent value.
+    fields:
+      - doc: root is the cgroup v2 directory under which the new group is created.
+        name: root
+        type: string
+    kind: struct
+    name: groupConfig
+  - kind: named
+    name: Option
+    underlying: func(*groupConfig)

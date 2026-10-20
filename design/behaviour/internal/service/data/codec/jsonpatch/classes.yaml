@@ -1,0 +1,364 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      maxAlignCells bounds the table the alignment of two arrays' differing
+      middles builds: past it, their elements are paired by position instead,
+      which is still a correct patch — only a longer one.
+    items:
+      - name: maxAlignCells
+        type: int
+        value: 1 << 18
+    name: maxAlignCells
+  - doc: The three operations a diff emits.
+    grouped: true
+    items:
+      - doc: |-
+          Add adds a member to an object, or inserts an element into an array
+          before the one at the index — after every element when the index is
+          the array's length.
+        name: Add
+        type: Op
+        value: "\"add\""
+      - doc: Remove removes a member of an object, or the element at the index.
+        name: Remove
+        type: Op
+        value: "\"remove\""
+      - doc: Replace replaces the value at the path, the whole document at "".
+        name: Replace
+        type: Op
+        value: "\"replace\""
+    name: Add
+  - doc: |-
+      The FNV-1a 64-bit parameters the digests are built with, and the width of
+      the integers they take in.
+    grouped: true
+    items:
+      - doc: fnvOffset is FNV-1a's offset basis.
+        name: fnvOffset
+        type: uint64
+        value: "14695981039346656037"
+      - doc: fnvPrime is FNV-1a's prime.
+        name: fnvPrime
+        type: uint64
+        value: "1099511628211"
+      - doc: uint64Bytes is how many bytes an integer adds to a digest.
+        name: uint64Bytes
+        type: int
+        value: "8"
+      - doc: byteBits is how far the next byte of an integer is shifted.
+        name: byteBits
+        type: uint
+        value: "8"
+    name: fnvOffset
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxAlignCells
+      - Op
+      - Add
+      - EditValue
+      - Diff
+      - differ
+      - (*differ).diff
+      - (*differ).diffObjects
+      - (*differ).diffArrays
+      - (*differ).changeRun
+      - align
+      - lcsLengths
+      - commonPrefix
+      - reversed
+      - escapeToken
+    name: jsonpatch.go
+  - decls:
+      - fnvOffset
+      - node
+      - parse
+      - readValue
+      - digest
+      - numberDigest
+      - fnvByte
+      - fnvString
+      - fnvUint
+      - mix
+      - readObject
+      - readArray
+      - readMember
+      - equal
+      - everyMember
+      - sameNumber
+      - canonical
+      - encode
+      - write
+      - writeObject
+      - scalarToken
+      - writeTokenner
+      - writeContainer
+      - notJSON
+    name: tree.go
+functions:
+  - name: Diff
+    params: from, to []byte
+    results: "[]EditValue, error"
+  - doc: |-
+      align returns the pairs of indices, into a and into b, of the elements both
+      keep in order — a longest common subsequence under equal — ascending. Past
+      maxAlignCells it keeps none, and the elements are paired by position.
+    name: align
+    params: a, b []*node
+    results: "[][2]int"
+  - doc: |-
+      lcsLengths returns the table of the longest common subsequences of the
+      suffixes of a and b: the entry at i*(len(b)+1)+j is the length for a[i:]
+      and b[j:].
+    name: lcsLengths
+    params: a, b []*node
+    results: "[]uint32"
+  - doc: commonPrefix returns how many elements a and b share at their start.
+    name: commonPrefix
+    params: a, b []*node
+    results: int
+  - doc: reversed returns s's elements in reverse order, in a new slice.
+    name: reversed
+    params: s []*node
+    results: "[]*node"
+  - doc: |-
+      escapeToken escapes a member name as an RFC 6901 reference token: "~" as
+      "~0" first, then "/" as "~1", so "~1" in a name stays itself.
+    name: escapeToken
+    params: name string
+    results: string
+  - doc: |-
+      parse reads raw as exactly one JSON value, strictly — jsontext's defaults:
+      no duplicate member name, valid UTF-8, nesting within its bound — and no
+      trailing data. which names the document in a refusal.
+    name: parse
+    params: which string, raw []byte
+    results: "*node, error"
+  - doc: readValue reads the next value from dec into a node.
+    name: readValue
+    params: dec *jsontext.Decoder
+    results: "*node, error"
+  - doc: |-
+      digest returns the digest of n, whose children already have theirs: the
+      kind, then what equal compares — a string's text, a number's sign, digits
+      and power of ten (every zero alike), an array's elements in order, an
+      object's members as a sum, so that their order changes nothing.
+    name: digest
+    params: n *node
+    results: uint64
+  - doc: |-
+      numberDigest adds a number's sign, digits and power of ten to h, every zero
+      alike, so that two numbers sameNumber calls one share it.
+    name: numberDigest
+    params: h uint64, text string
+    results: uint64
+  - doc: fnvByte adds one byte to an FNV-1a digest.
+    name: fnvByte
+    params: h uint64, b byte
+    results: uint64
+  - doc: |-
+      fnvString adds s's bytes to an FNV-1a digest, after its length, so that
+      two strings side by side never read as one.
+    name: fnvString
+    params: h uint64, s string
+    results: uint64
+  - doc: fnvUint adds v's eight bytes to an FNV-1a digest.
+    name: fnvUint
+    params: h, v uint64
+    results: uint64
+  - doc: |-
+      mix scrambles v — splitmix64's finalizer — so that summing the members of
+      an object does not let two members cancel out.
+    name: mix
+    params: v uint64
+    results: uint64
+  - doc: |-
+      readObject reads an object's members into obj, up to and including the
+      closing brace.
+    name: readObject
+    params: dec *jsontext.Decoder, obj *node
+    results: error
+  - doc: |-
+      readArray reads an array's elements into arr, up to and including the
+      closing bracket.
+    name: readArray
+    params: dec *jsontext.Decoder, arr *node
+    results: error
+  - doc: |-
+      readMember reads one object member: its name, then its value. The name is
+      taken out of its token at once: a token read from a decoder is void after
+      the decoder's next call.
+    name: readMember
+    params: dec *jsontext.Decoder
+    results: name string, value *node, err error
+  - doc: |-
+      equal reports whether a and b are the same JSON value in RFC 6902's sense
+      (§4.6): the same kind, strings equal once unescaped, numbers numerically
+      equal, arrays equal element by element, objects with the same members,
+      whatever their order.
+    name: equal
+    params: a, b *node
+    results: bool
+  - doc: everyMember reports whether every member of a has an equal namesake in b.
+    name: everyMember
+    params: a, b *node
+    results: bool
+  - doc: |-
+      sameNumber reports whether two JSON numbers, as written, are the same
+      number. JSON numbers are exact decimals, so they are compared exactly:
+      reduced to a sign, significant digits and a power of ten, in time linear in
+      their text — never by computing ten to an exponent a document chose.
+    name: sameNumber
+    params: a, b string
+    results: bool
+  - doc: |-
+      canonical reduces a JSON number to a sign, its significant digits without
+      leading or trailing zeros — empty for zero — and the power of ten they are
+      multiplied by; ok is false for an exponent that is not an integer, which a
+      number jsontext accepted never has.
+    name: canonical
+    params: number string
+    results: negative bool, digits string, exponent *big.Int, ok bool
+  - doc: |-
+      encode writes n compact: members in the document's order, a number as
+      written, a string escaped as jsontext escapes it.
+    name: encode
+    params: n *node
+    results: "[]byte"
+  - doc: write writes n to enc.
+    name: write
+    params: enc *jsontext.Encoder, n *node
+    results: error
+  - doc: writeObject writes an object's members to enc, in the document's order.
+    name: writeObject
+    params: enc *jsontext.Encoder, obj *node
+    results: error
+  - doc: scalarToken is the token of a string, true, false or null.
+    name: scalarToken
+    params: n *node
+    results: jsontext.Token
+  - doc: "writeContainer writes an object or an array: begin, what body writes, end."
+    name: writeContainer
+    params: enc writeTokenner, begin, end jsontext.Token, body func() error
+    results: error
+  - doc: |-
+      notJSON is NotJSON naming which document and the offset reading stopped
+      at. The decoder's error travels as a field only when it is a syntax error,
+      whose message this package rebuilds from its offset alone: jsontext quotes
+      the character it stopped at, and that character is the document's.
+    name: notJSON
+    params: which string, offset int64, cause error
+    results: error
+imports:
+  big: math/big
+  bytes: bytes
+  corejsonpatch: github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch
+  errors: errors
+  io: io
+  json: encoding/json
+  jsontext: encoding/json/jsontext
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
+  strconv: strconv
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch
+  name: jsonpatch
+  purpose: Package jsonpatch computes the structural difference between two JSON documents as RFC 6902 operations — add, remove and replace, each at an RFC 6901 JSON Pointer — with the value each operation writes AND the value it replaces or removes (ADR 0143).
+types:
+  - kind: named
+    name: Op
+    underlying: string
+  - fields:
+      - doc: Op is add, remove or replace.
+        name: Op
+        type: Op
+      - doc: Path is the RFC 6901 JSON Pointer of the value the operation changes.
+        name: Path
+        type: string
+      - doc: |-
+          Value is the value the operation writes: add and replace; absent for
+          remove.
+        name: Value
+        type: json.RawMessage
+      - doc: |-
+          Old is the value the operation replaces or removes: replace and
+          remove; absent for add.
+        name: Old
+        type: json.RawMessage
+    kind: struct
+    name: EditValue
+  - doc: differ collects the operations of one diff.
+    fields:
+      - doc: edits are the operations so far, in order.
+        name: edits
+        type: "[]EditValue"
+    kind: struct
+    methods:
+      - doc: diff appends the operations that turn a, at path, into b.
+        name: diff
+        params: path string, a, b *node
+        recv: d *differ
+      - doc: |-
+          diffObjects appends the operations that turn object a, at path, into object
+          b: members in byte order of their names, removed, compared or added.
+        name: diffObjects
+        params: path string, a, b *node
+        recv: d *differ
+      - doc: |-
+          diffArrays appends the operations that turn array a, at path, into array b.
+          The equal elements at both ends are kept; the elements of the middles both
+          keep are found by alignment; between two kept elements, the removed and the
+          added are paired in order and compared, the rest removed or added. i is the
+          index in the array as the operations so far have left it.
+        name: diffArrays
+        params: path string, a, b []*node
+        recv: d *differ
+      - doc: |-
+          changeRun appends the operations that turn the removed elements into the
+          added ones, starting at index i, and returns the index after them: pairs
+          compared in turn, then the extra ones removed or added.
+        name: changeRun
+        params: path string, i int, removed, added []*node
+        recv: d *differ
+        results: int
+    name: differ
+  - doc: node is one JSON value.
+    fields:
+      - doc: fields holds an object's members by name.
+        name: fields
+        type: map[string]*node
+      - doc: text is a string's value, unescaped, or a number as written.
+        name: text
+        type: string
+      - doc: names are an object's member names, in the document's order.
+        name: names
+        type: "[]string"
+      - doc: items are an array's elements.
+        name: items
+        type: "[]*node"
+      - doc: |-
+          sum is a digest of the value that two equal values share: equal
+          compares it first, so two values that differ are told apart in one
+          comparison however large they are, and aligning two arrays costs one
+          comparison a pair of elements rather than a walk of both.
+        name: sum
+        type: uint64
+      - doc: |-
+          kind is the value's kind, as jsontext names it: 'n', 'f', 't', '"',
+          '0', '{' or '['.
+        name: kind
+        type: jsontext.Kind
+    kind: struct
+    name: node
+  - doc: writeTokenner is what writing a container needs of an encoder.
+    kind: named
+    name: writeTokenner
+    underlying: |-
+      interface {
+      	// WriteToken writes one token.
+      	WriteToken(jsontext.Token) error
+      }

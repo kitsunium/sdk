@@ -1,0 +1,1961 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Config.resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: Config.resolve
+        kind: self
+      - id: c.Pool.apply
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                settings, kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{},
+                			kerrs.String("missing", "db"))
+          when: c.DB == nil
+      - opt:
+          do:
+            - return: |-
+                settings, kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{},
+                			kerrs.String("missing", "dialect"), kerrs.String("dialect", c.Dialect.String()))
+          when: "!c.Dialect.Valid()"
+      - opt:
+          do:
+            - return: settings, err
+          init:
+            bind: err
+            eval: c.Pool.apply(c.DB)
+            to: c.Pool.apply
+          when: err != nil
+      - set: settings
+        value: "resolved{db: c.DB, dialect: c.Dialect, clk: c.resolvedClock(), probe: c.probeBudget()}"
+      - return: settings, nil
+  - of: Config.resolvedClock
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: Config.probeBudget
+    steps:
+      - opt:
+          do:
+            - return: DefaultCheckTimeout
+          when: c.CheckTimeout <= 0
+      - return: c.CheckTimeout
+  - of: PoolConfig.apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: PoolConfig.apply
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: db.SetMaxOpenConns
+        kind: value
+      - id: db.SetMaxIdleConns
+        kind: value
+      - id: db.SetConnMaxLifetime
+        kind: value
+      - id: db.SetConnMaxIdleTime
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresql.PoolMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "MaxOpen"), kerrs.Int("value", p.MaxOpen))
+              to: kerrs
+          when: p.MaxOpen <= 0
+      - eval: db.SetMaxOpenConns(p.MaxOpen)
+        to: db.SetMaxOpenConns
+      - eval: db.SetMaxIdleConns(p.idleCeiling())
+        to: db.SetMaxIdleConns
+      - eval: db.SetConnMaxLifetime(p.lifetime())
+        to: db.SetConnMaxLifetime
+      - eval: db.SetConnMaxIdleTime(p.MaxIdleTime)
+        to: db.SetConnMaxIdleTime
+      - return: nil
+  - of: PoolConfig.idleCeiling
+    steps:
+      - opt:
+          do:
+            - return: min(DefaultMaxIdle, p.MaxOpen)
+          when: p.MaxIdle <= 0
+      - return: min(p.MaxIdle, p.MaxOpen)
+  - of: PoolConfig.lifetime
+    steps:
+      - opt:
+          do:
+            - return: DefaultMaxLifetime
+          when: p.MaxLifetime <= 0
+      - return: p.MaxLifetime
+  - of: savepointName
+    steps:
+      - return: savepointPrefix + strconv.FormatUint(n, decimalBase)
+  - of: savepointSQL
+    steps:
+      - return: "\"SAVEPOINT \" + name, \"ROLLBACK TO SAVEPOINT \" + name, \"RELEASE SAVEPOINT \" + name"
+  - of: tryLockSQL
+    steps:
+      - opt:
+          do:
+            - return: "\"SELECT pg_try_advisory_lock(\" + dialect.Placeholder(1) + \")\", lockKey(key)"
+          when: dialect == coresql.DialectPostgres
+      - return: "\"SELECT GET_LOCK(\" + dialect.Placeholder(1) + \", 0)\", key"
+  - of: unlockSQL
+    steps:
+      - opt:
+          do:
+            - return: "\"SELECT pg_advisory_unlock(\" + dialect.Placeholder(1) + \")\", lockKey(key)"
+          when: dialect == coresql.DialectPostgres
+      - return: "\"SELECT RELEASE_LOCK(\" + dialect.Placeholder(1) + \")\", key"
+  - of: FileLockSQL
+    steps:
+      - return: "\"DELETE FROM \" + table + \" WHERE 1 = 0\""
+  - of: lockKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: lockKey
+        kind: self
+      - id: fnv
+        kind: stdlib
+      - id: hasher.Write
+        kind: value
+    steps:
+      - bind: hasher
+        eval: fnv.New64a()
+        to: fnv
+      - opt:
+          do:
+            - return: "0"
+          init:
+            bind: _, err
+            eval: hasher.Write([]byte(name))
+            to: hasher.Write
+          when: err != nil
+      - return: int64(hasher.Sum64())
+  - of: newScopedExecutor
+    participants:
+      - id: caller
+        kind: actor
+      - id: newScopedExecutor
+        kind: self
+      - id: ex.live.Store
+        kind: value
+    steps:
+      - bind: ex
+        eval: "&scopedExecutor{state: state}"
+      - eval: ex.live.Store(true)
+        to: ex.live.Store
+      - return: ex
+  - of: (*scopedExecutor).retire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scopedExecutor).retire
+        kind: self
+      - id: e.live.Store
+        kind: value
+    steps:
+      - eval: e.live.Store(false)
+        to: e.live.Store
+  - of: (*scopedExecutor).usable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scopedExecutor).usable
+        kind: self
+      - id: failed
+        kind: internal
+      - id: e.state.poisonedErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: failed(coresql.TxClosed, nil)
+              to: failed
+          when: "!e.live.Load()"
+      - opt:
+          do:
+            - return: failed(coresql.TxPoisoned, poison)
+              to: failed
+          init:
+            bind: poison
+            eval: e.state.poisonedErr()
+            to: e.state.poisonedErr
+          when: poison != nil
+      - return: nil
+  - of: (*scopedExecutor).ExecContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scopedExecutor).ExecContext
+        kind: self
+      - id: e.usable
+        kind: internal
+      - id: e.state.tx.ExecContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: e.usable()
+            to: e.usable
+          when: err != nil
+      - return: e.state.tx.ExecContext(ctx, query, args...)
+        to: e.state.tx.ExecContext
+  - of: (*scopedExecutor).QueryContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scopedExecutor).QueryContext
+        kind: self
+      - id: e.usable
+        kind: internal
+      - id: e.state.tx.QueryContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: e.usable()
+            to: e.usable
+          when: err != nil
+      - return: e.state.tx.QueryContext(ctx, query, args...)
+        to: e.state.tx.QueryContext
+  - of: (*scopedExecutor).QueryRowContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scopedExecutor).QueryRowContext
+        kind: self
+      - id: e.usable
+        kind: internal
+      - id: e.state.tx.QueryRowContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: e.state.tx.QueryRowContext(ctx, query, args...)
+              to: e.state.tx.QueryRowContext
+          init:
+            bind: err
+            eval: e.usable()
+            to: e.usable
+          when: err == nil
+      - return: e.state.tx.QueryRowContext(deadContext, query, args...)
+        to: e.state.tx.QueryRowContext
+  - of: (*scopedExecutor).PrepareContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scopedExecutor).PrepareContext
+        kind: self
+      - id: e.usable
+        kind: internal
+      - id: e.state.tx.PrepareContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: e.usable()
+            to: e.usable
+          when: err != nil
+      - return: e.state.tx.PrepareContext(ctx, query)
+        to: e.state.tx.PrepareContext
+  - of: NewChecker
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewChecker
+        kind: self
+      - id: cfg.resolve
+        kind: internal
+    steps:
+      - bind: res, err
+        eval: cfg.resolve()
+        to: cfg.resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&checker{cfg: res}, nil"
+  - of: (*checker).Check
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*checker).Check
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: c.cfg.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: pingVerdict
+        kind: internal
+      - id: failed
+        kind: internal
+    steps:
+      - bind: probe, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - defer: cancel()
+      - bind: timer
+        eval: c.cfg.clk.NewTimer(c.cfg.probe)
+        to: c.cfg.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: answer
+        eval: make(chan error, 1)
+      - go: |-
+          func() {
+          		//: the only statement this port ever sends.
+          		answer <- c.cfg.db.PingContext(probe)
+          	}()
+      - select:
+          cases:
+            - comm: err := <-answer
+              do:
+                - return: pingVerdict(err)
+                  to: pingVerdict
+            - comm: <-timer.C()
+              do:
+                - eval: cancel()
+                - return: failed(coresql.HealthCheckTimeout, nil)
+                  to: failed
+  - of: pingVerdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: pingVerdict
+        kind: self
+      - id: failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: failed(coresql.HealthCheckFailed, err)
+        to: failed
+  - of: (*transactor).Join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).Join
+        kind: self
+      - id: scopeFor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: scope.exec, true
+          init:
+            bind: scope
+            eval: scopeFor(ctx, t)
+            to: scopeFor
+          when: scope != nil
+      - return: t.cfg.db, false
+  - of: (*transactor).Defer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).Defer
+        kind: self
+      - id: scopeFor
+        kind: internal
+      - id: scope.state.hold
+        kind: internal
+    steps:
+      - bind: scope
+        eval: scopeFor(ctx, t)
+        to: scopeFor
+      - opt:
+          do:
+            - return: "false"
+          when: scope == nil
+      - return: scope.state.hold(scope.id, fn)
+        to: scope.state.hold
+  - of: (*transactor).OnAbort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).OnAbort
+        kind: self
+      - id: scopeFor
+        kind: internal
+      - id: scope.state.holdAbort
+        kind: internal
+    steps:
+      - bind: scope
+        eval: scopeFor(ctx, t)
+        to: scopeFor
+      - opt:
+          do:
+            - return: "false"
+          when: scope == nil
+      - return: scope.state.holdAbort(ctx, scope.id, fn)
+        to: scope.state.holdAbort
+  - of: NewMigrator
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMigrator
+        kind: self
+      - id: cfg.resolve
+        kind: internal
+      - id: mig.resolve
+        kind: internal
+    steps:
+      - bind: res, err
+        eval: cfg.resolve()
+        to: cfg.resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: plan, err
+        eval: mig.resolve()
+        to: mig.resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&migrator{cfg: res, plan: plan, tx: &transactor{cfg: res}}, nil"
+  - of: (*migrator).Plan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).Plan
+        kind: self
+      - id: m.ensureTable
+        kind: internal
+      - id: m.applied
+        kind: internal
+      - id: m.pending
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: m.ensureTable(ctx)
+            to: m.ensureTable
+          when: err != nil
+      - bind: applied, highest, err
+        eval: m.applied(ctx)
+        to: m.applied
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: m.pending(applied, highest)
+        to: m.pending
+  - of: (*migrator).Up
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).Up
+        kind: self
+      - id: m.serialised
+        kind: internal
+    steps:
+      - return: m.serialised(ctx, m.upAll)
+        to: m.serialised
+  - of: (*migrator).upAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).upAll
+        kind: self
+      - id: m.Plan
+        kind: internal
+      - id: m.applyOne
+        kind: internal
+    steps:
+      - bind: pending, err
+        eval: m.Plan(ctx)
+        to: m.Plan
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: m.applyOne(ctx, migration)
+                  to: m.applyOne
+                when: err != nil
+          key: _
+          range: pending
+          value: migration
+      - return: nil
+  - of: (*migrator).Down
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).Down
+        kind: self
+      - id: m.serialised
+        kind: internal
+    steps:
+      - return: |-
+          m.serialised(ctx, func(locked context.Context) error {
+          		//: the reversal, under the lock.
+          		return m.downTo(locked, target)
+          	})
+        to: m.serialised
+  - of: (*migrator).downTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).downTo
+        kind: self
+      - id: m.ensureTable
+        kind: internal
+      - id: m.applied
+        kind: internal
+      - id: m.reverseAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: m.ensureTable(ctx)
+            to: m.ensureTable
+          when: err != nil
+      - bind: applied, _, err
+        eval: m.applied(ctx)
+        to: m.applied
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: m.reverseAll(ctx, applied, target)
+        to: m.reverseAll
+  - of: (*migrator).serialised
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).serialised
+        kind: self
+      - id: m.underFileLock
+        kind: internal
+      - id: m.acquire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: m.underFileLock(ctx, work)
+              to: m.underFileLock
+          when: "!m.cfg.dialect.SupportsAdvisoryLock()"
+      - bind: lock, err
+        eval: m.acquire(ctx)
+        to: m.acquire
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: func() { err = errors.Join(err, lock.release(ctx)) }()
+      - return: work(ctx)
+  - of: (*migrator).reverseAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).reverseAll
+        kind: self
+      - id: m.assertNoUnknown
+        kind: internal
+      - id: m.revertOne
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: m.assertNoUnknown(applied, target)
+            to: m.assertNoUnknown
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: migration.Version <= target || !applied[migration.Version]
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: m.revertOne(ctx, migration)
+                  to: m.revertOne
+                when: err != nil
+          key: _
+          range: slices.Backward(m.plan.migrations)
+          value: migration
+      - return: nil
+  - of: (*migrator).assertNoUnknown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).assertNoUnknown
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: known
+        eval: make(map[uint64]bool, len(m.plan.migrations))
+      - loop:
+          do:
+            - set: known[migration.Version]
+              value: "true"
+          key: _
+          range: m.plan.migrations
+          value: migration
+      - bind: remaining
+        eval: slices.Sorted(maps.Keys(applied))
+        to: slices
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: version <= target || known[version]
+            - return: |-
+                kerrs.Wrap(coresql.MigrationUnknownVersion, kerrs.WrapParams{},
+                			kerrs.String("version", strconv.FormatUint(version, decimalBase)))
+              to: kerrs
+          key: _
+          range: remaining
+          value: version
+      - return: nil
+  - of: (*migrator).applyOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).applyOne
+        kind: self
+      - id: m.tx.Transact
+        kind: internal
+      - id: failed
+        kind: internal
+    steps:
+      - bind: err
+        eval: |-
+          m.tx.Transact(ctx, coresql.TxOptionsValue{}, func(txCtx context.Context, ex coresql.Executor) error {
+          		//: the step runs on the SAME executor as the bookkeeping row, which
+          		//: is what makes the two commit together on a transactional-DDL
+          		//: engine — see the package CLAUDE.md for the MySQL caveat.
+          		if stepErr := migration.Up(txCtx, ex); stepErr != nil {
+          			//: verbatim, so the caller's errors.Is still answers.
+          			return stepErr
+          		}
+          		//: the version row is written by the same transaction it describes.
+          		return m.record(txCtx, ex, migration)
+          	})
+        to: m.tx.Transact
+      - opt:
+          do:
+            - return: failed(coresql.MigrationFailed, err, versionField(migration), directionField(directionUp))
+              to: failed
+          when: err != nil
+      - return: nil
+  - of: (*migrator).revertOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).revertOne
+        kind: self
+      - id: m.tx.Transact
+        kind: internal
+      - id: failed
+        kind: internal
+    steps:
+      - bind: err
+        eval: |-
+          m.tx.Transact(ctx, coresql.TxOptionsValue{}, func(txCtx context.Context, ex coresql.Executor) error {
+          		//: an Irreversible step fails here, with the caller's own declaration.
+          		if stepErr := migration.Down(txCtx, ex); stepErr != nil {
+          			//: verbatim, so errs.HasCode(err, CodeMigrationIrreversible) works.
+          			return stepErr
+          		}
+          		//: the version row is removed by the same transaction that undid it.
+          		return m.forget(txCtx, ex, migration)
+          	})
+        to: m.tx.Transact
+      - opt:
+          do:
+            - return: failed(coresql.MigrationFailed, err, versionField(migration), directionField(directionDown))
+              to: failed
+          when: err != nil
+      - return: nil
+  - of: versionField
+    participants:
+      - id: caller
+        kind: actor
+      - id: versionField
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.String("version", strconv.FormatUint(migration.Version, decimalBase))
+        to: kerrs
+  - of: directionField
+    participants:
+      - id: caller
+        kind: actor
+      - id: directionField
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.String("direction", direction)
+        to: kerrs
+  - of: identStart
+    steps:
+      - return: c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+  - of: MigrateConfig.resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: MigrateConfig.resolve
+        kind: self
+      - id: m.resolvedTable
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: validateSet
+        kind: internal
+    steps:
+      - bind: table, err
+        eval: m.resolvedTable()
+        to: m.resolvedTable
+      - opt:
+          do:
+            - return: migratePlan{}, err
+          when: err != nil
+      - bind: sorted
+        eval: slices.Clone(m.Migrations)
+        to: slices
+      - eval: |-
+          slices.SortFunc(sorted, func(a, b coresql.MigrationValue) int {
+          		//: cmp.Compare on uint64 without converting to a signed type.
+          		return compareVersions(a.Version, b.Version)
+          	})
+        to: slices
+      - opt:
+          do:
+            - return: migratePlan{}, verr
+          init:
+            bind: verr
+            eval: validateSet(sorted)
+            to: validateSet
+          when: verr != nil
+      - return: |-
+          migratePlan{
+          		migrations: sorted, table: table,
+          		lockBudget: m.lockBudget(), retry: m.retryInterval(),
+          	}, nil
+  - of: MigrateConfig.resolvedTable
+    steps:
+      - bind: name
+        eval: m.VersionTable
+      - opt:
+          do:
+            - set: name
+              value: DefaultVersionTable
+          when: name == ""
+      - opt:
+          do:
+            - return: "\"\", kerrs.Wrap(coresql.VersionTableInvalid, kerrs.WrapParams{}, kerrs.String(\"table\", name))"
+          when: "!isIdentifier(name)"
+      - return: name, nil
+  - of: MigrateConfig.lockBudget
+    steps:
+      - opt:
+          do:
+            - return: DefaultLockTimeout
+          when: m.LockTimeout <= 0
+      - return: m.LockTimeout
+  - of: MigrateConfig.retryInterval
+    steps:
+      - opt:
+          do:
+            - return: DefaultLockRetryInterval
+          when: m.LockRetryInterval <= 0
+      - return: m.LockRetryInterval
+  - of: compareVersions
+    steps:
+      - opt:
+          do:
+            - return: "-1"
+          when: a < b
+      - opt:
+          do:
+            - return: "1"
+          when: a > b
+      - return: "0"
+  - of: validateSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSet
+        kind: self
+      - id: migration.Validate
+        kind: value
+      - id: kerrs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: migration.Validate()
+                  to: migration.Validate
+                when: err != nil
+            - opt:
+                do:
+                  - continue: true
+                when: index == 0
+            - opt:
+                do:
+                  - return: |-
+                      kerrs.Wrap(coresql.DuplicateMigration, kerrs.WrapParams{},
+                      				kerrs.String("version", strconv.FormatUint(migration.Version, decimalBase)))
+                    to: kerrs
+                when: sorted[index-1].Version == migration.Version
+          key: index
+          range: sorted
+          value: migration
+      - return: nil
+  - of: (*migrator).underFileLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).underFileLock
+        kind: self
+      - id: m.cfg.clk.Now().Add
+        kind: value
+      - id: m.fileLockedRun
+        kind: internal
+      - id: m.pause
+        kind: internal
+    steps:
+      - bind: deadline
+        eval: m.cfg.clk.Now().Add(m.plan.lockBudget)
+        to: m.cfg.clk.Now().Add
+      - loop:
+          do:
+            - bind: busy, err
+              eval: m.fileLockedRun(ctx, work)
+              to: m.fileLockedRun
+            - opt:
+                do:
+                  - return: err
+                when: "!busy"
+            - opt:
+                do:
+                  - return: pauseErr
+                init:
+                  bind: pauseErr
+                  eval: m.pause(ctx, deadline)
+                  to: m.pause
+                when: pauseErr != nil
+          forever: true
+  - of: (*migrator).fileLockedRun
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).fileLockedRun
+        kind: self
+      - id: m.tx.Transact
+        kind: internal
+    steps:
+      - var:
+          name: outcome
+          type: error
+      - bind: began
+        eval: "false"
+      - set: err
+        to: m.tx.Transact
+        value: |-
+          m.tx.Transact(ctx, coresql.TxOptionsValue{}, func(txCtx context.Context, ex coresql.Executor) error {
+          		began = true
+          		//: nothing runs before the lock is held.
+          		if lockErr := m.takeFileLock(txCtx, ex); lockErr != nil {
+          			busy = lockBusy(lockErr)
+          			//: rolled back either way; a real failure also names its phase.
+          			return failed(coresql.MigrationFailed, lockErr, kerrs.String("phase", lockPhase))
+          		}
+          		//: every migration runs in its own savepoint of this transaction.
+          		outcome = work(txCtx)
+          		//: COMMIT what applied, even when a later migration failed: the one
+          		//: that failed has already rolled back to its own savepoint.
+          		return nil
+          	})
+      - opt:
+          do:
+            - set: busy
+              value: "true"
+          when: "!began && err != nil && lockBusy(err)"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: false, err
+                when: kerrs.HasCode(err, coresql.CodeRollbackFailed)
+            - return: true, nil
+          when: busy
+      - return: false, errors.Join(outcome, runPhase(err, began, outcome))
+  - of: runPhase
+    participants:
+      - id: caller
+        kind: actor
+      - id: runPhase
+        kind: self
+      - id: failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          when: err == nil || kerrs.HasCode(err, coresql.CodeMigrationFailed)
+      - opt:
+          do:
+            - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
+              to: failed
+          when: "!began"
+      - opt:
+          do:
+            - return: err
+          when: outcome != nil
+      - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", commitPhase))
+        to: failed
+  - of: (*migrator).takeFileLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).takeFileLock
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, createTableSQL(m.plan.table))
+            to: ex.ExecContext
+          when: err != nil
+      - bind: _, err
+        eval: ex.ExecContext(ctx, FileLockSQL(m.plan.table))
+        to: ex.ExecContext
+      - return: err
+  - of: lockBusy
+    participants:
+      - id: caller
+        kind: actor
+      - id: lockBusy
+        kind: self
+      - id: err.Error
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+      - bind: text
+        eval: err.Error()
+        to: err.Error
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: strings.Contains(text, marker)
+          key: _
+          range: busyMarkers
+          value: marker
+      - return: "false"
+  - of: (*migrator).acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).acquire
+        kind: self
+      - id: m.cfg.db.Conn
+        kind: value
+      - id: m.waitForLock
+        kind: internal
+    steps:
+      - bind: conn, err
+        eval: m.cfg.db.Conn(ctx)
+        to: m.cfg.db.Conn
+      - opt:
+          do:
+            - return: nil, failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
+          when: err != nil
+      - set: held, err
+        to: m.waitForLock
+        value: m.waitForLock(ctx, conn)
+      - opt:
+          do:
+            - return: nil, errors.Join(err, closeVerdict(conn))
+          when: err != nil
+      - return: held, nil
+  - of: (*migrator).waitForLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).waitForLock
+        kind: self
+      - id: tryLockSQL
+        kind: internal
+      - id: unlockSQL
+        kind: internal
+      - id: m.cfg.clk.Now().Add
+        kind: value
+      - id: tryOnce
+        kind: internal
+      - id: m.pause
+        kind: internal
+    steps:
+      - bind: query, arg
+        eval: tryLockSQL(m.cfg.dialect, m.plan.table)
+        to: tryLockSQL
+      - bind: release, releaseArg
+        eval: unlockSQL(m.cfg.dialect, m.plan.table)
+        to: unlockSQL
+      - bind: deadline
+        eval: m.cfg.clk.Now().Add(m.plan.lockBudget)
+        to: m.cfg.clk.Now().Add
+      - loop:
+          do:
+            - bind: granted, err
+              eval: tryOnce(ctx, conn, query, arg)
+              to: tryOnce
+            - opt:
+                do:
+                  - return: nil, failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
+                when: err != nil
+            - opt:
+                do:
+                  - return: "&advisoryLock{conn: conn, query: release, arg: releaseArg}, nil"
+                when: granted
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: m.pause(ctx, deadline)
+                  to: m.pause
+                when: err != nil
+          forever: true
+  - of: (*migrator).pause
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).pause
+        kind: self
+      - id: failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: failed(coresql.MigrationLockTimeout, nil)
+              to: failed
+          when: "!m.cfg.clk.Now().Before(deadline)"
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: failed(coresql.MigrationFailed, ctx.Err(), kerrs.String("phase", lockPhase))
+                  to: failed
+            - comm: <-m.cfg.clk.After(m.plan.retry)
+              do:
+                - return: nil
+  - of: tryOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: tryOnce
+        kind: self
+      - id: conn.QueryRowContext(ctx, query, arg).Scan
+        kind: value
+      - id: lockGranted
+        kind: internal
+    steps:
+      - var:
+          name: answer
+          type: any
+      - set: err
+        to: conn.QueryRowContext(ctx, query, arg).Scan
+        value: conn.QueryRowContext(ctx, query, arg).Scan(&answer)
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - return: lockGranted(answer), nil
+        to: lockGranted
+  - of: lockGranted
+    steps:
+      - typeswitch:
+          bind: value
+          cases:
+            - do:
+                - return: value
+              types: bool
+            - do:
+                - return: value == 1
+              types: int64
+            - do:
+                - return: string(value) == "1"
+              types: "[]byte"
+            - do:
+                - return: value == "1"
+              types: string
+            - default: true
+              do:
+                - return: "false"
+          "on": answer
+  - of: (*advisoryLock).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*advisoryLock).release
+        kind: self
+      - id: l.conn.ExecContext
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: _, unlockErr
+        eval: l.conn.ExecContext(cleanup(ctx), l.query, l.arg)
+        to: l.conn.ExecContext
+      - return: errors.Join(unlockErr, closeVerdict(l.conn))
+        to: errors
+  - of: closeVerdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeVerdict
+        kind: self
+      - id: conn.Close
+        kind: value
+      - id: failed
+        kind: internal
+    steps:
+      - bind: err
+        eval: conn.Close()
+        to: conn.Close
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
+        to: failed
+  - of: createTableSQL
+    steps:
+      - return: |-
+          "CREATE TABLE IF NOT EXISTS " + table +
+          		" (version BIGINT NOT NULL PRIMARY KEY, name TEXT NOT NULL, applied_at_unix BIGINT NOT NULL)"
+  - of: (*migrator).ensureTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).ensureTable
+        kind: self
+      - id: m.tx.Join
+        kind: internal
+      - id: ex.ExecContext
+        kind: value
+      - id: failed
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: m.tx.Join(ctx)
+        to: m.tx.Join
+      - bind: _, err
+        eval: ex.ExecContext(ctx, createTableSQL(m.plan.table))
+        to: ex.ExecContext
+      - opt:
+          do:
+            - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
+              to: failed
+          when: err != nil
+      - return: nil
+  - of: (*migrator).applied
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).applied
+        kind: self
+      - id: m.tx.Join
+        kind: internal
+      - id: ex.QueryContext
+        kind: value
+      - id: scanVersions
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: m.tx.Join(ctx)
+        to: m.tx.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, "SELECT version FROM "+m.plan.table+" ORDER BY version")
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, 0, failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: a close error after a successful scan still invalidates the read.
+          		if cerr := rows.Close(); cerr != nil && err == nil {
+          			//: the driver's error travels beside the verdict.
+          			err = failed(coresql.MigrationFailed, cerr, kerrs.String("phase", tablePhase))
+          		}
+          	}()
+      - return: scanVersions(rows)
+        to: scanVersions
+  - of: (*migrator).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).record
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - bind: query
+        eval: |-
+          "INSERT INTO " + m.plan.table + " (version, name, applied_at_unix) VALUES (" +
+          		m.cfg.dialect.Placeholder(bindVersion) + ", " + m.cfg.dialect.Placeholder(bindName) + ", " +
+          		m.cfg.dialect.Placeholder(bindAppliedAt) + ")"
+      - bind: _, err
+        eval: |-
+          ex.ExecContext(ctx, query,
+          		int64(migration.Version), migration.Name, m.cfg.clk.Now().Unix())
+        to: ex.ExecContext
+      - return: err
+  - of: (*migrator).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).forget
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - bind: query
+        eval: "\"DELETE FROM \" + m.plan.table + \" WHERE version = \" + m.cfg.dialect.Placeholder(bindVersion)"
+      - bind: _, err
+        eval: ex.ExecContext(ctx, query, int64(migration.Version))
+        to: ex.ExecContext
+      - return: err
+  - of: scanVersions
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanVersions
+        kind: self
+      - id: rows.Scan
+        kind: value
+      - id: rows.Err
+        kind: value
+    steps:
+      - set: versions
+        value: make(map[uint64]bool)
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: recorded
+                type: int64
+            - opt:
+                do:
+                  - return: nil, 0, failed(coresql.MigrationFailed, serr, kerrs.String("phase", tablePhase))
+                init:
+                  bind: serr
+                  eval: rows.Scan(&recorded)
+                  to: rows.Scan
+                when: serr != nil
+            - opt:
+                do:
+                  - return: |-
+                      nil, 0, failed(coresql.MigrationFailed, nil,
+                      				kerrs.String("phase", tablePhase), kerrs.Int64("version", recorded))
+                when: recorded < 0
+            - bind: version
+              eval: uint64(recorded)
+            - set: versions[version]
+              value: "true"
+            - opt:
+                do:
+                  - set: highest
+                    value: version
+                when: version > highest
+      - opt:
+          do:
+            - return: nil, 0, failed(coresql.MigrationFailed, rerr, kerrs.String("phase", tablePhase))
+          init:
+            bind: rerr
+            eval: rows.Err()
+            to: rows.Err
+          when: rerr != nil
+      - return: versions, highest, nil
+  - of: failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: failed
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: verdict
+        eval: kerrs.Wrap(sentinel, kerrs.WrapParams{}, fields...)
+        to: kerrs
+      - opt:
+          do:
+            - return: verdict
+          when: cause == nil
+      - return: errors.Join(verdict, cause)
+        to: errors
+  - of: Statements
+    participants:
+      - id: caller
+        kind: actor
+      - id: Statements
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - return:
+          closure:
+            params: ctx context.Context, ex coresql.Executor
+            results: error
+            steps:
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - return: err
+                        init:
+                          bind: _, err
+                          eval: ex.ExecContext(ctx, stmt)
+                          to: ex.ExecContext
+                        when: err != nil
+                  key: _
+                  range: stmts
+                  value: stmt
+              - return: nil
+  - of: NewTransactor
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTransactor
+        kind: self
+      - id: cfg.resolve
+        kind: internal
+    steps:
+      - bind: res, err
+        eval: cfg.resolve()
+        to: cfg.resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&transactor{cfg: res}, nil"
+  - of: (*transactor).Transact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).Transact
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: scopeFor
+        kind: internal
+      - id: t.nested
+        kind: internal
+      - id: t.root
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{}, kerrs.String("missing", "fn"))
+              to: kerrs
+          when: fn == nil
+      - opt:
+          do:
+            - return: t.nested(ctx, scope, opts, fn)
+              to: t.nested
+          init:
+            bind: scope
+            eval: scopeFor(ctx, t)
+            to: scopeFor
+          when: scope != nil
+      - return: t.root(ctx, opts, fn)
+        to: t.root
+  - of: (*transactor).root
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).root
+        kind: self
+      - id: t.cfg.db.BeginTx
+        kind: value
+      - id: failed
+        kind: internal
+      - id: newScopedExecutor
+        kind: internal
+      - id: scoped.retire
+        kind: internal
+      - id: t.settle
+        kind: internal
+      - id: state.drain
+        kind: internal
+      - id: runAborted
+        kind: internal
+    steps:
+      - bind: tx, err
+        eval: t.cfg.db.BeginTx(ctx, opts.StdOptions())
+        to: t.cfg.db.BeginTx
+      - opt:
+          do:
+            - return: failed(coresql.BeginFailed, err)
+              to: failed
+          when: err != nil
+      - bind: state
+        eval: "&txState{tx: tx, dialect: t.cfg.dialect}"
+      - bind: scoped
+        eval: newScopedExecutor(state)
+        to: newScopedExecutor
+      - bind: settled
+        eval: "false"
+      - defer: |-
+          func() {
+          		//: the ordinary paths settle the transaction themselves.
+          		if settled {
+          			//: nothing left to undo.
+          			return
+          		}
+          		//: a PANIC left the transaction open. Retire the handle and roll
+          		//: back, then let the panic continue with its original stack — see
+          		//: the package doc: a panic is not a database outcome, and
+          		//: converting it here would hide a bug at the site that produced it.
+          		//: What was held for a commit that will never happen is dropped.
+          		scoped.retire()
+          		_, aborted := state.drain(false)
+          		//: the panic is the news and it is already travelling, so there is no
+          		//: return value left to report a rollback failure on. It is recorded
+          		//: on the STATE instead: a unit of work that leaked its executor past
+          		//: the panic then gets a typed refusal rather than a statement sent
+          		//: to a connection database/sql has already discarded.
+          		if rbErr := tx.Rollback(); rbErr != nil && !txEnded(rbErr) {
+          			//: the transaction's real state is unknown from here.
+          			state.poison(failed(coresql.RollbackFailed, rbErr))
+          		}
+          		//: the work is undone: what waited for that is told, before the
+          		//: panic continues.
+          		runAborted(aborted)
+          	}()
+      - set: err
+        value: "fn(withScope(ctx, &txScope{owner: t, state: state, exec: scoped, id: rootScope}), scoped)"
+      - set: settled
+        value: "true"
+      - eval: scoped.retire()
+        to: scoped.retire
+      - set: err
+        to: t.settle
+        value: t.settle(state, err)
+      - bind: held, aborted
+        eval: state.drain(err == nil)
+        to: state.drain
+      - loop:
+          do:
+            - eval: fn.fn()
+          key: _
+          range: held
+          value: fn
+      - eval: runAborted(aborted)
+        to: runAborted
+      - return: err
+  - of: (*transactor).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).settle
+        kind: self
+      - id: errors
+        kind: stdlib
+      - id: state.poisonedErr
+        kind: internal
+      - id: state.tx.Commit
+        kind: value
+      - id: failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errors.Join(cause, rollback(state))
+              to: errors
+          when: cause != nil
+      - opt:
+          do:
+            - return: errors.Join(failed(coresql.TxPoisoned, poison), rollback(state))
+              to: errors
+          init:
+            bind: poison
+            eval: state.poisonedErr()
+            to: state.poisonedErr
+          when: poison != nil
+      - opt:
+          do:
+            - return: failed(coresql.CommitFailed, err)
+              to: failed
+          init:
+            bind: err
+            eval: state.tx.Commit()
+            to: state.tx.Commit
+          when: err != nil
+      - return: nil
+  - of: rollback
+    participants:
+      - id: caller
+        kind: actor
+      - id: rollback
+        kind: self
+      - id: state.tx.Rollback
+        kind: value
+      - id: failed
+        kind: internal
+    steps:
+      - bind: err
+        eval: state.tx.Rollback()
+        to: state.tx.Rollback
+      - opt:
+          do:
+            - return: nil
+          when: err == nil || errors.Is(err, stdsql.ErrTxDone)
+      - return: failed(coresql.RollbackFailed, err)
+        to: failed
+  - forward: context.WithoutCancel
+    of: cleanup
+  - of: txEnded
+    participants:
+      - id: caller
+        kind: actor
+      - id: txEnded
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: errors.Is(err, stdsql.ErrTxDone)
+        to: errors
+  - of: (*transactor).nested
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).nested
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: scope.state.poisonedErr
+        kind: internal
+      - id: failed
+        kind: internal
+      - id: scope.state.nextSavepoint
+        kind: internal
+      - id: savepointSQL
+        kind: internal
+      - id: scope.state.tx.ExecContext
+        kind: value
+      - id: t.runNested
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(coresql.NestedIsolation, kerrs.WrapParams{})
+              to: kerrs
+          when: "!opts.IsZero()"
+      - opt:
+          do:
+            - return: failed(coresql.TxPoisoned, poison)
+              to: failed
+          init:
+            bind: poison
+            eval: scope.state.poisonedErr()
+            to: scope.state.poisonedErr
+          when: poison != nil
+      - bind: id, name
+        eval: scope.state.nextSavepoint()
+        to: scope.state.nextSavepoint
+      - bind: create, undo, release
+        eval: savepointSQL(scope.state.dialect, name)
+        to: savepointSQL
+      - opt:
+          do:
+            - return: |-
+                failed(coresql.SavepointFailed, err,
+                			kerrs.String("statement", "SAVEPOINT"), kerrs.String("savepoint", name))
+              to: failed
+          init:
+            bind: _, err
+            eval: scope.state.tx.ExecContext(ctx, create)
+            to: scope.state.tx.ExecContext
+          when: err != nil
+      - return: "t.runNested(ctx, scope, fn, savepointStmts{name: name, undo: undo, release: release, id: id})"
+        to: t.runNested
+  - of: (*transactor).runNested
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).runNested
+        kind: self
+      - id: newScopedExecutor
+        kind: internal
+      - id: scoped.retire
+        kind: internal
+      - id: t.settleNested
+        kind: internal
+    steps:
+      - bind: scoped
+        eval: newScopedExecutor(scope.state)
+        to: newScopedExecutor
+      - bind: settled
+        eval: "false"
+      - defer: |-
+          func() {
+          		//: the ordinary paths settle the savepoint themselves.
+          		if settled {
+          			//: nothing left to undo.
+          			return
+          		}
+          		//: a PANIC unwound past the scope. Retire the handle and undo the
+          		//: savepoint so the outer transaction is not left carrying half of
+          		//: an abandoned unit of work; the panic then continues. What the
+          		//: scope held for the commit goes with its work.
+          		scoped.retire()
+          		undone := scope.state.dropFrom(sp.id)
+          		//: best-effort, and on a DETACHED context: a panic often coexists
+          		//: with a cancellation, and the undo must outlive it. A failure here
+          		//: POISONS, so the outer scope refuses to commit half of an abandoned
+          		//: unit of work — that is the channel this path reports on, since the
+          		//: panic itself is already carrying the diagnosis upward.
+          		if _, undoErr := scope.state.tx.ExecContext(cleanup(ctx), sp.undo); undoErr != nil {
+          			//: the engine's state is unknown; nothing may be committed.
+          			scope.state.poison(failed(coresql.SavepointFailed, undoErr,
+          				kerrs.String("statement", "ROLLBACK TO"), kerrs.String("savepoint", sp.name)))
+          		}
+          		//: the scope's work is undone — or the transaction is poisoned, and
+          		//: will never commit it: what waited for that is told.
+          		runAborted(undone)
+          	}()
+      - bind: err
+        eval: "fn(withScope(ctx, &txScope{owner: t, state: scope.state, exec: scoped, id: sp.id}), scoped)"
+      - set: settled
+        value: "true"
+      - eval: scoped.retire()
+        to: scoped.retire
+      - return: t.settleNested(ctx, scope, sp, err)
+        to: t.settleNested
+  - of: (*transactor).settleNested
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).settleNested
+        kind: self
+      - id: scope.state.dropFrom
+        kind: internal
+      - id: t.undoSavepoint
+        kind: internal
+      - id: runAborted
+        kind: internal
+      - id: errors
+        kind: stdlib
+      - id: scope.state.tx.ExecContext
+        kind: value
+      - id: failed
+        kind: internal
+      - id: scope.state.poison
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: undone
+              eval: scope.state.dropFrom(sp.id)
+              to: scope.state.dropFrom
+            - bind: undoErr
+              eval: t.undoSavepoint(ctx, scope, sp)
+              to: t.undoSavepoint
+            - eval: runAborted(undone)
+              to: runAborted
+            - return: errors.Join(cause, undoErr)
+              to: errors
+          when: cause != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: txEnded(err)
+            - bind: verdict
+              eval: |-
+                failed(coresql.SavepointFailed, err,
+                			kerrs.String("statement", "RELEASE"), kerrs.String("savepoint", sp.name))
+              to: failed
+            - eval: scope.state.poison(verdict)
+              to: scope.state.poison
+            - return: verdict
+          init:
+            bind: _, err
+            eval: scope.state.tx.ExecContext(cleanup(ctx), sp.release)
+            to: scope.state.tx.ExecContext
+          when: err != nil
+      - return: nil
+  - of: (*transactor).undoSavepoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).undoSavepoint
+        kind: self
+      - id: scope.state.tx.ExecContext
+        kind: value
+      - id: failed
+        kind: internal
+      - id: scope.state.poison
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: scope.state.tx.ExecContext(cleanup(ctx), sp.undo)
+        to: scope.state.tx.ExecContext
+      - opt:
+          do:
+            - return: nil
+          when: err == nil || txEnded(err)
+      - bind: verdict
+        eval: |-
+          failed(coresql.SavepointFailed, err,
+          		kerrs.String("statement", "ROLLBACK TO"), kerrs.String("savepoint", sp.name))
+        to: failed
+      - eval: scope.state.poison(verdict)
+        to: scope.state.poison
+      - return: verdict
+  - of: scopeOf
+    steps:
+      - bind: scope, _
+        eval: ctx.Value(scopeKey).(*txScope)
+      - return: scope
+  - of: withScope
+    participants:
+      - id: caller
+        kind: actor
+      - id: withScope
+        kind: self
+      - id: scopeOf
+        kind: internal
+      - id: context
+        kind: stdlib
+    steps:
+      - set: scope.parent
+        to: scopeOf
+        value: scopeOf(ctx)
+      - return: context.WithValue(ctx, scopeKey, scope)
+        to: context
+  - of: (*txState).nextSavepoint
+    steps:
+      - lock:
+          mutex: s.mu
+      - op: ++
+        set: s.counter
+      - return: s.counter, savepointName(s.counter)
+  - of: (*txState).poison
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - set: s.poisoned
+              value: cause
+          when: s.poisoned == nil
+  - of: (*txState).poisonedErr
+    steps:
+      - lock:
+          mutex: s.mu
+          read: true
+      - return: s.poisoned
+  - of: (*txState).hold
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: "false"
+          when: s.ended
+      - opt:
+          do:
+            - set: s.held
+              value: "append(s.held, heldFn{fn: fn, scope: scope})"
+          when: fn != nil
+      - return: "true"
+  - of: (*txState).holdAbort
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: "false"
+          when: s.ended
+      - opt:
+          do:
+            - set: s.aborted
+              value: "append(s.aborted, abortFn{ctx: context.WithoutCancel(ctx), fn: fn, scope: scope})"
+          when: fn != nil
+      - return: "true"
+  - of: (*txState).dropFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*txState).dropFrom
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: s.mu
+      - bind: inside
+        eval:
+          closure:
+            params: scope uint64
+            results: bool
+            steps:
+              - return: scope >= from
+      - set: s.held
+        to: slices
+        value: slices.DeleteFunc(s.held, func(h heldFn) bool { return inside(h.scope) })
+      - var:
+          name: undone
+          type: "[]abortFn"
+      - bind: kept
+        eval: s.aborted[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: undone
+                    value: append(undone, held)
+                  - continue: true
+                when: inside(held.scope)
+            - set: kept
+              value: append(kept, held)
+          key: _
+          range: s.aborted
+          value: held
+      - eval: clear(s.aborted[len(kept):])
+      - set: s.aborted
+        value: kept
+      - return: undone
+  - of: (*txState).drain
+    steps:
+      - lock:
+          mutex: s.mu
+      - set: s.ended
+        value: "true"
+      - set: held, aborted
+        value: s.held, s.aborted
+      - set: s.held, s.aborted
+        value: nil, nil
+      - opt:
+          do:
+            - return: nil, aborted
+          when: "!committed"
+      - return: held, nil
+  - of: runAborted
+    steps:
+      - loop:
+          do:
+            - eval: held.fn(held.ctx)
+          key: _
+          range: slices.Backward(aborted)
+          value: held
+  - of: NewWithheld
+    steps:
+      - return: "Withheld{cause: cause}"
+  - of: Withheld.Error
+    participants:
+      - id: caller
+        kind: actor
+      - id: Withheld.Error
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: ended.Error() + " (the driver's text is withheld)"
+                when: errors.Is(w.cause, ended)
+          key: _
+          range: "[]error{context.DeadlineExceeded, context.Canceled}"
+          value: ended
+      - opt:
+          do:
+            - return: fmt.Sprintf("%T SQLSTATE %s (the driver's text is withheld)", w.cause, stated.SQLState())
+              to: fmt
+          init:
+            bind: stated, ok
+            eval: |-
+              errors.AsType[interface {
+              		error
+              		SQLState() string
+              	}](w.cause)
+          when: ok
+      - opt:
+          do:
+            - return: fmt.Sprintf("%T code %d (the driver's text is withheld)", w.cause, coded.Code())
+              to: fmt
+          init:
+            bind: coded, ok
+            eval: |-
+              errors.AsType[interface {
+              		error
+              		Code() int
+              	}](w.cause)
+          when: ok
+      - return: fmt.Sprintf("%T (the driver's text is withheld)", w.cause)
+        to: fmt
+  - of: Withheld.Unwrap
+    steps:
+      - return: w.cause

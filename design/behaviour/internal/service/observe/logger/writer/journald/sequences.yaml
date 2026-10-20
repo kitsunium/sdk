@@ -1,0 +1,280 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*journaldFactory).Decode
+    steps:
+      - bind: c
+        eval: Config{}
+      - opt:
+          do:
+            - return: nil, configInvalid()
+          when: |-
+            !decodeStr(raw, "socket_path", &c.SocketPath) ||
+            		!decodeLevelKey(raw, &c.MinLevel) ||
+            		!decodeIntKey(raw, "buffer_size", &c.BufferSize)
+      - return: c, nil
+  - of: configInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: configInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(writer.WriterConfigInvalid, errs.WrapParams{}, errs.String("writer", writerName))
+        to: errs
+  - of: decodeStr
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - set: "*dst"
+        value: s
+      - return: "true"
+  - of: decodeLevelKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeLevelKey
+        kind: self
+      - id: level
+        kind: package
+    steps:
+      - bind: v, present
+        eval: raw["min_level"]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: lvl, perr
+        eval: level.ParseLevel(s)
+        to: level
+      - opt:
+          do:
+            - return: "false"
+          when: perr != nil
+      - set: "*dst"
+        value: lvl
+      - return: "true"
+  - of: decodeIntKey
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - typeswitch:
+          bind: t
+          cases:
+            - do:
+                - set: "*dst"
+                  value: t
+              types: int
+            - do:
+                - set: "*dst"
+                  value: int(t)
+              types: int64
+            - do:
+                - set: "*dst"
+                  value: int(t)
+              types: float64
+            - default: true
+              do:
+                - return: "false"
+          "on": v
+      - return: "true"
+  - of: (*journaldFactory).Name
+    steps:
+      - return: writerName
+  - of: (*journaldFactory).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*journaldFactory).Open
+        kind: self
+      - id: newJournaldSink
+        kind: internal
+      - id: async
+        kind: package
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: c, ok
+        eval: cfg.(Config)
+      - opt:
+          do:
+            - return: nil, writer.WriterConfigInvalid
+          when: "!ok"
+      - bind: path
+        eval: c.SocketPath
+      - opt:
+          do:
+            - set: path
+              value: defaultSocketPath
+          when: path == ""
+      - bind: dial
+        eval: c.Dialer
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      nil, errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
+                      				errs.String("network", socketNetwork))
+                when: "!unixDatagrams"
+            - set: dial
+              value: net.Dial
+          when: dial == nil
+      - bind: conn, derr
+        eval: dial(socketNetwork, path)
+      - opt:
+          do:
+            - return: nil, wrapOpen(derr)
+          when: derr != nil
+      - bind: base
+        eval: newJournaldSink(conn)
+        to: newJournaldSink
+      - bind: nonblocking
+        eval: "async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError})"
+        to: async
+      - return: levelgate.New(nonblocking, c.MinLevel), nil
+        to: levelgate
+  - of: newJournaldSink
+    steps:
+      - return: "&journaldSink{conn: conn}"
+  - of: (*journaldSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*journaldSink).Write
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.conn.Write
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - bind: accepted
+        eval: len(p)
+      - opt:
+          do:
+            - return: 0, wrapWrite(ctx.Err(), accepted)
+          when: ctx != nil && ctx.Err() != nil
+      - opt:
+          do:
+            - set: p
+              value: p[:len(p)-1]
+          when: len(p) > 0 && p[len(p)-1] == '\n'
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - set: s.buf
+        value: append(s.buf[:0], messagePrefix...)
+      - set: s.buf
+        value: append(s.buf, p...)
+      - set: s.buf
+        value: append(s.buf, '\n')
+      - bind: _, werr
+        eval: s.conn.Write(s.buf)
+        to: s.conn.Write
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: 0, wrapWrite(werr, accepted)
+          when: werr != nil
+      - return: accepted, nil
+  - of: (*journaldSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*journaldSink).Flush
+        kind: self
+      - id: wrapWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapWrite(ctx.Err(), 0)
+              to: wrapWrite
+          when: ctx != nil && ctx.Err() != nil
+      - return: nil
+  - of: (*journaldSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*journaldSink).Close
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.conn.Close
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: wrapWrite
+        kind: internal
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: cerr
+        eval: s.conn.Close()
+        to: s.conn.Close
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: wrapWrite(cerr, 0)
+              to: wrapWrite
+          when: cerr != nil
+      - return: nil
+  - of: wrapOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapOpen
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corejournald.CodeJournaldOpenFailed,
+          		Reason:  "JOURNALD_OPEN_FAILED",
+          		Public:  "Journald sink could not connect the journal socket",
+          		Private: "service/observe/logger/writer/journald: connecting the unix-datagram socket failed",
+          	})
+        to: errs
+  - of: wrapWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapWrite
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corejournald.CodeJournaldWriteFailed,
+          		Reason:  "JOURNALD_WRITE_FAILED",
+          		Public:  "Journald sink write failed",
+          		Private: "service/observe/logger/writer/journald: the unix-datagram socket returned an error",
+          	}, errs.Int("bytes", n))
+        to: errs

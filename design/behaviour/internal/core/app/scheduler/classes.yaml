@@ -1,0 +1,96 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Job
+      - Schedule
+    name: scheduler.go
+  - decls:
+      - EntryValue
+    name: scheduler_entry.go
+  - decls:
+      - ResultValue
+    name: scheduler_result.go
+imports:
+  context: context
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/scheduler
+  name: scheduler
+  purpose: Package scheduler — ranges 0.2.12.* (ADR 0041 core/app/scheduler block) and 0.3.43.* (ADR 0041 service/app/scheduler block, declared here since ADR 0160).
+types:
+  - kind: named
+    name: Job
+    underlying: func(ctx context.Context) error
+  - kind: named
+    name: Schedule
+    underlying: func(after time.Time) (next time.Time, ok bool)
+  - fields:
+      - doc: |-
+          Name identifies the entry in results and errors. It must be non-empty
+          and unique within one Scheduler.
+        name: Name
+        type: string
+      - doc: Schedule decides when the Job is due.
+        name: Schedule
+        type: Schedule
+      - doc: Job is the work to run.
+        name: Job
+        type: Job
+      - doc: |-
+          AllowOverlap permits a fire while the previous run of THIS entry has not
+          returned. The zero value (false) skips that fire and reports it as
+          [ResultValue.Skipped] — the safe default, because the SDK cannot know
+          whether two concurrent copies of a Job are safe and the symptom of
+          getting it wrong is a duplicated side effect rather than an error.
+          Setting it is the caller's in-code assertion that concurrent copies are
+          safe, the same instrument resilience.HedgeConfig.Idempotent uses for the
+          same class of claim (ADR 0031).
+        name: AllowOverlap
+        type: bool
+    kind: struct
+    name: EntryValue
+  - fields:
+      - doc: Name is the entry's registered name.
+        name: Name
+        type: string
+      - doc: |-
+          Scheduled is the due instant this decision stands for. When fires were
+          missed it is the LATEST due instant at or before the wake-up, never the
+          oldest: the scheduler skips rather than catches up, so the run that
+          happens is the current one and the stale ones are what got dropped.
+        name: Scheduled
+        type: time.Time
+      - doc: Started is when the Job was invoked. Zero when Skipped.
+        name: Started
+        type: time.Time
+      - doc: Finished is when the Job returned. Zero when Skipped.
+        name: Finished
+        type: time.Time
+      - doc: |-
+          Missed counts the due instants that were dropped because they had
+          already passed when the scheduler woke — a machine that slept, a
+          timer that overran, a job that held the slot. It never causes extra
+          runs; it exists so "skip" is not the same thing as "silently drop".
+
+          It counts only instants missed WITHIN one Run: the scheduler keeps no
+          state across restarts, so fires missed while the process was down are
+          not visible to it and are not counted here.
+        name: Missed
+        type: int
+      - doc: |-
+          Skipped reports that the fire was not run because the previous run of
+          this entry had not returned and AllowOverlap is false.
+        name: Skipped
+        type: bool
+      - doc: |-
+          Err is the Job's own error, verbatim and unwrapped, so errors.Is against
+          the caller's own sentinels keeps working. It is [JobPanicked] when the
+          Job panicked and the scheduler recovered.
+        name: Err
+        type: error
+    kind: struct
+    name: ResultValue

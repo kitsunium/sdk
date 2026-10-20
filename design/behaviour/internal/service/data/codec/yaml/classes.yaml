@@ -1,0 +1,3566 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      noKeyStart lists the indicators no implicit key starts with: the node
+      parser refuses each by name or as a syntax error.
+    items:
+      - name: noKeyStart
+        type: string
+        value: "\"&*!%@`[{]},#|>\""
+    name: noKeyStart
+  - doc: documentSeparator opens every document after the first.
+    items:
+      - name: documentSeparator
+        type: string
+        value: "\"---\\n\""
+    name: documentSeparator
+  - doc: The hooks a type may implement, one bit of typeHooks each.
+    grouped: true
+    items:
+      - doc: "hookMarshaler: T implements marshalYAMLer."
+        name: hookMarshaler
+        type: typeHooks
+        value: 1 << iota
+      - doc: "hookPtrMarshaler: *T implements marshalYAMLer and T does not."
+        name: hookPtrMarshaler
+      - doc: "hookTextMarshaler: T implements encoding.TextMarshaler."
+        name: hookTextMarshaler
+      - doc: "hookPtrTextMarshaler: *T implements encoding.TextMarshaler and T does not."
+        name: hookPtrTextMarshaler
+      - doc: "hookUnmarshaler: *T implements unmarshalYAMLer."
+        name: hookUnmarshaler
+      - doc: |-
+          hookForeignUnmarshaler: *T has an UnmarshalYAML method of another
+          signature — yaml.v3's UnmarshalYAML(*yaml.Node) — which the decoder
+          cannot call.
+        name: hookForeignUnmarshaler
+      - doc: "hookTextUnmarshaler: *T implements encoding.TextUnmarshaler."
+        name: hookTextUnmarshaler
+      - doc: "hookIsZeroer: T implements IsZero() bool."
+        name: hookIsZeroer
+    name: hookMarshaler
+  - doc: indentStep is how many spaces each nesting level indents by.
+    items:
+      - name: indentStep
+        type: int
+        value: "2"
+    name: indentStep
+  - doc: |-
+      rootColumn is the column of the collection "holding" the root, so that
+      the root's own entries sit at column 0.
+    items:
+      - name: rootColumn
+        type: int
+        value: "-indentStep"
+    name: rootColumn
+  - doc: The three places a value starts at.
+    grouped: true
+    items:
+      - doc: atRoot is the start of the document.
+        name: atRoot
+        type: place
+        value: iota
+      - doc: afterKey is just after a mapping key's ":".
+        name: afterKey
+      - doc: afterDash is just after a sequence entry's "-".
+        name: afterDash
+    name: atRoot
+  - doc: |-
+      The shapes a value takes once its pointers, interfaces and hooks are
+      resolved.
+    grouped: true
+    items:
+      - doc: shapeNull writes null.
+        name: shapeNull
+        type: shape
+        value: iota
+      - doc: "shapeText writes a string: a MarshalText result or a duration's text."
+        name: shapeText
+      - doc: shapeAny writes the value a MarshalYAML hook returned.
+        name: shapeAny
+      - doc: shapeValue writes a reflected value by its kind.
+        name: shapeValue
+    name: shapeNull
+  - doc: The order map keys of different kinds are written in.
+    grouped: true
+    items:
+      - doc: rankNull is a nil key.
+        name: rankNull
+        type: keyRank
+        value: iota
+      - doc: rankBool is a boolean key.
+        name: rankBool
+      - doc: rankInt is a signed integer key.
+        name: rankInt
+      - doc: rankUint is an unsigned integer key.
+        name: rankUint
+      - doc: rankFloat is a float key.
+        name: rankFloat
+      - doc: rankString is a string key.
+        name: rankString
+      - doc: rankOther is any other key, which keyText refuses.
+        name: rankOther
+    name: rankNull
+  - doc: The numbers the encoder formats with.
+    grouped: true
+    items:
+      - doc: decimalBase is the base integers are written in.
+        name: decimalBase
+        type: int
+        value: "10"
+      - doc: float64Bits is the precision a float64 is written at.
+        name: float64Bits
+        type: int
+        value: "64"
+      - doc: float32Bits is the precision a float32 is read at.
+        name: float32Bits
+        type: int
+        value: "32"
+    name: decimalBase
+  - doc: |-
+      literalIndicator is the indentation indicator a literal block carries when
+      its first line starts with a blank or a line break: the content always sits
+      one step deeper than its parent, so the indicator is always the step.
+    items:
+      - name: literalIndicator
+        type: byte
+        value: "'0' + byte(indentStep)"
+    name: literalIndicator
+  - doc: The characters that never appear verbatim in a scalar the encoder writes.
+    grouped: true
+    items:
+      - doc: runeDelete is DEL, U+007F.
+        name: runeDelete
+        type: rune
+        value: "0x7F"
+      - doc: c1First is the first C1 control character, U+0080.
+        name: c1First
+        type: rune
+        value: "0x80"
+      - doc: c1Last is the last C1 control character, U+009F.
+        name: c1Last
+        type: rune
+        value: "0x9F"
+      - doc: runeByteOrderMark is U+FEFF.
+        name: runeByteOrderMark
+        type: rune
+        value: "0xFEFF"
+      - doc: runeNonCharacterFFFE is U+FFFE, a non-character.
+        name: runeNonCharacterFFFE
+        type: rune
+        value: "0xFFFE"
+      - doc: runeNonCharacterFFFF is U+FFFF, a non-character.
+        name: runeNonCharacterFFFF
+        type: rune
+        value: "0xFFFF"
+    name: runeDelete
+  - doc: The hexadecimal escapes the encoder writes.
+    grouped: true
+    items:
+      - doc: hexDigitsUpper are the digits an escape is written with.
+        name: hexDigitsUpper
+        type: string
+        value: "\"0123456789ABCDEF\""
+      - doc: maxByteEscape is the largest code point written as \xXX.
+        name: maxByteEscape
+        type: rune
+        value: "0xFF"
+      - doc: nibbleBits is the width of one hexadecimal digit.
+        name: nibbleBits
+        type: int
+        value: "4"
+      - doc: nibbleMask keeps one hexadecimal digit.
+        name: nibbleMask
+        type: rune
+        value: "0xF"
+    name: hexDigitsUpper
+  - doc: |-
+      plainUnsafeFirst lists the characters a plain scalar the encoder writes
+      never starts with: every indicator, and the blanks a reader would strip.
+    items:
+      - name: plainUnsafeFirst
+        type: string
+        value: "\"-?:,[]{}#&*!|>'\\\"%@` \\t\""
+    name: plainUnsafeFirst
+  - doc: |-
+      flowUnsafe lists the characters the encoder never writes in a plain scalar
+      inside a flow collection.
+    items:
+      - name: flowUnsafe
+        type: string
+        value: "\",[]{}:#\""
+    name: flowUnsafe
+  - doc: |-
+      maxYAMLBytes caps the bytes one document may hold: Unmarshal refuses a
+      longer input before reading it, and the streaming decoder refuses a
+      document that grows past it. 10 MiB covers every realistic configuration
+      document while keeping an attacker-controlled payload from exhausting memory
+      (CWE-400).
+    items:
+      - name: maxYAMLBytes
+        type: int
+        value: 10 << 20
+    name: maxYAMLBytes
+  - doc: |-
+      maxDepth bounds how deeply collections nest, when reading and when writing:
+      a configuration nested a hundred levels deep is not a configuration, and a
+      cyclic Go value would otherwise recurse until the stack ran out.
+    items:
+      - name: maxDepth
+        type: int
+        value: "100"
+    name: maxDepth
+  - doc: |-
+      maxNodes bounds how many nodes one document may hold. The byte cap alone
+      lets ten megabytes of "[0,0,0,…]" become five million nodes; this keeps the
+      tree a document builds within a fixed multiple of a configuration's size.
+    items:
+      - name: maxNodes
+        type: int
+        value: 1 << 20
+    name: maxNodes
+  - doc: |-
+      maxKeyRunes is YAML's own bound on an implicit key (YAML 1.2.2 §7.4.2): a key
+      written without the ? indicator spans at most 1024 characters.
+    items:
+      - name: maxKeyRunes
+        type: int
+        value: "1024"
+    name: maxKeyRunes
+  - doc: |-
+      mergeKey is YAML 1.1's merge key, refused as a plain key and never written
+      plain.
+    items:
+      - name: mergeKey
+        type: string
+        value: "\"<<\""
+    name: mergeKey
+  - doc: |-
+      maxPooledNodes bounds the arena a recycled parser keeps: a parser that read
+      a huge document is dropped instead of pinning its arena in the pool.
+    items:
+      - name: maxPooledNodes
+        type: int
+        value: 1 << 14
+    name: maxPooledNodes
+  - doc: The three kinds of node the subset has.
+    grouped: true
+    items:
+      - doc: "kindScalar is a scalar: plain, quoted or block."
+        name: kindScalar
+        type: nodeKind
+        value: iota + 1
+      - doc: kindMapping is a block or flow mapping; its children alternate key, value.
+        name: kindMapping
+      - doc: kindSequence is a block or flow sequence.
+        name: kindSequence
+    name: kindScalar
+  - doc: The scalar styles.
+    grouped: true
+    items:
+      - doc: stylePlain is an unquoted scalar.
+        name: stylePlain
+        type: scalarStyle
+        value: iota
+      - doc: styleSingle is a 'single-quoted' scalar.
+        name: styleSingle
+      - doc: styleDouble is a "double-quoted" scalar.
+        name: styleDouble
+      - doc: styleBlock is a literal (|) or folded (>) block scalar.
+        name: styleBlock
+    name: stylePlain
+  - doc: byteOrderMark is the UTF-8 encoding of U+FEFF, which may open a stream.
+    items:
+      - name: byteOrderMark
+        type: string
+        value: "\"\\ufeff\""
+    name: byteOrderMark
+  - doc: |-
+      noNode is the index parseDocument returns for a document that holds no
+      node at all: an empty input, or one of comments only.
+    items:
+      - name: noNode
+        type: int32
+        value: "-1"
+    name: noNode
+  - doc: |-
+      smallMapping is the number of entries up to which duplicate keys are found
+      by comparing every pair: below it, the comparisons cost less than a set.
+    items:
+      - name: smallMapping
+        type: int32
+        value: "16"
+    name: smallMapping
+  - doc: |-
+      The bases of the core schema's prefixed integers, and the value digitValue
+      gives a character that is a digit of none.
+    grouped: true
+    items:
+      - doc: octalBase is the base of a 0o integer.
+        name: octalBase
+        type: int
+        value: "8"
+      - doc: hexBase is the base of a 0x integer.
+        name: hexBase
+        type: int
+        value: "16"
+      - doc: |-
+          notADigit is digitValue's answer for a character that is no digit: it
+          is past every base used here.
+        name: notADigit
+        type: int
+        value: "16"
+    name: octalBase
+  - doc: The core schema's types, and the two readings the subset refuses.
+    grouped: true
+    items:
+      - doc: resolvedString is everything the other kinds do not match.
+        name: resolvedString
+        type: resolvedKind
+        value: iota
+      - doc: resolvedNull is ~, null, Null, NULL, or nothing.
+        name: resolvedNull
+      - doc: resolvedBool is true or false, in three cases each — never yes/no/on/off.
+        name: resolvedBool
+      - doc: |-
+          resolvedInt is a decimal, 0o octal or 0x hexadecimal integer that fits
+          an int64.
+        name: resolvedInt
+      - doc: resolvedUint is an integer past math.MaxInt64 that fits a uint64.
+        name: resolvedUint
+      - doc: resolvedFloat is a decimal float, .inf or .nan.
+        name: resolvedFloat
+      - doc: |-
+          resolvedLeadingZero is a decimal integer with a leading zero, which
+          YAML 1.1 reads as octal and YAML 1.2 as decimal.
+        name: resolvedLeadingZero
+      - doc: resolvedOutOfRange is an integer or a float no 64-bit Go value holds.
+        name: resolvedOutOfRange
+    name: resolvedString
+  - doc: The reasons a plain scalar's segment on one line ends.
+    grouped: true
+    items:
+      - doc: stopEnd is the line break or the end of the document.
+        name: stopEnd
+        type: plainStop
+        value: iota
+      - doc: |-
+          stopValue is ":" followed by a blank or the end of the line — in flow
+          context too: libyaml, and so yaml.v3, keeps a ":" followed by a flow
+          indicator inside the scalar, and the subset reads it as they do.
+        name: stopValue
+      - doc: stopComment is a "#" after a blank.
+        name: stopComment
+      - doc: stopFlow is a flow indicator, in flow context.
+        name: stopFlow
+      - doc: |-
+          stopQuestion is a "?" in flow context, where libyaml ends the scalar and
+          starts an explicit key; the subset refuses it rather than read it
+          another way.
+        name: stopQuestion
+    name: stopEnd
+  - doc: Block-scalar chomping, as its header's indicator says.
+    grouped: true
+    items:
+      - doc: chompStrip ("-") drops every trailing line break.
+        name: chompStrip
+        type: chomping
+        value: iota - 1
+      - doc: chompClip (no indicator) keeps exactly the last line break.
+        name: chompClip
+      - doc: chompKeep ("+") keeps every trailing line break.
+        name: chompKeep
+    name: chompStrip
+  - doc: |-
+      The characters YAML gives a double-quoted escape beyond C's, and the bounds
+      of what a hexadecimal escape may name.
+    grouped: true
+    items:
+      - doc: runeNextLine is \N, U+0085.
+        name: runeNextLine
+        type: rune
+        value: "0x85"
+      - doc: runeNoBreakSpace is \_, U+00A0.
+        name: runeNoBreakSpace
+        type: rune
+        value: "0xA0"
+      - doc: runeLineSeparator is \L, U+2028.
+        name: runeLineSeparator
+        type: rune
+        value: "0x2028"
+      - doc: runeParagraphSeparator is \P, U+2029.
+        name: runeParagraphSeparator
+        type: rune
+        value: "0x2029"
+      - doc: runeEscape is \e, U+001B.
+        name: runeEscape
+        type: rune
+        value: "0x1B"
+      - doc: surrogateFirst is the first UTF-16 surrogate, which no escape may name.
+        name: surrogateFirst
+        type: rune
+        value: "0xD800"
+      - doc: surrogateLast is the last UTF-16 surrogate.
+        name: surrogateLast
+        type: rune
+        value: "0xDFFF"
+    name: runeNextLine
+  - doc: The states of a block scalar being read.
+    grouped: true
+    items:
+      - doc: blockLiteral marks a literal (|) scalar rather than a folded one.
+        name: blockLiteral
+        type: blockFlags
+        value: 1 << iota
+      - doc: blockLeadingBreak says the last content line ended with a line break.
+        name: blockLeadingBreak
+      - doc: blockLeadingBlank says the last content line started with a blank.
+        name: blockLeadingBlank
+    name: blockLiteral
+  - doc: The widths of the hexadecimal escapes.
+    grouped: true
+    items:
+      - doc: hexByteDigits is the width of \xXX.
+        name: hexByteDigits
+        type: int
+        value: "2"
+      - doc: hexBMPDigits is the width of \uXXXX.
+        name: hexBMPDigits
+        type: int
+        value: "4"
+      - doc: hexRuneDigits is the width of \UXXXXXXXX.
+        name: hexRuneDigits
+        type: int
+        value: "8"
+    name: hexByteDigits
+  - doc: |-
+      neverStartsPlain lists the indicators no plain scalar starts with, in any
+      context.
+    items:
+      - name: neverStartsPlain
+        type: string
+        value: "\",[]{}#&*!|>'\\\"%@`\""
+    name: neverStartsPlain
+files:
+  - decls:
+      - noKeyStart
+      - nodeIndicatorRefusals
+      - (*parser).isEntry
+      - (*parser).parseBlockNode
+      - (*parser).parseBlockMapping
+      - (*parser).parseBlockEntry
+      - (*parser).nextEntry
+      - (*parser).parseBlockSequence
+      - (*parser).nextSequenceEntry
+      - (*parser).parseBlockValue
+      - (*parser).entrySeparator
+      - (*parser).parseValueOnLine
+      - (*parser).parseMapValueOnLine
+      - (*parser).parseEntryOnLine
+      - (*parser).parseValueBelow
+      - (*parser).parseImplicitKey
+      - (*parser).scanBlockKey
+      - (*parser).keyIndicator
+      - (*parser).checkKey
+      - (*parser).refuseNodeIndicator
+      - (*parser).refuseReserved
+      - (*parser).parseInlineNode
+      - (*parser).parseInlineValue
+      - (*parser).parseInlineFlow
+      - (*parser).scalarOrError
+      - (*parser).followedByValueIndicator
+      - (*parser).lineHasImplicitKey
+      - (*parser).valueIndicatorAfter
+      - (*parser).plainKeyEnd
+      - (*parser).quotedEnd
+    name: block.go
+  - decls:
+      - Codec
+      - yamlCodec
+      - New
+      - (*yamlCodec).Name
+      - (*yamlCodec).MIMETypes
+      - (*yamlCodec).Extensions
+      - (*yamlCodec).Marshal
+      - (*yamlCodec).Unmarshal
+      - (*yamlCodec).Append
+      - (*yamlCodec).NewEncoder
+      - (*yamlCodec).NewDecoder
+    name: codec.go
+  - decls:
+      - yamlDecoder
+      - documentState
+      - newStreamDecoder
+      - (*yamlDecoder).Decode
+      - (*yamlDecoder).More
+      - (*yamlDecoder).readDocument
+      - (*yamlDecoder).appendLine
+      - (*documentState).found
+      - (*yamlDecoder).takeLine
+      - (*yamlDecoder).readLine
+      - isMarkerLine
+      - hasContent
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - documentSeparator
+      - yamlEncoder
+      - (*yamlEncoder).Encode
+      - (*yamlEncoder).Close
+    name: encoder.go
+  - decls:
+      - at
+      - syntaxError
+      - refused
+      - marshalError
+    name: failed.go
+  - decls:
+      - closingOf
+      - flowCollection
+      - (*parser).parseFlowCollection
+      - (*parser).flowStep
+      - (*parser).flowEntry
+      - (*parser).flowSequenceEntry
+      - (*parser).flowPair
+      - (*parser).atFlowValueIndicator
+      - (*parser).flowKey
+      - (*parser).flowValue
+      - (*parser).flowScalar
+      - (*parser).skipFlowSpace
+      - (*parser).flowSpaceStep
+      - (*parser).flowSpaceError
+    name: flow.go
+  - decls:
+      - hookMarshaler
+      - marshalerType
+      - typeHooks
+      - typeHooks.has
+      - hooksOf
+      - computeHooks
+      - pointerOnlyHooks
+    name: hooks.go
+  - decls:
+      - marshalYAMLer
+      - unmarshalYAMLer
+      - isZeroer
+      - marshalYAMLHook
+      - unmarshalYAMLHook
+      - isZeroHook
+    name: hooks_interface.go
+  - decls:
+      - indentStep
+      - rootColumn
+      - atRoot
+      - shapeNull
+      - place
+      - shape
+      - encoder
+      - resolved
+      - (*encoder).encodeDocument
+      - (*encoder).enter
+      - (*encoder).leave
+      - (*encoder).writeAny
+      - (*encoder).writeUntypedScalar
+      - (*encoder).writeValue
+      - (*encoder).resolve
+      - isNilValue
+      - applyHooks
+      - usesHook
+      - receiver
+      - callMarshalYAML
+      - callMarshalText
+      - hookMarshalFailed
+      - (*encoder).writeKind
+      - (*encoder).appendScalarKind
+      - (*encoder).separate
+      - (*encoder).writeScalarText
+      - (*encoder).writeInt
+      - (*encoder).writeFloat
+    name: marshal.go
+  - decls:
+      - rankNull
+      - keyRank
+      - renderedKey
+      - (*encoder).openBlock
+      - (*encoder).writeIndent
+      - (*encoder).writeEntryStart
+      - (*encoder).writeStringMap
+      - (*encoder).writeKeyThen
+      - (*encoder).writeList
+      - (*encoder).writeMap
+      - textKeyed
+      - (*encoder).writeTextKeyedMap
+      - (*encoder).writeStruct
+      - (*encoder).writeStructFields
+      - (*encoder).writeInlineEntries
+      - inlineKeys
+      - hasVisibleField
+      - fieldForRead
+      - isEmpty
+      - zeroByHook
+      - emptyByKind
+      - isScalarKind
+      - structEmpty
+      - (*encoder).writeSequence
+      - (*encoder).writeKey
+      - (*encoder).appendStringKey
+      - (*encoder).writeKeyValueThen
+      - keyText
+      - interfaceKeyText
+      - hookedKeyText
+      - kindKeyText
+      - rankOf
+      - compareKeys
+      - unwrapKey
+      - compareSameRank
+      - boolOrder
+      - (*encoder).writeString
+      - literalFits
+      - (*encoder).writeLiteral
+      - (*encoder).writeLiteralHeader
+      - needsIndentIndicator
+      - literalSafe
+    name: marshal_block.go
+  - decls:
+      - (*encoder).openFlow
+      - (*encoder).finishFlow
+      - (*encoder).writeFlowAny
+      - (*encoder).appendUntypedScalar
+      - (*encoder).writeFlowString
+      - (*encoder).writeFlowValue
+      - (*encoder).writeFlowKind
+      - (*encoder).writeFlowMapValue
+      - (*encoder).writeFlowStructValue
+      - (*encoder).writeFlowStringMap
+      - (*encoder).flowSeparator
+      - (*encoder).writeFlowList
+      - (*encoder).writeFlowMap
+      - (*encoder).writeFlowEntry
+      - (*encoder).writeFlowStruct
+      - (*encoder).writeFlowFields
+      - (*encoder).writeFlowSequence
+      - (*encoder).writeFlowKey
+    name: marshal_flow.go
+  - decls:
+      - decimalBase
+      - literalIndicator
+      - runeDelete
+      - hexDigitsUpper
+      - plainUnsafeFirst
+      - flowUnsafe
+      - shortEscapes
+      - validText
+      - printable
+      - isControl
+      - isMisread
+      - plainSafe
+      - plainEdgesSafe
+      - plainInsideUnsafe
+      - allPlainPrintable
+      - startsWithMarker
+      - appendDoubleQuoted
+      - appendQuotedRune
+      - appendHexEscape
+      - appendHexDigits
+      - appendFloat
+      - specialFloatText
+    name: marshal_scalar.go
+  - decls:
+      - maxYAMLBytes
+      - maxDepth
+      - maxNodes
+      - maxKeyRunes
+      - mergeKey
+      - maxPooledNodes
+      - nodeKind
+      - kindScalar
+      - scalarStyle
+      - stylePlain
+      - node
+      - (*node).isNull
+      - isNullText
+    name: node.go
+  - decls:
+      - byteOrderMark
+      - noNode
+      - smallMapping
+      - parserPool
+      - parser
+      - acquireParser
+      - releaseParser
+      - (*parser).reset
+      - (*parser).at
+      - (*parser).peek
+      - isBlank
+      - (*parser).blankOrEnd
+      - (*parser).newline
+      - (*parser).col
+      - (*parser).columnOf
+      - (*parser).errHere
+      - (*parser).errAt
+      - (*parser).refuseAt
+      - (*parser).add
+      - (*parser).scalar
+      - (*parser).empty
+      - (*parser).open
+      - (*parser).close
+      - (*parser).child
+      - (*parser).skipBlanks
+      - (*parser).skipToEOL
+      - (*parser).skipToContent
+      - (*parser).classifyLine
+      - (*parser).lineIndent
+      - (*parser).atMarker
+      - (*parser).atDocumentMarker
+      - (*parser).finishLine
+      - (*parser).parseDocument
+      - (*parser).emptyDocument
+      - (*parser).documentStart
+      - (*parser).documentEnd
+      - (*parser).afterDocumentEnd
+      - (*parser).checkDuplicates
+      - (*parser).checkDuplicatesPairwise
+    name: parse.go
+  - decls:
+      - octalBase
+      - resolvedString
+      - resolvedKind
+      - scalarValue
+      - resolvePlain
+      - resolveNumber
+      - specialFloat
+      - prefixedInteger
+      - resolveFloat
+      - resolveBase
+      - resolveDecimal
+      - digitValue
+      - isDigit
+      - isDecimalInteger
+      - isDecimalFloat
+      - skipSign
+      - scanExponent
+      - countDigits
+      - isYAML11Bool
+      - readsAsNonString
+      - looksNumeric
+      - startsLikeNumber
+      - skipUnderscores
+      - isNumberChar
+      - looksLikeTimestamp
+    name: resolve.go
+  - decls:
+      - stopEnd
+      - chompStrip
+      - runeNextLine
+      - blockLiteral
+      - hexByteDigits
+      - neverStartsPlain
+      - simpleEscapes
+      - plainStop
+      - chomping
+      - quotedScan
+      - blockScalar
+      - blockFlags
+      - blockHeader
+      - isFlowIndicator
+      - (*parser).plainStart
+      - (*parser).startsIndicator
+      - (*parser).plainSegment
+      - (*parser).plainStopAt
+      - (*parser).plainStopError
+      - (*parser).refuseQuestion
+      - (*parser).scanPlainKey
+      - (*parser).scanPlain
+      - (*parser).foldPlain
+      - (*parser).plainContinuationSegment
+      - (*parser).plainContinuation
+      - (*parser).lineBlanks
+      - (*parser).continues
+      - (*parser).markerLineAt
+      - (*parser).endsFlowScalar
+      - appendFold
+      - (*parser).scanSingleQuoted
+      - (*parser).scanDoubleQuoted
+      - (*parser).scanQuoted
+      - (*parser).quotedFast
+      - (*parser).closesAt
+      - needsBuilding
+      - (*parser).quotedStep
+      - (*parser).quotedQuote
+      - (*parser).quotedEscape
+      - (*parser).quotedBreak
+      - (*parser).foldQuoted
+      - (*parser).joinEscapedBreak
+      - (*parser).insideQuoted
+      - (*parser).escape
+      - (*parser).hexEscape
+      - isScalarValue
+      - (*parser).parseBlockScalar
+      - blockIndent
+      - (*parser).blockContent
+      - (*parser).blockLineStart
+      - (*blockScalar).has
+      - (*blockScalar).set
+      - (*blockScalar).folds
+      - (*parser).chompBlock
+      - (*parser).readBlockHeader
+      - (*parser).headerIndicator
+      - chompOf
+      - (*parser).blockBreaks
+      - (*parser).blockIndentation
+      - (*parser).inBlockIndentation
+      - (*parser).detectIndent
+    name: scan.go
+  - decls:
+      - stringMapType
+      - fieldInfo
+      - structInfo
+      - tagFlags
+      - structInfoOf
+      - buildStructInfo
+      - yamlTag
+      - parseTagFlags
+      - inlineField
+      - addField
+    name: structinfo.go
+  - decls:
+      - bomUTF16BigEndian
+      - decoder
+      - decodeDocument
+      - (*decoder).decodeUntyped
+      - prepareSource
+      - forbiddenCharacter
+      - forbiddenRune
+      - isAmbiguousBreak
+      - isForbiddenControl
+      - sourceError
+      - (*decoder).node
+      - (*decoder).mismatch
+      - (*decoder).refuse
+      - describe
+      - describeResolved
+      - (*decoder).toAny
+      - (*decoder).sequenceAny
+      - (*decoder).fillStringMap
+      - (*decoder).plainAny
+      - intAny
+      - (*decoder).refuseResolved
+      - (*decoder).intoStringMap
+    name: unmarshal.go
+  - decls:
+      - timeLayouts
+      - mapDecoding
+      - mayHaveHooks
+      - (*decoder).decode
+      - allocateThrough
+      - (*decoder).decodeKind
+      - decodeNull
+      - nullable
+      - (*decoder).decodeHooked
+      - (*decoder).decodeScalarHooked
+      - (*decoder).callUnmarshaler
+      - (*decoder).decodeHookTarget
+      - (*decoder).callUnmarshalText
+      - (*decoder).hookFailed
+      - (*decoder).decodeTime
+      - (*decoder).decodeDuration
+      - (*decoder).decodeInterface
+      - (*decoder).decodeIntoHeld
+      - (*decoder).decodeMap
+      - (*decoder).decodeMapEntry
+      - (*decoder).decodeMapKey
+      - (*decoder).checkKeyCollision
+      - (*decoder).decodeStruct
+      - (*decoder).decodeStructEntry
+      - (*decoder).decodeInlineEntry
+      - fieldForWrite
+      - (*decoder).decodeSlice
+      - (*decoder).decodeArray
+      - (*decoder).decodeEntries
+      - (*decoder).decodeScalar
+      - (*decoder).decodeResolved
+      - (*decoder).decodeBool
+      - (*decoder).decodeInt
+      - (*decoder).intValue
+      - wholeInt
+      - (*decoder).decodeUint
+      - (*decoder).uintValue
+      - wholeUint
+      - (*decoder).decodeFloat
+      - (*decoder).floatValue
+      - (*decoder).floatAt
+    name: unmarshal_typed.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: newStreamDecoder returns a decoder reading documents from r.
+    name: newStreamDecoder
+    params: r io.Reader
+    results: "*yamlDecoder"
+  - doc: |-
+      isMarkerLine reports whether line is the document marker marker at column
+      0, followed by a blank or the line's end.
+    name: isMarkerLine
+    params: line []byte, marker string
+    results: bool
+  - doc: |-
+      hasContent reports whether line holds more than blanks and a comment. A
+      directive is not content: it belongs to the document it precedes, where the
+      parser refuses it by name.
+    name: hasContent
+    params: line []byte
+    results: bool
+  - doc: |-
+      at returns the line and column fields every decoding refusal carries: both
+      1-based, so they read as an editor shows them.
+    name: at
+    params: line, column int
+    results: "[]errs.FieldValue"
+  - doc: |-
+      syntaxError is UnmarshalFailed at a position, with a detail that names what
+      is wrong and never quotes the input.
+    name: syntaxError
+    params: line, column int, detail string
+    results: error
+  - doc: |-
+      refused is a construct the subset names and refuses, at a position. The
+      refusal's own code is the origin and UnmarshalFailed joins its trail, so a
+      caller testing for "any decoding failure" by code still matches.
+    name: refused
+    params: sentinel *errs.Error, line, column int
+    results: error
+  - doc: |-
+      marshalError is MarshalFailed with a detail and, when known, the Go type
+      that could not be written.
+    name: marshalError
+    params: detail, goType string
+    results: error
+  - doc: closingOf returns the indicator closing the flow collection opener opens.
+    name: closingOf
+    params: opener byte
+    results: byte
+  - doc: hooksOf returns the hooks t implements, from the cache.
+    name: hooksOf
+    params: t reflect.Type
+    results: typeHooks
+  - doc: computeHooks reads by reflection which hooks t and its pointer implement.
+    name: computeHooks
+    params: t reflect.Type
+    results: typeHooks
+  - doc: |-
+      pointerOnlyHooks returns the bits for the marshal hooks only ptr — not the
+      type it points to — implements, and for an UnmarshalYAML whose signature
+      the decoder cannot call.
+    name: pointerOnlyHooks
+    params: ptr reflect.Type, h typeHooks
+    results: typeHooks
+  - doc: |-
+      marshalYAMLHook returns v's MarshalYAML hook, when v has one.
+
+      IFACE-PLUGIN: the hook is a method of the caller's own type, which the codec
+      knows only through this interface.
+    name: marshalYAMLHook
+    params: v reflect.Value
+    results: marshalYAMLer, bool
+  - doc: |-
+      unmarshalYAMLHook returns v's UnmarshalYAML hook, when v has one.
+
+      IFACE-PLUGIN: the hook is a method of the caller's own type, which the codec
+      knows only through this interface.
+    name: unmarshalYAMLHook
+    params: v reflect.Value
+    results: unmarshalYAMLer, bool
+  - doc: |-
+      isZeroHook returns v's IsZero hook, when v has one.
+
+      IFACE-PLUGIN: the hook is a method of the caller's own type, which the codec
+      knows only through this interface.
+    name: isZeroHook
+    params: v reflect.Value
+    results: isZeroer, bool
+  - doc: |-
+      isNilValue reports whether v writes as null: invalid, or a nil pointer or
+      interface. A nil map or slice writes as an empty collection, as in yaml.v3.
+    name: isNilValue
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      applyHooks returns what a hook of v's type writes in v's place, and whether
+      it has one: MarshalYAML first, then MarshalText, then a duration's text. A
+      pointer-receiver hook applies where v is addressable.
+    name: applyHooks
+    params: v reflect.Value
+    results: resolved, bool, error
+  - doc: |-
+      usesHook reports whether v is written through the hook own, or through
+      viaPointer when v is addressable.
+    name: usesHook
+    params: h, own, viaPointer typeHooks, v reflect.Value
+    results: bool
+  - doc: |-
+      receiver returns the value a hook is called on: v, or its address for a
+      pointer-receiver hook.
+    name: receiver
+    params: v reflect.Value, viaPointer bool
+    results: reflect.Value
+  - doc: |-
+      callMarshalYAML calls MarshalYAML on target, a value of type t or a pointer
+      to one.
+    name: callMarshalYAML
+    params: target reflect.Value, t reflect.Type
+    results: resolved, bool, error
+  - doc: |-
+      callMarshalText calls MarshalText on target, a value of type t or a pointer
+      to one.
+    name: callMarshalText
+    params: target reflect.Value, t reflect.Type
+    results: resolved, bool, error
+  - doc: |-
+      hookMarshalFailed wraps the error a type's own MarshalYAML or MarshalText
+      returned. A cause that is already an SDK error keeps its code; any other
+      becomes MarshalFailed.
+    name: hookMarshalFailed
+    params: cause error, t reflect.Type
+    results: error
+  - doc: |-
+      textKeyed reports whether a map key type is a string kind whose text is its
+      value: no hook rewrites it.
+    name: textKeyed
+    params: key reflect.Type
+    results: bool
+  - doc: |-
+      inlineKeys returns the keys of v's inline map, sorted, refusing one a field
+      declares.
+    name: inlineKeys
+    params: v reflect.Value, info *structInfo
+    results: "[]reflect.Value, error"
+  - doc: hasVisibleField reports whether writing v writes at least one field.
+    name: hasVisibleField
+    params: v reflect.Value, info *structInfo
+    results: bool
+  - doc: |-
+      fieldForRead returns the field at index in v, and false when a nil inlined
+      pointer on the way means the field is absent.
+    name: fieldForRead
+    params: v reflect.Value, index []int
+    results: reflect.Value, bool
+  - doc: |-
+      isEmpty reports whether omitempty leaves v out, as yaml.v3 decides it:
+      IsZero when the type has it, otherwise by kind.
+    name: isEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: zeroByHook asks v's IsZero; a nil pointer is empty without asking it.
+    name: zeroByHook
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      emptyByKind reports whether v is empty by its kind: nil, zero, an empty
+      string, slice or map, or a struct whose exported fields are all empty. An
+      array is never empty, as in yaml.v3.
+    name: emptyByKind
+    params: v reflect.Value
+    results: bool
+  - doc: isScalarKind reports whether k is a boolean or a number kind.
+    name: isScalarKind
+    params: k reflect.Kind
+    results: bool
+  - doc: structEmpty reports whether every exported field of v is empty.
+    name: structEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      keyText renders the map key k: a string, a number, a boolean, or the text
+      a hook gives. Anything else — a struct, a pointer, a collection — would be
+      a complex key, which the subset refuses.
+    name: keyText
+    params: k reflect.Value, depth int
+    results: renderedKey, error
+  - doc: |-
+      interfaceKeyText renders an interface key: null when nil, what it holds
+      otherwise.
+    name: interfaceKeyText
+    params: k reflect.Value, depth int
+    results: renderedKey, error
+  - doc: |-
+      hookedKeyText renders a key through its MarshalText or MarshalYAML, and
+      reports whether it has one.
+    name: hookedKeyText
+    params: k reflect.Value, depth int
+    results: renderedKey, bool, error
+  - doc: kindKeyText renders a key by its kind.
+    name: kindKeyText
+    params: k reflect.Value
+    results: renderedKey, error
+  - doc: |-
+      rankOf orders keys of different kinds: null, booleans, numbers, strings,
+      then anything else.
+    name: rankOf
+    params: k reflect.Value
+    results: keyRank
+  - doc: "compareKeys orders two map keys deterministically: by rank, then by value."
+    name: compareKeys
+    params: a, b reflect.Value
+    results: int
+  - doc: unwrapKey returns what an interface key holds.
+    name: unwrapKey
+    params: k reflect.Value
+    results: reflect.Value
+  - doc: compareSameRank orders two keys of the same rank by value.
+    name: compareSameRank
+    params: a, b reflect.Value, rank keyRank
+    results: int
+  - doc: boolOrder maps false to 0 and true to 1.
+    name: boolOrder
+    params: b bool
+    results: int
+  - doc: |-
+      literalFits reports whether s is written as a literal block placed at: it
+      spans lines, a block carries it verbatim, and at the root its first line
+      shows its indentation — libyaml reads a root indicator differently from the
+      specification, so the encoder never writes one there.
+    name: literalFits
+    params: s string, at place
+    results: bool
+  - doc: |-
+      needsIndentIndicator reports whether a literal block of s needs an
+      indentation indicator: its first line starts with a blank or is empty, so
+      the reader cannot detect the indentation from it.
+    name: needsIndentIndicator
+    params: s string
+    results: bool
+  - doc: |-
+      literalSafe reports whether every reader reads s back from a literal block:
+      it holds a line with content, and no character a block cannot carry
+      verbatim — a carriage return, a control character, a byte order mark, or a
+      character YAML 1.1 reads as a line break.
+    name: literalSafe
+    params: s string
+    results: bool
+  - doc: validText reports whether s is UTF-8, which every YAML scalar is.
+    name: validText
+    params: s string
+    results: bool
+  - doc: |-
+      printable reports whether r may appear verbatim in any scalar the encoder
+      writes.
+    name: printable
+    params: r rune
+    results: bool
+  - doc: isControl reports whether r is a C0 or C1 control character, or DEL.
+    name: isControl
+    params: r rune
+    results: bool
+  - doc: |-
+      isMisread reports whether r is a character a reader may take for something
+      else: a line break to YAML 1.1, a byte order mark, a non-character.
+    name: isMisread
+    params: r rune
+    results: bool
+  - doc: |-
+      plainSafe reports whether s can be written as a plain scalar and read back
+      as the same string by every reader: it is not empty, its edges and its
+      inside hold nothing a reader takes for an indicator, every character is
+      printable and none is a tab, no reader takes it for anything but a string,
+      and it is neither a document marker nor the merge key — which yaml.v3 reads
+      as a merge and the subset refuses as a key. flow refuses the flow
+      indicators too.
+    name: plainSafe
+    params: s string, flow bool
+    results: bool
+  - doc: |-
+      plainEdgesSafe reports whether s neither starts with an indicator or a
+      blank nor ends with a blank or a ":".
+    name: plainEdgesSafe
+    params: s string
+    results: bool
+  - doc: |-
+      plainInsideUnsafe reports whether s holds a value indicator or a comment —
+      and, in flow context, a flow indicator, a ":" or a "#" anywhere.
+    name: plainInsideUnsafe
+    params: s string, flow bool
+    results: bool
+  - doc: |-
+      allPlainPrintable reports whether every character of s is printable and
+      none is a tab.
+    name: allPlainPrintable
+    params: s string
+    results: bool
+  - doc: startsWithMarker reports whether s starts like a document marker.
+    name: startsWithMarker
+    params: s string
+    results: bool
+  - doc: |-
+      appendDoubleQuoted writes s as a double-quoted scalar, escaping what must
+      be: the quote, the backslash, and every character printable rejects.
+    name: appendDoubleQuoted
+    params: buf *bytes.Buffer, s string
+  - doc: |-
+      appendQuotedRune writes r inside a double-quoted scalar: its short escape,
+      a hexadecimal escape, or itself.
+    name: appendQuotedRune
+    params: buf *bytes.Buffer, r rune
+  - doc: |-
+      appendHexEscape writes r as \xXX when it fits a byte, \uXXXX otherwise. A
+      character printable rejects is always within the first plane.
+    name: appendHexEscape
+    params: buf *bytes.Buffer, r rune
+  - doc: appendHexDigits writes the low digits hexadecimal digits of r.
+    name: appendHexDigits
+    params: buf *bytes.Buffer, r rune, digits int
+  - doc: |-
+      appendFloat writes f so that every reader reads it back as a float: .inf,
+      -.inf and .nan for the special values, and a decimal that always carries a
+      dot — 1.0 rather than 1, 1.0e+21 rather than 1e+21 — since YAML 1.1 needs
+      the dot and the core schema reads a dotless decimal as an integer.
+    name: appendFloat
+    params: dst []byte, f float64, bits int
+    results: "[]byte"
+  - doc: specialFloatText returns the core schema's spelling of an infinity or NaN.
+    name: specialFloatText
+    params: f float64
+    results: string, bool
+  - doc: |-
+      isNullText reports whether a plain scalar's text is one of the core
+      schema's spellings of null.
+    name: isNullText
+    params: text string
+    results: bool
+  - doc: acquireParser returns a parser reset to read src.
+    name: acquireParser
+    params: src string
+    results: "*parser"
+  - doc: releaseParser hands p back to the pool.
+    name: releaseParser
+    params: p *parser
+  - doc: "isBlank reports whether c separates tokens on a line: a space or a tab."
+    name: isBlank
+    params: c byte
+    results: bool
+  - doc: |-
+      resolvePlain reads a plain scalar's text by the YAML 1.2 core schema
+      (YAML 1.2.2 §10.3.2).
+    name: resolvePlain
+    params: text string
+    results: scalarValue
+  - doc: |-
+      resolveNumber reads text, which starts like a number, as an integer, a
+      float, or — when it matches neither grammar — a string.
+    name: resolveNumber
+    params: text string
+    results: scalarValue
+  - doc: specialFloat reads the core schema's spellings of infinity and NaN.
+    name: specialFloat
+    params: text string
+    results: float64, bool
+  - doc: prefixedInteger splits a 0o or 0x integer into its digits and its base.
+    name: prefixedInteger
+    params: text string
+    results: digits string, base int, ok bool
+  - doc: resolveFloat reads a decimal float, refusing one past float64.
+    name: resolveFloat
+    params: text string
+    results: scalarValue
+  - doc: |-
+      resolveBase reads digits as an unsigned integer in base, or a string when
+      they are not all digits of that base.
+    name: resolveBase
+    params: digits string, base int
+    results: scalarValue
+  - doc: |-
+      resolveDecimal reads a decimal integer: refused when a leading zero makes
+      YAML 1.1 read it as octal, out of range past 64 bits.
+    name: resolveDecimal
+    params: text string
+    results: scalarValue
+  - doc: |-
+      digitValue returns the value of the hexadecimal digit c, or 16 when c is
+      not one.
+    name: digitValue
+    params: c byte
+    results: int
+  - doc: isDigit reports whether c is a decimal digit.
+    name: isDigit
+    params: c byte
+    results: bool
+  - doc: isDecimalInteger reports whether text matches [-+]?[0-9]+.
+    name: isDecimalInteger
+    params: text string
+    results: bool
+  - doc: |-
+      isDecimalFloat reports whether text matches the core schema's float:
+      [-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)? with a dot or an exponent.
+    name: isDecimalFloat
+    params: text string
+    results: bool
+  - doc: skipSign returns i past an optional sign at i.
+    name: skipSign
+    params: text string, i int
+    results: int
+  - doc: |-
+      scanExponent reads an optional exponent at i: it returns the offset past it,
+      whether there was one, and false when an "e" has no digits.
+    name: scanExponent
+    params: text string, i int
+    results: end int, present, ok bool
+  - doc: countDigits returns how many decimal digits text holds from i on.
+    name: countDigits
+    params: text string, i int
+    results: int
+  - doc: |-
+      isYAML11Bool reports whether text is one of the spellings YAML 1.1 reads as
+      a boolean and YAML 1.2 as a string — the words the subset never takes for a
+      boolean, and the encoder always quotes.
+    name: isYAML11Bool
+    params: text string
+    results: bool
+  - doc: |-
+      readsAsNonString reports whether some YAML reader would take the plain
+      scalar text for something other than a string: the core schema, YAML 1.1
+      (booleans, underscores, base 2, sexagesimal), or a timestamp. The encoder
+      quotes every such string, so what it writes reads back as text in every
+      reader.
+    name: readsAsNonString
+    params: text string
+    results: bool
+  - doc: |-
+      looksNumeric reports whether text starts like a number and holds nothing a
+      number in any YAML dialect could not — digits, signs, a dot, underscores,
+      colons (YAML 1.1's base 60), and the letters of 0x, 0o, 0b and exponents.
+      Underscores are skipped where the number starts, as yaml.v3 drops every
+      underscore before it parses a number: +_0 is 0 to it, +._5 is 0.5.
+    name: looksNumeric
+    params: text string
+    results: bool
+  - doc: |-
+      startsLikeNumber reports whether text has a digit, or a dot and a digit, at
+      i — once the underscores before each are skipped.
+    name: startsLikeNumber
+    params: text string, i int
+    results: bool
+  - doc: skipUnderscores returns i past every underscore at i.
+    name: skipUnderscores
+    params: text string, i int
+    results: int
+  - doc: isNumberChar reports whether c can appear in a number of some YAML dialect.
+    name: isNumberChar
+    params: c byte
+    results: bool
+  - doc: |-
+      looksLikeTimestamp reports whether text starts like a YAML 1.1 timestamp:
+      four digits and a dash.
+    name: looksLikeTimestamp
+    params: text string
+    results: bool
+  - doc: isFlowIndicator reports whether c is one of the flow indicators , [ ] { }.
+    name: isFlowIndicator
+    params: c byte
+    results: bool
+  - doc: |-
+      appendFold appends the fold between two lines of a scalar: a space when no
+      empty line separates them, otherwise one line feed per empty line.
+    name: appendFold
+    params: text []byte, breaks int
+    results: "[]byte"
+  - doc: |-
+      needsBuilding reports whether c, inside a quoted scalar opened by quote, is
+      an escape, a quote that is not closing, or a line break.
+    name: needsBuilding
+    params: c, quote byte
+    results: bool
+  - doc: |-
+      isScalarValue reports whether value is a Unicode scalar value: at most
+      U+10FFFF, and not a UTF-16 surrogate.
+    name: isScalarValue
+    params: value uint64
+    results: bool
+  - doc: |-
+      blockIndent returns the content indentation an explicit indicator gives a
+      block scalar inside parent: relative to the parent, and — as libyaml has
+      it — absolute at the root. Without an indicator it is 0: detected.
+    name: blockIndent
+    params: parent, indicator int
+    results: int
+  - doc: chompOf returns the chomping a "+" or a "-" indicator says.
+    name: chompOf
+    params: indicator byte
+    results: chomping
+  - doc: structInfoOf returns the struct information of t, from the cache.
+    name: structInfoOf
+    params: t reflect.Type
+    results: "*structInfo"
+  - doc: |-
+      buildStructInfo adds t's fields to info, prefixing their index paths with
+      prefix. visiting holds the structs being inlined, so a cycle of inlined
+      structs is refused instead of recursing forever.
+    name: buildStructInfo
+    params: info *structInfo, t reflect.Type, prefix []int, visiting map[reflect.Type]bool
+  - doc: |-
+      yamlTag returns the field's yaml tag, and false when the field takes no
+      part: unexported and not embedded, or tagged "-". Like yaml.v3, a field
+      whose whole tag holds no ":" is read as a bare yaml tag.
+    name: yamlTag
+    params: field reflect.StructField
+    results: string, bool
+  - doc: |-
+      parseTagFlags reads the comma-separated flags of a yaml tag, returning the
+      reason when one is unknown.
+    name: parseTagFlags
+    params: flags string
+    results: tagFlags, string
+  - doc: |-
+      inlineField merges an ",inline" field into info: a struct's (or a pointer
+      to a struct's) fields join the parent's, a map with string keys collects
+      the keys no field declares.
+    name: inlineField
+    params: info *structInfo, field reflect.StructField, index []int, visiting map[reflect.Type]bool
+  - doc: addField adds f to info, refusing a key two fields declare.
+    name: addField
+    params: info *structInfo, f fieldInfo
+  - doc: |-
+      decodeDocument parses data as one document of the subset and decodes it
+      into v, a non-nil pointer. firstLine is the line number of data's first
+      line, so a document read from a stream is located in the stream. An empty
+      document leaves v unchanged.
+    name: decodeDocument
+    params: data []byte, v any, firstLine int
+    results: error
+  - doc: |-
+      prepareSource checks data is text YAML can hold — UTF-8, no control
+      character but tab and line breaks, no character YAML 1.1 and 1.2 read
+      differently — and returns it as a string with every line break normalised
+      to "\n". The check runs before the parse, so the parser never meets a byte
+      it has to second-guess.
+    name: prepareSource
+    params: data []byte, firstLine int
+    results: string, error
+  - doc: |-
+      forbiddenCharacter returns the offset of the first character of data the
+      subset refuses, why, and whether there is one.
+    name: forbiddenCharacter
+    params: data []byte
+    results: int, string, bool
+  - doc: |-
+      forbiddenRune reports whether the character r, encoded in size bytes at
+      byte offset off, is refused, and why.
+    name: forbiddenRune
+    params: r rune, size, off int
+    results: string, bool
+  - doc: |-
+      isAmbiguousBreak reports whether r is a line break to YAML 1.1 and text to
+      YAML 1.2.
+    name: isAmbiguousBreak
+    params: r rune
+    results: bool
+  - doc: |-
+      isForbiddenControl reports whether r is a control character a document
+      cannot hold raw — any but tab and the line breaks — or a non-character.
+    name: isForbiddenControl
+    params: r rune
+    results: bool
+  - doc: |-
+      sourceError is a syntax error at byte i of data, whose first line is
+      firstLine.
+    name: sourceError
+    params: data []byte, i, firstLine int, detail string
+    results: error
+  - doc: describe names what node n is, for a refusal.
+    name: describe
+    params: n *node
+    results: string
+  - doc: describeResolved names a plain scalar's reading by the core schema.
+    name: describeResolved
+    params: kind resolvedKind
+    results: string
+  - doc: |-
+      intAny returns i as an int when it fits one, as an int64 otherwise — on a
+      32-bit platform.
+    name: intAny
+    params: i int64
+    results: any
+  - doc: |-
+      mayHaveHooks reports whether t can carry a method: a predeclared scalar
+      type and an unnamed slice, map or pointer cannot, which spares the hooks
+      cache a lookup for nearly every value of a document.
+    name: mayHaveHooks
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      allocateThrough follows v's pointers, allocating the nil ones, and returns
+      the value they lead to.
+    name: allocateThrough
+    params: v reflect.Value
+    results: reflect.Value
+  - doc: |-
+      decodeNull applies null to v: nil for a pointer, a map, a slice or an
+      interface; nothing for any other kind, as encoding/json and yaml.v3 do.
+    name: decodeNull
+    params: v reflect.Value
+  - doc: nullable reports whether a value of kind k can be nil.
+    name: nullable
+    params: k reflect.Kind
+    results: bool
+  - doc: |-
+      fieldForWrite returns the field at index in v, allocating the nil pointers
+      of inlined structs on the way.
+    name: fieldForWrite
+    params: v reflect.Value, index []int
+    results: reflect.Value
+  - doc: wholeInt returns f as an int64 when it is a whole number within range.
+    name: wholeInt
+    params: f float64
+    results: int64, bool
+  - doc: wholeUint returns f as a uint64 when it is a whole number within range.
+    name: wholeUint
+    params: f float64
+    results: uint64, bool
+imports:
+  bufio: bufio
+  bytes: bytes
+  cmp: cmp
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coreyaml: github.com/kitsunium/sdk/internal/core/data/codec/yaml
+  encoding: encoding
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  maps: maps
+  math: math
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/yaml
+  name: yaml
+  purpose: "Package yaml — the block structure: mappings, sequences, keys and values."
+types:
+  - doc: yamlCodec is the concrete Codec implementation for YAML.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*yamlCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*yamlCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*yamlCodec"
+        results: "[]string"
+      - doc: Marshal writes v as one YAML document.
+        name: Marshal
+        params: v any
+        recv: "*yamlCodec"
+        results: encoded []byte, err error
+      - doc: |-
+          Unmarshal reads data as exactly one YAML document of the subset into v,
+          which must be a non-nil pointer. An empty document leaves v unchanged.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*yamlCodec"
+        results: error
+      - doc: |-
+          Append encodes v as YAML and appends the bytes to dst, leaving dst
+          untouched on error. It implements codec.Appender.
+        name: Append
+        params: dst []byte, v any
+        recv: "*yamlCodec"
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder returns a codec.Encoder writing one document per Encode to w,
+          separated by "---".
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*yamlCodec"
+        results: codec.Encoder
+      - doc: NewDecoder returns a codec.Decoder reading one document per Decode from r.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*yamlCodec"
+        results: codec.Decoder
+    name: yamlCodec
+  - doc: |-
+      yamlDecoder reads a stream of documents, each separated by a "---" line or
+      closed by a "..." line, and decodes them one per Decode. A document is
+      read whole — bounded at maxYAMLBytes — and then parsed exactly as Unmarshal
+      parses one, so every refusal of the subset applies to each.
+    fields:
+      - doc: r reads the stream.
+        name: r
+        type: "*bufio.Reader"
+      - doc: doc holds the document being read; reused across Decode calls.
+        name: doc
+        type: "[]byte"
+      - doc: |-
+          next holds a "---" line read past the end of the previous document,
+          which opens the next one.
+        name: next
+        type: "[]byte"
+      - doc: line counts the stream's lines consumed before the next document.
+        name: line
+        type: int
+      - doc: done latches the end of the stream or a failure.
+        name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode reads the next document into v. It returns io.EOF once the stream
+          holds no further document.
+        name: Decode
+        params: v any
+        recv: d *yamlDecoder
+        results: error
+      - doc: |-
+          More reports whether Decode may still return a document: false once the
+          stream has ended or a Decode has failed.
+        name: More
+        recv: d *yamlDecoder
+        results: bool
+      - doc: |-
+          readDocument reads the next document's lines into d.doc and reports whether
+          there was one: a document is closed by a "..." line, by the "---" line that
+          opens the next, or by the end of the stream, and is one when it holds a
+          "---" or content.
+        name: readDocument
+        recv: d *yamlDecoder
+        results: bool, error
+      - doc: |-
+          appendLine appends the stream's next line to d.doc and returns where it
+          starts and whether the stream ended with it; a read failure other than the
+          end is returned as such.
+        name: appendLine
+        recv: d *yamlDecoder
+        results: start int, last bool, err error
+      - doc: |-
+          takeLine classifies the line d.doc[start:] for the document being read and
+          reports whether the document ends with it: a "---" after a document opens
+          the next one and is carried over, a "..." closes this one.
+        name: takeLine
+        params: state *documentState, start int
+        recv: d *yamlDecoder
+        results: bool, error
+      - doc: |-
+          readLine appends the next line of the stream, its line break included, to
+          dst, refusing a document that grows past maxYAMLBytes.
+        name: readLine
+        params: dst []byte
+        recv: d *yamlDecoder
+        results: "[]byte, error"
+    name: yamlDecoder
+  - doc: documentState is what readDocument has seen of the document it reads.
+    fields:
+      - doc: explicit says a "---" opened it.
+        name: explicit
+        type: bool
+      - doc: content says a line held content.
+        name: content
+        type: bool
+    kind: struct
+    methods:
+      - doc: "found reports whether the document is one: a \"---\" or content."
+        name: found
+        recv: s *documentState
+        results: bool
+    name: documentState
+  - doc: |-
+      yamlEncoder writes a stream of documents to w. A failed write is sticky:
+      every later Encode, and Close, return it, so a caller who checks only Close
+      still learns the stream is incomplete.
+    fields:
+      - doc: w receives the documents.
+        name: w
+        type: io.Writer
+      - doc: err is the first write failure.
+        name: err
+        type: error
+      - doc: written counts the documents written.
+        name: written
+        type: int
+      - doc: closed refuses an Encode after Close.
+        name: closed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Encode writes v as the next document. A value the encoder cannot write is
+          refused before anything reaches w, and does not end the stream.
+        name: Encode
+        params: v any
+        recv: e *yamlEncoder
+        results: error
+      - doc: |-
+          Close ends the stream. Every document is written whole by Encode, so there
+          is nothing to flush; Close reports a write that failed.
+        name: Close
+        recv: e *yamlEncoder
+        results: error
+    name: yamlEncoder
+  - doc: |-
+      flowCollection is the flow collection being parsed: where it opened, what
+      closes it, and where its children start on the stack.
+    fields:
+      - doc: line is the line it opened on.
+        name: line
+        type: int
+      - doc: off is the offset of its opening indicator.
+        name: "off"
+        type: int
+      - doc: base is where its children start on the stack.
+        name: base
+        type: int
+      - doc: index is its node.
+        name: index
+        type: int32
+      - doc: kind is a sequence or a mapping.
+        name: kind
+        type: nodeKind
+      - doc: closing is "]" or "}".
+        name: closing
+        type: byte
+    kind: struct
+    name: flowCollection
+  - doc: |-
+      typeHooks records which hooks a type and its pointer implement, one bit
+      each.
+    kind: named
+    methods:
+      - doc: has reports whether the hook bit is set.
+        name: has
+        params: hook typeHooks
+        recv: h typeHooks
+        results: bool
+    name: typeHooks
+    underlying: uint16
+  - doc: |-
+      marshalYAMLer is the hook a type implements to choose what it is written
+      as: MarshalYAML returns the value written in its place. It is
+      gopkg.in/yaml.v3's Marshaler, method for method, so a type written for
+      yaml.v3 keeps working.
+    kind: named
+    name: marshalYAMLer
+    underlying: |-
+      interface {
+      	MarshalYAML() (any, error)
+      }
+  - doc: |-
+      unmarshalYAMLer is the hook a type implements to read itself:
+      UnmarshalYAML is handed a function that decodes the node into any value
+      the hook chooses. It is the hook yaml.v2 defined and yaml.v3 still calls.
+      yaml.v3's other form, UnmarshalYAML(*yaml.Node), names a yaml.v3 type and
+      is refused.
+    kind: named
+    name: unmarshalYAMLer
+    underlying: |-
+      interface {
+      	UnmarshalYAML(unmarshal func(any) error) error
+      }
+  - doc: |-
+      isZeroer is the hook omitempty asks first, as yaml.v3 does: time.Time is
+      empty when IsZero says so.
+    kind: named
+    name: isZeroer
+    underlying: |-
+      interface {
+      	IsZero() bool
+      }
+  - doc: place is where a value is written.
+    kind: named
+    name: place
+    underlying: uint8
+  - doc: shape is what a resolved value writes as.
+    kind: named
+    name: shape
+    underlying: uint8
+  - doc: encoder writes one document into buf.
+    fields:
+      - doc: buf receives the document.
+        name: buf
+        type: "*bytes.Buffer"
+      - doc: depth is how many values enclose the one being written.
+        name: depth
+        type: int
+    kind: struct
+    methods:
+      - doc: encodeDocument writes v as one document.
+        name: encodeDocument
+        params: v any
+        recv: e *encoder
+        results: error
+      - doc: |-
+          enter counts one level of nesting, refusing a value nested past maxDepth —
+          which is how a cyclic value is refused instead of recursing forever.
+        name: enter
+        recv: e *encoder
+        results: error
+      - doc: leave undoes enter.
+        name: leave
+        recv: e *encoder
+      - doc: |-
+          writeAny writes the value x, placed at, inside a collection whose entries
+          sit at column col. flow writes a collection in flow style. The common
+          untyped shapes are written without reflection.
+        name: writeAny
+        params: x any, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeUntypedScalar writes nil, a bool, an int or a float64 without
+          reflection, and reports whether x was one.
+        name: writeUntypedScalar
+        params: x any, at place
+        recv: e *encoder
+        results: bool
+      - doc: writeValue writes the reflected value v; see writeAny.
+        name: writeValue
+        params: v reflect.Value, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          resolve walks v's pointers and interfaces and applies the first hook met:
+          MarshalYAML, MarshalText, a duration's text. A chain of indirections counts
+          against the depth bound, so a cycle of pointers ends.
+        name: resolve
+        params: v reflect.Value
+        recv: e *encoder
+        results: resolved, error
+      - doc: writeKind writes v, which is neither a pointer nor an interface, by kind.
+        name: writeKind
+        params: v reflect.Value, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendScalarKind writes a boolean or a number's text, and reports whether v
+          was one.
+        name: appendScalarKind
+        params: v reflect.Value
+        recv: e *encoder
+        results: bool
+      - doc: separate writes the space after a key's ":" or an entry's "-".
+        name: separate
+        params: at place
+        recv: e *encoder
+      - doc: writeScalarText writes a scalar's text, placed at.
+        name: writeScalarText
+        params: text string, at place
+        recv: e *encoder
+      - doc: |-
+          writeInt writes an integer, placed at. The digits are formatted into the
+          buffer's spare capacity after the separator is written, so nothing is
+          allocated and nothing overwrites them.
+        name: writeInt
+        params: i int64, at place
+        recv: e *encoder
+      - doc: writeFloat writes a float of bits bits, placed at, as writeInt does.
+        name: writeFloat
+        params: f float64, bits int, at place
+        recv: e *encoder
+      - doc: |-
+          openBlock writes what precedes a block collection's first entry, placed
+          at, and returns the column of its entries and whether the first entry
+          continues the current line.
+        name: openBlock
+        params: col int, at place
+        recv: e *encoder
+        results: inner int, firstInline bool
+      - doc: writeIndent writes n spaces.
+        name: writeIndent
+        params: n int
+        recv: e *encoder
+      - doc: |-
+          writeEntryStart writes the indentation of a collection's entry: none for
+          the first entry of a collection that continues its parent's line.
+        name: writeEntryStart
+        params: inner int, first, firstInline bool
+        recv: e *encoder
+      - doc: writeStringMap writes a map[string]any, keys sorted.
+        name: writeStringMap
+        params: m map[string]any, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: writeKeyThen writes a string key and its ":", then calls value.
+        name: writeKeyThen
+        params: key string, value func() error
+        recv: e *encoder
+        results: error
+      - doc: writeList writes a []any.
+        name: writeList
+        params: list []any, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: "writeMap writes a map, keys sorted: numbers by value, strings by bytes."
+        name: writeMap
+        params: v reflect.Value, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeTextKeyedMap writes a non-empty map whose keys are plain strings, keys
+          sorted by bytes. MapKeys and MapIndex each allocate per entry; here the
+          keys are read into one slice and the values into one reflected slice, so
+          the cost is a handful of allocations whatever the map's size.
+        name: writeTextKeyedMap
+        params: v reflect.Value, col int, at place
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeStruct writes a struct's fields in declaration order, omitempty
+          fields left out when empty, then its inline map's entries, keys sorted.
+        name: writeStruct
+        params: v reflect.Value, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeStructFields writes v's visible fields as block entries and reports
+          whether the first entry is still to come, placed inline.
+        name: writeStructFields
+        params: v reflect.Value, info *structInfo, inner int, firstInline bool
+        recv: e *encoder
+        results: bool, error
+      - doc: |-
+          writeInlineEntries writes the entries of v's inline map, keys in the order
+          given. pending says the first of them continues its parent's line.
+        name: writeInlineEntries
+        params: v reflect.Value, info *structInfo, keys []reflect.Value, inner int, pending bool
+        recv: e *encoder
+        results: error
+      - doc: writeSequence writes a slice or an array.
+        name: writeSequence
+        params: v reflect.Value, col int, at place, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeKey writes a string mapping key and its ":". A key is a scalar on one
+          line of at most 1024 bytes, so every reader takes it for an implicit key.
+        name: writeKey
+        params: key string
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendStringKey writes key's text: plain when it reads back as the same
+          string, double-quoted otherwise.
+        name: appendStringKey
+        params: key string, flow bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeKeyValueThen writes a reflected mapping key and its ":", then calls
+          value.
+        name: writeKeyValueThen
+        params: k reflect.Value, value func() error
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeString writes a string, placed at: a literal block when it spans
+          lines and every reader would read the block back, plain when it reads back
+          as the same string everywhere, double-quoted otherwise.
+        name: writeString
+        params: s string, col int, at place
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeLiteral writes s as a literal block scalar: its header, then each line
+          one step deeper than the parent, with the chomping indicator that keeps
+          exactly s's trailing line breaks.
+        name: writeLiteral
+        params: s string, col int, at place
+        recv: e *encoder
+      - doc: |-
+          writeLiteralHeader writes a literal block's header: "|", the indentation
+          indicator when the first line cannot show the indentation, and the
+          chomping indicator for trailing line breaks.
+        name: writeLiteralHeader
+        params: s string, trailing int, at place
+        recv: e *encoder
+      - doc: openFlow writes what precedes a flow collection placed at.
+        name: openFlow
+        params: at place
+        recv: e *encoder
+      - doc: |-
+          finishFlow ends the line of a flow collection that was written without
+          error.
+        name: finishFlow
+        params: err error
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeFlowAny writes x in flow style, with no line break: collections in
+          brackets, strings plain when flow-safe and double-quoted otherwise.
+        name: writeFlowAny
+        params: x any
+        recv: e *encoder
+        results: error
+      - doc: |-
+          appendUntypedScalar writes nil, a bool, an int or a float64 in flow style,
+          and reports whether x was one.
+        name: appendUntypedScalar
+        params: x any
+        recv: e *encoder
+        results: bool
+      - doc: writeFlowString writes s in a flow collection.
+        name: writeFlowString
+        params: s string
+        recv: e *encoder
+        results: error
+      - doc: writeFlowValue writes the reflected value v in flow style.
+        name: writeFlowValue
+        params: v reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: writeFlowKind writes v, neither a pointer nor an interface, in flow style.
+        name: writeFlowKind
+        params: v reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: writeFlowMapValue writes a reflected map in flow style.
+        name: writeFlowMapValue
+        params: v reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: writeFlowStructValue writes a struct in flow style.
+        name: writeFlowStructValue
+        params: v reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: writeFlowStringMap writes a map[string]any in flow style, keys in order.
+        name: writeFlowStringMap
+        params: m map[string]any, keys []string
+        recv: e *encoder
+        results: error
+      - doc: flowSeparator writes ", " before every entry but the first.
+        name: flowSeparator
+        params: i int
+        recv: e *encoder
+      - doc: writeFlowList writes a []any in flow style.
+        name: writeFlowList
+        params: list []any
+        recv: e *encoder
+        results: error
+      - doc: writeFlowMap writes a map in flow style, keys in the order given.
+        name: writeFlowMap
+        params: v reflect.Value, keys []reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeFlowEntry writes a reflected key, its ": ", and its value, in flow
+          style.
+        name: writeFlowEntry
+        params: k, value reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeFlowStruct writes a struct in flow style: its visible fields, then its
+          inline map's entries.
+        name: writeFlowStruct
+        params: v reflect.Value, info *structInfo, inline []reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: |-
+          writeFlowFields writes v's visible fields in flow style and returns how
+          many it wrote.
+        name: writeFlowFields
+        params: v reflect.Value, info *structInfo
+        recv: e *encoder
+        results: int, error
+      - doc: writeFlowSequence writes a slice or an array in flow style.
+        name: writeFlowSequence
+        params: v reflect.Value
+        recv: e *encoder
+        results: error
+      - doc: "writeFlowKey writes a string key and its \": \" in a flow mapping."
+        name: writeFlowKey
+        params: key string
+        recv: e *encoder
+        results: error
+    name: encoder
+  - doc: resolved is a value once its pointers, interfaces and hooks are resolved.
+    fields:
+      - doc: replacement is what a MarshalYAML hook returned, for shapeAny.
+        name: replacement
+        type: any
+      - doc: value is the value to write by kind, for shapeValue.
+        name: value
+        type: reflect.Value
+      - doc: text is the string to write, for shapeText.
+        name: text
+        type: string
+      - doc: shape says which of the three is written.
+        name: shape
+        type: shape
+    kind: struct
+    name: resolved
+  - doc: keyRank orders keys of different kinds.
+    kind: named
+    name: keyRank
+    underlying: uint8
+  - doc: |-
+      renderedKey is a mapping key's text, and whether it is a string (to quote
+      as needed) or a number or boolean (written as it is).
+    fields:
+      - doc: text is the key's text.
+        name: text
+        type: string
+      - doc: isString says the text is a string.
+        name: isString
+        type: bool
+    kind: struct
+    name: renderedKey
+  - doc: nodeKind is what a parsed node is.
+    kind: named
+    name: nodeKind
+    underlying: uint8
+  - doc: |-
+      scalarStyle is how a scalar was written; only a plain scalar is resolved by
+      the core schema, every other style is a string.
+    kind: named
+    name: scalarStyle
+    underlying: uint8
+  - doc: |-
+      node is one node of a parsed document, held in the parser's arena and
+      addressed by its index.
+    fields:
+      - doc: value is a scalar's content, its escapes and folding applied.
+        name: value
+        type: string
+      - doc: |-
+          off is the byte offset of the node's first character: an error turns it
+          into a column only when one is reported.
+        name: "off"
+        type: int32
+      - doc: line is the 1-based line of the node's first character.
+        name: line
+        type: int32
+      - doc: first is the index in parser.kids of the node's first child.
+        name: first
+        type: int32
+      - doc: "count is how many children the node has: a mapping has two per entry."
+        name: count
+        type: int32
+      - doc: kind is scalar, mapping or sequence.
+        name: kind
+        type: nodeKind
+      - doc: style is how a scalar was written.
+        name: style
+        type: scalarStyle
+    kind: struct
+    methods:
+      - doc: "isNull reports whether n is a null: an empty node, or a plain ~ or null."
+        name: isNull
+        recv: n *node
+        results: bool
+    name: node
+  - doc: |-
+      parser reads one document of the subset into an arena of nodes. It is used
+      by one goroutine at a time and recycled through parserPool.
+    fields:
+      - doc: dup is the scratch set a large mapping's keys are checked against.
+        name: dup
+        type: map[string]struct{}
+      - doc: src is the document, line breaks normalised to "\n".
+        name: src
+        type: string
+      - doc: nodes is the arena; a node is addressed by its index.
+        name: nodes
+        type: "[]node"
+      - doc: kids holds every collection's children, each collection's contiguous.
+        name: kids
+        type: "[]int32"
+      - doc: stack collects the children of the collections being parsed.
+        name: stack
+        type: "[]int32"
+      - doc: text is the scratch a scalar with escapes or folding is built in.
+        name: text
+        type: "[]byte"
+      - doc: pos is the byte offset of the cursor.
+        name: pos
+        type: int
+      - doc: line is the 1-based line of the cursor.
+        name: line
+        type: int
+      - doc: lineStart is the byte offset where the cursor's line starts.
+        name: lineStart
+        type: int
+      - doc: depth is how many collections enclose the cursor.
+        name: depth
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          isEntry reports whether the byte at i starts a block sequence entry: a "-"
+          followed by a blank or the end of its line.
+        name: isEntry
+        params: i int
+        recv: p *parser
+        results: bool
+      - doc: |-
+          parseBlockNode parses the node whose first character is under the cursor,
+          in block context. parent is the indentation of the collection holding the
+          node: -1 at the root.
+        name: parseBlockNode
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseBlockMapping parses a block mapping whose first key is under the
+          cursor at column indent; every later key sits at the same column on a line
+          of its own.
+        name: parseBlockMapping
+        params: indent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseBlockEntry parses one entry of a block mapping — its key and its value
+          — onto the stack.
+        name: parseBlockEntry
+        params: indent int
+        recv: p *parser
+        results: error
+      - doc: |-
+          nextEntry moves to the next content line and reports whether it continues
+          the block collection whose entries sit at column indent; when it does, the
+          cursor is left on the entry. A line indented deeper than the entries is
+          refused: nothing of the previous entry can still be open.
+        name: nextEntry
+        params: indent int
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          parseBlockSequence parses a block sequence whose first "-" is under the
+          cursor at column indent.
+        name: parseBlockSequence
+        params: indent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          nextSequenceEntry reports whether the next content line is another entry of
+          the block sequence at column indent. A line at that column that is not an
+          entry belongs to the mapping an indentless sequence is the value of: the
+          cursor goes back to its start.
+        name: nextSequenceEntry
+        params: indent int
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          parseBlockValue parses what follows a mapping key's ":" or a sequence
+          entry's "-": a node on the same line, a node on the lines below indented
+          deeper than parent, or nothing — the empty node. mapValue says which.
+        name: parseBlockValue
+        params: parent int, mapValue bool
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          entrySeparator refuses a tab after a sequence entry's "-": libyaml reads
+          the start of an entry as indentation.
+        name: entrySeparator
+        params: mapValue bool
+        recv: p *parser
+        results: error
+      - doc: |-
+          parseValueOnLine parses a value that starts on the line of its key or its
+          "-". A mapping value may not be a block sequence or a mapping on that line;
+          a sequence entry may hold either, compact.
+        name: parseValueOnLine
+        params: parent int, mapValue bool
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseMapValueOnLine parses a mapping value on the line of its key: a block
+          collection cannot start there.
+        name: parseMapValueOnLine
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseEntryOnLine parses a sequence entry on the line of its "-": a compact
+          sequence, a compact mapping, a scalar or a flow collection.
+        name: parseEntryOnLine
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseValueBelow parses a value written on the lines after its key or its
+          "-": a node indented deeper than parent, an indentless sequence at the key's
+          own indentation, or nothing.
+        name: parseValueBelow
+        params: parent int, mapValue bool, line, off int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseImplicitKey parses the mapping key under the cursor, through the ":"
+          that ends it. A key is a scalar on one line; anything else is refused by
+          name.
+        name: parseImplicitKey
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          scanBlockKey scans a block mapping key: double-quoted, single-quoted or
+          plain, on one line. A flow collection as a key is refused by name.
+        name: scanBlockKey
+        params: line, off int
+        recv: p *parser
+        results: string, scalarStyle, error
+      - doc: |-
+          keyIndicator checks the key just scanned — its length, the merge key — and
+          moves past the ":" after it. In flow context a quoted key may be followed by
+          ":" with no blank, as JSON writes it.
+        name: keyIndicator
+        params: line, off int, style scalarStyle, value string, flow bool
+        recv: p *parser
+        results: error
+      - doc: |-
+          checkKey refuses the key src[off:end]: one longer than YAML's bound on an
+          implicit key, or the YAML 1.1 merge key, which copies another mapping.
+        name: checkKey
+        params: line, off, end int, style scalarStyle, value string
+        recv: p *parser
+        results: error
+      - doc: |-
+          refuseNodeIndicator refuses, by name, a construct that begins a node: an
+          anchor, an alias, a tag, an explicit "?" key, a directive; and a reserved
+          indicator.
+        name: refuseNodeIndicator
+        params: flow bool
+        recv: p *parser
+        results: error
+      - doc: |-
+          refuseReserved refuses "%" — a directive at column 0, a reserved indicator
+          anywhere else — and the reserved indicators "@" and "`".
+        name: refuseReserved
+        params: c byte, line, off int
+        recv: p *parser
+        results: error
+      - doc: |-
+          parseInlineNode parses the scalar or flow collection under the cursor and
+          the rest of its line.
+        name: parseInlineNode
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: parseInlineValue parses the scalar or flow collection under the cursor.
+        name: parseInlineValue
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          parseInlineFlow parses a flow collection in block context. A collection
+          followed by ":" was a key: a complex key, refused by name.
+        name: parseInlineFlow
+        params: parent, line, off int
+        recv: p *parser
+        results: int32, error
+      - doc: scalarOrError adds the scalar just scanned, unless its scan failed.
+        name: scalarOrError
+        params: value string, style scalarStyle, line, off int, err error
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          followedByValueIndicator reports whether, after blanks, the cursor is on a
+          ":" that makes the node before it a mapping key.
+        name: followedByValueIndicator
+        recv: p *parser
+        results: bool
+      - doc: |-
+          lineHasImplicitKey reports, without moving the cursor, whether the line
+          from the cursor holds an implicit mapping key: a quoted scalar closed on
+          this line, or a plain scalar, followed by ":" and a blank or the end of the
+          line.
+        name: lineHasImplicitKey
+        recv: p *parser
+        results: bool
+      - doc: |-
+          valueIndicatorAfter reports whether, past blanks from i, a ":" followed by
+          a separator sits on the line.
+        name: valueIndicatorAfter
+        params: i int
+        recv: p *parser
+        results: bool
+      - doc: |-
+          plainKeyEnd returns the offset of the ":" ending the plain implicit key
+          starting at i, or -1 when the line holds none before it ends or a comment
+          starts.
+        name: plainKeyEnd
+        params: i int
+        recv: p *parser
+        results: int
+      - doc: |-
+          quotedEnd returns the offset just past the quote closing the quoted scalar
+          opened at i, when it closes on the same line.
+        name: quotedEnd
+        params: i int, quote byte
+        recv: p *parser
+        results: int, bool
+      - doc: |-
+          parseFlowCollection parses the flow sequence or mapping whose opening
+          indicator is under the cursor. It may span lines; the cursor ends just past
+          its closing indicator.
+        name: parseFlowCollection
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          flowStep parses one entry of the flow collection f and the separator after
+          it, and reports whether the collection is closed. A trailing comma before
+          the closing indicator is allowed.
+        name: flowStep
+        params: f *flowCollection, parent int
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          flowEntry parses one entry of a flow collection onto the stack: a node in
+          a sequence (a single "key: value" pair becomes a one-entry mapping), a key
+          and its value in a mapping.
+        name: flowEntry
+        params: kind nodeKind, parent int
+        recv: p *parser
+        results: error
+      - doc: |-
+          flowSequenceEntry parses one node of a flow sequence. A scalar followed by
+          ":" is a single pair, which YAML reads as a mapping of one entry.
+        name: flowSequenceEntry
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          flowPair parses one entry of a flow mapping: a scalar key, then ":" and a
+          value, or no ":" and the empty value ({a, b: 1} holds a: null).
+        name: flowPair
+        params: parent int
+        recv: p *parser
+        results: key, value int32, err error
+      - doc: |-
+          atFlowValueIndicator reports whether the cursor is on a ":" ending a key in
+          flow context: followed by a blank, the end of the line or a flow indicator,
+          or directly after a quoted key, as JSON writes it.
+        name: atFlowValueIndicator
+        params: style scalarStyle
+        recv: p *parser
+        results: bool
+      - doc: "flowKey scans a flow mapping key: a quoted or plain scalar on one line."
+        name: flowKey
+        recv: p *parser
+        results: string, scalarStyle, error
+      - doc: |-
+          flowValue parses the value after a ":" in flow context: a node, or the
+          empty node when the entry ends there.
+        name: flowValue
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: "flowScalar scans a scalar in flow context: quoted, or plain across lines."
+        name: flowScalar
+        params: parent int
+        recv: p *parser
+        results: string, scalarStyle, error
+      - doc: |-
+          skipFlowSpace moves the cursor past blanks, line breaks and comments inside
+          a flow collection that opened at (line, off). The end of the document, or a
+          document marker, inside the collection is refused.
+        name: skipFlowSpace
+        params: line, off int
+        recv: p *parser
+        results: error
+      - doc: |-
+          flowSpaceStep moves the cursor past one blank, line break or comment, and
+          reports whether it moved.
+        name: flowSpaceStep
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          flowSpaceError refuses a document marker the skip stopped on: a document
+          cannot end inside a flow collection.
+        name: flowSpaceError
+        recv: p *parser
+        results: error
+      - doc: |-
+          reset empties the parser for reuse. The used part of the arena is cleared
+          first, so a pooled parser keeps no reference to the document it read.
+        name: reset
+        recv: p *parser
+      - doc: |-
+          at returns the byte at i, or 0 past the end. A document never holds a NUL —
+          prepareSource refuses control characters — so 0 reads as "the end".
+        name: at
+        params: i int
+        recv: p *parser
+        results: byte
+      - doc: peek returns the byte under the cursor, or 0 at the end.
+        name: peek
+        recv: p *parser
+        results: byte
+      - doc: |-
+          blankOrEnd reports whether the byte at i ends a token: a blank, a line
+          break, or the end of the document.
+        name: blankOrEnd
+        params: i int
+        recv: p *parser
+        results: bool
+      - doc: newline moves the cursor past the line break under it.
+        name: newline
+        recv: p *parser
+      - doc: |-
+          col returns the cursor's 0-based byte column — the indentation arithmetic
+          the block structure is decided by.
+        name: col
+        recv: p *parser
+        results: int
+      - doc: |-
+          columnOf returns the 1-based column, in characters, of the byte at off,
+          reading back to the start of its line. It runs only when an error is
+          reported, so the scan costs nothing on the success path.
+        name: columnOf
+        params: off int
+        recv: p *parser
+        results: int
+      - doc: errHere is a syntax error at the cursor.
+        name: errHere
+        params: detail string
+        recv: p *parser
+        results: error
+      - doc: errAt is a syntax error at a recorded position.
+        name: errAt
+        params: line, off int, detail string
+        recv: p *parser
+        results: error
+      - doc: |-
+          refuseAt is a construct of YAML the subset refuses by name, at a recorded
+          position.
+        name: refuseAt
+        params: sentinel *errs.Error, line, off int
+        recv: p *parser
+        results: error
+      - doc: |-
+          add appends n to the arena and returns its index, refusing a document past
+          maxNodes.
+        name: add
+        params: n node
+        recv: p *parser
+        results: int32, error
+      - doc: scalar adds a scalar node starting at (line, off).
+        name: scalar
+        params: value string, style scalarStyle, line, off int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          empty adds the empty node a key or an entry has when nothing follows it: a
+          plain scalar with no text, which the core schema reads as null.
+        name: empty
+        params: line, off int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          open adds a collection node at the cursor and enters it, refusing nesting
+          past maxDepth. Its children are collected on the stack from base onward.
+        name: open
+        params: kind nodeKind
+        recv: p *parser
+        results: collection int32, base int, err error
+      - doc: |-
+          close leaves the collection, moving its children from the stack into kids,
+          where they stay contiguous.
+        name: close
+        params: collection int32, base int
+        recv: p *parser
+      - doc: child returns the j-th child of collection n.
+        name: child
+        params: n *node, j int32
+        recv: p *parser
+        results: int32
+      - doc: skipBlanks moves the cursor past spaces and tabs.
+        name: skipBlanks
+        recv: p *parser
+      - doc: skipToEOL moves the cursor to the line break ending its line, or the end.
+        name: skipToEOL
+        recv: p *parser
+      - doc: |-
+          skipToContent moves the cursor, which is at the start of a line, past every
+          line that is empty, blank or a comment, to the start of the next line that
+          holds content. It reports false at the end of the document. A tab among a
+          line's leading blanks is refused, even on a blank or a comment line: in
+          block context the line's start is its indentation, and libyaml — so yaml.v3
+          — refuses a tab there, which the subset never reads otherwise.
+        name: skipToContent
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          classifyLine looks at the first byte after a line's leading spaces, at i:
+          content stops skipToContent with the cursor at the line's start, an empty or
+          comment line is skipped, a tab is refused.
+        name: classifyLine
+        params: i int
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          lineIndent returns the indentation of the line the cursor starts, which
+          holds content. YAML indents with spaces only: a tab where the indentation
+          is read is refused.
+        name: lineIndent
+        recv: p *parser
+        results: int, error
+      - doc: |-
+          atMarker reports whether the line starting at the cursor is the document
+          marker marker ("---" or "..."), followed by a blank or the end of the line.
+        name: atMarker
+        params: marker string
+        recv: p *parser
+        results: bool
+      - doc: |-
+          atDocumentMarker reports whether the line starting at the cursor is a
+          document start or a document end marker.
+        name: atDocumentMarker
+        recv: p *parser
+        results: bool
+      - doc: |-
+          finishLine accepts the rest of the line after a node: blanks, an optional
+          comment that a blank separates from the node, then the line break or the
+          end. The cursor moves to the start of the next line.
+        name: finishLine
+        recv: p *parser
+        results: error
+      - doc: |-
+          parseDocument parses exactly one document and returns its root node, or
+          noNode when it holds none. Anything after the document — a second one, a
+          directive — is refused by name.
+        name: parseDocument
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          emptyDocument ends a document that holds no content: an explicit "---"
+          with nothing under it is a null document, an implicit one is nothing, and
+          a "..." with no "---" before it closes no document.
+        name: emptyDocument
+        params: explicit bool
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          documentStart reads what may precede a document's content — blank and
+          comment lines, a directive, the "---" marker — and reports whether the
+          marker was present. A directive is refused by name; content on the marker
+          line is refused.
+        name: documentStart
+        recv: p *parser
+        results: explicit bool, err error
+      - doc: |-
+          documentEnd accepts what may follow a document: blank and comment lines,
+          and one "..." marker. A second document — after "---", after "...", or
+          a directive opening one — is refused by name.
+        name: documentEnd
+        recv: p *parser
+        results: error
+      - doc: |-
+          afterDocumentEnd consumes the "..." under the cursor and refuses anything
+          after it but blank and comment lines: it would open another document.
+        name: afterDocumentEnd
+        recv: p *parser
+        results: error
+      - doc: |-
+          checkDuplicates refuses a mapping that holds the same key twice. Keys
+          compare by their text, whatever their style: "a" and a are one key here, as
+          they are to a person reading the file.
+        name: checkDuplicates
+        params: collection int32
+        recv: p *parser
+        results: error
+      - doc: |-
+          checkDuplicatesPairwise compares every key of the mapping n with the ones
+          before it.
+        name: checkDuplicatesPairwise
+        params: n *node, pairs int32
+        recv: p *parser
+        results: error
+      - doc: plainStart refuses a plain scalar's first character when YAML reserves it.
+        name: plainStart
+        params: flow bool
+        recv: p *parser
+        results: error
+      - doc: |-
+          startsIndicator reports whether the character under the cursor opens an
+          indicator rather than a plain scalar: one of neverStartsPlain, "-" followed
+          by a blank, and — in block context — "?" or ":" followed by one. In flow
+          context "?" and ":" always open an indicator.
+        name: startsIndicator
+        params: flow bool
+        recv: p *parser
+        results: bool
+      - doc: |-
+          plainSegment scans the plain scalar's text on the cursor's line, from the
+          cursor, and returns the offset just past its last non-blank character and
+          why it ended. The cursor does not move.
+        name: plainSegment
+        params: flow bool
+        recv: p *parser
+        results: int, plainStop
+      - doc: |-
+          plainStopAt reports whether the character c at i ends a plain scalar's
+          segment, and why.
+        name: plainStopAt
+        params: i int, c byte, flow bool
+        recv: p *parser
+        results: plainStop, bool
+      - doc: |-
+          plainStopError refuses what ended a segment where it cannot end one: a "?"
+          in flow context, a ":" value indicator in block context.
+        name: plainStopError
+        params: end int, stop plainStop, flow bool
+        recv: p *parser
+        results: error
+      - doc: |-
+          refuseQuestion refuses the "?" that ended a plain scalar's segment at end
+          in flow context: libyaml reads it as an explicit key indicator, the core
+          grammar as text, and the subset reads it neither way.
+        name: refuseQuestion
+        params: end int
+        recv: p *parser
+        results: error
+      - doc: |-
+          scanPlainKey scans a plain implicit key on the cursor's line, leaving the
+          cursor on the ":" (or, in flow context, wherever the key ends).
+        name: scanPlainKey
+        params: flow bool
+        recv: p *parser
+        results: string, error
+      - doc: |-
+          scanPlain scans a plain scalar from the cursor, folding the lines it spans.
+          The cursor ends just past the scalar's last non-blank character.
+        name: scanPlain
+        params: parent int, flow bool
+        recv: p *parser
+        results: string, error
+      - doc: |-
+          foldPlain continues the plain scalar src[start:end] onto the lines that
+          continue it — indented deeper than parent, not a comment, not a document
+          marker, not (in flow context) an indicator — folding the line breaks.
+        name: foldPlain
+        params: start, end, parent int, flow bool
+        recv: p *parser
+        results: string, error
+      - doc: |-
+          plainContinuationSegment moves the cursor to the continuation line starting
+          at next, breaks empty lines below the cursor's, and appends its segment.
+        name: plainContinuationSegment
+        params: next, breaks int, flow bool
+        recv: p *parser
+        results: plainStop, error
+      - doc: |-
+          plainContinuation looks past the line break after the cursor for a line that
+          continues a plain scalar. It returns that line's start, how many empty lines
+          lie between, and whether there is one; the cursor does not move. A tab in
+          an empty line's indentation — at or left of the parent's column — is
+          refused, as libyaml refuses it while it scans the scalar.
+        name: plainContinuation
+        params: parent int, flow bool
+        recv: p *parser
+        results: next, breaks int, ok bool, err error
+      - doc: |-
+          lineBlanks returns the offset of the first byte past the blanks opening the
+          line at lineStart, refusing a tab at or left of the parent's column.
+        name: lineBlanks
+        params: lineStart, parent, line int
+        recv: p *parser
+        results: int, error
+      - doc: |-
+          continues reports whether the content line starting at lineStart, whose
+          first non-blank byte is at first, continues a plain scalar.
+        name: continues
+        params: lineStart, first, parent int, flow bool
+        recv: p *parser
+        results: bool
+      - doc: |-
+          markerLineAt reports whether the line starting at lineStart is a document
+          marker.
+        name: markerLineAt
+        params: lineStart int
+        recv: p *parser
+        results: bool
+      - doc: |-
+          endsFlowScalar reports whether the byte at i ends a plain scalar in flow
+          context: a flow indicator, or ":" before a blank.
+        name: endsFlowScalar
+        params: i int
+        recv: p *parser
+        results: bool
+      - doc: |-
+          scanSingleQuoted scans a single-quoted scalar from its opening quote: a
+          doubled quote is a quote, every other character is itself, and line breaks
+          fold. singleLine refuses a scalar that does not close on its line (a key).
+        name: scanSingleQuoted
+        params: singleLine bool
+        recv: p *parser
+        results: string, error
+      - doc: |-
+          scanDoubleQuoted scans a double-quoted scalar from its opening quote,
+          applying YAML's escapes and folding its line breaks. singleLine refuses a
+          scalar that does not close on its line (a key).
+        name: scanDoubleQuoted
+        params: singleLine bool
+        recv: p *parser
+        results: string, error
+      - doc: |-
+          scanQuoted scans a quoted scalar whose opening quote is under the cursor.
+          One that closes on its line with nothing to unescape is the document's own
+          bytes; any other is built in p.text.
+        name: scanQuoted
+        params: quote byte, singleLine bool
+        recv: p *parser
+        results: string, error
+      - doc: |-
+          quotedFast returns the quoted scalar from the cursor when it closes on its
+          line with no escape and no doubled quote, and moves past it.
+        name: quotedFast
+        params: quote byte
+        recv: p *parser
+        results: string, bool
+      - doc: |-
+          closesAt reports whether the byte at i is a quote closing a scalar opened
+          by quote: a single quote doubled is not one.
+        name: closesAt
+        params: i int, quote byte
+        recv: p *parser
+        results: bool
+      - doc: |-
+          quotedStep consumes one character, escape or fold of a quoted scalar and
+          reports whether the scalar is closed.
+        name: quotedStep
+        params: q *quotedScan
+        recv: p *parser
+        results: bool, error
+      - doc: |-
+          quotedQuote consumes the quote under the cursor and reports whether it
+          closes the scalar; a doubled single quote is a quote.
+        name: quotedQuote
+        params: q *quotedScan
+        recv: p *parser
+        results: bool
+      - doc: |-
+          quotedEscape consumes the escape under the cursor: a line break escaped
+          joins the lines with nothing between, any other escape names a character.
+        name: quotedEscape
+        params: q *quotedScan
+        recv: p *parser
+        results: error
+      - doc: quotedBreak folds the line break under the cursor.
+        name: quotedBreak
+        params: q *quotedScan
+        recv: p *parser
+        results: error
+      - doc: |-
+          foldQuoted folds the line break under the cursor inside a quoted scalar
+          that opened at (line, off): a space when the next line follows directly,
+          one line feed per empty line otherwise, and the next line's leading blanks
+          dropped. A document marker or the end of the document inside the scalar is
+          refused.
+        name: foldQuoted
+        params: line, off int
+        recv: p *parser
+        results: error
+      - doc: |-
+          joinEscapedBreak handles a line break escaped by "\" in a double-quoted
+          scalar: the break and the next line's leading blanks produce nothing, and
+          each empty line in between produces a line feed.
+        name: joinEscapedBreak
+        params: line, off int
+        recv: p *parser
+        results: error
+      - doc: |-
+          insideQuoted refuses a quoted scalar opened at (line, off) whose next line
+          is the end of the document or a document marker.
+        name: insideQuoted
+        params: line, off int
+        recv: p *parser
+        results: error
+      - doc: |-
+          escape appends the character the escape under the cursor (a backslash)
+          names, and moves past it.
+        name: escape
+        recv: p *parser
+        results: error
+      - doc: |-
+          hexEscape appends the code point a \x, \u or \U escape of width digits
+          names.
+        name: hexEscape
+        params: width int
+        recv: p *parser
+        results: error
+      - doc: |-
+          parseBlockScalar parses a literal (|) or folded (>) block scalar whose
+          header is under the cursor. parent is the indentation of the collection
+          holding it; its content is indented deeper. The algorithm is libyaml's, so
+          a block scalar reads here as it reads in yaml.v3.
+        name: parseBlockScalar
+        params: parent int
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          blockContent reads a block scalar's content lines into p.text, folding them
+          when the scalar is folded.
+        name: blockContent
+        params: b *blockScalar
+        recv: p *parser
+        results: error
+      - doc: |-
+          blockLineStart writes what separates the previous content line from the
+          one under the cursor: a folded space, or the line breaks kept as they are.
+        name: blockLineStart
+        params: b *blockScalar
+        recv: p *parser
+      - doc: chompBlock applies the chomping indicator to the end of a block scalar.
+        name: chompBlock
+        params: b *blockScalar, chomp chomping
+        recv: p *parser
+      - doc: |-
+          readBlockHeader reads a block scalar header after its indicator: a
+          chomping indicator and an indentation indicator, in either order, then
+          blanks, an optional comment and the line break.
+        name: readBlockHeader
+        recv: p *parser
+        results: blockHeader, error
+      - doc: |-
+          headerIndicator reads one header indicator under the cursor, if there is
+          one.
+        name: headerIndicator
+        params: h *blockHeader
+        recv: p *parser
+        results: error
+      - doc: |-
+          blockBreaks consumes the empty lines of a block scalar from the start of a
+          line, and the indentation of the first line with content, up to indent. It
+          returns how many empty lines it consumed and, when detect is set, the
+          indentation it detected from the first content line.
+        name: blockBreaks
+        params: indent, parent int, detect bool
+        recv: p *parser
+        results: breaks, detected int, err error
+      - doc: |-
+          blockIndentation consumes a block scalar line's indentation: every space
+          while the indentation is unknown, up to indent otherwise. A tab where an
+          indentation space belongs is refused.
+        name: blockIndentation
+        params: indent int
+        recv: p *parser
+        results: error
+      - doc: |-
+          inBlockIndentation reports whether the cursor is still inside a block
+          scalar line's indentation.
+        name: inBlockIndentation
+        params: indent int
+        recv: p *parser
+        results: bool
+      - doc: |-
+          detectIndent returns the indentation of the first content line, at least
+          one deeper than the parent, refusing a leading empty line indented deeper
+          than that line, which YAML forbids.
+        name: detectIndent
+        params: parent, maxEmpty int
+        recv: p *parser
+        results: int, error
+    name: parser
+  - doc: resolvedKind is what the core schema reads a plain scalar as.
+    kind: named
+    name: resolvedKind
+    underlying: uint8
+  - doc: scalarValue is a plain scalar's reading by the core schema.
+    fields:
+      - doc: f is a float's value.
+        name: f
+        type: float64
+      - doc: i is an integer's value when it fits an int64.
+        name: i
+        type: int64
+      - doc: u is an integer's value when it fits only a uint64.
+        name: u
+        type: uint64
+      - doc: kind is the reading.
+        name: kind
+        type: resolvedKind
+      - doc: b is a boolean's value.
+        name: b
+        type: bool
+    kind: struct
+    name: scalarValue
+  - doc: plainStop is why a plain scalar's segment on one line ended.
+    kind: named
+    name: plainStop
+    underlying: uint8
+  - doc: chomping is a block scalar's chomping indicator.
+    kind: named
+    name: chomping
+    underlying: int
+  - doc: quotedScan is the state of a quoted scalar being built.
+    fields:
+      - doc: line is the line the scalar opened on.
+        name: line
+        type: int
+      - doc: off is the offset of its opening quote.
+        name: "off"
+        type: int
+      - doc: blanks counts the raw blanks at the end of the text, which a fold drops.
+        name: blanks
+        type: int
+      - doc: quote is '"' or '\''.
+        name: quote
+        type: byte
+      - doc: "singleLine refuses a line break: the scalar is a key."
+        name: singleLine
+        type: bool
+    kind: struct
+    name: quotedScan
+  - doc: blockScalar is the state of a block scalar being read, as libyaml keeps it.
+    fields:
+      - doc: indent is the content's indentation.
+        name: indent
+        type: int
+      - doc: trailing counts the empty lines after the last content line.
+        name: trailing
+        type: int
+      - doc: flags holds the scalar's style and what the last content line was.
+        name: flags
+        type: blockFlags
+    kind: struct
+    methods:
+      - doc: has reports whether flag is set.
+        name: has
+        params: flag blockFlags
+        recv: b *blockScalar
+        results: bool
+      - doc: set sets or clears flag.
+        name: set
+        params: flag blockFlags, on bool
+        recv: b *blockScalar
+      - doc: |-
+          folds reports whether the line break before a content line folds: in a
+          folded scalar, between two lines neither of which starts with a blank.
+        name: folds
+        params: trailingBlank bool
+        recv: b *blockScalar
+        results: bool
+    name: blockScalar
+  - doc: blockFlags are a block scalar's boolean states, as one value.
+    kind: named
+    name: blockFlags
+    underlying: uint8
+  - doc: blockHeader is a block scalar's header indicators.
+    fields:
+      - doc: chomp is the chomping indicator.
+        name: chomp
+        type: chomping
+      - doc: indicator is the indentation indicator, 0 when absent.
+        name: indicator
+        type: int
+      - doc: seenChomp says a chomping indicator was read.
+        name: seenChomp
+        type: bool
+    kind: struct
+    name: blockHeader
+  - doc: fieldInfo is one key a struct reads and writes.
+    fields:
+      - doc: key is the mapping key, as written in the document.
+        name: key
+        type: string
+      - doc: |-
+          index is the path of field indices from the struct to the field,
+          through inlined structs.
+        name: index
+        type: "[]int"
+      - doc: omitEmpty leaves the field out of the output when it is empty.
+        name: omitEmpty
+        type: bool
+      - doc: flow writes the field's collection in flow style.
+        name: flow
+        type: bool
+    kind: struct
+    name: fieldInfo
+  - doc: structInfo is everything the codec reads from a struct type's tags.
+    fields:
+      - doc: byKey finds a field by its key.
+        name: byKey
+        type: map[string]int
+      - doc: |-
+          tagError names the malformed tag, when one is; the type is then refused
+          in both directions.
+        name: tagError
+        type: string
+      - doc: |-
+          fields are the struct's keys, in declaration order, inlined fields in
+          place.
+        name: fields
+        type: "[]fieldInfo"
+      - doc: |-
+          inlineMap is the index path of the map collecting the keys no field
+          declares, or nil.
+        name: inlineMap
+        type: "[]int"
+    kind: struct
+    name: structInfo
+  - doc: tagFlags are the options after the name in a yaml tag.
+    fields:
+      - doc: omitEmpty is ",omitempty".
+        name: omitEmpty
+        type: bool
+      - doc: flow is ",flow".
+        name: flow
+        type: bool
+      - doc: inline is ",inline".
+        name: inline
+        type: bool
+    kind: struct
+    name: tagFlags
+  - doc: decoder turns a parsed document into Go values.
+    fields:
+      - doc: p holds the document's arena.
+        name: p
+        type: "*parser"
+      - doc: |-
+          hooks counts the UnmarshalYAML calls in progress, so a hook that keeps
+          decoding into itself is refused instead of recursing forever.
+        name: hooks
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          decodeUntyped decodes node root into *map[string]any or *any without
+          reflection, and reports whether v was one of them.
+        name: decodeUntyped
+        params: root int32, v any
+        recv: d *decoder
+        results: bool, error
+      - doc: node returns the node at index i.
+        name: node
+        params: i int32
+        recv: d *decoder
+        results: "*node"
+      - doc: |-
+          mismatch is UnmarshalFailed at node n: a value its target cannot hold. It
+          names the Go type and never the value.
+        name: mismatch
+        params: n *node, detail string, t reflect.Type
+        recv: d *decoder
+        results: error
+      - doc: refuse is a refused construct at node n.
+        name: refuse
+        params: sentinel *errs.Error, n *node
+        recv: d *decoder
+        results: error
+      - doc: |-
+          toAny decodes node i into the untyped value it is: nil, bool, int (int64
+          when an int is narrower, uint64 past int64), float64, string, []any or
+          map[string]any — a mapping keyed by each key's text.
+        name: toAny
+        params: i int32
+        recv: d *decoder
+        results: any, error
+      - doc: sequenceAny decodes the sequence n into a []any.
+        name: sequenceAny
+        params: n *node
+        recv: d *decoder
+        results: "[]any, error"
+      - doc: |-
+          fillStringMap decodes the mapping n's entries into out, keyed by each key's
+          text.
+        name: fillStringMap
+        params: n *node, out map[string]any
+        recv: d *decoder
+        results: error
+      - doc: plainAny decodes the plain scalar n by the core schema.
+        name: plainAny
+        params: n *node
+        recv: d *decoder
+        results: any, error
+      - doc: |-
+          refuseResolved refuses a plain scalar the core schema reads as a leading
+          zero integer — by name — or as a number past 64 bits.
+        name: refuseResolved
+        params: n *node, kind resolvedKind, t reflect.Type
+        recv: d *decoder
+        results: error
+      - doc: |-
+          intoStringMap decodes node i into *target, merging into an existing map
+          as yaml.v3 does.
+        name: intoStringMap
+        params: i int32, target *map[string]any
+        recv: d *decoder
+        results: error
+      - doc: decode decodes node i into v, which is settable.
+        name: decode
+        params: i int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: decodeKind decodes node i into v by v's kind.
+        name: decodeKind
+        params: i int32, n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeHooked decodes node i through a hook of v's type when it has one,
+          reporting whether it did: UnmarshalYAML for any node; for a scalar, a time,
+          UnmarshalText, a duration. yaml.v3's UnmarshalYAML(*yaml.Node) is refused
+          rather than skipped.
+        name: decodeHooked
+        params: i int32, n *node, v reflect.Value
+        recv: d *decoder
+        results: bool, error
+      - doc: |-
+          decodeScalarHooked decodes the scalar n through a time, UnmarshalText or a
+          duration, reporting whether v's type has one of them.
+        name: decodeScalarHooked
+        params: n *node, v reflect.Value, h typeHooks
+        recv: d *decoder
+        results: bool, error
+      - doc: callUnmarshaler calls v's UnmarshalYAML with a function decoding node i.
+        name: callUnmarshaler
+        params: i int32, n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeHookTarget decodes node i into the target an UnmarshalYAML hook
+          passed its function.
+        name: decodeHookTarget
+        params: i int32, n *node, target any
+        recv: d *decoder
+        results: error
+      - doc: callUnmarshalText calls v's UnmarshalText with the scalar n's text.
+        name: callUnmarshalText
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          hookFailed wraps the error a type's own hook returned. A cause that is
+          already an SDK error keeps its code; any other becomes UnmarshalFailed.
+        name: hookFailed
+        params: n *node, cause error, t reflect.Type
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeTime reads a time.Time from a scalar: RFC 3339, or one of the
+          timestamp forms yaml.v3 read.
+        name: decodeTime
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeDuration reads a time.Duration from its text. A bare number is
+          refused, as yaml.v3 refused it: its unit would be a guess.
+        name: decodeDuration
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeInterface decodes node i into the interface v: the untyped value for
+          an empty interface, or into what a non-empty one points at.
+        name: decodeInterface
+        params: i int32, n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeIntoHeld decodes node i into the pointer a non-empty interface holds;
+          with nothing held there is nothing to decode into.
+        name: decodeIntoHeld
+        params: i int32, n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeMap decodes the mapping n into the map v, merging into an existing
+          map. Two keys that decode to one Go key are refused, as two keys that read
+          the same are.
+        name: decodeMap
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeMapEntry decodes the j-th key of the mapping n and its value into the
+          map v.
+        name: decodeMapEntry
+        params: n *node, j int32, v reflect.Value, m *mapDecoding
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeMapKey decodes the key node keyIndex into m.key: a string key is the
+          key's text; a key of another kind is decoded as a scalar and checked
+          against the keys before it, since 1 and 0x1 decode to one int.
+        name: decodeMapKey
+        params: keyIndex int32, t reflect.Type, m *mapDecoding
+        recv: d *decoder
+        results: error
+      - doc: checkKeyCollision refuses a decoded key the mapping has already decoded.
+        name: checkKeyCollision
+        params: keyNode *node, m *mapDecoding
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeStruct decodes the mapping n into the struct v: each key into the
+          field that declares it, the others into the inline map if there is one, or
+          nowhere — as yaml.v3 ignores an unknown key.
+        name: decodeStruct
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: decodeStructEntry decodes the j-th entry of the mapping n into the struct v.
+        name: decodeStructEntry
+        params: n *node, j int32, v reflect.Value, info *structInfo
+        recv: d *decoder
+        results: error
+      - doc: decodeInlineEntry decodes one entry into the inline map m.
+        name: decodeInlineEntry
+        params: key string, valueIndex int32, m reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: decodeSlice decodes the sequence n into the slice v, replacing it.
+        name: decodeSlice
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeArray decodes the sequence n into the array v, whose length it must
+          match exactly.
+        name: decodeArray
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: decodeEntries decodes the sequence n's entries into v's elements.
+        name: decodeEntries
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          decodeScalar decodes the scalar n into v, whose kind is a string, a
+          boolean or a number. A string takes any scalar's text as written; a
+          boolean or a number takes only a plain scalar the core schema reads as one.
+        name: decodeScalar
+        params: n *node, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: decodeResolved decodes a plain scalar's core-schema reading into v.
+        name: decodeResolved
+        params: n *node, r scalarValue, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: "decodeBool decodes a boolean: true or false, never YAML 1.1's yes/no/on/off."
+        name: decodeBool
+        params: n *node, r scalarValue, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: decodeInt decodes a signed integer, refusing a value its type cannot hold.
+        name: decodeInt
+        params: n *node, r scalarValue, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          intValue reads a plain scalar's reading as an int64: an integer, or a float
+          that is a whole number held exactly.
+        name: intValue
+        params: n *node, r scalarValue, t reflect.Type
+        recv: d *decoder
+        results: int64, error
+      - doc: |-
+          decodeUint decodes an unsigned integer, refusing a value its type cannot
+          hold.
+        name: decodeUint
+        params: n *node, r scalarValue, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          uintValue reads a plain scalar's reading as a uint64: an integer that is
+          not negative, or a float that is such a whole number held exactly.
+        name: uintValue
+        params: n *node, r scalarValue, t reflect.Type
+        recv: d *decoder
+        results: uint64, error
+      - doc: decodeFloat decodes a float, from a float or an integer.
+        name: decodeFloat
+        params: n *node, r scalarValue, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          floatValue reads a plain scalar's reading as a float for v: a float — a
+          float32 parsed at 32 bits, so it is rounded once — or an integer.
+        name: floatValue
+        params: n *node, r scalarValue, v reflect.Value
+        recv: d *decoder
+        results: float64, error
+      - doc: |-
+          floatAt returns the float f read for v: a finite decimal float32 is parsed
+          again at 32 bits, so it is rounded once rather than twice.
+        name: floatAt
+        params: n *node, f float64, v reflect.Value
+        recv: d *decoder
+        results: float64, error
+    name: decoder
+  - doc: |-
+      mapDecoding is the reusable state of one map being decoded: a key and an
+      element value set and copied into the map per entry, and the keys seen when
+      two texts may decode to one key.
+    fields:
+      - doc: seen holds the keys decoded so far, for a key type that is not a string.
+        name: seen
+        type: map[any]bool
+      - doc: key is the key of the entry being decoded.
+        name: key
+        type: reflect.Value
+      - doc: elem is the value of the entry being decoded.
+        name: elem
+        type: reflect.Value
+      - doc: "textKeys says a key is its text: a string kind with no text hook."
+        name: textKeys
+        type: bool
+    kind: struct
+    name: mapDecoding
+vars:
+  - doc: |-
+      nodeIndicatorRefusals maps the indicators that open a refused construct to
+      the sentinel naming it.
+    items:
+      - name: nodeIndicatorRefusals
+        value: |-
+          map[byte]*errs.Error{
+          	'&': coreyaml.AnchorRefused,
+          	'*': coreyaml.AliasRefused,
+          	'!': coreyaml.TagRefused,
+          }
+    name: nodeIndicatorRefusals
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME and
+      extension tables.
+    grouped: true
+    items:
+      - doc: Codec is the registered YAML singleton.
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&yamlCodec{})
+      - doc: mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
+        name: mimeTypes
+        value: "[]string{\"application/yaml\", \"text/yaml\", \"application/x-yaml\"}"
+      - doc: extensions is hoisted for the same reason.
+        name: extensions
+        value: "[]string{\".yaml\", \".yml\"}"
+    name: Codec
+  - doc: |-
+      The hook interfaces as reflected types, the types the codec treats as
+      text, and the cache: reflection runs once per type for the life of the
+      process.
+    grouped: true
+    items:
+      - name: marshalerType
+        value: reflect.TypeFor[marshalYAMLer]()
+      - name: unmarshalerType
+        value: reflect.TypeFor[unmarshalYAMLer]()
+      - name: textMarshalerType
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+      - name: textUnmarshalerType
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - name: isZeroerType
+        value: reflect.TypeFor[isZeroer]()
+      - name: durationType
+        value: reflect.TypeFor[time.Duration]()
+      - name: timeType
+        value: reflect.TypeFor[time.Time]()
+      - doc: hooksCache maps a reflect.Type to its typeHooks.
+        name: hooksCache
+        type: sync.Map
+    name: marshalerType
+  - doc: |-
+      shortEscapes maps the characters a double-quoted scalar escapes by name to
+      their escape.
+    items:
+      - name: shortEscapes
+        value: |-
+          map[rune]string{
+          	'"': `\"`, '\\': `\\`, 0: `\0`, '\a': `\a`, '\b': `\b`, '\t': `\t`,
+          	'\n': `\n`, '\v': `\v`, '\f': `\f`, '\r': `\r`, runeEscape: `\e`,
+          	runeNextLine: `\N`, runeLineSeparator: `\L`, runeParagraphSeparator: `\P`,
+          }
+    name: shortEscapes
+  - doc: |-
+      parserPool recycles parsers and their arenas across calls. A parser whose
+      arena grew past maxPooledNodes is dropped rather than repooled.
+    items:
+      - name: parserPool
+        value: |-
+          recycler.NewCappedPool[*parser](
+          	func() *parser { return &parser{} },
+          	func(p *parser) { p.reset() },
+          	func(p *parser) int { return cap(p.nodes) },
+          	maxPooledNodes,
+          )
+    name: parserPool
+  - doc: The escapes of a double-quoted scalar.
+    grouped: true
+    items:
+      - doc: |-
+          simpleEscapes maps the character after a backslash to the character it
+          names. "\/" is YAML 1.2's JSON escape, which libyaml — so yaml.v3 —
+          refuses; the subset reads nothing they refuse, so it is not here.
+        name: simpleEscapes
+        value: |-
+          map[byte]rune{
+          		'0': 0, 'a': '\a', 'b': '\b', 't': '\t', '\t': '\t', 'n': '\n',
+          		'v': '\v', 'f': '\f', 'r': '\r', 'e': runeEscape, ' ': ' ', '"': '"',
+          		'\\': '\\', 'N': runeNextLine, '_': runeNoBreakSpace,
+          		'L': runeLineSeparator, 'P': runeParagraphSeparator,
+          	}
+      - doc: |-
+          hexEscapeWidths maps the character after a backslash to the number of
+          hexadecimal digits it takes.
+        name: hexEscapeWidths
+        value: "map[byte]int{'x': hexByteDigits, 'u': hexBMPDigits, 'U': hexRuneDigits}"
+    name: simpleEscapes
+  - doc: |-
+      The untyped mapping's type, and the cache: reflection runs once per struct
+      type for the life of the process.
+    grouped: true
+    items:
+      - doc: stringMapType is map[string]any, the untyped mapping.
+        name: stringMapType
+        value: reflect.TypeFor[map[string]any]()
+      - doc: structCache maps a reflect.Type to its *structInfo.
+        name: structCache
+        type: sync.Map
+    name: stringMapType
+  - doc: |-
+      The byte order marks of the encodings YAML allows besides UTF-8, which the
+      subset refuses, and the line breaks the source is normalised with.
+    grouped: true
+    items:
+      - doc: bomUTF16BigEndian opens UTF-16 big-endian text.
+        name: bomUTF16BigEndian
+        value: "[]byte{0xFE, 0xFF}"
+      - doc: bomUTF16LittleEndian opens UTF-16 (or UTF-32) little-endian text.
+        name: bomUTF16LittleEndian
+        value: "[]byte{0xFF, 0xFE}"
+      - doc: bomUTF32BigEndian opens UTF-32 big-endian text.
+        name: bomUTF32BigEndian
+        value: "[]byte{0x00, 0x00, 0xFE, 0xFF}"
+      - doc: |-
+          carriageReturnLineFeed is a carriage return and a line feed, one line
+          break.
+        name: carriageReturnLineFeed
+        value: "[]byte(\"\\r\\n\")"
+      - doc: lineFeed is the line break the parser reads.
+        name: lineFeed
+        value: "[]byte(\"\\n\")"
+      - doc: carriageReturn is a lone carriage return, one line break.
+        name: carriageReturn
+        value: "[]byte(\"\\r\")"
+    name: bomUTF16BigEndian
+  - doc: |-
+      timeLayouts are the forms a time.Time is read from: RFC 3339 — the form
+      the encoder writes — then the timestamp forms yaml.v3 accepted, so a
+      configuration that read a date before still reads it.
+    items:
+      - name: timeLayouts
+        value: |-
+          []string{
+          	time.RFC3339Nano,
+          	"2006-1-2T15:4:5.999999999Z07:00",
+          	"2006-1-2t15:4:5.999999999Z07:00",
+          	"2006-1-2 15:4:5.999999999",
+          	"2006-1-2",
+          }
+    name: timeLayouts

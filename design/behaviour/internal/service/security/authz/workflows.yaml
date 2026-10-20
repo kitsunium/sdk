@@ -1,0 +1,27 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: foldConditions
+    steps:
+      - bind: result
+        eval: conjunction
+      - loop:
+          do:
+            - bind: memberHolds, memberErr
+              eval: member(request)
+            - opt:
+                do:
+                  - return: false, memberErr
+                when: memberErr != nil
+            - opt:
+                do:
+                  - set: result
+                    value: result && memberHolds
+                  - continue: true
+                when: conjunction
+            - set: result
+              value: result || memberHolds
+          key: _
+          range: members
+          value: member
+      - return: result, nil

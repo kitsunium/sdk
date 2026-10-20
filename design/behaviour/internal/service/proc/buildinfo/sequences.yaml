@@ -1,0 +1,179 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ReadBuild
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadBuild
+        kind: self
+      - id: debug
+        kind: stdlib
+      - id: ParseBuild
+        kind: internal
+    steps:
+      - bind: info, read
+        eval: debug.ReadBuildInfo()
+        to: debug
+      - opt:
+          do:
+            - return: BuildValue{}, false
+          when: "!read"
+      - return: ParseBuild(info), true
+        to: ParseBuild
+  - of: mainModule
+    participants:
+      - id: caller
+        kind: actor
+      - id: mainModule
+        kind: self
+      - id: fromVersion
+        kind: internal
+      - id: stamp
+        kind: internal
+    steps:
+      - bind: described
+        eval: fromVersion(main.Path, main.Version)
+        to: fromVersion
+      - set: described.Local
+        value: main.Version == develVersion || main.Version == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: described.Local
+                    value: "true"
+                when: strings.HasPrefix(setting.Key, settingVCSPrefix)
+            - eval: stamp(&described, setting)
+              to: stamp
+          key: _
+          range: settings
+          value: setting
+      - return: described
+  - of: stamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: stamp
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: settingRevision
+              do:
+                - set: described.Revision
+                  value: setting.Value
+            - case: settingTime
+              do:
+                - opt:
+                    do:
+                      - set: described.Time
+                        value: at
+                    init:
+                      bind: at, err
+                      eval: time.Parse(time.RFC3339, setting.Value)
+                      to: time
+                    when: err == nil
+            - case: settingModified
+              do:
+                - set: described.Modified
+                  value: described.Modified || setting.Value == settingTrue
+            - default: true
+          "on": setting.Key
+  - of: dependency
+    participants:
+      - id: caller
+        kind: actor
+      - id: dependency
+        kind: self
+      - id: fromVersion
+        kind: internal
+    steps:
+      - bind: replaced
+        eval: dep.Replace
+      - opt:
+          do:
+            - bind: described
+              eval: fromVersion(dep.Path, dep.Version)
+              to: fromVersion
+            - set: described.Local
+              value: dep.Version == develVersion
+            - return: described
+          when: replaced == nil
+      - opt:
+          do:
+            - return: "ModuleValue{Path: dep.Path, Dir: replaced.Path, Local: true}"
+          when: replaced.Version == "" || replaced.Version == develVersion
+      - bind: described
+        eval: fromVersion(dep.Path, replaced.Version)
+        to: fromVersion
+      - set: described.Replacement
+        value: replaced.Path
+      - return: described
+  - of: pseudoCommit
+    participants:
+      - id: caller
+        kind: actor
+      - id: pseudoCommit
+        kind: self
+      - id: semver
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: revision
+              value: rev
+          init:
+            bind: rev, ok
+            eval: semver.PseudoVersionRev(version)
+            to: semver
+          when: ok
+      - opt:
+          do:
+            - set: at
+              value: stamp
+          init:
+            bind: stamp, ok
+            eval: semver.PseudoVersionTime(version)
+            to: semver
+          when: ok
+      - return: revision, at
+  - of: fromVersion
+    participants:
+      - id: caller
+        kind: actor
+      - id: fromVersion
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: pseudoCommit
+        kind: internal
+    steps:
+      - bind: described
+        eval: "ModuleValue{Path: path}"
+      - opt:
+          do:
+            - set: version
+              value: trimmed
+            - set: described.Modified
+              value: "true"
+          init:
+            bind: trimmed, dirty
+            eval: strings.CutSuffix(version, dirtySuffix)
+            to: strings
+          when: dirty
+      - switch:
+          cases:
+            - case: version == develVersion || version == ""
+            - case: semver.IsPseudoVersion(version)
+              do:
+                - set: described.Revision, described.Time
+                  to: pseudoCommit
+                  value: pseudoCommit(version)
+            - default: true
+              do:
+                - set: described.Version
+                  value: version
+      - return: described

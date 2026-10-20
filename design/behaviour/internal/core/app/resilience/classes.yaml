@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Operation
+    name: resilience.go
+imports:
+  context: context
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/resilience
+  name: resilience
+  purpose: Package resilience — range 0.2.8.* (ADR 0026 core/app/resilience block).
+types:
+  - kind: named
+    name: Operation
+    underlying: func(ctx context.Context) error

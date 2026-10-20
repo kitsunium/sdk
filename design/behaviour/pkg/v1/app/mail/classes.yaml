@@ -1,0 +1,20 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Compose
+    name: mail.go
+functions:
+  - name: Compose
+    params: msg Message
+    results: raw []byte, err error
+imports:
+  svcmail: github.com/kitsunium/sdk/internal/service/app/mail
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/mail
+  name: mail
+  purpose: "Package mail is the public facade for the SDK's electronic-mail domain: build a message as a value, and hand it to a transport that refuses to lie about what it sent."
+types: []

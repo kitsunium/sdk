@@ -1,0 +1,917 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      CloseCodeLen is the width of the status code that opens a Close frame's
+      payload. A Close payload is therefore either empty or at least this long —
+      one byte is not "a truncated code", it is a protocol error.
+    items:
+      - name: CloseCodeLen
+        type: int
+        value: "2"
+    name: CloseCodeLen
+  - doc: MaskLen is the width of the masking key a client prefixes to every frame.
+    items:
+      - name: MaskLen
+        type: int
+        value: "4"
+    name: MaskLen
+  - doc: |-
+      MinHeaderLen is the shortest possible frame header: flags/opcode and the
+      mask bit with a 7-bit length.
+    items:
+      - name: MinHeaderLen
+        type: int
+        value: "2"
+    name: MinHeaderLen
+  - doc: |-
+      MaxHeaderLen is the longest possible frame header: the two fixed bytes, a
+      64-bit extended length, and a masking key.
+    items:
+      - name: MaxHeaderLen
+        type: int
+        value: MinHeaderLen + length64Width + MaskLen
+    name: MaxHeaderLen
+  - doc: Frame header bit masks and length markers, from the diagram in RFC 6455 §5.2.
+    grouped: true
+    items:
+      - name: finBit
+        type: byte
+        value: "0x80"
+      - name: reservedBits
+        type: byte
+        value: "0x70"
+      - name: opCodeBits
+        type: byte
+        value: "0x0F"
+      - name: maskBit
+        type: byte
+        value: "0x80"
+      - name: lengthBits
+        type: byte
+        value: "0x7F"
+      - name: length16Marker
+        type: byte
+        value: "126"
+      - name: length64Marker
+        type: byte
+        value: "127"
+      - name: length16Width
+        type: int
+        value: "2"
+      - name: length64Width
+        type: int
+        value: "8"
+    name: finBit
+  - doc: |-
+      Masking strides. They are not protocol constants — RFC 6455 fixes only
+      MaskLen — but sizes ApplyMask moves the payload in, and both are
+      multiples of MaskLen so the key never has to be rotated to stay aligned.
+    grouped: true
+    items:
+      - doc: "maskWordWidth is one 64-bit word: the four-byte key spelled twice."
+        name: maskWordWidth
+        type: int
+        value: 2 * MaskLen
+      - doc: |-
+          maskBlockWidth is four of those, unrolled so the loop's compare and
+          branch are amortised over four words instead of one.
+        name: maskBlockWidth
+        type: int
+        value: maskWordsPerBlock * maskWordWidth
+      - doc: |-
+          maskWordsPerBlock is how many words one block iteration writes. It is
+          four because that is where the store port saturates on the machine
+          BENCH.md was taken on; nothing in the protocol prefers any value.
+        name: maskWordsPerBlock
+        type: int
+        value: "4"
+      - doc: |-
+          maskQuadBits is the masking key's width in BITS, which is how far the
+          key must be shifted to spell it a second time inside one word.
+        name: maskQuadBits
+        type: int
+        value: 8 * MaskLen
+      - doc: |-
+          The four word offsets inside one block, named so the unrolled writes
+          cannot drift out of step with maskWordWidth.
+        name: maskWordAt0
+        type: int
+        value: 0 * maskWordWidth
+      - name: maskWordAt1
+        type: int
+        value: 1 * maskWordWidth
+      - name: maskWordAt2
+        type: int
+        value: 2 * maskWordWidth
+      - name: maskWordAt3
+        type: int
+        value: 3 * maskWordWidth
+    name: maskWordWidth
+  - doc: |-
+      switchingProtocols is the status line every successful upgrade begins with.
+      It is written by hand because by then the response belongs to us: net/http's
+      ResponseWriter is out of the picture the moment the socket is hijacked.
+    items:
+      - name: switchingProtocols
+        type: string
+        value: "\"HTTP/1.1 101 Switching Protocols\\r\\n\""
+    name: switchingProtocols
+  - doc: crlf terminates every header line and, on its own, the header block.
+    items:
+      - name: crlf
+        type: string
+        value: "\"\\r\\n\""
+    name: crlf
+  - doc: |-
+      nullOrigin is what a browser sends for a sandboxed iframe, a data: URL or a
+      file:// page. It names an OPAQUE origin — one that is deliberately equal to
+      no other — so it can never satisfy a same-origin rule.
+    items:
+      - name: nullOrigin
+        type: string
+        value: "\"null\""
+    name: nullOrigin
+  - doc: |-
+      httpsScheme is the only scheme an Origin may carry when this server
+      terminated the request's TLS itself: the browser demonstrably connected over
+      https, so a page it loaded over plain http is a different origin.
+    items:
+      - name: httpsScheme
+        type: string
+        value: "\"https\""
+    name: httpsScheme
+  - doc: |-
+      DefaultPingInterval is how often an idle connection proves the peer is still
+      there. It sits under the idle timeout of every proxy worth naming (nginx and
+      most cloud load balancers default to 60 s), so a connection that has nothing
+      to say still survives the intermediaries between it and its peer.
+    items:
+      - name: DefaultPingInterval
+        type: time.Duration
+        value: 30 * time.Second
+    name: DefaultPingInterval
+  - doc: |-
+      DefaultWriteTimeout bounds ONE frame's write. A connection has no total write
+      budget by nature; this is what stops a peer that has stopped reading from
+      pinning a goroutine and a socket buffer forever.
+    items:
+      - name: DefaultWriteTimeout
+        type: time.Duration
+        value: 10 * time.Second
+    name: DefaultWriteTimeout
+  - doc: |-
+      DefaultMaxMessageSize is the ceiling on one reassembled message. It exists
+      because a message's size is chosen by the PEER, one 64-bit field at a time,
+      and fragmentation lets that peer keep choosing until the process dies.
+    items:
+      - comment: 1 MiB
+        name: DefaultMaxMessageSize
+        type: int64
+        value: 1 << 20
+    name: DefaultMaxMessageSize
+  - doc: |-
+      DefaultMaxFrameSize is the ceiling on a single frame's announced payload. It
+      is checked before any buffer is sized, which is the whole point: the number
+      being checked is the number the attacker wrote.
+    items:
+      - comment: 1 MiB
+        name: DefaultMaxFrameSize
+        type: int64
+        value: 1 << 20
+    name: DefaultMaxFrameSize
+  - doc: |-
+      initialWriteCapacity pre-sizes the per-connection frame buffer. A few hundred
+      bytes covers the overwhelming majority of messages, and the buffer is reused
+      for the connection's whole life, so a steady-state send allocates nothing.
+    items:
+      - name: initialWriteCapacity
+        type: int
+        value: "512"
+    name: initialWriteCapacity
+files:
+  - decls:
+      - CloseCodeLen
+      - AppendClosePayload
+      - ParseClosePayload
+    name: close.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - MaskLen
+      - MinHeaderLen
+      - MaxHeaderLen
+      - finBit
+      - maskWordWidth
+      - FrameHeaderValue
+      - FrameHeaderValue.ValidateFromClient
+      - FrameHeaderLen
+      - ParseFrameHeader
+      - ApplyMask
+      - AppendFrame
+      - parseLength
+      - parseLength16
+      - parseLength64
+      - validateControlShape
+      - validateOutbound
+    name: frame.go
+  - decls:
+      - switchingProtocols
+      - crlf
+      - nullOrigin
+      - httpsScheme
+      - Upgrade
+      - verifyHandshake
+      - verifyOrigin
+      - forwardedScheme
+      - sameOrigin
+      - schemeConsistent
+      - slicesContainsFold
+      - refuse
+      - hasToken
+      - chooseSubprotocol
+      - hasExactToken
+      - canHijack
+      - hijack
+      - writeAccept
+    name: handshake.go
+  - decls:
+      - AcceptKey
+      - ValidateKey
+    name: handshake_key.go
+  - decls:
+      - DefaultPingInterval
+      - DefaultWriteTimeout
+      - DefaultMaxMessageSize
+      - DefaultMaxFrameSize
+      - Option
+      - config
+      - Subprotocols
+      - MaxMessageSize
+      - MaxFrameSize
+      - PingInterval
+      - WithoutPing
+      - WriteTimeout
+      - AllowOrigins
+      - AllowAnyOrigin
+      - resolve
+      - refuseUninterpretable
+      - clampToDefaults
+      - isToken
+      - isTokenChar
+      - misconfigured
+    name: options.go
+  - decls:
+      - ValidateText
+    name: text.go
+  - decls:
+      - initialWriteCapacity
+      - Conn
+      - NewConn
+      - (*Conn).Subprotocol
+      - (*Conn).Done
+      - (*Conn).PeerCloseCode
+      - (*Conn).Receive
+      - (*Conn).assemble
+      - (*Conn).Send
+      - (*Conn).SendText
+      - (*Conn).SendBinary
+      - (*Conn).Ping
+      - (*Conn).Close
+      - (*Conn).CloseWith
+      - (*Conn).nextHeader
+      - (*Conn).trackFragment
+      - (*Conn).readDataPayload
+      - (*Conn).completeMessage
+      - (*Conn).serveControl
+      - (*Conn).readControlPayload
+      - (*Conn).serveClose
+      - (*Conn).sendFrame
+      - (*Conn).sendClose
+      - (*Conn).writeLocked
+      - (*Conn).failConnection
+      - (*Conn).socketGone
+      - (*Conn).ended
+      - (*Conn).end
+      - (*Conn).terminate
+      - (*Conn).join
+      - (*Conn).watch
+      - (*Conn).startHeartbeat
+      - heartbeatState
+      - (*Conn).heartbeat
+      - closeCodeFor
+      - swallowErr
+    name: websocket.go
+functions:
+  - name: AppendClosePayload
+    params: dst []byte, code corenet.WSCloseCode, reason string
+    results: wire []byte, err error
+  - name: ParseClosePayload
+    params: b []byte
+    results: code corenet.WSCloseCode, reason string, err error
+  - name: FrameHeaderLen
+    params: b []byte
+    results: int
+  - name: ParseFrameHeader
+    params: b []byte
+    results: header FrameHeaderValue, err error
+  - name: ApplyMask
+    params: payload []byte, key [MaskLen]byte
+  - name: AppendFrame
+    params: dst []byte, op corenet.WSOpCode, final bool, payload []byte
+    results: wire []byte, err error
+  - doc: parseLength reads the payload length, enforcing the minimal-encoding rule.
+    name: parseLength
+    params: b []byte
+    results: length uint64, err error
+  - doc: parseLength16 reads the 16-bit extended length.
+    name: parseLength16
+    params: b []byte
+    results: length uint64, err error
+  - doc: parseLength64 reads the 64-bit extended length.
+    name: parseLength64
+    params: b []byte
+    results: length uint64, err error
+  - doc: validateControlShape enforces RFC 6455 §5.5 on a control frame.
+    name: validateControlShape
+    params: header FrameHeaderValue
+    results: error
+  - doc: validateOutbound refuses a frame this endpoint must not put on the wire.
+    name: validateOutbound
+    params: op corenet.WSOpCode, final bool, size int
+    results: error
+  - name: Upgrade
+    params: w http.ResponseWriter, r *http.Request, opts ...Option
+    results: conn *Conn, err error
+  - doc: |-
+      verifyHandshake applies RFC 6455 §4.2.1 to the request, writing the refusal
+      itself so every caller answers the same way.
+    name: verifyHandshake
+    params: w http.ResponseWriter, r *http.Request, cfg *config
+    results: error
+  - doc: |-
+      verifyOrigin applies the connection's origin policy.
+
+      The browser's same-origin policy does NOT apply to WebSocket: a page on any
+      site may open a connection to this server, and the browser will attach the
+      user's cookies to the handshake. The origin check is the only thing standing
+      between that and cross-site WebSocket hijacking, so it is on by default and
+      turned off by name.
+    name: verifyOrigin
+    params: w http.ResponseWriter, r *http.Request, cfg *config
+    results: error
+  - doc: |-
+      forwardedScheme reports that a proxy in front of this server announced the
+      scheme the browser used, and that this server did not terminate TLS itself —
+      so the announcement is the only source for the scheme, and it is one a client
+      can write.
+
+      Presence alone is read, never the value: a header a stranger wrote can then
+      only make this check STRICTER, never looser. That is the whole reason it is
+      safe to consult headers here at all. Where TLS ended in this process the
+      scheme is known first-hand and the announcement is irrelevant.
+    name: forwardedScheme
+    params: r *http.Request
+    results: bool
+  - doc: |-
+      sameOrigin reports whether an Origin header names the request's own origin,
+      as far as this server can see it.
+
+      The host and port are always compared. The scheme is compared only when this
+      server terminated TLS itself, because only then does it KNOW the browser used
+      https — and a page loaded over plain http for the same host is exactly the
+      downgrade an origin check exists to notice: anyone who can inject into that
+      page gets an encrypted socket carrying the user's cookies.
+
+      Behind a TLS-terminating proxy the request arrives in plaintext whatever the
+      browser used, so the scheme is invisible here and is NOT compared: requiring
+      the Origin's scheme to equal the request's would refuse every browser behind
+      every proxy. [AllowOrigins] is what closes that gap, since it names the
+      scheme outright. X-Forwarded-Proto is deliberately not consulted — where no
+      proxy overwrites it, the client wrote it.
+    name: sameOrigin
+    params: origin string, r *http.Request
+    results: bool
+  - doc: |-
+      schemeConsistent reports whether an Origin's scheme agrees with what this
+      server can see of the scheme the browser used.
+    name: schemeConsistent
+    params: scheme string, r *http.Request
+    results: bool
+  - doc: slicesContainsFold reports whether list holds want, case-insensitively.
+    name: slicesContainsFold
+    params: list []string, want string
+    results: bool
+  - doc: refuse writes the HTTP refusal and returns the matching typed error.
+    name: refuse
+    params: w http.ResponseWriter, status int, key, value, why string
+    results: error
+  - doc: |-
+      hasToken reports whether any of the header values carries the token.
+
+      A header like "Connection: keep-alive, Upgrade" is one value holding two
+      tokens, and net/http will also hand back several values for a header sent
+      twice. Both shapes are legal and both are produced by real proxies, so both
+      are scanned.
+    name: hasToken
+    params: values []string, token string
+    results: bool
+  - doc: |-
+      chooseSubprotocol picks the server's most preferred subprotocol the client
+      also offered, or "" when there is no overlap.
+
+      The SERVER's order decides. A client advertises what it can speak; choosing
+      among those is the server's call, or a client that listed a deprecated
+      dialect first could pin the server to it forever.
+    name: chooseSubprotocol
+    params: preferred []string, r *http.Request
+    results: chosen string, agreed bool
+  - doc: hasExactToken reports whether any header value carries the token verbatim.
+    name: hasExactToken
+    params: values []string, token string
+    results: bool
+  - doc: |-
+      canHijack reports whether the response's connection can be taken over,
+      walking the same unwrap chain http.ResponseController does.
+
+      It exists because there is no way to ASK http.ResponseController: calling
+      Hijack to find out is the act itself, and it cannot be undone. A middleware
+      that wraps the response to count bytes is the normal shape of an HTTP stack,
+      so the chain walk is not optional.
+    name: canHijack
+    params: w http.ResponseWriter
+    results: bool
+  - doc: |-
+      hijack takes the socket over and returns it with the reader net/http was
+      using.
+
+      The reader is returned rather than discarded because net/http may have
+      buffered bytes into it while parsing the request. Reading from the socket
+      directly afterwards would silently skip them — which on a protocol whose
+      every frame is length-prefixed means every subsequent frame is misparsed.
+    name: hijack
+    params: w http.ResponseWriter
+    results: socket stdnet.Conn, buffered *bufio.Reader, err error
+  - doc: writeAccept puts the 101 response on the socket.
+    name: writeAccept
+    params: socket stdnet.Conn, key, subprotocol string
+    results: error
+  - name: AcceptKey
+    params: key string
+    results: string
+  - name: ValidateKey
+    params: key string
+    results: error
+  - name: Subprotocols
+    params: names ...string
+    results: Option
+  - name: MaxMessageSize
+    params: n int64
+    results: Option
+  - name: MaxFrameSize
+    params: n int64
+    results: Option
+  - name: PingInterval
+    params: d time.Duration
+    results: Option
+  - name: WithoutPing
+    results: Option
+  - name: WriteTimeout
+    params: d time.Duration
+    results: Option
+  - name: AllowOrigins
+    params: origins ...string
+    results: Option
+  - name: AllowAnyOrigin
+    results: Option
+  - doc: |-
+      resolve turns the raw option set into a usable one: it clamps where a working
+      default needs no explanation, and refuses where any value the SDK chose would
+      be arbitrary (ADR 0031).
+    name: resolve
+    params: opts []Option
+    results: resolved config, err error
+  - doc: refuseUninterpretable rejects the values no SDK-chosen reading could justify.
+    name: refuseUninterpretable
+    params: cfg *config
+    results: error
+  - doc: |-
+      clampToDefaults fills in every unset value with the one a caller who has not
+      yet learned the question exists should get.
+
+      It takes a pointer rather than returning a copy because the struct is past
+      the size at which passing it by value is honest, and because "fill in what is
+      missing" reads better as a mutation than as a rebuild.
+    name: clampToDefaults
+    params: cfg *config
+  - doc: |-
+      isToken reports whether s is an RFC 7230 §3.2.6 token: one or more tchar —
+      ALPHA, DIGIT, or one of !#$%&'*+-.^_`|~ — and nothing else.
+    name: isToken
+    params: s string
+    results: bool
+  - doc: isTokenChar reports whether c is an RFC 7230 tchar.
+    name: isTokenChar
+    params: c byte
+    results: bool
+  - doc: misconfigured builds the ADR 0031 refusal for one named option.
+    name: misconfigured
+    params: option string, value int64, why string
+    results: error
+  - name: ValidateText
+    params: b []byte
+    results: error
+  - name: NewConn
+    params: socket stdnet.Conn, buffered *bufio.Reader, subprotocol string, cfg *config, draining <-chan struct{}
+    results: "*Conn"
+  - doc: closeCodeFor picks the status a malformed Close payload deserves.
+    name: closeCodeFor
+    params: cause error
+    results: corenet.WSCloseCode
+  - doc: |-
+      swallowErr intentionally discards a non-actionable error, recording the
+      discard so the error audit treats it as deliberate rather than dropped.
+
+      It is used on three paths where there is genuinely nothing to report: sending
+      a courtesy Close frame on a socket that may already be gone, closing that
+      socket a second time, and setting a write deadline on a connection whose next
+      write reports the real problem far more usefully.
+    name: swallowErr
+    params: err error
+imports:
+  atomic: sync/atomic
+  base64: encoding/base64
+  binary: encoding/binary
+  bufio: bufio
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  io: io
+  math: math
+  sha1: crypto/sha1
+  slices: slices
+  stdnet: net
+  strings: strings
+  sync: sync
+  textproto: net/textproto
+  time: time
+  url: net/url
+  utf8: unicode/utf8
+  worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/websocket
+  name: websocket
+  purpose: "Package websocket — the closing handshake's payload (RFC 6455 §5.5.1): a two-byte status code and an optional UTF-8 reason, written and read here."
+types:
+  - fields:
+      - doc: "Final is the FIN bit: this frame completes the message."
+        name: Final
+        type: bool
+      - doc: OpCode is the frame type.
+        name: OpCode
+        type: corenet.WSOpCode
+      - doc: |-
+          Masked is the MASK bit. RFC 6455 §5.1 requires it on every client frame
+          and forbids it on every server frame.
+        name: Masked
+        type: bool
+      - doc: MaskKey is the four-byte key, meaningful only when Masked.
+        name: MaskKey
+        type: "[MaskLen]byte"
+      - doc: |-
+          Length is the payload length the frame announces. It is what the peer
+          SAYS, not what it has sent — every bound must be checked against it
+          BEFORE any buffer is sized from it.
+        name: Length
+        type: uint64
+    kind: struct
+    methods:
+      - name: ValidateFromClient
+        recv: h FrameHeaderValue
+        results: error
+    name: FrameHeaderValue
+  - kind: named
+    name: Option
+    underlying: func(*config)
+  - doc: |-
+      config is the resolved option set. It is unexported because several fields
+      have a zero value that means something specific, and the meaning is decided
+      by resolve rather than by whoever fills the struct.
+    fields:
+      - doc: subprotocols is the server's preference order, most preferred first.
+        name: subprotocols
+        type: "[]string"
+      - doc: |-
+          maxMessageSize bounds one reassembled message. Zero is CLAMPED to the
+          default; negative is REFUSED. There is no spelling for "unbounded".
+        name: maxMessageSize
+        type: int64
+      - doc: maxFrameSize bounds one frame's announced payload, the same way.
+        name: maxFrameSize
+        type: int64
+      - doc: |-
+          pingInterval is the heartbeat cadence. Zero is CLAMPED; negative is
+          REFUSED; "never" is noPing.
+        name: pingInterval
+        type: time.Duration
+      - doc: writeTimeout bounds one frame's write, clamped and refused the same way.
+        name: writeTimeout
+        type: time.Duration
+      - doc: |-
+          noPing is the explicit spelling of "never send a ping". It is a separate
+          field rather than a sentinel duration because "never" and "use the
+          default" are different intents and one zero cannot carry both.
+        name: noPing
+        type: bool
+      - doc: |-
+          allowedOrigins is the exact-match allowlist. Empty means the default
+          same-origin rule applies.
+        name: allowedOrigins
+        type: "[]string"
+      - doc: |-
+          anyOrigin disables the origin check entirely, which the caller must ask
+          for by name.
+        name: anyOrigin
+        type: bool
+      - doc: |-
+          clock is what the heartbeat ticks on. No public option sets it:
+          clampToDefaults makes it clock.System, and only a white-box test hands
+          it a ManualClock, so a probe is driven by advancing time.
+        name: clock
+        type: clock.Waiter
+    kind: struct
+    name: config
+  - fields:
+      - doc: |-
+          raw is the socket taken over from net/http at the upgrade. It is ours
+          from that moment: the engine no longer closes it, and neither does
+          net/http.
+        name: raw
+        type: stdnet.Conn
+      - doc: |-
+          br is the reader the hijack handed back. It MUST be used rather than the
+          socket: net/http may have buffered bytes into it while parsing the
+          request, and reading past it would silently drop them.
+        name: br
+        type: "*bufio.Reader"
+      - doc: subprotocol is what the handshake agreed on, or "" when nothing was.
+        name: subprotocol
+        type: string
+      - doc: cfg is the resolved option set.
+        name: cfg
+        type: config
+      - doc: |-
+          wmu serialises whole frames. Every write must be whole: two interleaved
+          frames are not two messages, they are one corrupt stream.
+        name: wmu
+        type: sync.Mutex
+      - doc: wbuf is the reusable encode buffer, guarded by wmu.
+        name: wbuf
+        type: "[]byte"
+      - doc: |-
+          closeSent records that this endpoint has already put a Close frame on the
+          wire. RFC 6455 §5.5.1 allows exactly one, and a second would be read as a
+          frame arriving after the closing handshake finished. It also refuses
+          every OTHER frame from that point on: done closes only after the Close
+          has been written and the lock released, so without this a Send or a Ping
+          queued on the lock would follow the Close onto the wire. Guarded by wmu.
+        name: closeSent
+        type: bool
+      - doc: msg accumulates the message being reassembled. Reader goroutine only.
+        name: msg
+        type: "[]byte"
+      - doc: |-
+          assembling records that a fragmented message is in progress, which is
+          what makes a continuation frame legal and a new data frame illegal.
+        name: assembling
+        type: bool
+      - doc: |-
+          msgOp is the opcode of the message in progress — the first frame's, since
+          a continuation frame does not repeat it.
+        name: msgOp
+        type: corenet.WSOpCode
+      - doc: hdr is the fixed scratch for one frame header. Reader goroutine only.
+        name: hdr
+        type: "[MaxHeaderLen]byte"
+      - doc: |-
+          ctl is the fixed scratch for one control-frame payload. It is a separate
+          buffer from msg on purpose: a control frame may arrive BETWEEN two
+          fragments, so answering it must not disturb the message being assembled.
+        name: ctl
+        type: "[corenet.WSMaxControlPayload]byte"
+      - doc: |-
+          rx counts frames Receive has READ, which is not the same as frames that
+          have arrived: one still waiting in the socket buffer has not moved it.
+          The heartbeat reads it to tell a live peer from a silent one; the value
+          is meaningless, only its movement matters.
+        name: rx
+        type: atomic.Uint64
+      - doc: |-
+          hb is what the heartbeat remembers from one tick to the next. It belongs
+          to the heartbeat: set before its goroutine starts and touched by no
+          other afterwards, which is why it needs no lock.
+        name: hb
+        type: heartbeatState
+      - doc: peerCode is the close code the peer sent, or zero when it sent none.
+        name: peerCode
+        type: atomic.Uint32
+      - doc: done is closed exactly once, when the connection ends for any reason.
+        name: done
+        type: chan struct{}
+      - doc: |-
+          endOnce guards close(done) against the several goroutines that can end a
+          connection: the handler, the heartbeat, and the drain watcher.
+        name: endOnce
+        type: sync.Once
+      - doc: |-
+          watcher owns the goroutine translating the server's drain signal into
+          a closing handshake.
+        name: watcher
+        type: "*worker.LoopDaemon"
+      - doc: pinger owns the heartbeat goroutine; nil when the heartbeat is disabled.
+        name: pinger
+        type: "*worker.LoopDaemon"
+    kind: struct
+    methods:
+      - name: Subprotocol
+        recv: c *Conn
+        results: string
+      - name: Done
+        recv: c *Conn
+        results: <-chan struct{}
+      - name: PeerCloseCode
+        recv: c *Conn
+        results: corenet.WSCloseCode
+      - name: Receive
+        recv: c *Conn
+        results: message corenet.WSMessageValue, err error
+      - doc: |-
+          assemble applies the fragmentation rules to one data frame and appends its
+          payload to the message in progress, reporting whether that message is now
+          whole.
+        name: assemble
+        params: header FrameHeaderValue
+        recv: c *Conn
+        results: complete bool, err error
+      - name: Send
+        params: message corenet.WSMessageValue
+        recv: c *Conn
+        results: error
+      - name: SendText
+        params: text string
+        recv: c *Conn
+        results: error
+      - name: SendBinary
+        params: data []byte
+        recv: c *Conn
+        results: error
+      - name: Ping
+        params: payload []byte
+        recv: c *Conn
+        results: error
+      - name: Close
+        recv: c *Conn
+        results: error
+      - name: CloseWith
+        params: code corenet.WSCloseCode, reason string
+        recv: c *Conn
+        results: error
+      - doc: nextHeader reads and validates one frame header.
+        name: nextHeader
+        recv: c *Conn
+        results: header FrameHeaderValue, err error
+      - doc: trackFragment applies RFC 6455 §5.4's ordering rules to a data frame.
+        name: trackFragment
+        params: header FrameHeaderValue
+        recv: c *Conn
+        results: error
+      - doc: readDataPayload appends one data frame's payload to the message in progress.
+        name: readDataPayload
+        params: header FrameHeaderValue
+        recv: c *Conn
+        results: error
+      - doc: completeMessage finishes the reassembled message and validates it.
+        name: completeMessage
+        recv: c *Conn
+        results: message corenet.WSMessageValue, err error
+      - doc: serveControl answers one control frame.
+        name: serveControl
+        params: header FrameHeaderValue
+        recv: c *Conn
+        results: error
+      - doc: readControlPayload reads and unmasks one control frame's payload.
+        name: readControlPayload
+        params: payload []byte, key [MaskLen]byte
+        recv: c *Conn
+        results: error
+      - doc: serveClose completes the closing handshake the peer began.
+        name: serveClose
+        params: payload []byte
+        recv: c *Conn
+        results: error
+      - doc: sendFrame writes one whole frame under the write lock.
+        name: sendFrame
+        params: op corenet.WSOpCode, payload []byte
+        recv: c *Conn
+        results: error
+      - doc: sendClose writes the connection's one and only Close frame.
+        name: sendClose
+        params: code corenet.WSCloseCode, reason string
+        recv: c *Conn
+        results: error
+      - doc: writeLocked puts one encoded frame on the wire. The caller holds wmu.
+        name: writeLocked
+        params: op corenet.WSOpCode, payload []byte
+        recv: c *Conn
+        results: error
+      - doc: |-
+          failConnection performs RFC 6455 §7.1.7: send a Close naming the fault when
+          one can still be sent, then drop the connection.
+
+          It returns the CAUSE rather than a generic closure, because the handler's
+          only useful question is what the peer did wrong.
+        name: failConnection
+        params: code corenet.WSCloseCode, cause error
+        recv: c *Conn
+        results: error
+      - doc: socketGone reports a read that could not complete because the connection died.
+        name: socketGone
+        params: cause error
+        recv: c *Conn
+        results: error
+      - doc: ended reports the connection's terminal error, or nil while it is open.
+        name: ended
+        recv: c *Conn
+        results: error
+      - doc: end closes done exactly once, whichever goroutine gets there first.
+        name: end
+        recv: c *Conn
+      - doc: |-
+          terminate ends the connection and closes the socket, without joining.
+
+          It is separate from Close on purpose: the heartbeat and the watcher call it
+          when their own work fails, and calling Close there would make a goroutine
+          join itself.
+        name: terminate
+        recv: c *Conn
+      - doc: join stops and waits for the connection's own goroutines.
+        name: join
+        recv: c *Conn
+      - doc: |-
+          watch starts the goroutine that turns the server's drain into a closing
+          handshake.
+
+          Goroutine lifecycle: exactly one per connection, owned by the Conn and joined
+          by Close. It returns as soon as the connection ends, whatever ended it.
+
+          The request context is deliberately NOT watched. net/http cancels it the
+          moment the handler returns, and a hijacked socket outlives the handler by
+          design — so a connection that watched it would end at an instant that says
+          nothing about the peer. The drain signal is a channel captured at the
+          upgrade, which is exactly why it keeps working afterwards.
+        name: watch
+        params: draining <-chan struct{}
+        recv: c *Conn
+      - doc: |-
+          startHeartbeat spawns the periodic Ping, unless it is disabled.
+
+          Goroutine lifecycle: at most one per connection, owned by the Conn and joined
+          by Close. It exits on the connection's own end, so it cannot outlive the
+          socket it writes to.
+
+          It is the connection's ONLY liveness check. A peer that vanishes without
+          closing — a lid closed, a NAT rebinding, a cable pulled — leaves a socket
+          that is perfectly readable and will simply never produce another byte; no
+          read error, no close frame, nothing. The heartbeat is what turns that silence
+          into an ending.
+
+          "Silence" means no frame READ since the last probe: the heartbeat watches
+          rx, and only Receive moves it. It therefore cannot tell a vanished peer from
+          a live one whose Pong is waiting, unread, behind a handler that stopped
+          calling Receive — which is why a reading goroutine is part of Conn's
+          contract rather than a style (ADR 0047 §D8, amended 2026-09-11).
+        name: startHeartbeat
+        recv: c *Conn
+      - doc: |-
+          heartbeat is one heartbeat tick, run on the pinger's goroutine and only there.
+
+          A peer that has not produced a single frame since the previous tick asked is
+          not slow, it is gone: a live peer is obliged to answer a Ping, so a full
+          interval of silence after a probe is an ending rather than a lull.
+        name: heartbeat
+        recv: c *Conn
+    name: Conn
+  - doc: |-
+      heartbeatState is what the heartbeat remembers between two ticks: the frame
+      count the previous tick saw, and whether that tick's Ping went out.
+    fields:
+      - doc: seen is rx as the previous tick read it.
+        name: seen
+        type: uint64
+      - doc: probed reports that the previous tick's Ping was sent.
+        name: probed
+        type: bool
+    kind: struct
+    name: heartbeatState

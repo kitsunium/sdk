@@ -1,0 +1,879 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: RegisterAgreement
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterAgreement
+        kind: self
+      - id: agreements.register
+        kind: internal
+    steps:
+      - return: agreements.register(a)
+        to: agreements.register
+  - of: LookupAgreement
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupAgreement
+        kind: self
+      - id: agreements.table.Lookup
+        kind: value
+    steps:
+      - return: agreements.table.Lookup(name)
+        to: agreements.table.Lookup
+  - of: AvailableAgreements
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableAgreements
+        kind: self
+      - id: agreements.table.Names
+        kind: value
+    steps:
+      - return: agreements.table.Names()
+        to: agreements.table.Names
+  - of: GenerateAgreementKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: GenerateAgreementKey
+        kind: self
+      - id: LookupAgreement
+        kind: internal
+      - id: agreement.GenerateKey
+        kind: internal
+    steps:
+      - bind: agreement, ok
+        eval: LookupAgreement(name)
+        to: LookupAgreement
+      - opt:
+          do:
+            - return: nil, nil, UnknownAgreementAlgorithm
+          when: "!ok"
+      - return: agreement.GenerateKey()
+        to: agreement.GenerateKey
+  - of: AgreementShared
+    participants:
+      - id: caller
+        kind: actor
+      - id: AgreementShared
+        kind: self
+      - id: LookupAgreement
+        kind: internal
+      - id: agreement.Shared
+        kind: internal
+    steps:
+      - bind: agreement, ok
+        eval: LookupAgreement(name)
+        to: LookupAgreement
+      - opt:
+          do:
+            - return: nil, UnknownAgreementAlgorithm
+          when: "!ok"
+      - bind: out, derr
+        eval: agreement.Shared(priv, peerPub)
+        to: agreement.Shared
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(neutralizeAgreementCause(derr), errs.WrapParams{
+                			Code:    CodeAgreementFailed,
+                			Reason:  "AGREEMENT_FAILED",
+                			Public:  "Key agreement failed to derive a shared secret",
+                			Private: "core/crypto.AgreementShared: the scheme rejected the inputs (cause withheld of key bytes)",
+                		})
+          when: derr != nil
+      - return: out, nil
+  - of: neutralizeAgreementCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: neutralizeAgreementCause
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: agreementSchemeFault{}
+          init:
+            bind: _, isSDK
+            eval: errs.CodeOf(cause)
+            to: errs
+          when: isSDK
+      - return: cause
+  - of: agreementSchemeFault.Error
+    steps:
+      - return: "\"agreement scheme fault (cause withheld of key bytes)\""
+  - of: Algorithm.String
+    steps:
+      - return: string(a)
+  - of: Algorithm.Known
+    participants:
+      - id: caller
+        kind: actor
+      - id: Algorithm.Known
+        kind: self
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: a == ""
+      - bind: _, found
+        eval: Lookup(a)
+        to: Lookup
+      - return: found
+  - of: RegisterDeriver
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterDeriver
+        kind: self
+      - id: derivers.register
+        kind: internal
+    steps:
+      - return: derivers.register(d)
+        to: derivers.register
+  - of: LookupDeriver
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupDeriver
+        kind: self
+      - id: derivers.table.Lookup
+        kind: value
+    steps:
+      - return: derivers.table.Lookup(name)
+        to: derivers.table.Lookup
+  - of: AvailableDerivers
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableDerivers
+        kind: self
+      - id: derivers.table.Names
+        kind: value
+    steps:
+      - return: derivers.table.Names()
+        to: derivers.table.Names
+  - of: Subkey
+    participants:
+      - id: caller
+        kind: actor
+      - id: Subkey
+        kind: self
+      - id: LookupDeriver
+        kind: internal
+      - id: deriver.Derive
+        kind: internal
+    steps:
+      - bind: deriver, ok
+        eval: LookupDeriver(name)
+        to: LookupDeriver
+      - opt:
+          do:
+            - return: nil, UnknownKDFAlgorithm
+          when: "!ok"
+      - return: deriver.Derive(secret, salt, info, length)
+        to: deriver.Derive
+  - of: conflictText
+    participants:
+      - id: caller
+        kind: actor
+      - id: conflictText
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString(err.Error())
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(":")
+                    to: b.WriteString
+                when: i == 0
+            - eval: b.WriteString(" " + f.Key() + "=" + strconv.Quote(f.StringValue()))
+              to: b.WriteString
+          key: i
+          range: errs.FieldsOf(err)
+          value: f
+      - return: b.String()
+        to: b.String
+  - of: RegisterHasher
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterHasher
+        kind: self
+      - id: hashers.register
+        kind: internal
+    steps:
+      - return: hashers.register(h)
+        to: hashers.register
+  - of: LookupHasher
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupHasher
+        kind: self
+      - id: hashers.table.Lookup
+        kind: value
+    steps:
+      - return: hashers.table.Lookup(name)
+        to: hashers.table.Lookup
+  - of: AvailableHashers
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableHashers
+        kind: self
+      - id: hashers.table.Names
+        kind: value
+    steps:
+      - return: hashers.table.Names()
+        to: hashers.table.Names
+  - of: Sum
+    participants:
+      - id: caller
+        kind: actor
+      - id: Sum
+        kind: self
+      - id: LookupHasher
+        kind: internal
+      - id: hasher.New
+        kind: internal
+      - id: hsh.Write
+        kind: value
+      - id: hsh.Sum
+        kind: value
+    steps:
+      - bind: hasher, ok
+        eval: LookupHasher(name)
+        to: LookupHasher
+      - opt:
+          do:
+            - return: nil, UnknownHashAlgorithm
+          when: "!ok"
+      - bind: hsh
+        eval: hasher.New()
+        to: hasher.New
+      - opt:
+          do:
+            - return: nil, werr
+          init:
+            bind: _, werr
+            eval: hsh.Write(data)
+            to: hsh.Write
+          when: werr != nil
+      - return: hsh.Sum(nil), nil
+        to: hsh.Sum
+  - of: NewHash
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHash
+        kind: self
+      - id: LookupHasher
+        kind: internal
+      - id: hasher.New
+        kind: internal
+    steps:
+      - bind: hasher, ok
+        eval: LookupHasher(name)
+        to: LookupHasher
+      - opt:
+          do:
+            - return: nil, UnknownHashAlgorithm
+          when: "!ok"
+      - return: hasher.New(), nil
+        to: hasher.New
+  - of: SumHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: SumHex
+        kind: self
+      - id: Sum
+        kind: internal
+      - id: hex
+        kind: stdlib
+    steps:
+      - bind: raw, sErr
+        eval: Sum(name, data)
+        to: Sum
+      - opt:
+          do:
+            - return: "\"\", sErr"
+          when: sErr != nil
+      - return: hex.EncodeToString(raw), nil
+        to: hex
+  - of: NewKey
+    steps:
+      - opt:
+          do:
+            - return: Key{}, InvalidKey
+          when: len(raw) != KeyLen
+      - return: "Key{raw: bytes.Clone(raw)}, nil"
+  - of: Key.Bytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: Key.Bytes
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - return: bytes.Clone(k.raw)
+        to: bytes
+  - of: Key.Zeroize
+    steps:
+      - eval: clear(k.raw)
+  - of: Key.String
+    steps:
+      - return: "\"<redacted>\""
+  - of: Key.GoString
+    steps:
+      - return: "\"<redacted>\""
+  - of: RegisterMAC
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterMAC
+        kind: self
+      - id: macs.register
+        kind: internal
+    steps:
+      - return: macs.register(m)
+        to: macs.register
+  - of: LookupMAC
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupMAC
+        kind: self
+      - id: macs.table.Lookup
+        kind: value
+    steps:
+      - return: macs.table.Lookup(name)
+        to: macs.table.Lookup
+  - of: AvailableMACs
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableMACs
+        kind: self
+      - id: macs.table.Names
+        kind: value
+    steps:
+      - return: macs.table.Names()
+        to: macs.table.Names
+  - of: MACTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: MACTag
+        kind: self
+      - id: LookupMAC
+        kind: internal
+      - id: mac.Tag
+        kind: internal
+    steps:
+      - bind: mac, ok
+        eval: LookupMAC(name)
+        to: LookupMAC
+      - opt:
+          do:
+            - return: nil, UnknownMACAlgorithm
+          when: "!ok"
+      - return: mac.Tag(key, message), nil
+        to: mac.Tag
+  - of: MACVerify
+    participants:
+      - id: caller
+        kind: actor
+      - id: MACVerify
+        kind: self
+      - id: LookupMAC
+        kind: internal
+      - id: mac.Verify
+        kind: internal
+    steps:
+      - bind: mac, found
+        eval: LookupMAC(name)
+        to: LookupMAC
+      - opt:
+          do:
+            - return: false, UnknownMACAlgorithm
+          when: "!found"
+      - return: mac.Verify(key, message, tag), nil
+        to: mac.Verify
+  - of: RegisterPasswordHasher
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterPasswordHasher
+        kind: self
+      - id: passwordHashers.register
+        kind: internal
+    steps:
+      - return: passwordHashers.register(p)
+        to: passwordHashers.register
+  - of: LookupPasswordHasher
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupPasswordHasher
+        kind: self
+      - id: passwordHashers.table.Lookup
+        kind: value
+    steps:
+      - return: passwordHashers.table.Lookup(name)
+        to: passwordHashers.table.Lookup
+  - of: AvailablePasswordHashers
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailablePasswordHashers
+        kind: self
+      - id: passwordHashers.table.Names
+        kind: value
+    steps:
+      - return: passwordHashers.table.Names()
+        to: passwordHashers.table.Names
+  - of: HashPassword
+    participants:
+      - id: caller
+        kind: actor
+      - id: HashPassword
+        kind: self
+      - id: LookupPasswordHasher
+        kind: internal
+      - id: hasher.Hash
+        kind: internal
+    steps:
+      - bind: hasher, ok
+        eval: LookupPasswordHasher(name)
+        to: LookupPasswordHasher
+      - opt:
+          do:
+            - return: "\"\", UnknownPasswordAlgorithm"
+          when: "!ok"
+      - return: hasher.Hash(password)
+        to: hasher.Hash
+  - of: VerifyPassword
+    participants:
+      - id: caller
+        kind: actor
+      - id: VerifyPassword
+        kind: self
+      - id: phcID
+        kind: internal
+      - id: LookupPasswordHasher
+        kind: internal
+      - id: hasher.Verify
+        kind: internal
+    steps:
+      - bind: id, idOK
+        eval: phcID(phc)
+        to: phcID
+      - opt:
+          do:
+            - return: false, InvalidPasswordHash
+          when: "!idOK"
+      - bind: hasher, found
+        eval: LookupPasswordHasher(Algorithm(id))
+        to: LookupPasswordHasher
+      - opt:
+          do:
+            - return: false, UnknownPasswordAlgorithm
+          when: "!found"
+      - return: hasher.Verify(password, phc)
+        to: hasher.Verify
+  - of: NeedsRehash
+    participants:
+      - id: caller
+        kind: actor
+      - id: NeedsRehash
+        kind: self
+      - id: phcID
+        kind: internal
+      - id: LookupPasswordHasher
+        kind: internal
+      - id: hasher.NeedsRehash
+        kind: internal
+    steps:
+      - bind: id, idOK
+        eval: phcID(phc)
+        to: phcID
+      - opt:
+          do:
+            - return: "false"
+          when: "!idOK"
+      - bind: hasher, found
+        eval: LookupPasswordHasher(Algorithm(id))
+        to: LookupPasswordHasher
+      - opt:
+          do:
+            - return: "false"
+          when: "!found"
+      - return: hasher.NeedsRehash(phc)
+        to: hasher.NeedsRehash
+  - of: phcID
+    participants:
+      - id: caller
+        kind: actor
+      - id: phcID
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!strings.HasPrefix(phc, \"$\")"
+      - bind: fields
+        eval: strings.Split(phc, "$")
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(fields) < phcMinSegments || fields[1] == ""
+      - return: fields[1], true
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: aeads.register
+        kind: internal
+      - id: indexID
+        kind: internal
+    steps:
+      - eval: aeads.register(a)
+        to: aeads.register
+      - opt:
+          do:
+            - panic: conflictText(err)
+          init:
+            bind: err
+            eval: indexID(a.ID(), a)
+            to: indexID
+          when: err != nil
+      - return: a
+  - of: indexID
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexID
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!idIndex.Publish(id, a)"
+      - return: |-
+          errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+          		errs.String("registrar", "crypto.Register"), errs.String("wire_id", fmt.Sprintf("0x%02x", id)))
+        to: errs
+  - of: Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lookup
+        kind: self
+      - id: aeads.table.Lookup
+        kind: value
+    steps:
+      - return: aeads.table.Lookup(name)
+        to: aeads.table.Lookup
+  - of: lookupByID
+    participants:
+      - id: caller
+        kind: actor
+      - id: lookupByID
+        kind: self
+      - id: idIndex.Lookup
+        kind: value
+    steps:
+      - return: idIndex.Lookup(id)
+        to: idIndex.Lookup
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: aeads.table.Names
+        kind: value
+    steps:
+      - return: aeads.table.Names()
+        to: aeads.table.Names
+  - of: (*schemeRegistry).register
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*schemeRegistry).register
+        kind: self
+      - id: plugin
+        kind: package
+      - id: r.publish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "fmt.Sprintf(\"crypto.%s [%s DUPLICATE_REGISTRATION]: %s\", r.verb, CodeDuplicateRegistration, why)"
+          init:
+            bind: why
+            eval: plugin.Unusable(v)
+            to: plugin
+          when: why != ""
+      - opt:
+          do:
+            - panic: conflictText(err)
+          init:
+            bind: err
+            eval: r.publish(v.Algorithm(), v)
+            to: r.publish
+          when: err != nil
+      - return: v
+  - of: (*schemeRegistry).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*schemeRegistry).publish
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!r.table.Publish(name, v)"
+      - return: |-
+          errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+          		errs.String("registrar", "crypto."+r.verb), errs.String("algorithm", string(name)))
+        to: errs
+  - of: Seal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Seal
+        kind: self
+      - id: Lookup
+        kind: internal
+      - id: scheme.Seal
+        kind: internal
+    steps:
+      - bind: scheme, ok
+        eval: Lookup(name)
+        to: Lookup
+      - opt:
+          do:
+            - return: nil, UnknownAlgorithm
+          when: "!ok"
+      - return: scheme.Seal(key, plaintext, aad)
+        to: scheme.Seal
+  - of: Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: Open
+        kind: self
+      - id: lookupByID
+        kind: internal
+      - id: scheme.Open
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, DecryptionFailed
+          when: len(box) < headerLen
+      - bind: scheme, ok
+        eval: lookupByID(box[1])
+        to: lookupByID
+      - opt:
+          do:
+            - return: nil, DecryptionFailed
+          when: "!ok"
+      - return: scheme.Open(key, box, aad)
+        to: scheme.Open
+  - of: RegisterSigner
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterSigner
+        kind: self
+      - id: signers.register
+        kind: internal
+    steps:
+      - return: signers.register(s)
+        to: signers.register
+  - of: LookupSigner
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupSigner
+        kind: self
+      - id: signers.table.Lookup
+        kind: value
+    steps:
+      - return: signers.table.Lookup(name)
+        to: signers.table.Lookup
+  - of: AvailableSigners
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableSigners
+        kind: self
+      - id: signers.table.Names
+        kind: value
+    steps:
+      - return: signers.table.Names()
+        to: signers.table.Names
+  - of: GenerateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: GenerateKey
+        kind: self
+      - id: LookupSigner
+        kind: internal
+      - id: signer.GenerateKey
+        kind: internal
+    steps:
+      - bind: signer, ok
+        eval: LookupSigner(name)
+        to: LookupSigner
+      - opt:
+          do:
+            - return: nil, nil, UnknownSignatureAlgorithm
+          when: "!ok"
+      - return: signer.GenerateKey()
+        to: signer.GenerateKey
+  - of: Sign
+    participants:
+      - id: caller
+        kind: actor
+      - id: Sign
+        kind: self
+      - id: LookupSigner
+        kind: internal
+      - id: signer.Sign
+        kind: internal
+    steps:
+      - bind: signer, ok
+        eval: LookupSigner(name)
+        to: LookupSigner
+      - opt:
+          do:
+            - return: nil, UnknownSignatureAlgorithm
+          when: "!ok"
+      - return: signer.Sign(priv, message)
+        to: signer.Sign
+  - of: Verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: Verify
+        kind: self
+      - id: LookupSigner
+        kind: internal
+      - id: signer.Verify
+        kind: internal
+    steps:
+      - bind: signer, found
+        eval: LookupSigner(name)
+        to: LookupSigner
+      - opt:
+          do:
+            - return: false, UnknownSignatureAlgorithm
+          when: "!found"
+      - return: signer.Verify(pub, message, sig), nil
+        to: signer.Verify
+  - of: RegisterStreamSealer
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterStreamSealer
+        kind: self
+      - id: streamSealers.register
+        kind: internal
+    steps:
+      - return: streamSealers.register(s)
+        to: streamSealers.register
+  - of: LookupStreamSealer
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupStreamSealer
+        kind: self
+      - id: streamSealers.table.Lookup
+        kind: value
+    steps:
+      - return: streamSealers.table.Lookup(name)
+        to: streamSealers.table.Lookup
+  - of: AvailableStreamSealers
+    participants:
+      - id: caller
+        kind: actor
+      - id: AvailableStreamSealers
+        kind: self
+      - id: streamSealers.table.Names
+        kind: value
+    steps:
+      - return: streamSealers.table.Names()
+        to: streamSealers.table.Names
+  - of: SealStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: SealStream
+        kind: self
+      - id: LookupStreamSealer
+        kind: internal
+      - id: sealer.Writer
+        kind: internal
+    steps:
+      - bind: sealer, ok
+        eval: LookupStreamSealer(name)
+        to: LookupStreamSealer
+      - opt:
+          do:
+            - return: nil, UnknownAlgorithm
+          when: "!ok"
+      - return: sealer.Writer(key, dst, aad)
+        to: sealer.Writer
+  - of: OpenStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: OpenStream
+        kind: self
+      - id: LookupStreamSealer
+        kind: internal
+      - id: sealer.Reader
+        kind: internal
+    steps:
+      - bind: sealer, ok
+        eval: LookupStreamSealer(name)
+        to: LookupStreamSealer
+      - opt:
+          do:
+            - return: nil, UnknownAlgorithm
+          when: "!ok"
+      - return: sealer.Reader(key, src, aad)
+        to: sealer.Reader

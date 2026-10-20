@@ -1,0 +1,136 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: ParseForm
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: Form(candidate), nil
+                when: spelling == name
+          key: candidate
+          range: formNames
+          value: spelling
+      - return: FormOther, errs.Wrap(InvalidForm, errs.WrapParams{}, errs.String("form", name))
+  - of: NewCompiledMessage
+    steps:
+      - opt:
+          do:
+            - return: |-
+                MessageValue{}, errs.Wrap(PluralFormMissing, errs.WrapParams{},
+                			errs.String("form", FormOther.String()), errs.String("detail", "a message must carry the other form"))
+          when: "!other.set"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: MessageValue{}, errs.Wrap(InvalidForm, errs.WrapParams{}, errs.String("form", entry.Form.String()))
+                when: entry.Form == FormOther || !entry.Form.Valid()
+            - opt:
+                do:
+                  - return: |-
+                      MessageValue{}, errs.Wrap(InvalidForm, errs.WrapParams{}, errs.String("form", entry.Form.String()),
+                      				errs.String("detail", "the plural categories must be ascending and distinct"))
+                when: index > 0 && entry.Form <= plural[index-1].Form
+            - opt:
+                do:
+                  - return: |-
+                      MessageValue{}, errs.Wrap(PluralFormMissing, errs.WrapParams{}, errs.String("form", entry.Form.String()),
+                      				errs.String("detail", "the category's pattern was never compiled"))
+                when: "!entry.Body.set"
+          key: index
+          range: plural
+          value: entry
+      - opt:
+          do:
+            - return: "MessageValue{other: other}, nil"
+          when: len(plural) == 0
+      - return: "MessageValue{other: other, plural: plural}, nil"
+  - of: MessageValue.patternFor
+    steps:
+      - opt:
+          do:
+            - return: m.other, m.other.set
+          when: form == FormOther
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: candidate.Body, true
+                when: candidate.Form == form
+          key: _
+          range: m.plural
+          value: candidate
+      - return: PatternValue{}, false
+  - of: NewPattern
+    steps:
+      - bind: size
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      PatternValue{}, errs.Wrap(InvalidPattern, errs.WrapParams{}, errs.Int("span", index),
+                      				errs.String("detail", "a span is literal text or a placeholder name, exactly one of the two"))
+                when: (span.Text == "") == (span.Name == "")
+            - opt:
+                do:
+                  - return: |-
+                      PatternValue{}, errs.Wrap(InvalidPattern, errs.WrapParams{}, errs.Int("span", index), errs.String("placeholder", span.Name),
+                      				errs.String("detail", "placeholder name is empty or outside [A-Za-z_][A-Za-z0-9_]*"))
+                when: span.Name != "" && !ValidPlaceholder(span.Name)
+            - op: +=
+              set: size
+              value: len(span.Text)
+          key: index
+          range: parts
+          value: span
+      - return: "PatternValue{parts: parts, size: size, set: true}, nil"
+  - of: ValidPlaceholder
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: name == "" || !isNameStart(name[0])
+      - loop:
+          cond: i < len(name)
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isNameStart(name[i]) && (name[i] < '0' || name[i] > '9')"
+          init: i := 1
+          post: i++
+      - return: "true"
+  - of: isAlpha
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: sub == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: (sub[i] < 'A' || sub[i] > 'Z') && (sub[i] < 'a' || sub[i] > 'z')
+          key: i
+          range: len(sub)
+      - return: "true"
+  - of: isDigit
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: sub == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: sub[i] < '0' || sub[i] > '9'
+          key: i
+          range: len(sub)
+      - return: "true"

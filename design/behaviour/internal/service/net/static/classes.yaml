@@ -1,0 +1,322 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: fieldOption names the Config field — or "fs" — a refusal is about.
+    items:
+      - name: fieldOption
+        type: string
+        value: "\"option\""
+    name: fieldOption
+  - doc: asciiDelete is DEL, the one control character above the printable range.
+    items:
+      - name: asciiDelete
+        type: byte
+        value: "0x7f"
+    name: asciiDelete
+  - grouped: true
+    items:
+      - doc: "present: the name was opened and stat'ed."
+        name: present
+        type: lookup
+        value: iota
+      - doc: "absent: the name names nothing — the file system refused the NAME."
+        name: absent
+      - doc: |-
+          broken: the tree holds something by that name and could not open or
+          stat it.
+        name: broken
+    name: present
+  - doc: |-
+      sniffBytes is how much of a file http.DetectContentType reads to guess a
+      type, the same bound http.ServeContent uses.
+    items:
+      - name: sniffBytes
+        type: int
+        value: "512"
+    name: sniffBytes
+  - doc: |-
+      DefaultContentSecurityPolicy is the policy sent when Config names none: the
+      page's own origin for everything it loads, no base URL or form target
+      elsewhere, and no framing by another page.
+    items:
+      - name: DefaultContentSecurityPolicy
+        type: string
+        value: "\"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'\""
+    name: DefaultContentSecurityPolicy
+  - doc: |-
+      DefaultReferrerPolicy is the Referrer-Policy sent when Config names none: a
+      full referrer to this origin, none at all to another.
+    items:
+      - name: DefaultReferrerPolicy
+        type: string
+        value: "\"same-origin\""
+    name: DefaultReferrerPolicy
+  - doc: |-
+      ImmutableCacheControl is the Cache-Control of a file Config.Immutable marks
+      content-hashed: stored for a year, shared caches included, and never
+      revalidated — a new version has a new name.
+    items:
+      - name: ImmutableCacheControl
+        type: string
+        value: "\"public, max-age=31536000, immutable\""
+    name: ImmutableCacheControl
+  - doc: |-
+      RevalidateCacheControl is the Cache-Control of every other response: stored,
+      but revalidated before each use, so a redeployed page is never served stale.
+    items:
+      - name: RevalidateCacheControl
+        type: string
+        value: "\"no-cache\""
+    name: RevalidateCacheControl
+  - doc: |-
+      indexName is the file a directory is served by, and the single-page
+      application's shell.
+    items:
+      - name: indexName
+        type: string
+        value: "\"index.html\""
+    name: indexName
+  - doc: "allowedMethods is the Allow header of a 405: the two methods answered."
+    items:
+      - name: allowedMethods
+        type: string
+        value: "\"GET, HEAD\""
+    name: allowedMethods
+files:
+  - decls:
+      - fieldOption
+      - asciiDelete
+      - headerValueSafe
+      - referrerPolicyKnown
+      - misconfigured
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - lookup
+      - present
+      - open
+      - nameRefused
+    name: lookup.go
+  - decls:
+      - platformNameRefused
+    name: lookup_unix.go
+  - decls:
+      - sniffBytes
+      - (*Handler).serveFile
+      - stream
+      - pinnedType
+    name: serve.go
+  - decls:
+      - DefaultContentSecurityPolicy
+      - DefaultReferrerPolicy
+      - ImmutableCacheControl
+      - RevalidateCacheControl
+      - indexName
+      - allowedMethods
+      - Config
+      - Handler
+      - NewHandler
+      - (*Handler).ServeHTTP
+      - cleanName
+      - (*Handler).serveName
+      - (*Handler).serveDirectory
+      - (*Handler).fallback
+      - redirectToDirectory
+      - notFound
+      - failed
+      - closeQuietly
+    name: static.go
+functions:
+  - doc: |-
+      headerValueSafe reports whether value can be sent as a header value as it
+      is: no control character but a tab. net/http would rewrite a CR or an LF
+      into a space and send a policy nobody wrote; the other control characters
+      make a value a browser discards.
+    name: headerValueSafe
+    params: value string
+    results: bool
+  - doc: |-
+      referrerPolicyKnown reports whether value is a Referrer-Policy a browser
+      applies: one token the specification defines, or a comma-separated list of
+      them (a browser applies the last it knows — the list is how a newer token
+      falls back to an older one). An empty item is refused with the rest: it is
+      a typo more often than a policy.
+    name: referrerPolicyKnown
+    params: value string
+    results: bool
+  - doc: misconfigured refuses a Config, naming the option and never its value.
+    name: misconfigured
+    params: option string
+    results: error
+  - doc: |-
+      open opens name in fsys and reads what it is. The caller closes the file
+      when found is present; nothing is left open otherwise.
+    name: open
+    params: fsys fs.FS, name string
+    results: file fs.File, info fs.FileInfo, found lookup
+  - doc: |-
+      nameRefused reports whether a failed lookup was the file system refusing the
+      NAME: nothing by that name, a name it cannot hold, a component that is a
+      file, a component too long. A client chooses every name it asks for, so a
+      client could otherwise turn any of these into a 5xx at will — a Windows
+      reserved character, a component past NAME_MAX, "index.html/x". Everything
+      else — a permission refused, a descriptor table full, a disk that failed, a
+      remote tree that did not answer — is the tree's failure, and a 500.
+    name: nameRefused
+    params: err error
+    results: bool
+  - doc: |-
+      platformNameRefused reports the two refusals of a name a Unix kernel does
+      not report as "does not exist": a component that is a file used as a
+      directory, and a component longer than the file system holds.
+    name: platformNameRefused
+    params: err error
+    results: bool
+  - doc: |-
+      stream answers with a file that cannot seek: the whole body with a 200, its
+      length from its stat, its type from its name or its first bytes. A read that
+      fails before the status is written is a 500; one that fails after it can
+      only cut the body, which the declared length makes visible to the client.
+    name: stream
+    params: w http.ResponseWriter, r *http.Request, name string, file fs.File, info fs.FileInfo
+  - doc: |-
+      pinnedType returns the Content-Type of the extensions a page cannot run
+      without, independent of the host's MIME tables. The standard library reads
+      /etc/mime.types, or the Windows registry, and lets it override its own
+      table; under nosniff a script or a stylesheet served as text/plain is
+      refused by the browser, and a WebAssembly module without application/wasm
+      cannot be compiled while it streams.
+    name: pinnedType
+    params: extension string
+    results: contentType string, pinned bool
+  - name: NewHandler
+    params: fsys fs.FS, cfg Config
+    results: "*Handler, error"
+  - doc: |-
+      cleanName turns a request path into a name of the tree: cleaned from the
+      root, so no ".." survives and nothing can climb above it, then made
+      relative as io/fs requires. The root is ".".
+    name: cleanName
+    params: requestPath string
+    results: string
+  - doc: |-
+      redirectToDirectory sends a directory named without its trailing slash to
+      the name with one. The Location is relative, so it stays right behind
+      http.StripPrefix, and starts with "./", so no directory name can make it
+      read as another host or a scheme. The name is escaped as one path segment:
+      a directory called "v2?beta" or "a#b" is redirected to itself, not to a
+      query or a fragment of another path.
+    name: redirectToDirectory
+    params: w http.ResponseWriter, r *http.Request, name string
+  - doc: notFound answers 404.
+    name: notFound
+    params: w http.ResponseWriter
+  - doc: "failed answers 500: the tree holds something it could not serve."
+    name: failed
+    params: w http.ResponseWriter
+  - doc: |-
+      closeQuietly closes a file the handler is done with. A close failure on a
+      read-only file changes nothing the client can be told.
+    name: closeQuietly
+    params: file io.Closer
+imports:
+  bufio: bufio
+  cmp: cmp
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+  http: net/http
+  io: io
+  mime: mime
+  path: path
+  strconv: strconv
+  strings: strings
+  syscall: syscall
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/static
+  name: static
+  purpose: Package static — what NewHandler refuses in a Config.
+types:
+  - doc: lookup is what opening a name found.
+    kind: named
+    name: lookup
+    underlying: uint8
+  - fields:
+      - doc: |-
+          ContentSecurityPolicy is sent on every response. Empty sends
+          DefaultContentSecurityPolicy; there is no way to send none. A value
+          holding a control character is refused at construction.
+        name: ContentSecurityPolicy
+        type: string
+      - doc: |-
+          ReferrerPolicy is sent on every response: one of the eight tokens the
+          Referrer Policy specification defines, or a comma-separated list of
+          them. Empty sends DefaultReferrerPolicy. Any other value is refused at
+          construction, because a browser ignores a token it does not know and falls back
+          to its own default, which sends the origin to every site.
+        name: ReferrerPolicy
+        type: string
+      - doc: |-
+          SinglePageApp serves the root's index.html, with 200, for a path that
+          has no extension and names nothing in the tree. A path with an
+          extension that names nothing stays a 404, and so does a directory with
+          no index.html.
+        name: SinglePageApp
+        type: bool
+      - doc: |-
+          Immutable reports whether the file at name — slash-separated, relative
+          to the root, as served: "assets/app-3f2a9c.js" — is content-hashed, so
+          its response may be cached with ImmutableCacheControl. For a fallback it
+          is asked about "index.html", the file actually served. Nil marks
+          nothing.
+        name: Immutable
+        type: func(name string) bool
+    kind: struct
+    name: Config
+  - fields:
+      - name: fsys
+        type: fs.FS
+      - name: csp
+        type: string
+      - name: referrer
+        type: string
+      - name: spa
+        type: bool
+      - name: immutable
+        type: func(name string) bool
+    kind: struct
+    methods:
+      - doc: |-
+          serveFile answers with one file of the tree: cached for good when the
+          caller marks its name content-hashed, typed without relying on the host's
+          tables for the types a page cannot run without, and ranged, conditional and
+          HEAD-aware through http.ServeContent when the file can seek.
+        name: serveFile
+        params: w http.ResponseWriter, r *http.Request, name string, file fs.File, info fs.FileInfo
+        recv: h *Handler
+      - name: ServeHTTP
+        params: w http.ResponseWriter, r *http.Request
+        recv: h *Handler
+      - doc: "serveName serves what name is: a file, a directory, or nothing."
+        name: serveName
+        params: w http.ResponseWriter, r *http.Request, name string, slash bool
+        recv: h *Handler
+      - doc: |-
+          serveDirectory serves a directory by its index.html: redirecting first to
+          the name with a trailing slash, so the page's relative links resolve inside
+          the directory. A directory without one is 404 — never a listing, and never
+          the single-page application's shell.
+        name: serveDirectory
+        params: w http.ResponseWriter, r *http.Request, name string, slash bool
+        recv: h *Handler
+      - doc: |-
+          fallback answers a name that names nothing: the root's index.html for a
+          single-page application's route, 404 for everything else.
+        name: fallback
+        params: w http.ResponseWriter, r *http.Request, name string
+        recv: h *Handler
+    name: Handler

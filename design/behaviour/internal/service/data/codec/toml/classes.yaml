@@ -1,0 +1,3223 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The problems a decode refuses a target for.
+    grouped: true
+    items:
+      - doc: "problemTarget: Unmarshal was not handed a non-nil pointer."
+        name: problemTarget
+        type: string
+        value: "\"the target is not a non-nil pointer\""
+      - doc: "problemMismatch: a value the target's type cannot hold."
+        name: problemMismatch
+        type: string
+        value: "\"the value does not fit the target's type\""
+      - doc: "problemOverflow: a number outside the target's range."
+        name: problemOverflow
+        type: string
+        value: "\"the number does not fit the target's type\""
+      - doc: "problemMapKey: a key the map's key type cannot hold."
+        name: problemMapKey
+        type: string
+        value: "\"the key does not fit the map's key type\""
+      - doc: "problemText: a value the target's UnmarshalText refused."
+        name: problemText
+        type: string
+        value: "\"the target's UnmarshalText refused the value\""
+      - doc: "problemEmbedded: a nil pointer to an unexported embedded struct."
+        name: problemEmbedded
+        type: string
+        value: "\"a nil pointer to an unexported embedded struct cannot be allocated\""
+      - doc: |-
+          problemArrayTooShort: an array of tables longer than the Go array it
+          decodes into.
+        name: problemArrayTooShort
+        type: string
+        value: "\"the array of tables has more elements than the Go array holds\""
+      - doc: |-
+          problemNotThisKind: text that is not the date or time a local type
+          reads.
+        name: problemNotThisKind
+        type: string
+        value: "\"the text is not the date or time this type reads\""
+    name: problemTarget
+  - doc: The problems an encode refuses a value for.
+    grouped: true
+    items:
+      - doc: "problemRoot: the value is not a map or a struct."
+        name: problemRoot
+        type: string
+        value: "\"a TOML document is a table: the value must be a map or a struct\""
+      - doc: "problemNil: a nil interface, or a nil pointer at the root."
+        name: problemNil
+        type: string
+        value: "\"a nil value has no TOML representation\""
+      - doc: |-
+          problemUnsupported: a channel, a function, a complex number or an
+          unsafe pointer.
+        name: problemUnsupported
+        type: string
+        value: "\"the type has no TOML representation\""
+      - doc: "problemUintRange: an unsigned integer above the largest int64."
+        name: problemUintRange
+        type: string
+        value: "\"the unsigned integer is larger than a TOML integer can hold\""
+      - doc: |-
+          problemKeyType: a map key that is not a string, a number or a
+          TextMarshaler.
+        name: problemKeyType
+        type: string
+        value: "\"the map's key type cannot be written as a TOML key\""
+      - doc: "problemKeyClash: two map keys written as the same TOML key."
+        name: problemKeyClash
+        type: string
+        value: "\"two map keys are written as the same TOML key\""
+      - doc: "problemTooDeepEncode: a value nested past maxDepth, or a cycle."
+        name: problemTooDeepEncode
+        type: string
+        value: "\"the value is nested too deep, or refers to itself\""
+      - doc: "problemNotUTF8: a string TOML cannot carry."
+        name: problemNotUTF8
+        type: string
+        value: "\"a string is not valid UTF-8\""
+      - doc: "problemMarshalText: a TextMarshaler that failed."
+        name: problemMarshalText
+        type: string
+        value: "\"a MarshalText method returned an error\""
+      - doc: |-
+          problemPointerLoop: a pointer type that points to itself, type P *P,
+          or a value that does.
+        name: problemPointerLoop
+        type: string
+        value: "\"a pointer refers to itself\""
+    name: problemRoot
+  - doc: |-
+      maxRetainedEncoderEntries is the entry capacity above which an encoder is
+      dropped rather than pooled.
+    items:
+      - name: maxRetainedEncoderEntries
+        type: int
+        value: "4096"
+    name: maxRetainedEncoderEntries
+  - doc: commentPrefix starts a commented-out line.
+    items:
+      - name: commentPrefix
+        type: string
+        value: "\"# \""
+    name: commentPrefix
+  - doc: |-
+      rfc3339Nano is the layout of an offset date-time: RFC 3339 with as many
+      fractional digits as the value needs.
+    items:
+      - name: rfc3339Nano
+        type: string
+        value: "\"2006-01-02T15:04:05.999999999Z07:00\""
+    name: rfc3339Nano
+  - doc: indentSymbol indents the elements of a multi-line array.
+    items:
+      - name: indentSymbol
+        type: string
+        value: "\"  \""
+    name: indentSymbol
+  - doc: tripleQuote delimits a multi-line basic string.
+    items:
+      - name: tripleQuote
+        type: string
+        value: "`\"\"\"`"
+    name: tripleQuote
+  - doc: hexDigits spells the hexadecimal digits of a \u escape.
+    items:
+      - name: hexDigits
+        type: string
+        value: "\"0123456789ABCDEF\""
+    name: hexDigits
+  - doc: The shifts of the four hexadecimal digits of a \u escape of one byte.
+    grouped: true
+    items:
+      - doc: highNibbleShift reaches the high nibble of a byte.
+        name: highNibbleShift
+        type: uint
+        value: "4"
+      - doc: lowNibbleMask keeps the low nibble.
+        name: lowNibbleMask
+        type: byte
+        value: "0x0f"
+    name: highNibbleShift
+  - doc: |-
+      The private messages of a refusal that wraps a cause — a writer, a reader,
+      a MarshalText or UnmarshalText method — under one of the two codes. Its
+      reason and public message are the sentinel's own.
+    grouped: true
+    items:
+      - doc: |-
+          privateTextMarshalFailed is the private message of a TextMarshaler's
+          refusal.
+        name: privateTextMarshalFailed
+        type: string
+        value: "\"service/data/codec/toml: a MarshalText method returned an error; it is the cause\""
+      - doc: |-
+          privateTextRefused is the private message of a TextUnmarshaler's
+          refusal.
+        name: privateTextRefused
+        type: string
+        value: "\"service/data/codec/toml: an UnmarshalText method refused a value; its error is the cause\""
+      - doc: privateWriteFailed is the private message of a writer's refusal.
+        name: privateWriteFailed
+        type: string
+        value: "\"service/data/codec/toml: the writer refused the encoded document; its error is the cause\""
+      - doc: privateReadFailed is the private message of a reader's failure.
+        name: privateReadFailed
+        type: string
+        value: "\"service/data/codec/toml: the reader failed before the document ended; its error is the cause\""
+    name: privateTextMarshalFailed
+  - doc: Text widths of the three types.
+    grouped: true
+    items:
+      - doc: localDateWidth is the length of YYYY-MM-DD.
+        name: localDateWidth
+        type: int
+        value: "10"
+      - doc: localTimeWidth is the length of HH:MM:SS without a fraction.
+        name: localTimeWidth
+        type: int
+        value: "8"
+      - doc: zeroPadWidth is the width every field but the year is padded to.
+        name: zeroPadWidth
+        type: int
+        value: "2"
+    name: localDateWidth
+  - doc: Field widths and bounds of RFC 3339.
+    grouped: true
+    items:
+      - doc: yearDigits is the width of a year.
+        name: yearDigits
+        type: int
+        value: "4"
+      - doc: pairDigits is the width of every other field.
+        name: pairDigits
+        type: int
+        value: "2"
+      - doc: monthsPerYear bounds a month.
+        name: monthsPerYear
+        type: int
+        value: "12"
+      - doc: maxHour bounds an hour, and an offset's hours.
+        name: maxHour
+        type: int
+        value: "23"
+      - doc: maxMinute bounds a minute, and an offset's minutes.
+        name: maxMinute
+        type: int
+        value: "59"
+      - doc: |-
+          maxSecond bounds a second: a leap second is refused, as the previous
+          library refused it, rather than silently moved to the next minute.
+        name: maxSecond
+        type: int
+        value: "59"
+      - doc: |-
+          nanoDigits is how many fractional digits a nanosecond holds; more are
+          truncated (§Offset Date-Time: "must be truncated, not rounded").
+        name: nanoDigits
+        type: int
+        value: "9"
+      - doc: secondsPerMinute converts an offset's minutes.
+        name: secondsPerMinute
+        type: int
+        value: "60"
+      - doc: secondsPerHour converts an offset's hours.
+        name: secondsPerHour
+        type: int
+        value: "3600"
+      - doc: datetimeBytes is the size of one datetime, for the retain decision.
+        name: datetimeBytes
+        type: int
+        value: "72"
+    name: yearDigits
+  - doc: Days in the months whose length does not depend on the year.
+    grouped: true
+    items:
+      - doc: longMonth has 31 days.
+        name: longMonth
+        type: int
+        value: "31"
+      - doc: shortMonth has 30 days.
+        name: shortMonth
+        type: int
+        value: "30"
+      - doc: februaryDays is February outside a leap year.
+        name: februaryDays
+        type: int
+        value: "28"
+      - doc: leapFebruaryDays is February in a leap year.
+        name: leapFebruaryDays
+        type: int
+        value: "29"
+      - doc: february is the month whose length depends on the year.
+        name: february
+        type: int
+        value: "2"
+      - doc: april has 30 days.
+        name: april
+        type: int
+        value: "4"
+      - doc: june has 30 days.
+        name: june
+        type: int
+        value: "6"
+      - doc: september has 30 days.
+        name: september
+        type: int
+        value: "9"
+      - doc: november has 30 days.
+        name: november
+        type: int
+        value: "11"
+    name: longMonth
+  - doc: |-
+      offsetInvalid marks an offset that offset could not read: no real offset
+      comes near it, since an offset's hours are at most 23.
+    items:
+      - name: offsetInvalid
+        type: int
+        value: 1 << 30
+    name: offsetInvalid
+  - doc: The Gregorian leap-year rule.
+    grouped: true
+    items:
+      - doc: leapCycle is every fourth year.
+        name: leapCycle
+        type: int
+        value: "4"
+      - doc: centuryCycle is every hundredth, which is not.
+        name: centuryCycle
+        type: int
+        value: "100"
+      - doc: quadCenturyCycle is every four hundredth, which is again.
+        name: quadCenturyCycle
+        type: int
+        value: "400"
+    name: leapCycle
+  - doc: Bits per digit of the integers with a radix prefix.
+    grouped: true
+    items:
+      - doc: hexBits is one hexadecimal digit.
+        name: hexBits
+        type: uint
+        value: "4"
+      - doc: octalBits is one octal digit.
+        name: octalBits
+        type: uint
+        value: "3"
+      - doc: binaryBits is one binary digit.
+        name: binaryBits
+        type: uint
+        value: "1"
+    name: hexBits
+  - doc: decimalBase is the base of a decimal integer.
+    items:
+      - name: decimalBase
+        type: byte
+        value: "10"
+    name: decimalBase
+  - doc: |-
+      floatBufferBytes sizes the stack buffer a float's digits are copied into
+      without their underscores; a longer float takes the heap.
+    items:
+      - name: floatBufferBytes
+        type: int
+        value: "64"
+    name: floatBufferBytes
+  - doc: |-
+      The bounds of Clinger's fast path: a significand of at most 53 bits scaled
+      by a power of ten that float64 holds exactly gives the correctly rounded
+      result in one multiplication or division.
+    grouped: true
+    items:
+      - doc: maxExactSignificand is 2^53.
+        name: maxExactSignificand
+        type: uint64
+        value: 1 << 53
+      - doc: maxExactPow10 is the largest power of ten float64 holds exactly.
+        name: maxExactPow10
+        type: int
+        value: "22"
+      - doc: maxSignificandDigits keeps the significand from overflowing uint64.
+        name: maxSignificandDigits
+        type: int
+        value: "19"
+      - doc: maxExponentDigits bounds an exponent before it is handed to strconv.
+        name: maxExponentDigits
+        type: int
+        value: "4"
+    name: maxExactSignificand
+  - doc: Digits an escape sequence carries.
+    grouped: true
+    items:
+      - doc: shortEscapeDigits is the length of \xHH (TOML v1.1.0).
+        name: shortEscapeDigits
+        type: int
+        value: "2"
+      - doc: unicodeEscapeDigits is the length of \uXXXX.
+        name: unicodeEscapeDigits
+        type: int
+        value: "4"
+      - doc: longEscapeDigits is the length of \UXXXXXXXX.
+        name: longEscapeDigits
+        type: int
+        value: "8"
+      - doc: hexDigitBits is how many bits one hexadecimal digit carries.
+        name: hexDigitBits
+        type: uint
+        value: "4"
+      - doc: hexLetterValue is the value of the hexadecimal digits a and A.
+        name: hexLetterValue
+        type: byte
+        value: "10"
+    name: shortEscapeDigits
+  - doc: Surrogates are not Unicode scalar values, so no escape may name one.
+    grouped: true
+    items:
+      - doc: surrogateFirst is the first UTF-16 surrogate.
+        name: surrogateFirst
+        type: uint32
+        value: "0xD800"
+      - doc: surrogateLast is the last UTF-16 surrogate.
+        name: surrogateLast
+        type: uint32
+        value: "0xDFFF"
+    name: surrogateFirst
+  - doc: delimiterLength is the length of a multi-line string's delimiters.
+    items:
+      - name: delimiterLength
+        type: int
+        value: "3"
+    name: delimiterLength
+  - doc: |-
+      maxClosingQuotes is the longest run of quotes that can end a multi-line
+      string: the three of the delimiter and two of the content.
+    items:
+      - name: maxClosingQuotes
+        type: int
+        value: "5"
+    name: maxClosingQuotes
+  - doc: |-
+      maxDocumentBytes caps the size of a document Unmarshal and the streaming
+      decoder accept (CWE-400). Ten MiB covers every configuration file there is,
+      and matches the cap the YAML and MessagePack codecs apply.
+    items:
+      - name: maxDocumentBytes
+        type: int
+        value: 10 << 20
+    name: maxDocumentBytes
+  - doc: |-
+      maxDepth caps how deep below the root a table, an array or a value may sit
+      (CWE-674): a key at the root is at depth 1, a value inside 128 nested arrays
+      at depth 129, and refused. The parse and the decode both recurse once per
+      level, so the cap is what keeps a document of ten million opening brackets
+      from reaching the stack's limit. A configuration nests a handful of levels;
+      generated documents a few more.
+    items:
+      - name: maxDepth
+        type: int32
+        value: "128"
+    name: maxDepth
+  - doc: |-
+      maxRetainedParserBytes is the arena size above which a parser is dropped
+      rather than pooled, so that one large document does not pin its arena for
+      the life of the pool.
+    items:
+      - name: maxRetainedParserBytes
+        type: int
+        value: 256 << 10
+    name: maxRetainedParserBytes
+  - doc: nodeBytes is the size of one node, for the retain decision.
+    items:
+      - name: nodeBytes
+        type: int
+        value: "64"
+    name: nodeBytes
+  - doc: |-
+      Interning: a key is turned into a Go string once per pooled parser, as the
+      replaced library did, so a document decoded again — a configuration
+      reloaded, a thousand tables with the same five keys — allocates no key twice.
+      Only keys are interned: a value may be a secret, and a pooled table outlives
+      the call.
+    grouped: true
+    items:
+      - doc: maxInternedKeys bounds the table; past it, keys are no longer added.
+        name: maxInternedKeys
+        type: int
+        value: "4096"
+      - doc: maxInternedKeyBytes is the longest key interned.
+        name: maxInternedKeyBytes
+        type: int
+        value: "64"
+      - doc: |-
+          internEntryBytes is the table's own cost per key, for the retain
+          decision.
+        name: internEntryBytes
+        type: int
+        value: "32"
+    name: maxInternedKeys
+  - doc: |-
+      Presizing: a large document allocates its arena once, sized from the
+      separators every node is introduced by, instead of doubling it log2(n)
+      times — a 9 000-node document otherwise allocates twice its arena per call,
+      since an arena past maxRetainedParserBytes is not pooled.
+    grouped: true
+    items:
+      - doc: |-
+          bytesPerNodeGuess is the document size per node below which the arena
+          is assumed big enough and no estimate is made.
+        name: bytesPerNodeGuess
+        type: int
+        value: "16"
+      - doc: |-
+          maxPresizedNodes bounds the up-front allocation to 2 MiB of nodes; a
+          document of more nodes grows past it as usual.
+        name: maxPresizedNodes
+        type: int
+        value: 1 << 15
+    name: bytesPerNodeGuess
+  - doc: Characters with a role in the grammar.
+    grouped: true
+    items:
+      - doc: charNewline ends a line.
+        name: charNewline
+        type: byte
+        value: "'\\n'"
+      - doc: charReturn may only appear before charNewline.
+        name: charReturn
+        type: byte
+        value: "'\\r'"
+      - doc: charHash starts a comment.
+        name: charHash
+        type: byte
+        value: "'#'"
+      - doc: charOpenBracket opens a table header or an array.
+        name: charOpenBracket
+        type: byte
+        value: "'['"
+      - doc: charCloseBracket closes a table header or an array.
+        name: charCloseBracket
+        type: byte
+        value: "']'"
+      - doc: charOpenBrace opens an inline table.
+        name: charOpenBrace
+        type: byte
+        value: "'{'"
+      - doc: charCloseBrace closes an inline table.
+        name: charCloseBrace
+        type: byte
+        value: "'}'"
+      - doc: charComma separates array elements and inline-table pairs.
+        name: charComma
+        type: byte
+        value: "','"
+      - doc: charDot separates the parts of a dotted key.
+        name: charDot
+        type: byte
+        value: "'.'"
+      - doc: charEquals separates a key from its value.
+        name: charEquals
+        type: byte
+        value: "'='"
+      - doc: charQuote opens a basic string.
+        name: charQuote
+        type: byte
+        value: "'\"'"
+      - doc: charApostrophe opens a literal string.
+        name: charApostrophe
+        type: byte
+        value: "'\\''"
+      - doc: charBackslash starts an escape sequence.
+        name: charBackslash
+        type: byte
+        value: "'\\\\'"
+      - doc: charSpace is whitespace.
+        name: charSpace
+        type: byte
+        value: "' '"
+      - doc: charTab is whitespace.
+        name: charTab
+        type: byte
+        value: "'\\t'"
+      - doc: charDelete is the one control character above the space.
+        name: charDelete
+        type: byte
+        value: "0x7f"
+      - doc: charFirstPrintable is the first character that is not a control.
+        name: charFirstPrintable
+        type: byte
+        value: "0x20"
+      - doc: charFirstNonASCII is the first byte of a multi-byte UTF-8 sequence.
+        name: charFirstNonASCII
+        type: byte
+        value: "0x80"
+    name: charNewline
+  - doc: The kinds of node a document is made of.
+    grouped: true
+    items:
+      - doc: |-
+          kindTable is a table: the root, a [header], an intermediate a header or
+          a dotted key implied, an inline table, or one element of an array of
+          tables.
+        name: kindTable
+        type: kind
+        value: iota + 1
+      - doc: kindArrayOfTables is the array a [[header]] appends to.
+        name: kindArrayOfTables
+      - doc: kindArray is an array value, written with brackets.
+        name: kindArray
+      - doc: kindString is a string of any of the four spellings.
+        name: kindString
+      - doc: kindInteger is a 64-bit signed integer.
+        name: kindInteger
+      - doc: kindFloat is an IEEE 754 binary64 value.
+        name: kindFloat
+      - doc: kindBool is true or false.
+        name: kindBool
+      - doc: "kindDateTime is an offset date-time: an instant."
+        name: kindDateTime
+      - doc: kindLocalDateTime is a date-time with no offset.
+        name: kindLocalDateTime
+      - doc: kindLocalDate is a calendar day.
+        name: kindLocalDate
+      - doc: kindLocalTime is a time of day.
+        name: kindLocalTime
+    name: kindTable
+  - doc: The ways a table comes to exist.
+    grouped: true
+    items:
+      - doc: |-
+          originImplicit is a table a longer [header] or [[header]] implied: its
+          own [header] may still define it, once.
+        name: originImplicit
+        type: origin
+        value: iota + 1
+      - doc: originHeader is a table its own [header] defined, or the root.
+        name: originHeader
+      - doc: |-
+          originDotted is a table a dotted key created: more dotted keys of the
+          same section may extend it, and a [header] may add a sub-table to it,
+          but nothing may define it again.
+        name: originDotted
+      - doc: |-
+          originInline is an inline table: complete when its closing brace is
+          read, and never extended afterwards.
+        name: originInline
+      - doc: originElement is one element of an array of tables.
+        name: originElement
+    name: originImplicit
+  - doc: Flags a node carries.
+    grouped: true
+    items:
+      - doc: flagKeyEscaped says the node's key lives in the unescape buffer.
+        name: flagKeyEscaped
+        type: uint8
+        value: 1 << iota
+      - doc: flagTextEscaped says the node's text lives in the unescape buffer.
+        name: flagTextEscaped
+      - doc: flagIndexed says the table's children are in the hash index.
+        name: flagIndexed
+    name: flagKeyEscaped
+  - doc: noNode marks the absence of a node in a link.
+    items:
+      - name: noNode
+        type: int32
+        value: "-1"
+    name: noNode
+  - doc: rootNode is the index of the root table in every arena.
+    items:
+      - name: rootNode
+        type: int32
+        value: "0"
+    name: rootNode
+  - doc: |-
+      linearLimit is the child count up to which a table is searched by a scan of
+      its children. A wider table moves to the hash index, so that a document
+      with a hundred thousand keys in one table costs a hundred thousand lookups
+      and not five billion comparisons.
+    items:
+      - name: linearLimit
+        type: int32
+        value: "16"
+    name: linearLimit
+  - doc: |-
+      hashMixer spreads a table's index over the bits of a key's hash, so the same
+      key in two tables lands in two buckets.
+    items:
+      - name: hashMixer
+        type: uint64
+        value: "0x9E3779B97F4A7C15"
+    name: hashMixer
+  - doc: |-
+      The options a toml struct tag may carry after the name, and the standalone
+      boolean tags the previous library also read.
+    grouped: true
+    items:
+      - doc: tagName is the struct tag the codec reads.
+        name: tagName
+        type: string
+        value: "\"toml\""
+      - doc: |-
+          tagComment is the struct tag whose value is written as a comment above
+          the field.
+        name: tagComment
+        type: string
+        value: "\"comment\""
+      - doc: tagSkip is the tag that drops a field.
+        name: tagSkip
+        type: string
+        value: "\"-\""
+      - doc: tagTrue is the value of a standalone boolean tag.
+        name: tagTrue
+        type: string
+        value: "\"true\""
+      - doc: optOmitEmpty drops an empty value.
+        name: optOmitEmpty
+        type: string
+        value: "\"omitempty\""
+      - doc: optOmitZero drops a zero value.
+        name: optOmitZero
+        type: string
+        value: "\"omitzero\""
+      - doc: optInline writes a table as an inline table.
+        name: optInline
+        type: string
+        value: "\"inline\""
+      - doc: |-
+          optMultiline writes a string with a newline as a multi-line string, and
+          an array one element per line.
+        name: optMultiline
+        type: string
+        value: "\"multiline\""
+      - doc: optCommented writes the value, and everything under it, commented out.
+        name: optCommented
+        type: string
+        value: "\"commented\""
+    name: tagName
+  - doc: The roles a type plays.
+    grouped: true
+    items:
+      - doc: "typeTextMarshaler: the type implements encoding.TextMarshaler."
+        name: typeTextMarshaler
+        type: typeFlags
+        value: 1 << iota
+      - doc: "typeTextMarshalerPtr: only *T implements encoding.TextMarshaler."
+        name: typeTextMarshalerPtr
+      - doc: "typeTextUnmarshaler: *T implements encoding.TextUnmarshaler."
+        name: typeTextUnmarshaler
+      - doc: "typeZeroer: T or *T has an IsZero method, which omitzero then uses."
+        name: typeZeroer
+      - doc: "typeSpecial: the type is time.Time or one of the local types."
+        name: typeSpecial
+      - doc: "typeValue: the type encodes as a value rather than as a table."
+        name: typeValue
+      - doc: "typeBadNames: a tag names a key that is not valid UTF-8."
+        name: typeBadNames
+    name: typeTextMarshaler
+  - doc: foldBufferBytes is the longest key folded to lower case on the stack.
+    items:
+      - name: foldBufferBytes
+        type: int
+        value: "64"
+    name: foldBufferBytes
+  - doc: "Byte classes, one bit each: a byte may belong to several."
+    grouped: true
+    items:
+      - doc: |-
+          classPrintable is the tab and printable ASCII, 0x20 to 0x7E: what a
+          string keeps verbatim, once its delimiter and escape are handled.
+        name: classPrintable
+        type: uint16
+        value: 1 << iota
+      - doc: classBareKey is A-Z a-z 0-9 - _ (§Keys).
+        name: classBareKey
+      - doc: classDigit is 0-9.
+        name: classDigit
+      - doc: classHex is 0-9 a-f A-F.
+        name: classHex
+      - doc: classOctal is 0-7.
+        name: classOctal
+      - doc: classBinary is 0 and 1.
+        name: classBinary
+      - doc: |-
+          classNumberStart is what a number, a date or a time starts with:
+          a digit, a sign, or the i and n of inf and nan.
+        name: classNumberStart
+    name: classPrintable
+  - doc: The words a value may be.
+    grouped: true
+    items:
+      - doc: wordTrue is the true boolean.
+        name: wordTrue
+        type: string
+        value: "\"true\""
+      - doc: wordFalse is the false boolean.
+        name: wordFalse
+        type: string
+        value: "\"false\""
+      - doc: wordInf is an infinite float.
+        name: wordInf
+        type: string
+        value: "\"inf\""
+      - doc: wordNaN is a float that is not a number.
+        name: wordNaN
+        type: string
+        value: "\"nan\""
+    name: wordTrue
+  - doc: escapeCharacter is the value of TOML v1.1.0's \e.
+    items:
+      - name: escapeCharacter
+        type: byte
+        value: "0x1b"
+    name: escapeCharacter
+  - doc: |-
+      byteValues is how many values a byte has: the size of every table indexed
+      by one.
+    items:
+      - name: byteValues
+        type: int
+        value: "256"
+    name: byteValues
+  - doc: The fields a refusal carries.
+    grouped: true
+    items:
+      - doc: fieldProblem names what is wrong, in a fixed sentence.
+        name: fieldProblem
+        type: string
+        value: "\"problem\""
+      - doc: fieldLine is the 1-based line of the problem.
+        name: fieldLine
+        type: string
+        value: "\"line\""
+      - doc: fieldColumn is the 1-based column of the problem, in characters.
+        name: fieldColumn
+        type: string
+        value: "\"column\""
+      - doc: fieldKey is the dotted key of the value a target could not hold.
+        name: fieldKey
+        type: string
+        value: "\"key\""
+      - doc: |-
+          fieldType is the Go type that could not hold a value, or that has no
+          TOML representation.
+        name: fieldType
+        type: string
+        value: "\"type\""
+      - doc: fieldTOML is the kind of TOML value a target could not hold.
+        name: fieldTOML
+        type: string
+        value: "\"toml\""
+      - doc: fieldLimit is the bound a document or a value went past.
+        name: fieldLimit
+        type: string
+        value: "\"limit\""
+    name: fieldProblem
+  - doc: |-
+      The problems a parse refuses a document for. Each is a fixed sentence: a
+      refusal never carries a byte of the document, whose values may be secrets.
+    grouped: true
+    items:
+      - doc: "problemExpectedNewline: something follows a complete expression."
+        name: problemExpectedNewline
+        type: string
+        value: "\"expected a newline or a comment after the expression\""
+      - doc: "problemExpectedKey: a key is required here."
+        name: problemExpectedKey
+        type: string
+        value: "\"expected a key\""
+      - doc: "problemExpectedEquals: a key with no equals sign after it."
+        name: problemExpectedEquals
+        type: string
+        value: "\"expected '=' after the key\""
+      - doc: "problemExpectedValue: nothing that starts a value."
+        name: problemExpectedValue
+        type: string
+        value: "\"expected a value\""
+      - doc: "problemExpectedComma: an array element followed by neither ',' nor ']'."
+        name: problemExpectedComma
+        type: string
+        value: "\"expected ',' or ']' after an array element\""
+      - doc: |-
+          problemExpectedPairComma: an inline-table pair followed by neither ','
+          nor '}'.
+        name: problemExpectedPairComma
+        type: string
+        value: "\"expected ',' or '}' after an inline table key-value\""
+      - doc: "problemUnclosedHeader: a table header that does not close."
+        name: problemUnclosedHeader
+        type: string
+        value: "\"expected ']' to close the table header\""
+      - doc: "problemKeyTwice: a key defined a second time."
+        name: problemKeyTwice
+        type: string
+        value: "\"the key is already defined\""
+      - doc: "problemTableTwice: a [header] repeated."
+        name: problemTableTwice
+        type: string
+        value: "\"the table is already defined\""
+      - doc: "problemTableDotted: a [header] for a table dotted keys defined."
+        name: problemTableDotted
+        type: string
+        value: "\"the table was defined by dotted keys and cannot be defined again\""
+      - doc: "problemTableIsArray: a [header] for an array of tables."
+        name: problemTableIsArray
+        type: string
+        value: "\"the table is already an array of tables\""
+      - doc: "problemNotArrayOfTables: a [[header]] for something else."
+        name: problemNotArrayOfTables
+        type: string
+        value: "\"the key is already defined and is not an array of tables\""
+      - doc: "problemExtendValue: a header passing through a value."
+        name: problemExtendValue
+        type: string
+        value: "\"the key is a value, a static array or an inline table, and cannot be extended\""
+      - doc: |-
+          problemDottedExtends: a dotted key reaching into a table defined
+          elsewhere.
+        name: problemDottedExtends
+        type: string
+        value: "\"a dotted key cannot extend a table defined by a header, a value or an inline table\""
+      - doc: "problemControlInComment: a control character in a comment."
+        name: problemControlInComment
+        type: string
+        value: "\"a comment contains a control character\""
+      - doc: |-
+          problemControlInString: a newline or a control character in a string
+          that may not hold it.
+        name: problemControlInString
+        type: string
+        value: "\"a string contains a control character or a newline it may not hold\""
+      - doc: "problemInvalidUTF8: bytes that are not UTF-8."
+        name: problemInvalidUTF8
+        type: string
+        value: "\"the document is not valid UTF-8\""
+      - doc: "problemUnterminatedString: the document ends inside a string."
+        name: problemUnterminatedString
+        type: string
+        value: "\"the string is not terminated\""
+      - doc: |-
+          problemBadEscape: an unknown escape, or one naming no Unicode scalar
+          value.
+        name: problemBadEscape
+        type: string
+        value: "\"invalid escape sequence\""
+      - doc: "problemTooManyQuotes: more than five quotes closing a multi-line string."
+        name: problemTooManyQuotes
+        type: string
+        value: "\"too many quotes at the end of a multi-line string\""
+      - doc: "problemBadNumber: a malformed integer or float."
+        name: problemBadNumber
+        type: string
+        value: "\"malformed number\""
+      - doc: "problemBadUnderscore: an underscore not between two digits."
+        name: problemBadUnderscore
+        type: string
+        value: "\"an underscore in a number must stand between two digits\""
+      - doc: "problemLeadingZero: a decimal number with a leading zero."
+        name: problemLeadingZero
+        type: string
+        value: "\"a decimal number cannot have a leading zero\""
+      - doc: "problemIntegerRange: an integer outside int64."
+        name: problemIntegerRange
+        type: string
+        value: "\"the integer does not fit a signed 64-bit integer\""
+      - doc: "problemFloatRange: a float too large for float64."
+        name: problemFloatRange
+        type: string
+        value: "\"the float is too large for a 64-bit float\""
+      - doc: "problemBadDate: a malformed date or a day that does not exist."
+        name: problemBadDate
+        type: string
+        value: "\"malformed or impossible date\""
+      - doc: |-
+          problemBadTime: a malformed time or an impossible hour, minute or
+          second.
+        name: problemBadTime
+        type: string
+        value: "\"malformed or impossible time\""
+      - doc: "problemBadOffset: a malformed time-zone offset."
+        name: problemBadOffset
+        type: string
+        value: "\"malformed time-zone offset\""
+      - doc: "problemTooDeep: tables and arrays nested past maxDepth."
+        name: problemTooDeep
+        type: string
+        value: "\"tables and arrays are nested too deep\""
+      - doc: "problemTooLarge: a document past maxDocumentBytes."
+        name: problemTooLarge
+        type: string
+        value: "\"the document is larger than the limit\""
+    name: problemExpectedNewline
+files:
+  - decls:
+      - Codec
+      - tomlCodec
+      - New
+      - (*tomlCodec).Name
+      - (*tomlCodec).MIMETypes
+      - (*tomlCodec).Extensions
+      - (*tomlCodec).Marshal
+      - (*tomlCodec).Unmarshal
+      - (*tomlCodec).Append
+      - (*tomlCodec).NewEncoder
+      - (*tomlCodec).NewDecoder
+    name: codec.go
+  - decls:
+      - problemTarget
+      - kindNames
+      - decoder
+      - unmarshal
+      - typeName
+      - (*decoder).root
+      - (*decoder).anyInto
+      - (*decoder).mergeTable
+      - (*decoder).merges
+      - (*decoder).keyString
+      - (*decoder).anyTable
+      - (*decoder).anyArray
+      - (*decoder).anyValue
+      - (*decoder).fail
+      - (*decoder).keyPath
+      - (*decoder).quotedKey
+      - quoteKey
+    name: decode.go
+  - decls:
+      - localZone
+      - (*decoder).scalarAny
+      - (*decoder).localAny
+      - instantOf
+      - (*decoder).scalar
+      - (*decoder).native
+      - (*decoder).setString
+      - (*decoder).setInteger
+      - (*decoder).setFloat
+      - (*decoder).setBool
+      - (*decoder).temporal
+      - (*decoder).asTime
+      - localTypeOf
+      - (*decoder).wrapFail
+    name: decode_scalar.go
+  - decls:
+      - (*decoder).value
+      - allocPointers
+      - (*decoder).intoInterface
+      - (*decoder).table
+      - (*decoder).tableIntoSlice
+      - (*decoder).tableIntoArray
+      - (*decoder).structFields
+      - (*decoder).field
+      - (*decoder).mapEntries
+      - (*decoder).mapKey
+      - (*decoder).textKey
+      - setIntKey
+      - setUintKey
+      - setFloatKey
+      - (*decoder).unmarshalText
+      - (*decoder).array
+      - (*decoder).elements
+    name: decode_value.go
+  - decls:
+      - tomlDecoder
+      - (*tomlDecoder).Decode
+      - (*tomlDecoder).More
+    name: decoder.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - problemRoot
+      - maxRetainedEncoderEntries
+      - commentPrefix
+      - entry
+      - encoder
+      - encoderPool
+      - (*encoder).reset
+      - (*encoder).retained
+      - encodeDocument
+      - resolve
+      - nilOrLoop
+      - encodeFail
+      - (*encoder).table
+      - (*encoder).keyValues
+      - (*encoder).subTables
+      - (*encoder).subTable
+      - (*encoder).arrayOfTables
+      - (*encoder).header
+      - appendComment
+      - cutLine
+      - (*encoder).keyValue
+      - commentLines
+      - (*encoder).isTable
+      - isArrayOfTables
+      - (*encoder).collect
+      - (*encoder).acquire
+      - (*encoder).release
+      - structEntries
+      - fieldOf
+      - omitted
+      - (*encoder).mapEntries
+      - nilToZero
+      - keyClash
+      - mapKeyString
+      - isEmpty
+      - isEmptyStruct
+      - isZero
+      - appendFloat
+    name: encode.go
+  - decls:
+      - rfc3339Nano
+      - indentSymbol
+      - tripleQuote
+      - hexDigits
+      - highNibbleShift
+      - (*encoder).appendValue
+      - (*encoder).appendIndirect
+      - appendScalar
+      - appendUint
+      - appendSpecial
+      - valueOf
+      - appendMarshaledText
+      - marshalText
+      - appendStringValue
+      - appendKey
+      - isBareKey
+      - appendString
+      - canBeLiteral
+      - appendBasicString
+      - appendEscapedByte
+      - appendUnicodeEscape
+      - basicEscapes
+      - appendMultilineString
+      - quoteRunLength
+      - appendQuoteRun
+      - appendMultilineByte
+      - containsByte
+      - (*encoder).appendArray
+      - appendSeparator
+      - (*encoder).appendInlineTable
+    name: encode_value.go
+  - decls:
+      - tomlEncoder
+      - (*tomlEncoder).Encode
+      - (*tomlEncoder).Close
+    name: encoder.go
+  - decls:
+      - privateTextMarshalFailed
+    name: errors.go
+  - decls:
+      - localDateWidth
+      - LocalDate
+      - LocalTime
+      - LocalDateTime
+      - LocalDate.AsTime
+      - LocalDate.String
+      - LocalDate.MarshalText
+      - (*LocalDate).UnmarshalText
+      - LocalDate.appendText
+      - LocalTime.String
+      - LocalTime.MarshalText
+      - (*LocalTime).UnmarshalText
+      - LocalTime.appendText
+      - LocalDateTime.AsTime
+      - LocalDateTime.String
+      - LocalDateTime.MarshalText
+      - (*LocalDateTime).UnmarshalText
+      - LocalDateTime.appendText
+      - appendPadded
+      - appendFraction
+      - parseExactly
+      - localDateOf
+      - localTimeOf
+    name: localtime.go
+  - decls:
+      - yearDigits
+      - longMonth
+      - offsetInvalid
+      - leapCycle
+      - nanoScale
+      - datetime
+      - (*parser).numberOrDate
+      - (*parser).digitsThen
+      - (*parser).dateTimeValue
+      - (*parser).dateTime
+      - (*parser).date
+      - (*parser).timeDelimiter
+      - (*parser).timeOfDay
+      - (*parser).secondFraction
+      - (*parser).offset
+      - (*parser).offsetError
+      - (*parser).fixed
+      - daysIn
+      - isLeap
+    name: parse_datetime.go
+  - decls:
+      - hexBits
+      - decimalBase
+      - floatBufferBytes
+      - maxExactSignificand
+      - exactPow10
+      - (*parser).numberValue
+      - (*parser).number
+      - (*parser).hasRadixPrefix
+      - (*parser).specialFloat
+      - signOf
+      - radixBits
+      - radixClass
+      - (*parser).radixInteger
+      - (*parser).digits
+      - (*parser).decimal
+      - (*parser).fraction
+      - (*parser).integerOf
+      - (*parser).floatOf
+      - fastFloat
+      - significandOf
+      - exponentOf
+    name: parse_number.go
+  - decls:
+      - shortEscapeDigits
+      - surrogateFirst
+      - delimiterLength
+      - maxClosingQuotes
+      - (*parser).stringValue
+      - (*parser).hasTriple
+      - (*parser).singleLineString
+      - (*parser).literalString
+      - (*parser).basicString
+      - (*parser).basicEscaped
+      - (*parser).basicStep
+      - (*parser).escape
+      - (*parser).hexEscape
+      - (*parser).multilineString
+      - (*parser).multilineStep
+      - (*parser).multilineOther
+      - (*parser).quoteRun
+      - (*parser).multilineEscape
+      - hexValue
+    name: parse_string.go
+  - decls:
+      - (*parser).header
+      - (*parser).walkHeader
+      - (*parser).headerStep
+      - (*parser).openTable
+      - (*parser).openArrayTable
+      - redefinitionProblem
+      - (*parser).keyValue
+      - (*parser).walkDotted
+      - (*parser).consume
+      - (*parser).key
+      - (*parser).simpleKey
+      - isBareKeyByte
+    name: parse_table.go
+  - decls:
+      - noPart
+      - (*parser).value
+      - leaf
+      - (*parser).boolValue
+      - (*parser).literal
+      - (*parser).array
+      - (*parser).afterElement
+      - (*parser).skipBlank
+      - (*parser).inlineTable
+      - (*parser).afterPair
+      - (*parser).inlineClose
+    name: parse_value.go
+  - decls:
+      - maxDocumentBytes
+      - maxDepth
+      - maxRetainedParserBytes
+      - nodeBytes
+      - maxInternedKeys
+      - bytesPerNodeGuess
+      - charNewline
+      - parser
+      - parserPool
+      - (*parser).reset
+      - (*parser).internKey
+      - (*parser).newKey
+      - (*parser).retainedBytes
+      - (*parser).parse
+      - estimateNodes
+      - (*parser).expression
+      - (*parser).endOfLine
+      - (*parser).skipSpace
+      - (*parser).newline
+      - (*parser).comment
+      - (*parser).atNewline
+      - (*parser).skipRune
+      - (*parser).fail
+      - position
+      - (*parser).newTable
+    name: parser.go
+  - decls:
+      - kindTable
+      - originImplicit
+      - flagKeyEscaped
+      - noNode
+      - rootNode
+      - linearLimit
+      - hashMixer
+      - hashSeed
+      - kind
+      - origin
+      - span
+      - node
+      - keyPart
+      - (*parser).keyBytes
+      - (*parser).textBytes
+      - (*parser).partBytes
+      - (*parser).child
+      - (*parser).add
+      - keyHash
+      - (*parser).indexTable
+      - (*parser).indexInsert
+      - (*parser).indexLookup
+    name: parser_tree.go
+  - decls:
+      - tagName
+      - typeTextMarshaler
+      - foldBufferBytes
+      - fieldOptions
+      - fieldPlan
+      - typeInfo
+      - typeFlags
+      - timeType
+      - infoOf
+      - describe
+      - methodFlags
+      - flagIf
+      - (*typeInfo).is
+      - structFields
+      - collectFields
+      - embeddedStruct
+      - parseTag
+      - applyOption
+      - standaloneTags
+      - fieldIndexes
+      - (*typeInfo).lookup
+      - (*typeInfo).lookupFolded
+      - isASCII
+    name: plan.go
+  - decls:
+      - classPrintable
+      - wordTrue
+      - escapeCharacter
+      - byteValues
+      - fieldProblem
+      - problemExpectedNewline
+      - byteClass
+      - buildByteClass
+      - markRange
+    name: syntax.go
+functions:
+  - name: New
+    results: codec.Codec
+  - doc: unmarshal parses data and decodes it into v.
+    name: unmarshal
+    params: data []byte, v any
+    results: error
+  - doc: typeName names the type of v for a refusal.
+    name: typeName
+    params: v reflect.Value
+    results: string
+  - doc: |-
+      quoteKey returns key as it would be written: bare when it can be, quoted
+      otherwise.
+    name: quoteKey
+    params: key string
+    results: string
+  - doc: |-
+      instantOf returns the time.Time of an offset date-time: in UTC for a zero
+      offset, in a fixed zone otherwise.
+    name: instantOf
+    params: dt *datetime
+    results: time.Time
+  - doc: localTypeOf returns the local type a kind decodes to.
+    name: localTypeOf
+    params: k kind
+    results: reflect.Type
+  - doc: |-
+      allocPointers follows the pointers of v, allocating the nil ones, and
+      reports false past maxDepth of them: only a type that points to itself —
+      type P *P — has a chain that long, and it never ends.
+    name: allocPointers
+    params: v reflect.Value
+    results: reflect.Value, bool
+  - doc: setIntKey parses raw as a decimal integer into the signed key.
+    name: setIntKey
+    params: key reflect.Value, raw []byte
+    results: bool
+  - doc: setUintKey parses raw as a decimal integer into the unsigned key.
+    name: setUintKey
+    params: key reflect.Value, raw []byte
+    results: bool
+  - doc: setFloatKey parses raw as a float into the float key.
+    name: setFloatKey
+    params: key reflect.Value, raw []byte
+    results: bool
+  - doc: encodeDocument appends the document v encodes to dst.
+    name: encodeDocument
+    params: dst []byte, v any
+    results: "[]byte, error"
+  - doc: |-
+      resolve follows pointers and interfaces to a concrete value, and reports
+      false when one of them is nil.
+    name: resolve
+    params: v reflect.Value
+    results: reflect.Value, bool
+  - doc: |-
+      nilOrLoop names why a value resolve gave up on has no representation: the
+      chain ended in nil, or it was still a non-nil pointer when resolve stopped
+      following it.
+    name: nilOrLoop
+    params: v reflect.Value
+    results: string
+  - doc: encodeFail returns MARSHAL_FAILED naming problem and the Go type concerned.
+    name: encodeFail
+    params: problem string, t reflect.Type
+    results: error
+  - doc: appendComment writes each line of comment as a TOML comment.
+    name: appendComment
+    params: b []byte, comment string
+    results: "[]byte"
+  - doc: cutLine splits s at its first newline.
+    name: cutLine
+    params: s string
+    results: line, rest string, found bool
+  - doc: |-
+      commentLines prefixes every line after the first of b[start:] with the
+      comment prefix.
+    name: commentLines
+    params: b []byte, start int
+    results: "[]byte"
+  - doc: |-
+      isArrayOfTables reports whether v is a non-empty slice or array whose every
+      element is a map or a struct.
+    name: isArrayOfTables
+    params: v reflect.Value
+    results: bool
+  - doc: structEntries appends the fields of struct v that are written.
+    name: structEntries
+    params: entries []entry, v reflect.Value, info *typeInfo
+    results: "[]entry"
+  - doc: |-
+      fieldOf returns the field of v at index, reporting false when a nil
+      embedded pointer is on the way.
+    name: fieldOf
+    params: v reflect.Value, index []int
+    results: reflect.Value, bool
+  - doc: |-
+      omitted reports whether a struct field is left out: a nil pointer, map or
+      interface always, an empty or zero value when the tag says so.
+    name: omitted
+    params: v reflect.Value, opts fieldOptions
+    results: bool
+  - doc: |-
+      nilToZero returns the zero value of a nil pointer's element, and any other
+      value unchanged.
+    name: nilToZero
+    params: v reflect.Value
+    results: reflect.Value
+  - doc: |-
+      keyClash refuses sorted entries with two equal keys, which a map whose keys
+      are written alike — two TextMarshalers, say — produces.
+    name: keyClash
+    params: entries []entry, t reflect.Type
+    results: error
+  - doc: mapKeyString returns the TOML key a map key is written as.
+    name: mapKeyString
+    params: k reflect.Value
+    results: string, error
+  - doc: |-
+      isEmpty implements omitempty: false, 0, "", a nil pointer or interface, an
+      empty array, slice or map, a zero time or local value, and a struct whose
+      every written field is empty.
+    name: isEmpty
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      isEmptyStruct reports whether struct v is empty: a value-like struct when it
+      is its zero, a table when every field it would write is empty.
+    name: isEmptyStruct
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      isZero implements omitzero: the type's own IsZero when it has one, the
+      reflect zero otherwise.
+    name: isZero
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      appendFloat writes a float as the previous library wrote it: inf, -inf,
+      nan, or the shortest decimal that round-trips, with ".0" when it has
+      neither a fraction nor an exponent.
+    name: appendFloat
+    params: b []byte, f float64, bits int
+    results: "[]byte"
+  - doc: appendScalar writes a boolean, an integer or a float.
+    name: appendScalar
+    params: b []byte, v reflect.Value
+    results: "[]byte, error"
+  - doc: |-
+      appendUint writes an unsigned integer, refusing one TOML's signed 64-bit
+      integers cannot hold.
+    name: appendUint
+    params: b []byte, v reflect.Value
+    results: "[]byte, error"
+  - doc: |-
+      appendSpecial writes time.Time as an offset date-time and the local types
+      as their own text.
+    name: appendSpecial
+    params: b []byte, v reflect.Value
+    results: "[]byte"
+  - doc: valueOf returns the T that v holds, without boxing a copy of it.
+    name: valueOf
+    params: v reflect.Value
+    results: T
+    typeParams: T any
+  - doc: appendMarshaledText writes the text a TextMarshaler returns, as a string.
+    name: appendMarshaledText
+    params: b []byte, v reflect.Value, info *typeInfo
+    results: "[]byte, error"
+  - doc: |-
+      marshalText calls the MarshalText method of v, through a copy's address when
+      only *T has it and v has none.
+    name: marshalText
+    params: v reflect.Value, info *typeInfo
+    results: "[]byte, error"
+  - doc: |-
+      appendStringValue writes a string: multi-line when multiline asks for it
+      and the string has a newline, literal when it can be, basic otherwise. A
+      string that is not UTF-8 is refused: TOML cannot carry it, and replacing
+      its bytes would write a value the caller did not hold.
+    name: appendStringValue
+    params: b []byte, s string, multiline bool
+    results: "[]byte, error"
+  - doc: "appendKey writes a key: bare when every byte allows it, quoted otherwise."
+    name: appendKey
+    params: b []byte, key string
+    results: "[]byte"
+  - doc: isBareKey reports whether key can be written without quotes.
+    name: isBareKey
+    params: key string
+    results: bool
+  - doc: |-
+      appendString writes s as a literal string when it can be one — no
+      apostrophe, no control character, valid UTF-8 — and as a basic string
+      otherwise.
+    name: appendString
+    params: b []byte, s string
+    results: "[]byte"
+  - doc: |-
+      canBeLiteral reports whether s, which is valid UTF-8, can be written as a
+      literal string.
+    name: canBeLiteral
+    params: s string
+    results: bool
+  - doc: |-
+      appendBasicString writes s, which is valid UTF-8, as a basic string. Every
+      string and key is checked before it gets here, so a byte past ASCII is part
+      of a character and is copied as it is.
+    name: appendBasicString
+    params: b []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendEscapedByte writes one ASCII byte of a basic string, escaped when it
+      must be.
+    name: appendEscapedByte
+    params: b []byte, c byte
+    results: "[]byte"
+  - doc: appendUnicodeEscape writes \u00XX for byte c.
+    name: appendUnicodeEscape
+    params: b []byte, c byte
+    results: "[]byte"
+  - doc: |-
+      appendMultilineString writes s as a multi-line basic string: newlines and
+      tabs as they are, a run of three or more quotes escaped quote by quote.
+    name: appendMultilineString
+    params: b []byte, s string
+    results: "[]byte"
+  - doc: quoteRunLength returns how many quotes start at s[i].
+    name: quoteRunLength
+    params: s string, i int
+    results: int
+  - doc: |-
+      appendQuoteRun writes a run of quotes inside a multi-line string: as they
+      are when there are fewer than three, escaped otherwise.
+    name: appendQuoteRun
+    params: b []byte, run int
+    results: "[]byte"
+  - doc: |-
+      appendMultilineByte writes one byte of a multi-line basic string: newlines
+      and tabs as they are, other control characters and the backslash escaped.
+    name: appendMultilineByte
+    params: b []byte, c byte
+    results: "[]byte"
+  - doc: containsByte reports whether s contains c.
+    name: containsByte
+    params: s string, c byte
+    results: bool
+  - doc: appendSeparator writes what precedes element i of an array.
+    name: appendSeparator
+    params: b []byte, i int, multiline bool
+    results: "[]byte"
+  - doc: appendPadded appends v in decimal, zero-padded to width.
+    name: appendPadded
+    params: b []byte, v, width int
+    results: "[]byte"
+  - doc: |-
+      appendFraction appends the fraction of a second: precision digits, or the
+      fewest that keep nanosecond when precision is 0.
+    name: appendFraction
+    params: b []byte, nanosecond, precision int
+    results: "[]byte"
+  - doc: parseExactly parses text as exactly one value of kind want into dt.
+    name: parseExactly
+    params: text []byte, dt *datetime, want kind
+    results: error
+  - doc: localDateOf returns the date part of dt.
+    name: localDateOf
+    params: dt *datetime
+    results: LocalDate
+  - doc: localTimeOf returns the time part of dt.
+    name: localTimeOf
+    params: dt *datetime
+    results: LocalTime
+  - doc: daysIn returns the number of days of month in year.
+    name: daysIn
+    params: month, year int
+    results: int
+  - doc: isLeap reports whether year is a Gregorian leap year.
+    name: isLeap
+    params: year int
+    results: bool
+  - doc: signOf returns -1 for a negative sign and 1 otherwise.
+    name: signOf
+    params: negative bool
+    results: int
+  - doc: |-
+      radixBits returns the bits per digit the radix mark c announces, or 0 when c
+      is no radix mark. The marks are lowercase only (§Integer).
+    name: radixBits
+    params: c byte
+    results: uint
+  - doc: |-
+      radixClass returns the byte class of the digits of the radix whose digits
+      carry bits bits.
+    name: radixClass
+    params: bits uint
+    results: uint16
+  - doc: |-
+      fastFloat converts a decimal float with Clinger's exact method when it
+      applies: a significand of at most 53 bits and a power of ten float64 holds
+      exactly. It reports false otherwise, and the caller defers to strconv.
+    name: fastFloat
+    params: b []byte
+    results: float64, bool
+  - doc: |-
+      significandOf reads the digits and the fractional digits of a float into a
+      significand, and returns the power of ten the fraction implies and what
+      follows.
+    name: significandOf
+    params: b []byte
+    results: significand uint64, exponent int, rest []byte, ok bool
+  - doc: exponentOf reads an exponent, "e" or "E" then a signed integer, or nothing.
+    name: exponentOf
+    params: b []byte
+    results: int, bool
+  - doc: hexValue returns the value of the hexadecimal digit c.
+    name: hexValue
+    params: c byte
+    results: byte
+  - doc: redefinitionProblem names why a [header] cannot define the existing node n.
+    name: redefinitionProblem
+    params: n *node
+    results: string
+  - doc: isBareKeyByte reports whether c may appear in a bare key.
+    name: isBareKeyByte
+    params: c byte
+    results: bool
+  - doc: leaf returns a node of kind k keyed part, ready for the scalar it holds.
+    name: leaf
+    params: k kind, part keyPart, at int
+    results: node
+  - doc: |-
+      estimateNodes estimates the nodes data will need: each key-value has its
+      '=', each array element its '[' or ',', each header its '['. Separators
+      inside strings overcount; dotted keys undercount; both are bounded by the
+      caller.
+    name: estimateNodes
+    params: data []byte
+    results: int
+  - doc: |-
+      position returns the 1-based line and column of offset at in data, the
+      column counted in characters.
+    name: position
+    params: data []byte, at int
+    results: line, column int
+  - doc: keyHash hashes key in table t.
+    name: keyHash
+    params: t int32, key []byte
+    results: uint64
+  - doc: infoOf returns the cached typeInfo of t, computing it on first use.
+    name: infoOf
+    params: t reflect.Type
+    results: "*typeInfo"
+  - doc: describe computes the typeInfo of t.
+    name: describe
+    params: t reflect.Type
+    results: "*typeInfo"
+  - doc: |-
+      methodFlags returns the roles t plays through the methods it, or its
+      pointer, has, and whether it is one of the types written specially.
+    name: methodFlags
+    params: t reflect.Type
+    results: typeFlags
+  - doc: flagIf returns flag when cond holds, and no flag otherwise.
+    name: flagIf
+    params: cond bool, flag typeFlags
+    results: typeFlags
+  - doc: |-
+      structFields returns the fields of struct t in declaration order,
+      flattening embedded structs as encoding/json does. Of two fields with one
+      key, the shallower wins, and at equal depth the first declared.
+    name: structFields
+    params: t reflect.Type
+    results: "[]fieldPlan"
+  - doc: |-
+      collectFields appends the fields of t, reached through index, to fields.
+      visited stops a struct that embeds itself through a pointer.
+    name: collectFields
+    params: fields *[]fieldPlan, t reflect.Type, index []int, depth int, visited map[reflect.Type]bool
+  - doc: |-
+      embeddedStruct returns the struct type an anonymous field embeds, directly
+      or through a pointer, or nil.
+    name: embeddedStruct
+    params: f reflect.StructField
+    results: reflect.Type
+  - doc: parseTag splits a toml tag into its name and options.
+    name: parseTag
+    params: tag string
+    results: name string, opts fieldOptions
+  - doc: |-
+      applyOption records one tag option; an unknown one is ignored, as the
+      previous library ignored it.
+    name: applyOption
+    params: opts *fieldOptions, opt string
+  - doc: |-
+      standaloneTags applies the standalone multiline:"true", inline:"true" and
+      commented:"true" tags and the comment tag.
+    name: standaloneTags
+    params: tag reflect.StructTag, opts fieldOptions
+    results: fieldOptions
+  - doc: |-
+      fieldIndexes builds the exact and the case-folded key indexes of fields.
+      The first field to claim a folded key keeps it.
+    name: fieldIndexes
+    params: fields []fieldPlan
+    results: exact, folded map[string]int
+  - doc: isASCII reports whether b is ASCII.
+    name: isASCII
+    params: b []byte
+    results: bool
+  - doc: buildByteClass computes byteClass.
+    name: buildByteClass
+    results: "[byteValues]uint16"
+  - doc: markRange adds cls to every byte from first to last.
+    name: markRange
+    params: table *[byteValues]uint16, first, last byte, cls uint16
+imports:
+  bytes: bytes
+  cmp: cmp
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  coretoml: github.com/kitsunium/sdk/internal/core/data/codec/toml
+  encoding: encoding
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  maphash: hash/maphash
+  math: math
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
+  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/toml
+  name: toml
+  purpose: Package toml is the TOML codec, written against TOML v1.0.0 (https://toml.io/en/v1.0.0) with the standard library alone.
+types:
+  - doc: tomlCodec is the concrete Codec implementation for TOML.
+    kind: struct
+    methods:
+      - doc: Name implements codec.Codec.
+        name: Name
+        recv: "*tomlCodec"
+        results: string
+      - doc: MIMETypes lists every MIME alias.
+        name: MIMETypes
+        recv: "*tomlCodec"
+        results: "[]string"
+      - doc: Extensions lists every file extension.
+        name: Extensions
+        recv: "*tomlCodec"
+        results: "[]string"
+      - doc: |-
+          Marshal serialises v, a map or a struct, as a TOML document. The document is
+          written into a buffer from the shared codec pool and returned as a copy of
+          exactly its length.
+        name: Marshal
+        params: v any
+        recv: "*tomlCodec"
+        results: encoded []byte, err error
+      - doc: Unmarshal parses data as a TOML document into v, a non-nil pointer.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*tomlCodec"
+        results: error
+      - doc: |-
+          Append encodes v as a TOML document directly onto dst. Implements the
+          optional codec.Appender interface; on failure dst is returned with its
+          length unchanged.
+        name: Append
+        params: dst []byte, v any
+        recv: "*tomlCodec"
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder returns a streaming codec.Encoder writing one document to w per
+          Encode call.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*tomlCodec"
+        results: codec.Encoder
+      - doc: NewDecoder returns a streaming codec.Decoder reading r as one document.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*tomlCodec"
+        results: codec.Decoder
+    name: tomlCodec
+  - doc: decoder writes one parsed tree into Go values.
+    fields:
+      - doc: p holds the tree.
+        name: p
+        type: "*parser"
+    kind: struct
+    methods:
+      - doc: |-
+          root decodes the root table into the target, natively for the two untyped
+          targets every config source and catalogue loader passes.
+        name: root
+        params: v any, target reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          anyInto returns the table n as an untyped value, merged into existing when
+          existing is already a map[string]any.
+        name: anyInto
+        params: n int32, existing any
+        recv: d *decoder
+        results: any
+      - doc: |-
+          mergeTable writes the children of table t into m: a table a header or a
+          dotted key defined is merged into a map already there; an inline table,
+          like any other value, replaces what was there — the replaced library's rule.
+        name: mergeTable
+        params: t int32, m map[string]any
+        recv: d *decoder
+      - doc: |-
+          merges reports whether node c merges into a map its target already holds:
+          a table a header or a dotted key defined does; an inline table is
+          self-contained and replaces it, as every other value does.
+        name: merges
+        params: c int32
+        recv: d *decoder
+        results: bool
+      - doc: |-
+          keyString returns the key of node c as a string, never one aliasing the
+          parser's buffers, which the next document reuses.
+        name: keyString
+        params: c int32
+        recv: d *decoder
+        results: string
+      - doc: anyTable returns table t as a map[string]any.
+        name: anyTable
+        params: t int32
+        recv: d *decoder
+        results: map[string]any
+      - doc: anyArray returns array n, static or of tables, as a []any.
+        name: anyArray
+        params: n int32
+        recv: d *decoder
+        results: "[]any"
+      - doc: |-
+          anyValue returns node n as the untyped Go value a TOML value decodes to:
+          map[string]any, []any, string, int64, float64, bool, time.Time,
+          LocalDateTime, LocalDate or LocalTime.
+        name: anyValue
+        params: n int32
+        recv: d *decoder
+        results: any
+      - doc: |-
+          fail returns UNMARSHAL_FAILED for node n, naming problem, the node's dotted
+          key and line, and the kind of value and the Go type when they are known.
+        name: fail
+        params: n int32, problem string, target reflect.Type
+        recv: d *decoder
+        results: error
+      - doc: keyPath returns the dotted key of node n, its array elements left out.
+        name: keyPath
+        params: n int32
+        recv: d *decoder
+        results: string
+      - doc: quotedKey returns the key of node c as it would be written.
+        name: quotedKey
+        params: c int32
+        recv: d *decoder
+        results: string
+      - doc: scalarAny returns the untyped Go value of a scalar node.
+        name: scalarAny
+        params: node *node
+        recv: d *decoder
+        results: any
+      - doc: localAny returns the untyped Go value of a local date, time or date-time.
+        name: localAny
+        params: node *node
+        recv: d *decoder
+        results: any
+      - doc: |-
+          scalar decodes the scalar node n into v: into a kind that holds it, else
+          through the type's UnmarshalText, else refused — the precedence the replaced
+          library had, so a string-kinded type with an UnmarshalText is still set
+          directly from a TOML string.
+        name: scalar
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          native assigns a string, an integer, a float or a boolean to v when v's
+          kind holds it, and reports whether it did: a value out of the kind's range
+          is refused there; any other kind is left to the caller.
+        name: native
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: held bool, err error
+      - doc: setString assigns a string to a string kind, and reports whether v was one.
+        name: setString
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: bool
+      - doc: |-
+          setInteger assigns an integer to a signed, unsigned or float kind, and
+          reports whether v was one; a value out of the kind's range is refused.
+        name: setInteger
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: held bool, err error
+      - doc: |-
+          setFloat assigns f to a float kind, and reports whether v was one; a finite
+          value float32 cannot hold is refused.
+        name: setFloat
+        params: n int32, v reflect.Value, f float64
+        recv: d *decoder
+        results: held bool, err error
+      - doc: setBool assigns a boolean to a bool kind, and reports whether v was one.
+        name: setBool
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: bool
+      - doc: |-
+          temporal decodes a date or time node into time.Time or one of the local
+          types. A local value goes into a time.Time in time.Local; an offset
+          date-time goes into time.Time only, since a local type would drop its
+          offset.
+        name: temporal
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          asTime returns a date or time of kind k as a time.Time: an offset date-time
+          at its offset, a local one in time.Local, a local time on January 1st of
+          year 0.
+        name: asTime
+        params: k kind, dt *datetime
+        recv: d *decoder
+        results: time.Time
+      - doc: |-
+          wrapFail returns UNMARSHAL_FAILED for node n with the error a target's own
+          UnmarshalText returned underneath.
+        name: wrapFail
+        params: n int32, cause error, target reflect.Type
+        recv: d *decoder
+        results: error
+      - doc: value decodes node n into v.
+        name: value
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          intoInterface stores node n into the interface v: the untyped value, merged
+          into a map v already holds when n is a table.
+        name: intoInterface
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          table decodes table n into v: a struct, a map, or — as the replaced
+          library allowed — a slice, whose last element the table goes into (one is
+          appended to an empty slice), or an array, whose first element it goes into
+          when the table is only passed through on the way to a deeper one.
+        name: table
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          tableIntoSlice decodes table n into the last element of slice v, appending
+          a zero one to an empty slice. An inline table is a value, which a slice
+          cannot hold.
+        name: tableIntoSlice
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          tableIntoArray decodes table n into the first element of array v, when n
+          is a table a longer header or a dotted key passed through. A table defined
+          by its own header, or inline, cannot be stored in an array: the replaced
+          library refused both.
+        name: tableIntoArray
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          structFields decodes each key of table n into the field of struct v it
+          names. A key no field names is ignored.
+        name: structFields
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          field returns the field of v at index, allocating the embedded pointers on
+          the way.
+        name: field
+        params: c int32, v reflect.Value, index []int
+        recv: d *decoder
+        results: reflect.Value, error
+      - doc: |-
+          mapEntries decodes each key of table n into an entry of map v. An entry
+          already there is decoded into, so a standard table merges into the map it
+          meets; an inline table is self-contained and starts from an empty map.
+        name: mapEntries
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          mapKey converts the key of node c into key, a value of the map's key type:
+          a string kind, an integer or a float spelled in decimal, or — for any other
+          kind — a type whose pointer implements encoding.TextUnmarshaler. The kinds
+          come first, as they did in the replaced library.
+        name: mapKey
+        params: c int32, key reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          textKey converts a key through the key type's UnmarshalText, refusing a
+          type that has none.
+        name: textKey
+        params: c int32, key reflect.Value, raw []byte
+        recv: d *decoder
+        results: error
+      - doc: unmarshalText hands raw to the UnmarshalText of v, which is addressable.
+        name: unmarshalText
+        params: c int32, v reflect.Value, raw []byte
+        recv: d *decoder
+        results: error
+      - doc: |-
+          array decodes array n, static or of tables, into v: a slice, which is
+          replaced, or an array, filled from the start — as the replaced library
+          filled one: elements past a static array's length are dropped, an array of
+          tables longer than it is refused, and elements the document does not reach
+          are left as they were.
+        name: array
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: elements decodes the elements of array n into the first elements of v.
+        name: elements
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+    name: decoder
+  - doc: |-
+      tomlDecoder reads its reader as one document. TOML has no separator between
+      documents, so the first Decode consumes the stream and every later one
+      returns io.EOF; the sticky done latch makes More report false from then on.
+    fields:
+      - doc: r is the document.
+        name: r
+        type: io.Reader
+      - doc: done is set by the first Decode, whatever it returned.
+        name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: Decode reads the whole document into v.
+        name: Decode
+        params: v any
+        recv: d *tomlDecoder
+        results: error
+      - doc: More reports whether a Decode call would produce another document.
+        name: More
+        recv: d *tomlDecoder
+        results: bool
+    name: tomlDecoder
+  - doc: entry is one key of a table being encoded.
+    fields:
+      - doc: key is the TOML key.
+        name: key
+        type: string
+      - doc: value is the Go value.
+        name: value
+        type: reflect.Value
+      - doc: opts are the struct tag's options, zero for a map entry.
+        name: opts
+        type: fieldOptions
+    kind: struct
+    name: entry
+  - doc: encoder writes one document. It is pooled with its scratch slices.
+    fields:
+      - doc: buf is the document being written.
+        name: buf
+        type: "[]byte"
+      - doc: keys is the dotted key of the table being written.
+        name: keys
+        type: "[]string"
+      - doc: free holds entry slices for reuse, one per table level in flight.
+        name: free
+        type: "[][]entry"
+      - doc: depth is how many tables and arrays enclose the value being written.
+        name: depth
+        type: int32
+      - doc: |-
+          hops is how many pointers and interfaces enclose the value being
+          written.
+        name: hops
+        type: int32
+      - doc: lastWasHeader says the last line written was a table header.
+        name: lastWasHeader
+        type: bool
+    kind: struct
+    methods:
+      - doc: reset empties the encoder for the next document.
+        name: reset
+        recv: e *encoder
+      - doc: retained is the entry capacity the encoder would keep in the pool.
+        name: retained
+        recv: e *encoder
+        results: int
+      - doc: |-
+          table writes the key-values of table v, a map or a struct, then its
+          sub-tables and arrays of tables under their headers.
+        name: table
+        params: v reflect.Value, commented bool
+        recv: e *encoder
+        results: error
+      - doc: keyValues writes every entry that is not a table.
+        name: keyValues
+        params: entries []entry, commented bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          subTables writes every entry that is a table or an array of tables, each
+          under its header.
+        name: subTables
+        params: entries []entry, commented bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          subTable writes one table entry: a [header] and its table, or one
+          [[header]] and table per element of an array of tables.
+        name: subTable
+        params: ent *entry, commented bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          arrayOfTables writes each element of v under its own [[header]]. The comment
+          is written above the first only.
+        name: arrayOfTables
+        params: v reflect.Value, comment string, commented bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          header writes a [table] or [[array of tables]] header for the current key,
+          after an empty line unless it follows another header or opens the document.
+        name: header
+        params: comment string, commented, array bool
+        recv: e *encoder
+      - doc: keyValue writes one key = value line.
+        name: keyValue
+        params: ent *entry, commented bool
+        recv: e *encoder
+        results: error
+      - doc: |-
+          isTable reports whether an entry is written under a header: a map or a
+          struct, or a non-empty array whose every element is one, unless the field
+          asked to be inline.
+        name: isTable
+        params: ent *entry
+        recv: e *encoder
+        results: bool
+      - doc: |-
+          collect returns the entries of table v: a struct's fields, nil ones and the
+          ones the tag omits left out, or a map's entries sorted by key.
+        name: collect
+        params: v reflect.Value
+        recv: e *encoder
+        results: "[]entry, error"
+      - doc: acquire returns an empty entry slice, reused when one is free.
+        name: acquire
+        recv: e *encoder
+        results: "[]entry"
+      - doc: release returns an entry slice for reuse.
+        name: release
+        params: s []entry
+        recv: e *encoder
+      - doc: |-
+          mapEntries appends the entries of map v, sorted by key, leaving out nil
+          interface values; a nil pointer is written as its type's zero value.
+        name: mapEntries
+        params: entries []entry, v reflect.Value
+        recv: e *encoder
+        results: "[]entry, error"
+      - doc: appendValue writes v as a TOML value.
+        name: appendValue
+        params: b []byte, v reflect.Value, opts fieldOptions
+        recv: e *encoder
+        results: "[]byte, error"
+      - doc: |-
+          appendIndirect writes what a pointer or an interface holds: a nil pointer
+          as its type's zero value, as the previous library wrote it; a nil interface
+          is refused, having no type to take a zero value from. Each level goes back
+          through appendValue, which may find a TextMarshaler there, and the levels
+          are counted, so a pointer that refers to itself is refused rather than
+          followed until the stack runs out.
+        name: appendIndirect
+        params: b []byte, v reflect.Value, opts fieldOptions
+        recv: e *encoder
+        results: "[]byte, error"
+      - doc: |-
+          appendArray writes a slice or an array: on one line, or one element per
+          line when multiline asks for it. Elements are written with no options: a
+          table among them is an inline table.
+        name: appendArray
+        params: b []byte, v reflect.Value, multiline bool
+        recv: e *encoder
+        results: "[]byte, error"
+      - doc: |-
+          appendInlineTable writes a map or a struct as an inline table, on one line:
+          its strings single-line whatever the field's tag, its tables inline too.
+        name: appendInlineTable
+        params: b []byte, v reflect.Value
+        recv: e *encoder
+        results: "[]byte, error"
+    name: encoder
+  - doc: |-
+      tomlEncoder writes each value Encode is given as a document of its own.
+      Consecutive documents are written one after the other: TOML has no
+      separator between documents, so a reader reads the stream as one, which
+      fails if two of them define the same key.
+    fields:
+      - doc: w receives each document.
+        name: w
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Encode writes v as one TOML document to the writer.
+        name: Encode
+        params: v any
+        recv: e *tomlEncoder
+        results: error
+      - doc: |-
+          Close is a no-op: the encoder buffers nothing between documents and does
+          not own the writer.
+        name: Close
+        recv: "*tomlEncoder"
+        results: error
+    name: tomlEncoder
+  - fields:
+      - doc: Year is the calendar year.
+        name: Year
+        type: int
+      - doc: Month is 1 to 12.
+        name: Month
+        type: int
+      - doc: Day is 1 to 31.
+        name: Day
+        type: int
+    kind: struct
+    methods:
+      - name: AsTime
+        params: zone *time.Location
+        recv: d LocalDate
+        results: time.Time
+      - name: String
+        recv: d LocalDate
+        results: string
+      - name: MarshalText
+        recv: d LocalDate
+        results: "[]byte, error"
+      - name: UnmarshalText
+        params: text []byte
+        recv: d *LocalDate
+        results: error
+      - doc: appendText appends the day to b.
+        name: appendText
+        params: b []byte
+        recv: d LocalDate
+        results: "[]byte"
+    name: LocalDate
+  - fields:
+      - doc: Hour is 0 to 23.
+        name: Hour
+        type: int
+      - doc: Minute is 0 to 59.
+        name: Minute
+        type: int
+      - doc: Second is 0 to 59.
+        name: Second
+        type: int
+      - doc: Nanosecond is 0 to 999 999 999.
+        name: Nanosecond
+        type: int
+      - doc: |-
+          Precision is how many fractional digits String writes: as many as the
+          document had, up to nine. Zero writes the fewest that keep
+          Nanosecond.
+        name: Precision
+        type: int
+    kind: struct
+    methods:
+      - name: String
+        recv: t LocalTime
+        results: string
+      - name: MarshalText
+        recv: t LocalTime
+        results: "[]byte, error"
+      - name: UnmarshalText
+        params: text []byte
+        recv: t *LocalTime
+        results: error
+      - doc: appendText appends the time to b.
+        name: appendText
+        params: b []byte
+        recv: t LocalTime
+        results: "[]byte"
+    name: LocalTime
+  - fields:
+      - name: ""
+        role: embedded
+        type: LocalDate
+      - name: ""
+        role: embedded
+        type: LocalTime
+    kind: struct
+    methods:
+      - name: AsTime
+        params: zone *time.Location
+        recv: dt LocalDateTime
+        results: time.Time
+      - name: String
+        recv: dt LocalDateTime
+        results: string
+      - name: MarshalText
+        recv: dt LocalDateTime
+        results: "[]byte, error"
+      - name: UnmarshalText
+        params: text []byte
+        recv: dt *LocalDateTime
+        results: error
+      - doc: appendText appends the date-time to b.
+        name: appendText
+        params: b []byte
+        recv: dt LocalDateTime
+        results: "[]byte"
+    name: LocalDateTime
+  - doc: datetime is the parsed value of any of the four date and time kinds.
+    fields:
+      - doc: year is the calendar year.
+        name: year
+        type: int
+      - doc: month is 1 to 12.
+        name: month
+        type: int
+      - doc: day is 1 to 31.
+        name: day
+        type: int
+      - doc: hour is 0 to 23.
+        name: hour
+        type: int
+      - doc: minute is 0 to 59.
+        name: minute
+        type: int
+      - doc: second is 0 to 59.
+        name: second
+        type: int
+      - doc: nanosecond is the fraction, truncated to nine digits.
+        name: nanosecond
+        type: int
+      - doc: precision is how many fractional digits were written, up to nine.
+        name: precision
+        type: int
+      - doc: offset is the offset date-time's zone, in seconds east of UTC.
+        name: offset
+        type: int
+    kind: struct
+    name: datetime
+  - doc: |-
+      parser reads one document into its tree. It is pooled: every slice keeps
+      its capacity from one document to the next.
+    fields:
+      - doc: data is the document.
+        name: data
+        type: "[]byte"
+      - doc: nodes is the arena; nodes[0] is the root table.
+        name: nodes
+        type: "[]node"
+      - doc: unescaped holds the strings and keys that had escape sequences.
+        name: unescaped
+        type: "[]byte"
+      - doc: times holds the date-times nodes point to.
+        name: times
+        type: "[]datetime"
+      - doc: parts is the key being read.
+        name: parts
+        type: "[]keyPart"
+      - doc: |-
+          index finds a key in a wide table: a hash of the table and the key to
+          the first node of its bucket.
+        name: index
+        type: map[uint64]int32
+      - doc: keys interns the keys decoded as Go strings, across documents.
+        name: keys
+        type: map[string]string
+      - doc: internedBytes counts the bytes keys holds, for the retain decision.
+        name: internedBytes
+        type: int
+      - doc: pos is the offset of the next byte to read.
+        name: pos
+        type: int
+      - doc: current is the table key-value lines are added to.
+        name: current
+        type: int32
+    kind: struct
+    methods:
+      - doc: |-
+          numberOrDate reads a value that starts like a number: an integer, a float,
+          or a date or a time, which start with four digits and a dash or two digits
+          and a colon.
+        name: numberOrDate
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: digitsThen reports whether count digits then the byte mark start at p.pos.
+        name: digitsThen
+        params: count int, mark byte
+        recv: p *parser
+        results: bool
+      - doc: dateTimeValue reads one of the four date and time kinds.
+        name: dateTimeValue
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: |-
+          dateTime reads a date and time into dt and returns which of the four kinds
+          it is.
+        name: dateTime
+        params: dt *datetime
+        recv: p *parser
+        results: kind, error
+      - doc: date reads YYYY-MM-DD and checks that the day exists.
+        name: date
+        params: dt *datetime
+        recv: p *parser
+        results: error
+      - doc: |-
+          timeDelimiter consumes the T, t or space between a date and a time, and
+          reports whether a time follows. A space is a delimiter only before a digit:
+          otherwise it is the whitespace after a local date.
+        name: timeDelimiter
+        recv: p *parser
+        results: bool
+      - doc: |-
+          timeOfDay reads HH:MM:SS with an optional fraction. Seconds may be left out
+          — TOML v1.1.0, which the previous library accepted — and a fraction then
+          cannot follow.
+        name: timeOfDay
+        params: dt *datetime
+        recv: p *parser
+        results: error
+      - doc: |-
+          secondFraction reads the optional fraction of a second, truncated to the
+          nanosecond, and reports whether it was well formed.
+        name: secondFraction
+        params: dt *datetime
+        recv: p *parser
+        results: bool
+      - doc: |-
+          offset reads Z, z, or ±HH:MM into dt and reports whether there was one.
+          offsetError then says whether it was well formed.
+        name: offset
+        params: dt *datetime
+        recv: p *parser
+        results: bool
+      - doc: offsetError refuses the offset offset marked as malformed.
+        name: offsetError
+        params: dt *datetime
+        recv: p *parser
+        results: error
+      - doc: |-
+          fixed reads exactly width digits, then the separator sep unless sep is 0,
+          and returns their value.
+        name: fixed
+        params: width int, sep byte
+        recv: p *parser
+        results: int, bool
+      - doc: numberValue reads an integer or a float.
+        name: numberValue
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: number reads a number from p.pos and returns its kind and its value's bits.
+        name: number
+        recv: p *parser
+        results: k kind, bits uint64, err error
+      - doc: hasRadixPrefix reports whether 0x, 0o or 0b starts at p.pos.
+        name: hasRadixPrefix
+        recv: p *parser
+        results: bool
+      - doc: specialFloat reads inf or nan, after an optional sign starting at start.
+        name: specialFloat
+        params: start int
+        recv: p *parser
+        results: kind, uint64, error
+      - doc: |-
+          radixInteger reads a hexadecimal, octal or binary integer. Its value must
+          fit a signed 64-bit integer: TOML's integers are signed, and the spelling
+          carries no sign (§Integer).
+        name: radixInteger
+        recv: p *parser
+        results: kind, uint64, error
+      - doc: |-
+          digits advances over a non-empty run of digits of class cls in which every
+          underscore stands between two digits.
+        name: digits
+        params: cls uint16
+        recv: p *parser
+        results: error
+      - doc: |-
+          decimal reads a decimal integer or a float whose sign, if any, started at
+          start.
+        name: decimal
+        params: start int
+        recv: p *parser
+        results: kind, uint64, error
+      - doc: |-
+          fraction reads the optional fractional part and exponent of a float, and
+          reports whether there was either.
+        name: fraction
+        recv: p *parser
+        results: isFloat bool, err error
+      - doc: |-
+          integerOf converts a decimal integer token, refusing one past the range of
+          a signed 64-bit integer (§Integer: "an error must be thrown").
+        name: integerOf
+        params: at int, token []byte
+        recv: p *parser
+        results: kind, uint64, error
+      - doc: |-
+          floatOf converts a float token whose grammar has been checked. A value too
+          large for float64 is refused; one too small rounds to zero, as IEEE 754
+          does.
+        name: floatOf
+        params: at int, token []byte
+        recv: p *parser
+        results: kind, uint64, error
+      - doc: stringValue reads a string value of any of the four spellings.
+        name: stringValue
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: hasTriple reports whether three quote characters start at p.pos.
+        name: hasTriple
+        params: quote byte
+        recv: p *parser
+        results: bool
+      - doc: |-
+          singleLineString reads a basic or literal string on one line, from its
+          opening quote, and reports whether its value lives in the unescape buffer.
+        name: singleLineString
+        recv: p *parser
+        results: value span, escaped bool, err error
+      - doc: |-
+          literalString reads a literal string on one line: everything up to the next
+          apostrophe, verbatim, except a newline or a control character other than
+          the tab.
+        name: literalString
+        recv: p *parser
+        results: span, error
+      - doc: |-
+          basicString reads a basic string on one line. A string with no escape
+          sequence is returned in place; the first backslash moves the value to the
+          unescape buffer.
+        name: basicString
+        recv: p *parser
+        results: value span, escaped bool, err error
+      - doc: |-
+          basicEscaped continues a basic string at its first backslash, rebuilding the
+          value in the unescape buffer from start.
+        name: basicEscaped
+        params: start int
+        recv: p *parser
+        results: span, error
+      - doc: |-
+          basicStep copies the byte c at p.pos, or the escape sequence or character
+          it starts, to the unescape buffer.
+        name: basicStep
+        params: c byte
+        recv: p *parser
+        results: error
+      - doc: |-
+          escape unescapes the sequence at p.pos, which is a backslash, into the
+          unescape buffer.
+        name: escape
+        recv: p *parser
+        results: error
+      - doc: |-
+          hexEscape reads the digits hexadecimal digits of an escape that started at
+          offset at, and appends the character they name.
+        name: hexEscape
+        params: at, digits int
+        recv: p *parser
+        results: error
+      - doc: |-
+          multilineString reads a multi-line string from its opening delimiter into
+          the unescape buffer. quote is the delimiter's character: a quote for a
+          basic string, whose escapes are interpreted, an apostrophe for a literal
+          one, kept verbatim.
+        name: multilineString
+        params: quote byte
+        recv: p *parser
+        results: span, error
+      - doc: |-
+          multilineStep copies one piece of a multi-line string to the unescape
+          buffer, and reports whether it was the closing delimiter.
+        name: multilineStep
+        params: quote byte
+        recv: p *parser
+        results: closed bool, err error
+      - doc: |-
+          multilineOther copies a newline, LF or CRLF, or a well-formed non-ASCII
+          character, refusing a control character and a carriage return that does not
+          end a line.
+        name: multilineOther
+        recv: p *parser
+        results: error
+      - doc: |-
+          quoteRun reads a run of the delimiter's character inside a multi-line
+          string. Fewer than three are content; three to five close the string, the
+          ones before the last three being content; more is refused (§String: "up to
+          two quotes may appear next to the closing delimiter").
+        name: quoteRun
+        params: quote byte
+        recv: p *parser
+        results: closed bool, err error
+      - doc: |-
+          multilineEscape handles a backslash in a multi-line basic string: a
+          backslash that ends a line removes it and every whitespace and newline
+          after it; any other is an escape sequence.
+        name: multilineEscape
+        recv: p *parser
+        results: error
+      - doc: |-
+          header reads a [table] or [[array of tables]] header and makes its table
+          the current one.
+        name: header
+        recv: p *parser
+        results: error
+      - doc: |-
+          walkHeader follows the intermediate parts of a header from the root,
+          creating the tables they imply, and returns the table the last part belongs
+          to.
+        name: walkHeader
+        params: parts []keyPart
+        recv: p *parser
+        results: int32, error
+      - doc: |-
+          headerStep returns the table part names in t, creating it if it does not
+          exist. A header may pass through any table but an inline one, and through
+          an array of tables into its last element.
+        name: headerStep
+        params: t int32, part keyPart
+        recv: p *parser
+        results: int32, error
+      - doc: openTable defines the table a [header] names.
+        name: openTable
+        params: parent int32, part keyPart, at int
+        recv: p *parser
+        results: error
+      - doc: |-
+          openArrayTable appends a new element to the array of tables a [[header]]
+          names.
+        name: openArrayTable
+        params: parent int32, part keyPart, at int
+        recv: p *parser
+        results: error
+      - doc: keyValue reads `key = value` and adds the value to table t.
+        name: keyValue
+        params: t int32
+        recv: p *parser
+        results: error
+      - doc: |-
+          walkDotted follows the intermediate parts of a dotted key from table t,
+          creating the tables they define, and returns the table the last part
+          belongs to.
+        name: walkDotted
+        params: t int32, parts []keyPart
+        recv: p *parser
+        results: int32, error
+      - doc: consume advances over c if it is the next byte, and reports whether it was.
+        name: consume
+        params: c byte
+        recv: p *parser
+        results: bool
+      - doc: key reads a simple or dotted key into p.parts, and the whitespace after it.
+        name: key
+        recv: p *parser
+        results: error
+      - doc: |-
+          simpleKey reads one part of a key: bare, or a quoted basic or literal
+          string on one line.
+        name: simpleKey
+        recv: p *parser
+        results: keyPart, error
+      - doc: |-
+          value reads one value and adds it to parent under key part. parent is a
+          table, with part its key, or an array, with noPart.
+        name: value
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: boolValue reads true or false.
+        name: boolValue
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: literal consumes word if the document continues with it.
+        name: literal
+        params: word string
+        recv: p *parser
+        results: bool
+      - doc: |-
+          array reads an array value: values separated by commas, with whitespace,
+          newlines and comments allowed around each, and an optional trailing comma
+          (§Array).
+        name: array
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: |-
+          afterElement consumes what follows an array element: a comma, after which
+          another element or the closing bracket comes, or the closing bracket. It
+          reports whether the array closed.
+        name: afterElement
+        recv: p *parser
+        results: closed bool, err error
+      - doc: |-
+          skipBlank advances over whitespace, newlines and comments, where an array or
+          an inline table allows them.
+        name: skipBlank
+        recv: p *parser
+        results: error
+      - doc: |-
+          inlineTable reads an inline table: key-values between braces, separated by
+          commas (§Inline Table). The table is closed once read: nothing later in the
+          document may add to it.
+        name: inlineTable
+        params: parent int32, part keyPart
+        recv: p *parser
+        results: error
+      - doc: |-
+          afterPair consumes what follows a key-value of an inline table: the closing
+          brace, or a comma and what follows it. It reports whether the table closed.
+        name: afterPair
+        recv: p *parser
+        results: closed bool, err error
+      - doc: |-
+          inlineClose skips what may precede a closing brace and consumes the brace
+          if it comes. Newlines and comments are allowed inside an inline table by
+          TOML v1.1.0, not v1.0.0; they are accepted because the library this codec
+          replaced accepted them, so no document that decoded before stops decoding.
+        name: inlineClose
+        recv: p *parser
+        results: closed bool, err error
+      - doc: reset empties the parser for the next document, keeping its capacity.
+        name: reset
+        recv: p *parser
+      - doc: |-
+          internKey returns key as a string, the same string every time while the
+          parser's table holds it.
+        name: internKey
+        params: key []byte
+        recv: p *parser
+        results: string
+      - doc: |-
+          newKey turns key into a string and keeps it in the intern table when there
+          is room for it.
+        name: newKey
+        params: key []byte
+        recv: p *parser
+        results: string
+      - doc: retainedBytes is the memory the parser would keep in the pool.
+        name: retainedBytes
+        recv: p *parser
+        results: int
+      - doc: parse reads data into the parser's tree.
+        name: parse
+        params: data []byte
+        recv: p *parser
+        results: error
+      - doc: |-
+          expression reads one line: a table header, a key-value, a comment or
+          nothing, then the end of the line.
+        name: expression
+        recv: p *parser
+        results: error
+      - doc: |-
+          endOfLine consumes whitespace, an optional comment and the newline that end
+          an expression, or the end of the document.
+        name: endOfLine
+        recv: p *parser
+        results: error
+      - doc: skipSpace advances over spaces and tabs.
+        name: skipSpace
+        recv: p *parser
+      - doc: newline consumes one newline, LF or CRLF, and reports whether there was one.
+        name: newline
+        recv: p *parser
+        results: bool
+      - doc: |-
+          comment consumes a comment up to, not including, its newline, refusing the
+          control characters TOML forbids in one (§Comment).
+        name: comment
+        recv: p *parser
+        results: error
+      - doc: atNewline reports whether a newline, LF or CRLF, starts at p.pos.
+        name: atNewline
+        recv: p *parser
+        results: bool
+      - doc: |-
+          skipRune advances over one well-formed UTF-8 character of two or more
+          bytes, and refuses anything else with problem.
+        name: skipRune
+        params: problem string
+        recv: p *parser
+        results: error
+      - doc: |-
+          fail returns UNMARSHAL_FAILED locating problem at offset at. The problem is
+          a fixed sentence: no byte of the document is ever copied into an error.
+        name: fail
+        params: at int, problem string
+        recv: p *parser
+        results: error
+      - doc: |-
+          newTable appends a table to parent and returns it, refusing a depth beyond
+          maxDepth.
+        name: newTable
+        params: parent int32, part keyPart, from origin
+        recv: p *parser
+        results: int32, error
+      - doc: keyBytes returns the key of node n.
+        name: keyBytes
+        params: n *node
+        recv: p *parser
+        results: "[]byte"
+      - doc: textBytes returns the text of node n.
+        name: textBytes
+        params: n *node
+        recv: p *parser
+        results: "[]byte"
+      - doc: partBytes returns the bytes of one key part.
+        name: partBytes
+        params: part keyPart
+        recv: p *parser
+        results: "[]byte"
+      - doc: child returns the child of table t named key, or noNode.
+        name: child
+        params: t int32, key []byte
+        recv: p *parser
+        results: int32
+      - doc: |-
+          add appends n to the arena as the last child of parent and returns its
+          index. The caller has checked the depth and the key.
+        name: add
+        params: parent int32, n node
+        recv: p *parser
+        results: int32
+      - doc: indexTable moves every child of table t into the hash index.
+        name: indexTable
+        params: t int32
+        recv: p *parser
+      - doc: indexInsert puts node c in the bucket of its key.
+        name: indexInsert
+        params: c int32
+        recv: p *parser
+      - doc: indexLookup finds the child of table t named key through the hash index.
+        name: indexLookup
+        params: t int32, key []byte
+        recv: p *parser
+        results: int32
+    name: parser
+  - doc: kind is what a node holds.
+    kind: named
+    name: kind
+    underlying: uint8
+  - doc: |-
+      origin is how a table came to exist, which decides what a later line of the
+      document may still add to it (TOML v1.0.0 §Table, §Inline Table, §Array of
+      Tables).
+    kind: named
+    name: origin
+    underlying: uint8
+  - doc: |-
+      span is a run of bytes, located by offsets so that it stays valid while the
+      buffer it points into grows. Whether it points into the document or into
+      the unescape buffer is recorded by the node that owns it.
+    fields:
+      - doc: start is the offset of the first byte.
+        name: start
+        type: int32
+      - doc: end is the offset after the last byte.
+        name: end
+        type: int32
+    kind: struct
+    name: span
+  - doc: |-
+      node is one table, array or value of a document. A node's children are a
+      linked list, so that appending to a table or an array never moves another
+      node.
+    fields:
+      - doc: |-
+          num is the value of an integer (as int64 bits), a float (as float64
+          bits) or a boolean (0 or 1), or the index of a date-time in the
+          parser's date-time list.
+        name: num
+        type: uint64
+      - doc: |-
+          key is the name the node has in its parent table; empty for an array
+          element and for the root.
+        name: key
+        type: span
+      - doc: text is a string's value, or the token a scalar was written as.
+        name: text
+        type: span
+      - doc: parent is the table or array that holds the node.
+        name: parent
+        type: int32
+      - doc: first is the first child of a table or an array.
+        name: first
+        type: int32
+      - doc: last is the last child of a table or an array.
+        name: last
+        type: int32
+      - doc: next is the next child of the same parent.
+        name: next
+        type: int32
+      - doc: hnext is the next node in the same bucket of the hash index.
+        name: hnext
+        type: int32
+      - doc: count is how many children a table or an array has.
+        name: count
+        type: int32
+      - doc: |-
+          at is the offset in the document where the node was written, for a
+          diagnostic.
+        name: at
+        type: int32
+      - doc: depth is how many tables and arrays enclose the node.
+        name: depth
+        type: int32
+      - doc: kind is what the node holds.
+        name: kind
+        type: kind
+      - doc: origin is how a table came to exist.
+        name: origin
+        type: origin
+      - doc: flags are flagKeyEscaped, flagTextEscaped and flagIndexed.
+        name: flags
+        type: uint8
+    kind: struct
+    name: node
+  - doc: keyPart is one dotted part of a key, as the key parser read it.
+    fields:
+      - doc: name is the unescaped part.
+        name: name
+        type: span
+      - doc: at is where the part starts in the document.
+        name: at
+        type: int32
+      - doc: escaped says name lives in the unescape buffer.
+        name: escaped
+        type: bool
+    kind: struct
+    name: keyPart
+  - doc: fieldOptions are the options of one struct field.
+    fields:
+      - doc: comment is written above the field.
+        name: comment
+        type: string
+      - doc: omitEmpty drops an empty value.
+        name: omitEmpty
+        type: bool
+      - doc: omitZero drops a zero value.
+        name: omitZero
+        type: bool
+      - doc: inline writes a table inline.
+        name: inline
+        type: bool
+      - doc: multiline writes strings and arrays across lines.
+        name: multiline
+        type: bool
+      - doc: commented writes the value commented out.
+        name: commented
+        type: bool
+    kind: struct
+    name: fieldOptions
+  - doc: fieldPlan is how one struct field maps to a key.
+    fields:
+      - doc: name is the key.
+        name: name
+        type: string
+      - doc: index is the field's path through embedded structs.
+        name: index
+        type: "[]int"
+      - doc: opts are the tag's options.
+        name: opts
+        type: fieldOptions
+      - doc: depth is how many embedded structs the field is reached through.
+        name: depth
+        type: int
+    kind: struct
+    name: fieldPlan
+  - doc: typeInfo is what the codec knows about one Go type.
+    fields:
+      - doc: fields are a struct's keys, in declaration order, shadowed ones removed.
+        name: fields
+        type: "[]fieldPlan"
+      - doc: exact finds a field by its exact key.
+        name: exact
+        type: map[string]int
+      - doc: |-
+          folded finds a field by its key in lower case, for a key whose case
+          matches no field exactly.
+        name: folded
+        type: map[string]int
+      - doc: flags are the roles the type plays.
+        name: flags
+        type: typeFlags
+    kind: struct
+    methods:
+      - doc: is reports whether the type plays every role in flags.
+        name: is
+        params: flags typeFlags
+        recv: ti *typeInfo
+        results: bool
+      - doc: |-
+          lookup returns the field a key names: by exact match first, then
+          case-insensitively, as encoding/json and the previous library match.
+        name: lookup
+        params: key []byte
+        recv: ti *typeInfo
+        results: "*fieldPlan, bool"
+      - doc: |-
+          lookupFolded finds a field by its key in lower case. An ASCII key short
+          enough is folded on the stack, so the lookup allocates nothing.
+        name: lookupFolded
+        params: key []byte
+        recv: ti *typeInfo
+        results: int, bool
+    name: typeInfo
+  - doc: typeFlags are the roles a type plays, one bit each.
+    kind: named
+    name: typeFlags
+    underlying: uint8
+vars:
+  - doc: |-
+      Package-level state: the codec singleton plus the hoisted MIME /
+      extension tables.
+    grouped: true
+    items:
+      - doc: ": register the singleton and expose it as a typed package var."
+        name: Codec
+        type: codec.Codec
+        value: codec.Register(&tomlCodec{})
+      - doc: ": MIME table hoisted."
+        name: mimeTypes
+        value: "[]string{\"application/toml\"}"
+      - doc: ": extension table hoisted for the same reason."
+        name: extensions
+        value: "[]string{\".toml\"}"
+    name: Codec
+  - doc: The names a refusal gives the kinds of TOML value.
+    items:
+      - name: kindNames
+        value: |-
+          [...]string{
+          	kindTable:         "table",
+          	kindArrayOfTables: "array of tables",
+          	kindArray:         "array",
+          	kindString:        "string",
+          	kindInteger:       "integer",
+          	kindFloat:         "float",
+          	kindBool:          "boolean",
+          	kindDateTime:      "offset date-time",
+          	kindLocalDateTime: "local date-time",
+          	kindLocalDate:     "local date",
+          	kindLocalTime:     "local time",
+          }
+    name: kindNames
+  - doc: The zone a local value takes when the target is a time.Time.
+    items:
+      - name: localZone
+        value: time.Local
+    name: localZone
+  - doc: encoderPool recycles encoders.
+    items:
+      - name: encoderPool
+        value: |-
+          recycler.NewCappedPool[*encoder](
+          	func() *encoder { return new(encoder) },
+          	(*encoder).reset,
+          	(*encoder).retained,
+          	maxRetainedEncoderEntries,
+          )
+    name: encoderPool
+  - doc: |-
+      basicEscapes maps a byte to the letter of its one-character escape in a
+      basic string, or to 0.
+    items:
+      - name: basicEscapes
+        value: |-
+          [byteValues]byte{
+          	'"':  '"',
+          	'\\': '\\',
+          	'\b': 'b',
+          	'\f': 'f',
+          	'\n': 'n',
+          	'\r': 'r',
+          	'\t': 't',
+          }
+    name: basicEscapes
+  - doc: nanoScale multiplies a fraction of n digits up to nanoseconds.
+    items:
+      - name: nanoScale
+        value: "[...]int{0, 1e8, 1e7, 1e6, 1e5, 1e4, 1e3, 1e2, 1e1, 1e0}"
+    name: nanoScale
+  - doc: exactPow10 holds the powers of ten float64 represents exactly.
+    items:
+      - name: exactPow10
+        value: |-
+          [...]float64{
+          	1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11,
+          	1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+          }
+    name: exactPow10
+  - doc: "noPart is the key of a node that has none: an array element."
+    items:
+      - name: noPart
+        value: keyPart{}
+    name: noPart
+  - doc: |-
+      parserPool recycles parsers with their arenas, dropping one that grew past
+      maxRetainedParserBytes.
+    items:
+      - name: parserPool
+        value: |-
+          recycler.NewCappedPool[*parser](
+          	func() *parser { return new(parser) },
+          	(*parser).reset,
+          	(*parser).retainedBytes,
+          	maxRetainedParserBytes,
+          )
+    name: parserPool
+  - doc: |-
+      hashSeed seeds the hash index. One seed per process is enough: the index
+      only has to spread keys, and a collision costs a comparison, not a wrong
+      answer.
+    items:
+      - name: hashSeed
+        value: maphash.MakeSeed()
+    name: hashSeed
+  - doc: The reflect types the codec treats specially.
+    grouped: true
+    items:
+      - doc: timeType is time.Time.
+        name: timeType
+        value: reflect.TypeFor[time.Time]()
+      - doc: localDateType is LocalDate.
+        name: localDateType
+        value: reflect.TypeFor[LocalDate]()
+      - doc: localTimeType is LocalTime.
+        name: localTimeType
+        value: reflect.TypeFor[LocalTime]()
+      - doc: localDateTimeType is LocalDateTime.
+        name: localDateTimeType
+        value: reflect.TypeFor[LocalDateTime]()
+      - doc: textMarshalerType is encoding.TextMarshaler.
+        name: textMarshalerType
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+      - doc: textUnmarshalerType is encoding.TextUnmarshaler.
+        name: textUnmarshalerType
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - doc: |-
+          isZeroerType is the method omitzero consults when a type has it:
+          IsZero reports whether the value is its type's zero.
+        name: isZeroerType
+        value: reflect.TypeFor[interface{ IsZero() bool }]()
+      - doc: typeInfos caches a *typeInfo per reflect.Type.
+        name: typeInfos
+        type: sync.Map
+      - doc: |-
+          predeclaredInfo describes every predeclared scalar type — bool, the
+          integers, the floats, string — which can have no method, and so plays
+          no role but being a value.
+        name: predeclaredInfo
+        value: "&typeInfo{flags: typeValue}"
+    name: timeType
+  - doc: The lexical tables.
+    grouped: true
+    items:
+      - doc: byteClass maps every byte to its classes.
+        name: byteClass
+        value: buildByteClass()
+      - doc: |-
+          simpleEscapes maps the character after a backslash to the byte it
+          stands for, or to 0 when it starts no one-character escape (§String).
+          \e is TOML v1.1.0's, accepted because the previous library accepted it.
+        name: simpleEscapes
+        value: |-
+          [byteValues]byte{
+          		'b':  '\b',
+          		't':  '\t',
+          		'n':  '\n',
+          		'f':  '\f',
+          		'r':  '\r',
+          		'"':  '"',
+          		'\\': '\\',
+          		'e':  escapeCharacter,
+          	}
+    name: byteClass

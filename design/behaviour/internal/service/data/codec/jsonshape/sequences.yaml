@@ -1,0 +1,992 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: members
+    participants:
+      - id: caller
+        kind: actor
+      - id: members
+        kind: self
+      - id: walk.scan
+        kind: internal
+      - id: dominantFallback
+        kind: internal
+      - id: indirect
+        kind: internal
+      - id: dominantMembers
+        kind: internal
+    steps:
+      - bind: walk
+        eval: "fieldWalk{queue: []level{{typ: t, children: true}}, seen: map[reflect.Type]bool{t: true}}"
+      - loop:
+          cond: len(walk.queue) > 0
+          do:
+            - bind: current
+              eval: walk.queue[0]
+            - set: walk.queue
+              value: walk.queue[1:]
+            - eval: walk.scan(current)
+              to: walk.scan
+      - opt:
+          do:
+            - set: extra
+              to: indirect
+              value: indirect(dominant.typ)
+          init:
+            bind: dominant
+            eval: dominantFallback(walk.fallbacks)
+            to: dominantFallback
+          when: dominant != nil
+      - return: dominantMembers(walk.found), extra
+        to: dominantMembers
+  - of: (*fieldWalk).scan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldWalk).scan
+        kind: self
+      - id: w.add
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: w.add(current, current.typ.Field(fieldIndex), fieldIndex)
+              to: w.add
+          key: fieldIndex
+          range: current.typ.NumField()
+  - of: (*fieldWalk).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldWalk).add
+        kind: self
+      - id: parseTag
+        kind: internal
+    steps:
+      - bind: opts, ignored
+        eval: parseTag(field)
+        to: parseTag
+      - opt:
+          do:
+            - return: ""
+          when: ignored
+      - bind: candidate
+        eval: |-
+          &member{
+          		name: opts.name, goName: field.Name, typ: field.Type, tag: field.Tag,
+          		index: append(slices.Clone(current.index), fieldIndex), opts: opts,
+          	}
+      - opt:
+          do:
+            - set: candidate.opts.embed
+              value: "true"
+          when: field.Anonymous && !opts.hasName && indirect(field.Type).Kind() == reflect.Struct
+      - opt:
+          do:
+            - return: ""
+          when: candidate.opts.embed && w.embedded(current, field, candidate)
+      - opt:
+          do:
+            - set: w.found
+              value: append(w.found, candidate)
+          when: writable(field, candidate.opts)
+  - of: (*fieldWalk).embedded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fieldWalk).embedded
+        kind: self
+      - id: embed
+        kind: internal
+      - id: indirect
+        kind: internal
+    steps:
+      - bind: promoted, collects, standsAsMember
+        eval: embed(field, candidate)
+        to: embed
+      - switch:
+          cases:
+            - case: promoted
+              do:
+                - bind: target
+                  eval: indirect(field.Type)
+                  to: indirect
+                - opt:
+                    do:
+                      - set: w.queue
+                        value: "append(w.queue, level{typ: target, index: candidate.index, children: !w.seen[target]})"
+                    when: current.children
+                - set: w.seen[target]
+                  value: "true"
+                - return: "true"
+            - case: collects
+              do:
+                - set: w.fallbacks
+                  value: append(w.fallbacks, candidate)
+                - return: "true"
+            - default: true
+              do:
+                - return: "!standsAsMember"
+  - of: embed
+    participants:
+      - id: caller
+        kind: actor
+      - id: embed
+        kind: self
+      - id: indirect
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: false, false, true
+                when: candidate.opts.hasName
+            - set: candidate.opts
+              value: "tagOptions{name: candidate.opts.name, embed: true}"
+          when: candidate.opts.hasOthers()
+      - bind: target
+        eval: indirect(field.Type)
+        to: indirect
+      - opt:
+          do:
+            - return: true, false, false
+          when: target.Kind() == reflect.Struct
+      - opt:
+          do:
+            - return: false, false, false
+          when: "!field.IsExported()"
+      - opt:
+          do:
+            - return: false, true, false
+          when: isJSONTextValue(target) || (target.Kind() == reflect.Map && target.Key().Kind() == reflect.String && !hasAnyMethod(target.Key()))
+      - return: false, false, true
+  - of: writable
+    participants:
+      - id: caller
+        kind: actor
+      - id: writable
+        kind: self
+      - id: indirect
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: field.IsExported()
+      - bind: target
+        eval: indirect(field.Type)
+        to: indirect
+      - opt:
+          do:
+            - return: "false"
+          when: "!field.Anonymous || target.Kind() != reflect.Struct"
+      - return: "!hasAnyMethod(target) && (!opts.omitZero || !receives(target, isZeroerType, true))"
+  - of: dominantMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: dominantMembers
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: byName
+        eval: slices.Clone(found)
+        to: slices
+      - eval: |-
+          slices.SortStableFunc(byName, func(a, b *member) int {
+          		//: grouped by name, the shallowest first, a tagged one before an untagged one.
+          		return cmp.Or(strings.Compare(a.name, b.name), cmp.Compare(len(a.index), len(b.index)), compareTagged(a, b))
+          	})
+        to: slices
+      - bind: written
+        eval: make([]*member, 0, len(byName))
+      - loop:
+          cond: start < len(byName)
+          do:
+            - bind: end
+              eval: start + 1
+            - loop:
+                cond: end < len(byName) && byName[end].name == byName[start].name
+                do:
+                  - op: ++
+                    set: end
+            - bind: first
+              eval: byName[start]
+            - opt:
+                do:
+                  - set: written
+                    value: append(written, first)
+                when: end-start == 1 || len(byName[start+1].index) != len(first.index) || byName[start+1].opts.hasName != first.opts.hasName
+            - set: start
+              value: end
+          init: start := 0
+      - eval: |-
+          slices.SortFunc(written, func(a, b *member) int {
+          		//: the order encoding/json writes them in.
+          		return slices.Compare(a.index, b.index)
+          	})
+        to: slices
+      - return: written
+  - of: compareTagged
+    steps:
+      - switch:
+          cases:
+            - case: a.opts.hasName && !b.opts.hasName
+              do:
+                - return: "-1"
+            - case: "!a.opts.hasName && b.opts.hasName"
+              do:
+                - return: "1"
+            - default: true
+              do:
+                - return: "0"
+  - of: dominantFallback
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(fallbacks) == 0 || (len(fallbacks) > 1 && len(fallbacks[0].index) == len(fallbacks[1].index))
+      - return: fallbacks[0]
+  - of: (*member).optional
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*member).optional
+        kind: self
+      - id: throughPointer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: m.opts.omitZero || (m.opts.omitEmpty && emptiable(m.typ))
+      - return: throughPointer(root, m.index)
+        to: throughPointer
+  - of: (*member).quoted
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!m.opts.quoted"
+      - bind: target
+        eval: m.typ
+      - opt:
+          do:
+            - set: target, addressable
+              value: target.Elem(), true
+          when: target.Name() == "" && target.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: "true"
+          when: target == numberType
+      - opt:
+          do:
+            - return: "false"
+          when: writesJSON(target, addressable) || writesText(target, addressable)
+      - switch:
+          cases:
+            - case: reflect.Bool, reflect.String, reflect.Float32, reflect.Float64, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": target.Kind()
+  - of: emptiable
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool, reflect.String, reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64
+              do:
+                - return: "true"
+            - case: reflect.Array
+              do:
+                - return: t.Len() == 0
+            - default: true
+              do:
+                - return: "false"
+          "on": t.Kind()
+  - of: indirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: indirect
+        kind: self
+      - id: t.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: t.Elem()
+              to: t.Elem
+          when: t.Kind() == reflect.Pointer && t.Name() == ""
+      - return: t
+  - of: receives
+    steps:
+      - return: t.Implements(iface) || (addressable && reflect.PointerTo(t).Implements(iface))
+  - of: hasStreamMethod
+    steps:
+      - return: streamMethodOn(t, m) || (addressable && streamMethodOn(reflect.PointerTo(t), m))
+  - of: streamMethodOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamMethodOn
+        kind: self
+      - id: receiver.MethodByName
+        kind: value
+      - id: signature.In
+        kind: value
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		method reflect.Method
+          		found  bool
+          		param  string
+          	)
+      - switch:
+          cases:
+            - case: marshalJSONTo
+              do:
+                - set: method, found
+                  to: receiver.MethodByName
+                  value: receiver.MethodByName("MarshalJSONTo")
+                - set: param
+                  value: "\"Encoder\""
+            - default: true
+              do:
+                - set: method, found
+                  to: receiver.MethodByName
+                  value: receiver.MethodByName("UnmarshalJSONFrom")
+                - set: param
+                  value: "\"Decoder\""
+          "on": m
+      - opt:
+          do:
+            - return: "false"
+          when: "!found"
+      - bind: signature
+        eval: method.Type
+      - opt:
+          do:
+            - return: "false"
+          when: signature.NumIn() != 2 || signature.NumOut() != 1 || signature.Out(0) != errorType
+      - bind: argument
+        eval: signature.In(1)
+        to: signature.In
+      - return: argument.Kind() == reflect.Pointer && argument.Elem().PkgPath() == jsontextPackage && argument.Elem().Name() == param
+  - of: writesJSON
+    steps:
+      - return: receives(t, jsonMarshalerType, addressable) || hasStreamMethod(t, marshalJSONTo, addressable)
+  - of: writesText
+    steps:
+      - return: receives(t, textMarshalerType, addressable) || receives(t, textAppenderType, addressable)
+  - of: hasAnyMethod
+    steps:
+      - return: |-
+          writesJSON(t, true) || writesText(t, true) ||
+          		receives(t, jsonUnmarshalerType, true) || receives(t, textUnmarshalerType, true) ||
+          		hasStreamMethod(t, unmarshalJSONFrom, true)
+  - of: isJSONTextValue
+    steps:
+      - return: t.PkgPath() == jsontextPackage && t.Name() == "Value"
+  - of: Kind.String
+    steps:
+      - opt:
+          do:
+            - return: "\"unknown\""
+          when: int(k) >= len(kindNames)
+      - return: kindNames[k]
+  - of: Kind.MarshalText
+    steps:
+      - return: "[]byte(k.String()), nil"
+  - of: Of
+    participants:
+      - id: caller
+        kind: actor
+      - id: Of
+        kind: self
+      - id: newWalker().shape
+        kind: internal
+    steps:
+      - return: newWalker().shape(t, false)
+        to: newWalker().shape
+  - of: For
+    participants:
+      - id: caller
+        kind: actor
+      - id: For
+        kind: self
+      - id: Of
+        kind: internal
+    steps:
+      - return: Of(reflect.TypeFor[T]())
+        to: Of
+  - of: tagOptions.hasOthers
+    steps:
+      - return: o.hasName || o.omitEmpty || o.omitZero || o.quoted || o.cased || o.formatted
+  - of: parseTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTag
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: readName
+        kind: internal
+      - id: readOption
+        kind: internal
+    steps:
+      - bind: tag
+        eval: field.Tag.Get("json")
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: tagOptions{}, true
+          when: tag == "-" || (!field.IsExported() && !field.Anonymous)
+      - set: opts.name
+        value: field.Name
+      - opt:
+          do:
+            - set: tag
+              to: readName
+              value: readName(tag, &opts)
+          when: tag != "" && !strings.HasPrefix(tag, ",")
+      - loop:
+          cond: tag != ""
+          do:
+            - set: tag
+              to: readOption
+              value: readOption(tag, &opts)
+      - return: opts, false
+  - of: readName
+    participants:
+      - id: caller
+        kind: actor
+      - id: readName
+        kind: self
+      - id: consumeOption
+        kind: internal
+    steps:
+      - bind: length
+        eval: len(tag) - len(strings.TrimLeftFunc(tag, func(r rune) bool { return !strings.ContainsRune(reservedInName, r) }))
+      - bind: name, valid
+        eval: tag[:length], true
+      - opt:
+          do:
+            - set: name, length, valid
+              to: consumeOption
+              value: consumeOption(tag, false)
+          when: "!strings.HasPrefix(tag[length:], \",\") && length != len(tag)"
+      - opt:
+          do:
+            - set: name
+              value: string([]rune(name))
+          when: "!utf8.ValidString(name)"
+      - opt:
+          do:
+            - set: opts.name, opts.hasName
+              value: name, true
+          when: valid
+      - return: tag[length:]
+  - of: readOption
+    participants:
+      - id: caller
+        kind: actor
+      - id: readOption
+        kind: self
+      - id: consumeOption
+        kind: internal
+      - id: readValue
+        kind: internal
+      - id: setFlag
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: tag
+              value: tag[1:]
+            - opt:
+                do:
+                  - return: "\"\""
+                when: tag == ""
+          when: tag[0] == ','
+      - bind: option, length, _
+        eval: consumeOption(tag, false)
+        to: consumeOption
+      - set: tag
+        value: tag[length:]
+      - switch:
+          cases:
+            - case: "\"case\""
+              do:
+                - return: readValue(tag, false, func(value string) { opts.cased = value == "ignore" || value == "strict" })
+                  to: readValue
+            - case: "\"format\""
+              do:
+                - return: readValue(tag, true, func(value string) { opts.formatted = value != "" })
+                  to: readValue
+            - default: true
+              do:
+                - eval: setFlag(option, opts)
+                  to: setFlag
+                - return: tag
+          "on": option
+  - of: setFlag
+    steps:
+      - switch:
+          cases:
+            - case: "\"embed\""
+              do:
+                - set: opts.embed
+                  value: "true"
+            - case: "\"omitempty\""
+              do:
+                - set: opts.omitEmpty
+                  value: "true"
+            - case: "\"omitzero\""
+              do:
+                - set: opts.omitZero
+                  value: "true"
+            - case: "\"string\""
+              do:
+                - set: opts.quoted
+                  value: "true"
+          "on": option
+  - of: readValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: readValue
+        kind: self
+      - id: consumeOption
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: tag
+          when: "!strings.HasPrefix(tag, \":\")"
+      - set: tag
+        value: tag[1:]
+      - bind: value, length, valid
+        eval: consumeOption(tag, allowQuoted)
+        to: consumeOption
+      - opt:
+          do:
+            - return: tag
+          when: "!valid"
+      - eval: keep(value)
+      - return: tag[length:]
+  - of: consumeOption
+    participants:
+      - id: caller
+        kind: actor
+      - id: consumeOption
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: utf8
+        kind: stdlib
+      - id: consumeQuoted
+        kind: internal
+    steps:
+      - bind: comma
+        eval: strings.IndexByte(in, ',')
+        to: strings
+      - opt:
+          do:
+            - set: comma
+              value: len(in)
+          when: comma < 0
+      - bind: first, _
+        eval: utf8.DecodeRuneInString(in)
+        to: utf8
+      - switch:
+          cases:
+            - case: first == '_' || unicode.IsLetter(first)
+              do:
+                - set: length
+                  value: len(in) - len(strings.TrimLeftFunc(in, isLetterOrDigit))
+                - return: in[:length], length, true
+            - case: first == '\'' && allowQuoted
+              do:
+                - return: consumeQuoted(in, comma)
+                  to: consumeQuoted
+            - default: true
+              do:
+                - return: in[:comma], comma, false
+  - of: consumeQuoted
+    participants:
+      - id: caller
+        kind: actor
+      - id: consumeQuoted
+        kind: self
+      - id: converted.WriteByte
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: converted.WriteRune
+        kind: value
+    steps:
+      - var:
+          name: converted
+          type: strings.Builder
+      - eval: converted.WriteByte('"')
+        to: converted.WriteByte
+      - bind: escaped
+        eval: "false"
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: escaped
+                    do:
+                      - set: escaped
+                        value: "false"
+                      - opt:
+                          do:
+                            - eval: converted.WriteByte('\\')
+                              to: converted.WriteByte
+                          when: r != '\''
+                  - case: r == '\\'
+                    do:
+                      - set: escaped
+                        value: "true"
+                      - continue: true
+                  - case: r == '"'
+                    do:
+                      - eval: converted.WriteByte('\\')
+                        to: converted.WriteByte
+                  - case: r == '\''
+                    do:
+                      - eval: converted.WriteByte('"')
+                        to: converted.WriteByte
+                      - bind: unquoted, err
+                        eval: strconv.Unquote(converted.String())
+                        to: strconv
+                      - opt:
+                          do:
+                            - return: in[:comma], comma, false
+                          when: err != nil
+                      - return: unquoted, offset + 2, true
+            - eval: converted.WriteRune(r)
+              to: converted.WriteRune
+          key: offset
+          range: in[1:]
+          value: r
+      - return: in[:comma], comma, false
+  - of: isLetterOrDigit
+    steps:
+      - return: r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r)
+  - of: newWalker
+    steps:
+      - return: "&walker{path: map[reflect.Type]bool{}}"
+  - of: (*walker).shape
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).shape
+        kind: self
+      - id: named
+        kind: internal
+      - id: knownShape
+        kind: internal
+      - id: w.byKind
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "&ShapeValue{Kind: Any, Nullable: true}"
+          when: t == nil
+      - opt:
+          do:
+            - bind: ref
+              eval: named(t, refKind(t))
+              to: named
+            - set: ref.Ref
+              value: ref.Name
+            - return: ref
+          when: w.path[t]
+      - opt:
+          do:
+            - set: w.path[t]
+              value: "true"
+            - defer: delete(w.path, t)
+          when: t.Name() != ""
+      - opt:
+          do:
+            - bind: element
+              eval: w.shape(t.Elem(), true)
+            - set: element.Nullable
+              value: "true"
+            - return: element
+          when: t.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: known
+          init:
+            bind: known, isKnown
+            eval: knownShape(t)
+            to: knownShape
+          when: isKnown
+      - opt:
+          do:
+            - return: named(t, Any)
+              to: named
+          when: t.Kind() != reflect.Interface && writesJSON(t, addressable)
+      - opt:
+          do:
+            - return: named(t, String)
+              to: named
+          when: t.Kind() != reflect.Interface && writesText(t, addressable)
+      - return: w.byKind(t, addressable)
+        to: w.byKind
+  - of: (*walker).byKind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).byKind
+        kind: self
+      - id: named
+        kind: internal
+      - id: w.slice
+        kind: internal
+      - id: w.mapOf
+        kind: internal
+      - id: w.object
+        kind: internal
+      - id: scalar
+        kind: internal
+    steps:
+      - bind: shape
+        eval: named(t, Any)
+        to: named
+      - switch:
+          cases:
+            - case: reflect.Slice
+              do:
+                - eval: w.slice(shape, t)
+                  to: w.slice
+            - case: reflect.Array
+              do:
+                - set: shape.Kind, shape.Items
+                  value: Array, w.shape(t.Elem(), addressable)
+            - case: reflect.Map
+              do:
+                - eval: w.mapOf(shape, t)
+                  to: w.mapOf
+            - case: reflect.Struct
+              do:
+                - eval: w.object(shape, t, addressable)
+                  to: w.object
+            - default: true
+              do:
+                - eval: scalar(shape, t)
+                  to: scalar
+          "on": t.Kind()
+      - return: shape
+  - of: scalar
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Bool
+              do:
+                - set: shape.Kind
+                  value: Boolean
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - set: shape.Kind, shape.Format
+                  value: Integer, t.Kind().String()
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - set: shape.Kind, shape.Format
+                  value: Number, t.Kind().String()
+            - case: reflect.String
+              do:
+                - set: shape.Kind
+                  value: String
+            - case: reflect.Interface
+              do:
+                - set: shape.Kind, shape.Nullable
+                  value: Any, true
+            - default: true
+              do:
+                - set: shape.Kind
+                  value: Unsupported
+          "on": t.Kind()
+  - of: (*walker).slice
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).slice
+        kind: self
+      - id: t.Elem
+        kind: value
+    steps:
+      - set: shape.Nullable
+        value: "true"
+      - bind: element
+        eval: t.Elem()
+        to: t.Elem
+      - opt:
+          do:
+            - set: shape.Kind, shape.Format
+              value: String, "base64"
+            - return: ""
+          when: element.Kind() == reflect.Uint8 && !hasAnyMethod(element)
+      - set: shape.Kind, shape.Items
+        value: Array, w.shape(element, true)
+  - of: (*walker).mapOf
+    steps:
+      - opt:
+          do:
+            - set: shape.Kind
+              value: Unsupported
+            - return: ""
+          when: "!keyWritable(t.Key())"
+      - set: shape.Kind, shape.Nullable, shape.Values
+        value: Map, true, w.shape(t.Elem(), false)
+  - of: (*walker).object
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).object
+        kind: self
+      - id: members
+        kind: internal
+      - id: w.extraValues
+        kind: internal
+    steps:
+      - set: shape.Kind
+        value: Object
+      - bind: written, extra
+        eval: members(t)
+        to: members
+      - loop:
+          do:
+            - bind: fieldAddressable
+              eval: addressable || throughPointer(t, member.index)
+            - set: shape.Fields
+              value: |-
+                append(shape.Fields, FieldValue{
+                			Name:     member.name,
+                			Shape:    w.shape(member.typ, fieldAddressable),
+                			Optional: member.optional(t),
+                			Quoted:   member.quoted(fieldAddressable),
+                			Rules:    member.tag.Get("validate"),
+                			GoName:   member.goName,
+                			Tag:      member.tag,
+                			Index:    member.index,
+                		})
+          key: _
+          range: written
+          value: member
+      - opt:
+          do:
+            - set: shape.Values
+              to: w.extraValues
+              value: w.extraValues(extra)
+          when: extra != nil
+  - of: (*walker).extraValues
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).extraValues
+        kind: self
+      - id: w.shape
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: w.shape(extra.Elem(), false)
+              to: w.shape
+          when: extra.Kind() == reflect.Map
+      - return: "&ShapeValue{Kind: Any}"
+  - of: knownShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: knownShape
+        kind: self
+      - id: named
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: timeType
+              do:
+                - bind: shape
+                  eval: named(t, String)
+                  to: named
+                - set: shape.Format
+                  value: "\"date-time\""
+                - return: shape, true
+            - case: durationType
+              do:
+                - bind: shape
+                  eval: named(t, Integer)
+                  to: named
+                - set: shape.Format
+                  value: "\"duration-ns\""
+                - return: shape, true
+            - case: numberType
+              do:
+                - return: named(t, Number), true
+                  to: named
+            - default: true
+              do:
+                - return: nil, false
+          "on": t
+  - of: keyWritable
+    steps:
+      - bind: addressable
+        eval: "false"
+      - opt:
+          do:
+            - set: t, addressable
+              value: t.Elem(), true
+          when: t.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: "true"
+          when: writesText(t, addressable)
+      - switch:
+          cases:
+            - case: reflect.String, reflect.Interface, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": t.Kind()
+  - of: refKind
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - return: Object
+            - case: reflect.Slice, reflect.Array
+              do:
+                - return: Array
+            - case: reflect.Map
+              do:
+                - return: Map
+            - default: true
+              do:
+                - return: Any
+          "on": t.Kind()
+  - of: named
+    steps:
+      - bind: shape
+        eval: "&ShapeValue{Kind: kind}"
+      - opt:
+          do:
+            - set: shape.Name
+              value: t.PkgPath() + "." + t.Name()
+          when: t.Name() != "" && t.PkgPath() != ""
+      - return: shape

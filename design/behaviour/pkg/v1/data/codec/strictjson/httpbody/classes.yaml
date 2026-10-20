@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody
+  name: httpbody
+  purpose: Package httpbody decodes the JSON body of an HTTP request with the strict decoder of github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson, adding what only an HTTP body has.
+types: []

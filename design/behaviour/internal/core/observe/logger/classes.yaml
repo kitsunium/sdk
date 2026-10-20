@@ -1,0 +1,380 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      KindAny tags a Value whose payload is an unconstrained interface; handlers
+      SHOULD render it via fmt.Sprintf or a "?" placeholder when the concrete
+      type is not in their format table. It is also the zero-value of Kind.
+    items:
+      - name: KindAny
+        type: Kind
+        value: "0"
+    name: KindAny
+  - doc: KindBool tags a Value carrying a boolean payload.
+    items:
+      - name: KindBool
+        type: Kind
+        value: "1"
+    name: KindBool
+  - doc: KindDuration tags a Value carrying a time.Duration payload.
+    items:
+      - name: KindDuration
+        type: Kind
+        value: "2"
+    name: KindDuration
+  - doc: KindFloat64 tags a Value carrying a float64 payload.
+    items:
+      - name: KindFloat64
+        type: Kind
+        value: "3"
+    name: KindFloat64
+  - doc: KindInt64 tags a Value carrying an int64 payload (also covers int / int32).
+    items:
+      - name: KindInt64
+        type: Kind
+        value: "4"
+    name: KindInt64
+  - doc: KindString tags a Value carrying a string payload.
+    items:
+      - name: KindString
+        type: Kind
+        value: "5"
+    name: KindString
+  - doc: KindTime tags a Value carrying a time.Time payload.
+    items:
+      - name: KindTime
+        type: Kind
+        value: "6"
+    name: KindTime
+  - doc: KindUint64 tags a Value carrying an unsigned 64-bit integer payload.
+    items:
+      - name: KindUint64
+        type: Kind
+        value: "7"
+    name: KindUint64
+  - doc: |-
+      KindGroup tags a Value whose payload is a slice of AttrValue, used to model
+      nested groups (slog.Group) without flattening into the parent record.
+    items:
+      - name: KindGroup
+        type: Kind
+        value: "8"
+    name: KindGroup
+  - doc: |-
+      unknownKindLabel is the sentinel returned when Kind is outside the table —
+      e.g. a future variant a stale handler does not yet recognise.
+    items:
+      - name: unknownKindLabel
+        type: string
+        value: "\"unknown\""
+    name: unknownKindLabel
+  - doc: |-
+      TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context fixes for
+      the two identifiers: 16 bytes of trace-id, 8 of span-id. They are not
+      tunable — they are the format, not a default.
+    grouped: true
+    items:
+      - doc: TraceIDLen is the trace identifier's length in bytes.
+        name: TraceIDLen
+        type: int
+        value: "16"
+      - doc: SpanIDLen is the span identifier's length in bytes.
+        name: SpanIDLen
+        type: int
+        value: "8"
+      - doc: TraceIDHexLen is the trace identifier's length in lowercase hex.
+        name: TraceIDHexLen
+        type: int
+        value: TraceIDLen * 2
+      - doc: SpanIDHexLen is the span identifier's length in lowercase hex.
+        name: SpanIDHexLen
+        type: int
+        value: SpanIDLen * 2
+    name: TraceIDLen
+  - doc: |-
+      TraceIDKey and SpanIDKey are the field names OpenTelemetry prescribes for
+      trace context in NON-OTLP log formats — "use the field names trace_id for
+      the TraceId, span_id for the SpanId"
+      (specification/compatibility/logging_trace_context.md). They are top-level
+      keys of the record, not attributes, which is why they are rendered by the
+      encoders rather than appended to RecordEvent.Attrs.
+    grouped: true
+    items:
+      - doc: TraceIDKey is the top-level field name carrying the trace identifier.
+        name: TraceIDKey
+        type: string
+        value: "\"trace_id\""
+      - doc: SpanIDKey is the top-level field name carrying the span identifier.
+        name: SpanIDKey
+        type: string
+        value: "\"span_id\""
+    name: TraceIDKey
+  - doc: |-
+      boolOne is the uint64 mask representing the boolean value true; zero
+      represents false. Stored in bits via the pack/unpack helpers.
+    items:
+      - name: boolOne
+        type: packedBits
+        value: "1"
+    name: boolOne
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - KindAny
+      - KindBool
+      - KindDuration
+      - KindFloat64
+      - KindInt64
+      - KindString
+      - KindTime
+      - KindUint64
+      - KindGroup
+      - unknownKindLabel
+      - kindLabels
+      - Kind
+      - Kind.String
+    name: kind.go
+  - decls:
+      - RecordEvent
+      - AttrValue
+    name: record.go
+  - decls:
+      - TraceIDLen
+      - TraceIDKey
+      - TraceContextValue
+      - TraceContextValue.IsValid
+      - TraceContextValue.AppendTraceIDHex
+      - TraceContextValue.AppendSpanIDHex
+      - TraceContextSource
+    name: trace_context.go
+  - decls:
+      - boolOne
+      - packedBits
+      - Value
+      - NewValue
+      - StringValue
+      - Int64Value
+      - IntValue
+      - Uint64Value
+      - Float64Value
+      - BoolValue
+      - DurationValue
+      - durationBits
+      - TimeValue
+      - GroupValue
+      - AnyValue
+      - Value.Kind
+      - Value.String
+      - Value.Int64
+      - Value.Bits
+      - Value.Uint64
+      - Value.Float64
+      - Value.Bool
+      - Value.Duration
+      - Value.Time
+      - Value.Group
+      - Value.Any
+    name: value.go
+functions:
+  - name: NewValue
+    params: v any
+    results: Value
+  - name: StringValue
+    params: v string
+    results: Value
+  - name: Int64Value
+    params: v int64
+    results: Value
+  - name: IntValue
+    params: v int
+    results: Value
+  - name: Uint64Value
+    params: v uint64
+    results: Value
+  - name: Float64Value
+    params: v float64
+    results: Value
+  - name: BoolValue
+    params: v bool
+    results: Value
+  - name: DurationValue
+    params: v time.Duration
+    results: Value
+  - doc: |-
+      durationBits reinterprets a time.Duration as the uint64 bit pattern used
+      to back Value.bits. Isolates the mandatory two-step conversion
+      (time.Duration → int64 → uint64) to one named helper so call sites stop
+      carrying the chained cast and the "why two casts?" comment lives here.
+    name: durationBits
+    params: d time.Duration
+    results: uint64
+  - name: TimeValue
+    params: v time.Time
+    results: Value
+  - name: GroupValue
+    params: attrs ...AttrValue
+    results: Value
+  - name: AnyValue
+    params: v any
+    results: Value
+imports:
+  context: context
+  hex: encoding/hex
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  math: math
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/observe/logger
+  name: logger
+  purpose: "Package logger — range 0.3.1.*, the logger engine's (ADR 0005 service/observe/logger block), declared here since ADR 0160: the engine, internal/service/observe/logger, returns these and declares none."
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: k Kind
+        results: string
+    name: Kind
+    underlying: int8
+  - fields:
+      - doc: Time is the instant the event occurred; zero means "fill in at handle time".
+        name: Time
+        type: time.Time
+      - doc: Level is the severity of the event.
+        name: Level
+        type: level.Level
+      - doc: Message is the human-readable description of the event.
+        name: Message
+        type: string
+      - doc: |-
+          PC is the program counter captured at the Log call site (via
+          runtime.Callers). Zero means "no caller information available";
+          handlers SHOULD resolve PC into a frame lazily at format time.
+        name: PC
+        type: uintptr
+      - doc: Attrs carries the structured key/value pairs attached to this event.
+        name: Attrs
+        type: "[]AttrValue"
+      - doc: |-
+          TraceContext is the identity of the span this event was emitted
+          inside; the zero value means "no trace here" and MUST render nothing.
+          It is a FIELD rather than two entries in Attrs because the Encoder
+          port receives no context.Context — the identity has to travel on the
+          record to reach the formatter at all — and because OpenTelemetry
+          prescribes trace_id / span_id as TOP-LEVEL keys of the log object,
+          which an attribute cannot be: WithGroup would prefix it. See ADR 0062.
+        name: TraceContext
+        type: TraceContextValue
+    kind: struct
+    name: RecordEvent
+  - fields:
+      - doc: Key identifies the attribute in the output line.
+        name: Key
+        type: string
+      - doc: Value carries the typed payload; handlers dispatch on Value.Kind().
+        name: Value
+        type: Value
+    kind: struct
+    name: AttrValue
+  - fields:
+      - doc: TraceID identifies the whole trace; rendered as 32 lowercase hex digits.
+        name: TraceID
+        type: "[TraceIDLen]byte"
+      - doc: SpanID identifies the span within the trace; 16 lowercase hex digits.
+        name: SpanID
+        type: "[SpanIDLen]byte"
+    kind: struct
+    methods:
+      - name: IsValid
+        recv: c TraceContextValue
+        results: bool
+      - name: AppendTraceIDHex
+        params: dst []byte
+        recv: c TraceContextValue
+        results: "[]byte"
+      - name: AppendSpanIDHex
+        params: dst []byte
+        recv: c TraceContextValue
+        results: "[]byte"
+    name: TraceContextValue
+  - kind: named
+    name: TraceContextSource
+    underlying: func(ctx context.Context) (trace TraceContextValue)
+  - doc: |-
+      packedBits is the named uint64 alias backing the bit-packed Kinds; the
+      typed accessors (Uint64 / Int64 / Float64 / …) read it under different
+      reinterpretations rather than each owning its own field.
+    kind: named
+    name: packedBits
+    underlying: uint64
+  - fields:
+      - doc: kind discriminates which underlying field carries the payload.
+        name: kind
+        type: Kind
+      - doc: |-
+          bits packs bool, int64, uint64, float64 and time.Duration payloads
+          behind the packedBits alias so typed accessors stay decoupled.
+        name: bits
+        type: packedBits
+      - doc: str carries the string payload when kind == KindString.
+        name: str
+        type: string
+      - doc: any carries the time.Time, []AttrValue (group) and KindAny payloads.
+        name: any
+        type: any
+    kind: struct
+    methods:
+      - name: Kind
+        recv: v Value
+        results: Kind
+      - name: String
+        recv: v Value
+        results: string
+      - name: Int64
+        recv: v Value
+        results: int64
+      - name: Bits
+        recv: v Value
+        results: packedBits
+      - name: Uint64
+        recv: v Value
+        results: uint64
+      - name: Float64
+        recv: v Value
+        results: float64
+      - name: Bool
+        recv: v Value
+        results: bool
+      - name: Duration
+        recv: v Value
+        results: time.Duration
+      - name: Time
+        recv: v Value
+        results: time.Time
+      - name: Group
+        recv: v Value
+        results: "[]AttrValue"
+      - name: Any
+        recv: v Value
+        results: any
+    name: Value
+vars:
+  - doc: |-
+      kindLabels is the lookup table indexed by Kind; lives here so String stays
+      O(1) and below the cyclomatic-complexity ceiling.
+    items:
+      - name: kindLabels
+        value: |-
+          [...]string{
+          	KindAny:      "any",
+          	KindBool:     "bool",
+          	KindDuration: "duration",
+          	KindFloat64:  "float64",
+          	KindInt64:    "int64",
+          	KindString:   "string",
+          	KindTime:     "time",
+          	KindUint64:   "uint64",
+          	KindGroup:    "group",
+          }
+    name: kindLabels

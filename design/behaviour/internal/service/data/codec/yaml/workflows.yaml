@@ -1,0 +1,138 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*parser).plainKeyEnd
+    steps:
+      - bind: start
+        eval: i
+      - loop:
+          cond: i < len(p.src)
+          do:
+            - bind: c
+              eval: p.src[i]
+            - opt:
+                do:
+                  - return: "-1"
+                when: c == '\n' || (c == '#' && i > start && isBlank(p.src[i-1]))
+            - opt:
+                do:
+                  - return: i
+                when: c == ':' && p.blankOrEnd(i+1)
+          post: i++
+      - return: "-1"
+  - of: (*parser).quotedEnd
+    steps:
+      - loop:
+          cond: i < len(p.src) && p.src[i] != '\n'
+          do:
+            - opt:
+                do:
+                  - return: i + 1, true
+                when: p.closesAt(i, quote)
+            - opt:
+                do:
+                  - op: ++
+                    set: i
+                when: (p.src[i] == '\\' && quote == '"') || (p.src[i] == '\'' && quote == '\'')
+          init: i++
+          post: i++
+      - return: 0, false
+  - of: structEmpty
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: v.Type().Field(i).IsExported() && !isEmpty(v.Field(i))
+          key: i
+          range: v.NumField()
+      - return: "true"
+  - of: isDecimalInteger
+    steps:
+      - bind: i
+        eval: "0"
+      - opt:
+          do:
+            - op: ++
+              set: i
+          when: text[0] == '-' || text[0] == '+'
+      - opt:
+          do:
+            - return: "false"
+          when: i == len(text)
+      - loop:
+          cond: i < len(text)
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isDigit(text[i])"
+          post: i++
+      - return: "true"
+  - of: (*parser).lineBlanks
+    steps:
+      - bind: j
+        eval: lineStart
+      - loop:
+          cond: isBlank(p.at(j))
+          do:
+            - opt:
+                do:
+                  - return: 0, p.errAt(line, j, "a tab character cannot indent a line")
+                when: p.at(j) == '\t' && j-lineStart <= parent
+            - op: ++
+              set: j
+      - return: j, nil
+  - of: (*parser).quotedFast
+    steps:
+      - bind: start
+        eval: p.pos
+      - loop:
+          cond: i < len(p.src)
+          do:
+            - opt:
+                do:
+                  - set: p.pos
+                    value: i + 1
+                  - return: p.src[start:i], true
+                when: p.closesAt(i, quote)
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: needsBuilding(p.src[i], quote)
+          init: i := start
+          post: i++
+      - return: "\"\", false"
+  - of: parseTagFlags
+    steps:
+      - var:
+          name: opts
+          type: tagFlags
+      - opt:
+          do:
+            - return: opts, ""
+          when: flags == ""
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: "\"omitempty\""
+                    do:
+                      - set: opts.omitEmpty
+                        value: "true"
+                  - case: "\"flow\""
+                    do:
+                      - set: opts.flow
+                        value: "true"
+                  - case: "\"inline\""
+                    do:
+                      - set: opts.inline
+                        value: "true"
+                  - default: true
+                    do:
+                      - return: opts, "a yaml struct tag holds an unknown flag"
+                "on": flag
+          key: flag
+          range: strings.SplitSeq(flags, ",")
+      - return: opts, ""

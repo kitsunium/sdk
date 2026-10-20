@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/signal
+  name: signal
+  purpose: "Package signal is the typed signal toolbox: parse, subscribe, and forward OS signals through one ergonomic surface."
+types: []

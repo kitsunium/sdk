@@ -1,0 +1,114 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: aesGCM.Algorithm
+    steps:
+      - return: algorithm
+  - of: aesGCM.ID
+    steps:
+      - return: algID
+  - of: aesGCM.Seal
+    participants:
+      - id: caller
+        kind: actor
+      - id: aesGCM.Seal
+        kind: self
+      - id: newGCM
+        kind: internal
+      - id: rand
+        kind: stdlib
+      - id: gcm.Seal
+        kind: value
+    steps:
+      - bind: gcm, gerr
+        eval: newGCM(key.Bytes())
+        to: newGCM
+      - opt:
+          do:
+            - return: nil, gerr
+          when: gerr != nil
+      - var:
+          name: nonce
+          type: "[nonceLen]byte"
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(rerr, errs.WrapParams{
+                			Code:    corecrypto.CodeEntropyFailed,
+                			Reason:  "ENTROPY_FAILED",
+                			Public:  "Could not gather entropy for encryption",
+                			Private: "service/crypto/aead/aesgcm.Seal: crypto/rand.Read failed while generating a nonce",
+                		})
+          init:
+            bind: _, rerr
+            eval: rand.Read(nonce[:])
+            to: rand
+          when: rerr != nil
+      - set: box
+        value: make([]byte, 0, len(plaintext)+nonceLen+gcmTagLen+headerLen)
+      - set: box
+        value: append(box, corecrypto.Version, algID)
+      - set: box
+        value: append(box, nonce[:]...)
+      - return: gcm.Seal(box, nonce[:], plaintext, aad), nil
+        to: gcm.Seal
+  - of: aesGCM.Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: aesGCM.Open
+        kind: self
+      - id: newGCM
+        kind: internal
+      - id: gcm.Open
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, corecrypto.DecryptionFailed
+          when: len(box) < headerLen+nonceLen || box[0] != corecrypto.Version || box[1] != algID
+      - bind: gcm, gerr
+        eval: newGCM(key.Bytes())
+        to: newGCM
+      - opt:
+          do:
+            - return: nil, corecrypto.DecryptionFailed
+          when: gerr != nil
+      - bind: nonce
+        eval: "box[headerLen : headerLen+nonceLen]"
+      - bind: ciphertext
+        eval: box[headerLen+nonceLen:]
+      - bind: pt, oerr
+        eval: gcm.Open(nil, nonce, ciphertext, aad)
+        to: gcm.Open
+      - opt:
+          do:
+            - return: nil, corecrypto.DecryptionFailed
+          when: oerr != nil
+      - return: pt, nil
+  - of: newGCM
+    participants:
+      - id: caller
+        kind: actor
+      - id: newGCM
+        kind: self
+      - id: aes
+        kind: stdlib
+      - id: cipher
+        kind: stdlib
+    steps:
+      - bind: block, berr
+        eval: aes.NewCipher(keyBytes)
+        to: aes
+      - opt:
+          do:
+            - return: nil, corecrypto.InvalidKey
+          when: berr != nil
+      - bind: mode, gerr
+        eval: cipher.NewGCM(block)
+        to: cipher
+      - opt:
+          do:
+            - return: nil, corecrypto.InvalidKey
+          when: gerr != nil
+      - return: mode, nil

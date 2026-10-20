@@ -1,0 +1,240 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The runtime/metrics a snapshot reads. Each is documented in
+      runtime/metrics; a name the running toolchain does not know reads as
+      KindBad and leaves its field zero rather than failing the snapshot.
+    grouped: true
+    items:
+      - name: metricGoroutines
+        type: string
+        value: "\"/sched/goroutines:goroutines\""
+      - name: metricHeapBytes
+        type: string
+        value: "\"/memory/classes/heap/objects:bytes\""
+      - name: metricHeapGoal
+        type: string
+        value: "\"/gc/heap/goal:bytes\""
+      - name: metricMemoryTotal
+        type: string
+        value: "\"/memory/classes/total:bytes\""
+      - name: metricHeapObjects
+        type: string
+        value: "\"/gc/heap/objects:objects\""
+      - name: metricTotalAlloc
+        type: string
+        value: "\"/gc/heap/allocs:bytes\""
+      - name: metricGCCycles
+        type: string
+        value: "\"/gc/cycles/total:gc-cycles\""
+      - name: metricGCPauses
+        type: string
+        value: "\"/sched/pauses/total/gc:seconds\""
+      - name: metricSchedLatency
+        type: string
+        value: "\"/sched/latencies:seconds\""
+      - name: metricCPUTotal
+        type: string
+        value: "\"/cpu/classes/total:cpu-seconds\""
+      - name: metricCPUIdle
+        type: string
+        value: "\"/cpu/classes/idle:cpu-seconds\""
+    name: metricGoroutines
+  - doc: maxDuration is the longest time.Duration, where a conversion saturates.
+    items:
+      - name: maxDuration
+        type: time.Duration
+        value: math.MaxInt64
+    name: maxDuration
+files:
+  - decls:
+      - cpuTime
+    name: cputime_unix.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - metricGoroutines
+      - maxDuration
+      - started
+      - StatsValue
+      - DistributionValue
+      - DistributionValue.Count
+      - DistributionValue.Quantile
+      - bucketBound
+      - seconds
+      - ReadStats
+      - apply
+      - applyCount
+      - applyDistribution
+      - lastGC
+      - runtimeCPU
+    name: stats.go
+functions:
+  - doc: |-
+      cpuTime returns the user and system CPU time the process has consumed, from
+      getrusage(2), and false. Should the call fail — it does not, for
+      RUSAGE_SELF — it falls back to the runtime's estimate and reports true.
+    name: cpuTime
+    results: used time.Duration, estimated bool
+  - doc: |-
+      bucketBound returns the finite bound that stands for a bucket: its upper
+      bound, or its lower one when the upper is infinite, or zero when neither is
+      finite.
+    name: bucketBound
+    params: lower, upper float64
+    results: float64
+  - doc: |-
+      seconds converts a finite, non-negative number of seconds to a duration,
+      saturating rather than overflowing.
+    name: seconds
+    params: value float64
+    results: time.Duration
+  - name: ReadStats
+    results: StatsValue
+  - doc: apply copies one runtime sample into the field it names.
+    name: apply
+    params: stats *StatsValue, sample *metrics.Sample
+  - doc: applyCount copies a uint64 sample into its field.
+    name: applyCount
+    params: stats *StatsValue, name string, value uint64
+  - doc: |-
+      applyDistribution copies a histogram sample into its field. The runtime
+      hands back fresh slices on every Read, so keeping them shares nothing.
+    name: applyDistribution
+    params: stats *StatsValue, name string, histogram *metrics.Float64Histogram
+  - doc: |-
+      lastGC returns when the most recent collection ended, or the zero time
+      before the first one. runtime/metrics has no such figure; ReadGCStats
+      copies it under the runtime's lock without stopping the world.
+    name: lastGC
+    results: time.Time
+  - doc: |-
+      runtimeCPU is the Go runtime's estimate of the CPU time the process used:
+      its total CPU capacity over the process's life minus its idle time. It is
+      the fallback where the kernel's count is not at hand. The runtime takes
+      these figures at a garbage collection's stop-the-world, so the estimate is
+      as old as the last collection — measured: unchanged across 300 ms of
+      spinning, and caught up by the next runtime.GC.
+    name: runtimeCPU
+    results: time.Duration
+imports:
+  debug: runtime/debug
+  math: math
+  metrics: runtime/metrics
+  os: os
+  runtime: runtime
+  syscall: syscall
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/self
+  name: self
+  purpose: "Package self is what the running process is doing right now: the Go runtime's own metrics and the kernel's account of the CPU time used."
+types:
+  - fields:
+      - doc: |-
+          At is when the snapshot was taken, on the wall clock: this describes
+          the machine, whatever clock the program's own logic runs on.
+        name: At
+        type: time.Time
+      - doc: Started is when the process started, to within its initialisation.
+        name: Started
+        type: time.Time
+      - doc: |-
+          LastGC is when the most recent garbage collection ended; zero before
+          the first one.
+        name: LastGC
+        type: time.Time
+      - doc: |-
+          GCPauses is the distribution of stop-the-world pauses caused by the
+          garbage collector.
+        name: GCPauses
+        type: DistributionValue
+      - doc: |-
+          SchedLatencies is the distribution of the time goroutines spent ready
+          to run before they ran — the queueing a saturated scheduler adds.
+        name: SchedLatencies
+        type: DistributionValue
+      - doc: PID is the process identifier.
+        name: PID
+        type: int
+      - doc: "MaxProcs is GOMAXPROCS: how many threads may run Go code at once."
+        name: MaxProcs
+        type: int
+      - doc: CPUs is how many logical CPUs the process can use.
+        name: CPUs
+        type: int
+      - doc: Goroutines is how many goroutines exist.
+        name: Goroutines
+        type: int
+      - doc: |-
+          HeapBytes is the memory occupied by live and not-yet-swept heap
+          objects.
+        name: HeapBytes
+        type: uint64
+      - doc: HeapObjects is how many objects occupy HeapBytes.
+        name: HeapObjects
+        type: uint64
+      - doc: HeapGoalBytes is the heap size at which the next collection starts.
+        name: HeapGoalBytes
+        type: uint64
+      - doc: |-
+          MemoryBytes is all the memory the Go runtime has mapped from the
+          system: the heap, the stacks, the runtime's own structures. It is the
+          runtime's number, not the kernel's resident set.
+        name: MemoryBytes
+        type: uint64
+      - doc: TotalAllocBytes is every byte ever allocated on the heap.
+        name: TotalAllocBytes
+        type: uint64
+      - doc: GCCycles is how many collections have completed.
+        name: GCCycles
+        type: uint64
+      - doc: CPUTime is the CPU time the process has consumed, user and system.
+        name: CPUTime
+        type: time.Duration
+      - doc: Uptime is At minus Started.
+        name: Uptime
+        type: time.Duration
+      - doc: |-
+          CPUEstimated reports that CPUTime is the Go runtime's estimate rather
+          than the kernel's count: the runtime's total CPU capacity minus its
+          idle time, which counts only threads running Go code and so misses time
+          spent in C code or blocked in the kernel — and which the runtime
+          refreshes only at a garbage collection, so it lags by up to one GC
+          cycle and reads zero before the first. It is true where getrusage(2)
+          does not exist — Windows, Plan 9, wasm — and wherever it failed.
+        name: CPUEstimated
+        type: bool
+    kind: struct
+    name: StatsValue
+  - fields:
+      - doc: Counts[i] is the number of observations in [Buckets[i], Buckets[i+1]).
+        name: Counts
+        type: "[]uint64"
+      - doc: |-
+          Buckets are the boundaries, in seconds, one more than Counts. The
+          first may be -Inf and the last +Inf.
+        name: Buckets
+        type: "[]float64"
+    kind: struct
+    methods:
+      - name: Count
+        recv: d DistributionValue
+        results: uint64
+      - name: Quantile
+        params: q float64
+        recv: d DistributionValue
+        results: time.Duration
+    name: DistributionValue
+vars:
+  - doc: |-
+      started is when this package was initialised: the process's start, to
+      within the initialisation of the packages linked before it. A program that
+      imports this package at all imports it at start-up, so the gap is the
+      runtime's own bring-up — microseconds, not the lifetime of anything.
+    items:
+      - name: started
+        value: time.Now()
+    name: started

@@ -1,0 +1,1220 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      causeNonPositiveInterval / causeNilOnChange are what Watch's input guards
+      say in CONFIG_WATCH_FAILED's cause field. They are sentences, not errors:
+      the field holds text, so withCause carries them as text and never mints the
+      stdlib error rule 2 bans.
+    grouped: true
+    items:
+      - name: causeNonPositiveInterval
+        value: "\"poll interval must be > 0\""
+      - name: causeNilOnChange
+        value: "\"onChange callback must not be nil\""
+    name: causeNonPositiveInterval
+  - doc: |-
+      keySeparator is the one level-separator of the key grammar. It is the same
+      character core/app/validation.JoinField writes, so a default's key and a
+      violation's path are literally the same string.
+    items:
+      - name: keySeparator
+        type: string
+        value: "\".\""
+    name: keySeparator
+  - doc: |-
+      jsonTagName is the tag that names a field on the operator's surface. Load
+      decodes every format — TOML, YAML, env, JSON — through a json round trip, so
+      this tag is the key the operator typed, and the Go field name is not.
+    items:
+      - name: jsonTagName
+        type: string
+        value: "\"json\""
+    name: jsonTagName
+  - doc: tagOptionSeparator splits a json tag's name from its options ("port,omitempty").
+    items:
+      - name: tagOptionSeparator
+        type: string
+        value: "\",\""
+    name: tagOptionSeparator
+  - doc: |-
+      tagOptOut is the json tag value that removes a field from the wire entirely.
+      A field that does not travel cannot carry a default.
+    items:
+      - name: tagOptOut
+        type: string
+        value: "\"-\""
+    name: tagOptOut
+  - doc: |-
+      expectedKeys is the capacity hint for a freshly-walked type. A configuration
+      struct is a handful of keys, not a thousand; the hint exists to avoid the
+      first two growth steps, not to be exact.
+    items:
+      - name: expectedKeys
+        type: int
+        value: "16"
+    name: expectedKeys
+  - doc: |-
+      expectedDepth is the capacity hint for the recursion guard — a configuration
+      nests a few levels, and the guard holds one entry per level.
+    items:
+      - name: expectedDepth
+        type: int
+        value: "8"
+    name: expectedDepth
+  - doc: |-
+      maxContainerDepth bounds how many pointer, slice, array and map layers
+      holdsSecret peels. No real field nests eight containers deep, and a type
+      that contains itself would otherwise be peeled forever.
+    items:
+      - name: maxContainerDepth
+        type: int
+        value: "8"
+    name: maxContainerDepth
+  - grouped: true
+    items:
+      - doc: secretNone is a field that holds no secret.
+        name: secretNone
+        type: secretHold
+        value: iota
+      - doc: "secretDirect is a secret.Value, or a pointer to one: one string."
+        name: secretDirect
+      - doc: secretNested is secrets inside a slice, an array or a map.
+        name: secretNested
+    name: secretNone
+  - grouped: true
+    items:
+      - doc: |-
+          keyLeaf is a key the decoder fills directly. Nothing below it is
+          addressable, so nothing below it can be unknown.
+        name: keyLeaf
+        type: keyKind
+        value: iota
+      - doc: keyTable is a key whose members are themselves addressable keys.
+        name: keyTable
+    name: keyLeaf
+  - doc: |-
+      maxKeyEchoRunes caps how much of a key a refusal echoes. A key is the
+      SCHEMA AUTHOR's own literal, never operator input, so echoing it is what
+      makes the refusal actionable — but an unbounded echo turns one bad
+      declaration into a log line nobody reads.
+    items:
+      - name: maxKeyEchoRunes
+        type: int
+        value: "96"
+    name: maxKeyEchoRunes
+  - doc: |-
+      maxKeyListRunes caps the joined key list a load failure carries. Keys are
+      names, never values, so the echo is safe; a 400-key configuration would still
+      produce an unreadable line without the cap.
+    items:
+      - name: maxKeyListRunes
+        type: int
+        value: "240"
+    name: maxKeyListRunes
+  - doc: keyListSeparator joins the keys a failure names.
+    items:
+      - name: keyListSeparator
+        type: string
+        value: "\", \""
+    name: keyListSeparator
+  - doc: echoTruncationMark tells a short list from a shortened one.
+    items:
+      - name: echoTruncationMark
+        type: string
+        value: "\"…\""
+    name: echoTruncationMark
+  - doc: |-
+      keyFailureKinds is how many independent answers the key pass can carry: the
+      keys that were required and absent, and the keys that were supplied and
+      unreadable. It is the capacity of the slice they are joined from.
+    items:
+      - name: keyFailureKinds
+        type: int
+        value: "2"
+    name: keyFailureKinds
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - envSource
+      - EnvSource
+      - envSource.Load
+      - envSource.Describe
+      - envSource.lookup
+      - matchPrefix
+      - coerceEnvInto
+    name: env_source.go
+  - decls:
+      - fileSource
+      - FileSource
+      - fileSource.Load
+      - fileSource.Describe
+      - parseDocument
+    name: file_source.go
+  - decls:
+      - fsSource
+      - FSSource
+      - fsSource.Load
+      - fsSource.Describe
+    name: fs_source.go
+  - decls:
+      - Load
+      - LoadSchema
+      - loadInto
+      - mergedLayers
+      - layerValue
+      - mergeLayers
+      - secretKeysByType
+      - secretKeysOf
+      - restoreRawSecrets
+      - lastSupplier
+      - checkDecoded
+      - decodeInto
+    name: load.go
+  - decls:
+      - deepMerge
+      - cloneNested
+      - cloneArray
+    name: merge.go
+  - decls:
+      - LoadWithOrigins
+      - LoadSchemaWithOrigins
+      - originsOf
+      - attribute
+      - describeLayer
+    name: origins.go
+  - decls:
+      - causeNonPositiveInterval
+      - pollWatcher
+      - PollWatcher
+      - pollWatcher.Watch
+      - pollWatcher.poll
+      - pollWatcher.waiter
+      - pollWatcher.validateInputs
+      - pollWatcher.stat
+    name: poll_watcher.go
+  - decls:
+      - SchemaValue
+      - NewSchemaValue
+      - composeRule
+      - (*SchemaValue).Source
+      - (*SchemaValue).Check
+      - (*SchemaValue).checkKeys
+    name: schema.go
+  - decls:
+      - compiledKeys
+      - compileKeys
+      - buildDefaultLayer
+      - placeDefault
+      - buildRequired
+      - addressKey
+      - rejectDefaultedRequirement
+      - keysOverlap
+      - normaliseLayer
+      - (*SchemaValue).rejectSelfContradiction
+      - coversPath
+    name: schema_defaults.go
+  - decls:
+      - keySeparator
+      - jsonTagName
+      - tagOptionSeparator
+      - tagOptOut
+      - expectedKeys
+      - expectedDepth
+      - maxContainerDepth
+      - secretHold
+      - secretNone
+      - keyKind
+      - keyLeaf
+      - jsonUnmarshalerType
+      - splitKey
+      - nestKey
+      - lookupKey
+      - collectVocabulary
+      - keyWalk
+      - keyWalk.walkKeys
+      - keyWalk.walkField
+      - kindOf
+      - joinKey
+      - keyName
+      - embeds
+      - hasJSONName
+      - descends
+      - decodesItself
+      - derefStruct
+      - secretHoldOf
+    name: schema_keys.go
+  - decls:
+      - requiredKey
+      - missingKeys
+      - unknownKeys
+      - collectUnknown
+    name: schema_presence.go
+  - decls:
+      - maxKeyEchoRunes
+      - maxKeyListRunes
+      - keyListSeparator
+      - echoTruncationMark
+      - keyFailureKinds
+      - rejectSchema
+      - rejectKeys
+      - rejectKeyList
+      - rejectViolations
+      - clipEcho
+    name: schema_reject.go
+  - decls:
+      - schemaSource
+      - schemaSource.Load
+      - schemaSource.Describe
+    name: schema_source.go
+  - decls:
+      - SchemaSpec
+    name: schema_spec.go
+  - decls:
+      - wrapAs
+      - withCause
+      - _
+    name: wrap.go
+functions:
+  - name: EnvSource
+    params: prefix string
+    results: coreconfig.Source
+  - doc: |-
+      matchPrefix turns a caller-supplied prefix into the string every environment
+      key must start with.
+
+      An empty prefix is the explicit read-everything mode and maps to "". Any
+      other prefix names a namespace and has to keep naming one, which is why the
+      trailing-separator absorption is not a bare TrimRight: trimming "_" or "___"
+      yields "", and "" is not a namespace with an empty name — it matches every
+      key in the process environment. A caller who wrote a prefix asked to be
+      scoped, so an all-underscore prefix resolves to the "_" namespace (the
+      leading-underscore variables) rather than to everything.
+    name: matchPrefix
+    params: prefix string
+    results: string
+  - doc: |-
+      coerceEnvInto parses val as a JSON token and stores it under key in out,
+      falling back to the original string when it is not valid JSON.
+
+      It writes into the map rather than returning an `any` so the dynamic value
+      lives only at the map-storage site — the shape KTN-INTERFACE-ANYUSE exempts.
+
+      It decodes with UseNumber so numeric tokens arrive as json.Number rather than
+      float64. Decoding into a bare `any` makes encoding/json widen every number to
+      float64, so "8080" would become 8080.0 — losing integrality, and with it
+      exact values above 2^53. Integral tokens therefore become int64; only genuine
+      fractions fall through to float64.
+
+      Coercion is gated on the value being ONE COMPLETE JSON document, because
+      json.Decoder.Decode stops at the end of the first token and reports no error
+      for whatever trails it. Without the gate every value that merely STARTS like
+      a number is silently truncated to that prefix: "0A0A01" becomes 0, "1500ms"
+      becomes 1500, "5gc.svc.cluster.local" becomes 5, "10.45.0.0/16" becomes
+      10.45. The result is not a parse failure the caller can see — it is a
+      plausible-looking value of the wrong type, which either lands in the target
+      silently or fails the whole Load with a decode error naming nothing.
+      json.Valid spans the entire input, which is exactly the missing property; it
+      still tolerates surrounding whitespace, so " 8080 " keeps coercing as before.
+    name: coerceEnvInto
+    params: out map[string]any, key, val string
+  - name: FileSource
+    params: format codec.Format, path string
+    results: coreconfig.Source
+  - doc: |-
+      parseDocument decodes one configuration document through the codec
+      registry. It is the half FileSource and FSSource share: they differ only in
+      where the bytes come from, so they refuse the same documents with the same
+      code, and a caller swapping one for the other sees no other difference.
+
+      It runs AFTER the read, so an unreadable file and an unregistered format
+      stay distinguishable by the fields their errors carry.
+    name: parseDocument
+    params: format codec.Format, data []byte
+    results: values map[string]any, err error
+  - name: FSSource
+    params: fsys fs.FS, format codec.Format, path string
+    results: coreconfig.Source
+  - name: Load
+    params: target *T, sources ...coreconfig.Source
+    results: error
+    typeParams: T any
+  - name: LoadSchema
+    params: target *T, schema *SchemaValue[T], sources ...coreconfig.Source
+    results: error
+    typeParams: T any
+  - doc: |-
+      loadInto is the one merge + keys + decode + check + validate pipeline every
+      entry point runs, so a schema can never change the ORDER of the other steps
+      — only whether the steps it owns happen at all. It returns the layers it
+      merged, in merge order, so a traced load can say which one supplied a key.
+    name: loadInto
+    params: target *T, schema *SchemaValue[T], sources []coreconfig.Source
+    results: loaded mergedLayers, err error
+    typeParams: T any
+  - doc: |-
+      mergeLayers folds the schema's defaults and then every source into one map,
+      and returns every layer it folded, in order.
+    name: mergeLayers
+    params: schema *SchemaValue[T], sources []coreconfig.Source
+    results: merged map[string]any, layers []layerValue, err error
+    typeParams: T any
+  - doc: |-
+      secretKeysOf returns the keys of T whose field holds a secret, and how:
+      compiled once into a schema, or walked once per type for a load that has
+      none.
+    name: secretKeysOf
+    params: schema *SchemaValue[T]
+    results: map[string]secretHold
+    typeParams: T any
+  - doc: |-
+      restoreRawSecrets replaces, for every DIRECT secret key an ENVIRONMENT layer
+      supplied last, the JSON-coerced value in the merged map with the variable's
+      raw text. A field holding secrets inside a slice or a map is left alone: its
+      variable holds a JSON document — ["a","b"] — whose coerced form is exactly
+      what its decode needs, and whose elements were written as strings.
+
+      The coercion is right for a port and wrong for a secret: `12345` becomes an
+      int64 and survives, but `1e3` becomes 1000, `0.10` becomes 0.1 and a
+      twenty-digit token becomes a float64 that has lost its tail — a secret the
+      operator never wrote, decoded without an error. core/security/secret.Value refuses a
+      JSON number for exactly that reason, so without this step a numeric secret
+      in the environment would fail the load; with it, the secret arrives as the
+      operator typed it. Only a top-level key can be one variable; a secret nested
+      in a table the environment supplied as JSON was written as JSON, quotes and
+      all, and is decoded as written.
+    name: restoreRawSecrets
+    params: merged map[string]any, layers []layerValue, secrets map[string]secretHold
+  - doc: |-
+      lastSupplier reports the environment source that supplied key LAST — the
+      layer whose value the merge kept — or false when that layer is anything else.
+    name: lastSupplier
+    params: layers []layerValue, key string
+    results: env envSource, supplied bool
+  - doc: |-
+      checkDecoded runs the schema's value constraints and then the target's own
+      Validate. The order is deliberate: a cross-field assertion written by hand
+      has no useful answer while the individual keys it reads are still invalid.
+    name: checkDecoded
+    params: target *T, schema *SchemaValue[T]
+    results: error
+    typeParams: T any
+  - doc: |-
+      decodeInto re-encodes the merged map to JSON then decodes it into target,
+      reusing encoding/json's struct-tag mapping.
+    name: decodeInto
+    params: merged map[string]any, target *T
+    results: error
+    typeParams: T any
+  - doc: |-
+      deepMerge folds src into dst in place: nested maps merge recursively, every
+      other value (including a non-map overriding a map) overwrites. Later sources
+      therefore win key-by-key.
+    name: deepMerge
+    params: dst, src map[string]any
+  - doc: |-
+      cloneNested deep-copies a nested config map so the copy shares no table AND
+      no array with its source, at any depth.
+
+      Arrays are copied as well as maps — and a table inside an array with them.
+      The merge never mutates an array (an array REPLACES, it is not merged), and
+      that is why arrays were once treated as opaque leaves. But the merge is not
+      the only reader of a copy: Source().Load hands one to the CALLER, and a
+      caller who edited an array default it had been handed was editing the
+      compiled schema's own value, so every later load decoded the edit.
+
+      A table and an array are the two shapes a decoded layer holds by reference;
+      everything else — a string, a bool, a json.Number, nil — is immutable and
+      shared as it is.
+    name: cloneNested
+    params: src map[string]any
+    results: map[string]any
+  - doc: |-
+      cloneArray deep-copies an array so neither its backing store nor a table
+      inside it is shared with src.
+
+      A nil array stays nil — slices.Clone preserves that, and it matters: nil
+      marshals as null, while an empty copy would marshal as [], a different
+      document that decodes to a different value.
+    name: cloneArray
+    params: src []any
+    results: "[]any"
+  - name: LoadWithOrigins
+    params: target *T, sources ...coreconfig.Source
+    results: origins []coreconfig.OriginValue, err error
+    typeParams: T any
+  - name: LoadSchemaWithOrigins
+    params: target *T, schema *SchemaValue[T], sources ...coreconfig.Source
+    results: origins []coreconfig.OriginValue, err error
+    typeParams: T any
+  - doc: |-
+      originsOf attributes every leaf key of the vocabulary to the LAST layer that
+      supplied it — the layer whose value the merge kept — in key order.
+    name: originsOf
+    params: known map[string]keyKind, secrets map[string]secretHold, loaded mergedLayers
+    results: "[]coreconfig.OriginValue"
+  - doc: |-
+      attribute names the layer that supplied key's final value and asks it to
+      describe itself. Both answers are empty when the key is absent from the
+      merged fold — never supplied, or supplied and then erased by a later layer
+      that replaced one of its tables with a scalar or a null: the field then
+      holds its zero, and the layer that first supplied the key did not decide it.
+    name: attribute
+    params: loaded mergedLayers, key string
+    results: layer, detail string
+  - doc: |-
+      describeLayer names one layer: the default layer, a source that describes
+      itself, or a source that does not — named by its position.
+    name: describeLayer
+    params: layer layerValue, key string
+    results: name, detail string
+  - name: PollWatcher
+    params: path string, interval time.Duration
+    results: coreconfig.Watcher
+  - name: NewSchemaValue
+    params: spec SchemaSpec[T]
+    results: schema *SchemaValue[T], err error
+    typeParams: T any
+  - doc: |-
+      composeRule folds the caller's cross-field rule into the tag constraint. A
+      caller who declared none pays no wrapper at all, which is the common case.
+    name: composeRule
+    params: tagRules, extra corevalidation.Constraint[T]
+    results: corevalidation.Constraint[T]
+    typeParams: T any
+  - doc: |-
+      compileKeys resolves a declaration's keys against T, refusing every one that
+      could not work. Defaults are resolved first so the requirement check can see
+      the whole defaulted set and refuse the pair that contradicts.
+    name: compileKeys
+    params: spec SchemaSpec[T]
+    results: compiled compiledKeys, err error
+    typeParams: T any
+  - doc: |-
+      buildDefaultLayer turns the declared defaults into the nested layer the merge
+      folds under every Source, refusing every declaration that cannot work. It
+      returns the layer and the declared keys in declaration order.
+    name: buildDefaultLayer
+    params: defaults []coreconfig.DeclaredValue, known map[string]keyKind
+    results: layer map[string]any, declared []string, err error
+  - doc: placeDefault validates one declaration and writes it into the layer.
+    name: placeDefault
+    params: raw map[string]any, def coreconfig.DeclaredValue, known map[string]keyKind, seen map[string]bool
+    results: error
+  - doc: |-
+      buildRequired resolves the required keys, refusing one that names nothing,
+      one declared twice, and one the schema itself would fill.
+    name: buildRequired
+    params: required []string, known map[string]keyKind, declared []string
+    results: keys []requiredKey, err error
+  - doc: |-
+      addressKey runs the three checks every declared key answers, whatever it
+      declares: the grammar, the target type's vocabulary, and the duplicate.
+    name: addressKey
+    params: key string, known map[string]keyKind, seen map[string]bool
+    results: segments []string, err error
+  - doc: |-
+      rejectDefaultedRequirement refuses a key that is required AND defaulted — at
+      the same level, or with one nested under the other.
+
+      Either arrangement has the same consequence: the default layer supplies the
+      key before any source is read, so the presence pass always finds it and the
+      requirement is a clause that cannot fire. A clause that cannot fire is worse
+      than no clause, because a reader takes it for protection.
+    name: rejectDefaultedRequirement
+    params: key string, declared []string
+    results: error
+  - doc: |-
+      keysOverlap reports whether two keys address the same configuration, either
+      because they are equal or because one is nested under the other.
+    name: keysOverlap
+    params: left, right string
+    results: bool
+  - doc: |-
+      normaliseLayer sends the raw layer through the loader's JSON round trip so it
+      holds exactly the shapes a Source would have produced. Numbers keep their
+      exact literal (json.Number) rather than widening to float64, for the reason
+      coerceEnvInto gives: a bare `any` decode loses integrality, and exactness
+      above 2^53 with it.
+    name: normaliseLayer
+    params: raw map[string]any
+    results: layer map[string]any, err error
+  - doc: |-
+      coversPath reports whether any declared key is the path itself or an ancestor
+      of it. A default declared for a whole table owns the violations reported
+      inside that table: the schema wrote those members.
+    name: coversPath
+    params: declared []string, path string
+    results: bool
+  - doc: |-
+      splitKey parses a declared key into its segments, reporting whether the
+      grammar was respected. An empty key, an empty segment ("a..b"), and a leading
+      or trailing separator are all refused: each of them would produce a nesting
+      level with no name, which the merged map cannot represent and the operator
+      cannot type.
+    name: splitKey
+    params: key string
+    results: segments []string, ok bool
+  - doc: |-
+      nestKey writes value into dst at the nesting the segments describe, creating
+      the intermediate maps as it goes. It is how a flat declaration
+      ("database.max_conns") becomes the nested layer deepMerge already knows how
+      to fold under a file's own nested tables.
+
+      It reports false when an intermediate level is already occupied by a
+      non-map — two declared keys where one is the prefix of the other
+      ("database" and "database.max_conns"), which is a contradiction in the
+      schema rather than something to resolve by guessing.
+    name: nestKey
+    params: dst map[string]any, segments []string, value any
+    results: bool
+  - doc: |-
+      lookupKey reports whether the pre-split segments resolve to an entry that
+      EXISTS in level, whatever that entry holds.
+
+      Existence is the whole question, and it is the one only the merged map can
+      answer: after the decode an absent key and a key set to its zero are the same
+      bytes. An explicit null therefore counts as SUPPLIED — the operator wrote the
+      key — and whether the resulting zero is acceptable is the validation domain's
+      question, not this one. Keeping the two apart is what stops the schema from
+      quietly becoming a second constraint engine.
+    name: lookupKey
+    params: level map[string]any, segments []string
+    results: bool
+  - doc: |-
+      collectVocabulary resolves every dotted key the target type can be
+      addressed by, in the json vocabulary the loader decodes through, and says of
+      each whether it is a leaf or a table. It is what turns a typo in a declared
+      key into a construction failure instead of a default that silently never
+      applies — the quietest way a configuration can be wrong — and what lets the
+      unknown-key pass stop descending where the type stops naming things.
+
+      The same walk also returns the keys whose field holds a core/security/secret.Value,
+      and how — directly, or inside a slice, an array or a map — so the loader's
+      idea of "a secret key" can never disagree with its idea of "a key"
+      (ADR 0097).
+
+      The walk stops at a type that decodes itself (see jsonUnmarshalerType) and
+      at a type it has already entered, so a self-referential struct terminates.
+      A key inside a recursive type therefore cannot be declared; that is a
+      stated limit, not an oversight.
+    name: collectVocabulary
+    params: typ reflect.Type
+    results: keys map[string]keyKind, secrets map[string]secretHold
+  - doc: kindOf turns "the walk descends into it" into the recorded kind.
+    name: kindOf
+    params: table bool
+    results: keyKind
+  - doc: joinKey extends base with one segment, in the same grammar splitKey parses.
+    name: joinKey
+    params: base, segment string
+    results: string
+  - doc: |-
+      keyName is the name a field carries on the operator's surface: its json tag
+      when it has a usable one, else its Go name. travels is false for a field the
+      json tag removes from the document entirely.
+    name: keyName
+    params: field reflect.StructField
+    results: name string, travels bool
+  - doc: |-
+      embeds reports whether a field is an anonymous struct — the one shape whose
+      members encoding/json reaches through an unexported field.
+    name: embeds
+    params: field reflect.StructField
+    results: bool
+  - doc: |-
+      hasJSONName reports whether a field's json tag names it explicitly. An
+      embedded field with a name is a nested object; without one it is inlined.
+    name: hasJSONName
+    params: field reflect.StructField
+    results: bool
+  - doc: |-
+      descends reports whether the walk should enter a field's type. Only a plain
+      struct (or a pointer to one) qualifies: a type that decodes ITSELF receives
+      raw bytes and never exposes its members to a key, and a map, slice or array
+      has no statically-named members at all.
+    name: descends
+    params: typ reflect.Type
+    results: bool
+  - doc: |-
+      decodesItself reports whether typ takes over its own decoding, which makes it
+      a leaf however many exported fields it happens to have. time.Time is the
+      canonical case, and the reason this is a property test rather than a list.
+    name: decodesItself
+    params: typ reflect.Type
+    results: bool
+  - doc: |-
+      derefStruct resolves one level of pointer, so *Database is walked exactly
+      like Database. deref reports whether a pointer was removed.
+    name: derefStruct
+    params: typ reflect.Type
+    results: target reflect.Type, deref bool
+  - doc: |-
+      secretHoldOf reports how a field of typ holds a core/security/secret.Value: directly
+      (through pointers only), nested inside a slice, an array or a map, or not at
+      all. A field of []secret.Value is a secret key — its value is secrets — but
+      not a direct one.
+
+      The peeling is bounded by maxContainerDepth, because a container type can
+      contain itself — `type Tree map[string]Tree` is a legitimate configuration
+      shape — and an unbounded peel of one would never return.
+    name: secretHoldOf
+    params: typ reflect.Type
+    results: secretHold
+  - doc: |-
+      missingKeys returns every required key no layer supplied, in declaration
+      order.
+
+      It collects them ALL. Reporting the first would make an operator restart the
+      service once per missing key to discover the next one, which is the failure a
+      report exists to prevent — the same rule ADR 0046 states for violations, and
+      the reason a schema is checked in one pass rather than at first access.
+    name: missingKeys
+    params: merged map[string]any, required []requiredKey
+    results: "[]string"
+  - doc: |-
+      unknownKeys returns every supplied key the target type cannot address, sorted
+      so the message is the same on every run.
+
+      It walks the merged map rather than the type, because the question is about
+      what a SOURCE carried. The walk stops at a leaf: below `extra` declared as a
+      map[string]any, or below a time.Time, there are no keys — there is one value
+      the decoder owns — so descending would report the contents of a legitimate
+      value as a typo.
+    name: unknownKeys
+    params: merged map[string]any, known map[string]keyKind, strict bool
+    results: "[]string"
+  - doc: collectUnknown appends every unaddressable key below level into out.
+    name: collectUnknown
+    params: level map[string]any, base string, known map[string]keyKind, out *[]string
+  - doc: |-
+      rejectSchema refuses a schema at CONSTRUCTION, naming the key and the clause
+      and NEVER the value. A default may be a placeholder credential written in
+      source, and a refusal is the one message that reaches a build log.
+    name: rejectSchema
+    params: key, clause string
+    results: error
+  - doc: |-
+      rejectKeys turns the key pass's two answers into one error, or into a genuine
+      nil when the deployment satisfied both.
+
+      They are joined rather than sequenced because they are independent facts
+      about the same map, and an operator who fixes the missing keys only to be
+      told about the typo on the next restart has been made to pay twice for one
+      pass. errors.Join keeps both matchable: errs.HasCode walks Unwrap() []error,
+      so HasCode(err, CodeConfigKeyMissing) and HasCode(err, CodeConfigUnknownKey)
+      both answer for the same value.
+    name: rejectKeys
+    params: missing, unknown []string
+    results: error
+  - doc: |-
+      rejectKeyList builds one typed failure naming every key it carries, and the
+      count, and nothing else.
+    name: rejectKeyList
+    params: sentinel error, counter string, keys []string
+    results: error
+  - doc: |-
+      rejectViolations turns a non-empty report into the load's documented
+      CONFIG_VALIDATION_FAILED, carrying the count, the first rule and the
+      offending KEYS — never a message and never a value. The full report stays
+      available through SchemaValue.Check.
+
+      The sentinel is the same one a Validator failure surfaces, on purpose: from
+      the operator's side the two are one event — "this configuration was refused"
+      — and splitting them would make every caller match two codes to ask one
+      question.
+    name: rejectViolations
+    params: report corevalidation.ReportValue
+    results: error
+  - doc: |-
+      clipEcho shortens text to limit runes, marking the truncation. It counts
+      RUNES, not bytes, so a non-ASCII key is never cut mid-character.
+    name: clipEcho
+    params: text string, limit int
+    results: string
+  - doc: |-
+      wrapAs returns the given config sentinel as the error origin — its code,
+      reason, public message and statuses win, so an *errs.Error cause from a
+      codec or a source someone else wrote cannot hijack the code — with the
+      cause kept IN THE CHAIN beside it and its message in the `cause` field. A
+      nil cause yields the bare sentinel.
+
+      In the chain is the point. errs.Wrap of a typed cause is origin-wins and
+      would hand the caller the codec's code; a cause flattened into a field
+      alone loses its identity, so errs.HasCode on a codec's refusal code — or
+      errors.Is against fs.ErrNotExist — stopped answering through config. The
+      sentinel and the cause are joined, and the join wrapped: Wrap finds the
+      sentinel first, so it is the origin and Error() renders it alone, while
+      errors.Is and errs.HasCode walk the join and reach the cause.
+    name: wrapAs
+    params: sentinel *kerrs.Error, cause error
+    results: error
+  - doc: |-
+      withCause returns the given config sentinel as the error origin with cause as
+      its `cause` field — wrapAs for a refusal this package states itself. An input
+      guard has a sentence to say and no error to wrap, and minting a stdlib error
+      only to have its Error() copied into the field would be the untyped error
+      rule 2 bans.
+    name: withCause
+    params: sentinel *kerrs.Error, cause string
+    results: error
+imports:
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  context: context
+  coreconfig: github.com/kitsunium/sdk/internal/core/app/config
+  coresecret: github.com/kitsunium/sdk/internal/core/security/secret
+  corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
+  encoding: encoding
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+  json: encoding/json
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  os: os
+  reflect: reflect
+  slices: slices
+  strconv: strconv
+  strings: strings
+  svcvalidation: github.com/kitsunium/sdk/internal/service/app/validation
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/config
+  name: config
+  purpose: Package config — environment-variable Source.
+types:
+  - doc: envSource reads PREFIX_KEY environment variables into a flat lower-cased map.
+    fields:
+      - name: prefix
+        type: string
+    kind: struct
+    methods:
+      - doc: Load scans the environment for the prefix and returns the stripped map.
+        name: Load
+        recv: s envSource
+        results: values map[string]any, err error
+      - doc: |-
+          Describe implements core/app/config.Describer: the layer is the environment and
+          the detail is the VARIABLE that supplied key — for a nested key, the one
+          that supplied its top-level table. It is the variable Load read: the same
+          match, and the last matching entry wins exactly as it does in Load.
+
+          The value is never read into the answer; the name is what an operator types.
+        name: Describe
+        params: key string
+        recv: s envSource
+        results: layer, detail string
+      - doc: |-
+          lookup finds the environment variable that supplies the top-level key under
+          this source's prefix, with its RAW value — before any JSON coercion. When
+          several variables map to one key (APP_PORT and APP_port), the last one in
+          the environment wins, which is the one Load stored.
+        name: lookup
+        params: key string
+        recv: s envSource
+        results: variable, raw string, found bool
+    name: envSource
+  - doc: fileSource reads a file and parses it through the codec registry into a map.
+    fields:
+      - name: format
+        type: codec.Format
+      - name: path
+        type: string
+    kind: struct
+    methods:
+      - doc: Load reads the file and decodes it into a flat/nested map.
+        name: Load
+        recv: s fileSource
+        results: values map[string]any, err error
+      - doc: |-
+          Describe implements core/app/config.Describer: the layer is a file and the
+          detail is its path, for every key it supplied.
+        name: Describe
+        params: _ string
+        recv: s fileSource
+        results: layer, detail string
+    name: fileSource
+  - doc: |-
+      fsSource reads a file inside an fs.FS and parses it through the codec
+      registry into a map — FileSource, with the filesystem as a parameter.
+    fields:
+      - name: fsys
+        type: fs.FS
+      - name: format
+        type: codec.Format
+      - name: path
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          Load reads the file from the filesystem and decodes it into a flat/nested
+          map.
+        name: Load
+        recv: s fsSource
+        results: values map[string]any, err error
+      - doc: |-
+          Describe implements core/app/config.Describer exactly as FileSource does: the
+          layer is a file and the detail is the path as given.
+        name: Describe
+        params: _ string
+        recv: s fsSource
+        results: layer, detail string
+    name: fsSource
+  - doc: |-
+      mergedLayers is what a load folded: every layer in order, and the map they
+      folded into — the one a traced load checks a key's final presence in.
+    fields:
+      - doc: layers is every layer, in merge order.
+        name: layers
+        type: "[]layerValue"
+      - doc: merged is the fold the decode read.
+        name: merged
+        type: map[string]any
+    kind: struct
+    name: mergedLayers
+  - doc: "layerValue is one layer a load merged: what it supplied, and who."
+    fields:
+      - doc: source supplied the layer; nil for the schema's default layer.
+        name: source
+        type: coreconfig.Source
+      - doc: |-
+          position is the source's index in the caller's sources, counting from
+          0, and -1 for the default layer.
+        name: position
+        type: int
+      - doc: values is the map the layer supplied.
+        name: values
+        type: map[string]any
+    kind: struct
+    name: layerValue
+  - doc: |-
+      pollWatcher detects file changes by polling its mtime+size on an interval —
+      cross-OS (os.Stat works on every GOOS; no inotify/kqueue dependency).
+    fields:
+      - name: path
+        type: string
+      - name: interval
+        type: time.Duration
+      - doc: |-
+          clk is what the interval ticks on. Nil — every watcher PollWatcher
+          builds — is the wall clock; a white-box test sets a ManualClock so a
+          poll happens when it advances the clock rather than when it sleeps.
+        name: clk
+        type: clock.Waiter
+    kind: struct
+    methods:
+      - doc: Watch polls until ctx is cancelled, firing onChange on each detected change.
+        name: Watch
+        params: ctx context.Context, onChange func()
+        recv: w pollWatcher
+        results: error
+      - doc: |-
+          poll owns the ticker and runs the detection loop until ctx is cancelled,
+          firing onChange on each observed mtime/size change. Split out of Watch so the
+          setup (input validation, baseline stat) and the loop each stay within the
+          cyclomatic budget — and so the ticker is created in the same function that
+          receives from it.
+        name: poll
+        params: ctx context.Context, onChange func(), lastMod, lastSize int64
+        recv: w pollWatcher
+        results: error
+      - doc: |-
+          waiter returns the clock the watch ticks on: the injected one, or the wall
+          clock when none was set.
+        name: waiter
+        recv: w pollWatcher
+        results: clock.Waiter
+      - doc: |-
+          validateInputs rejects the two Watch arguments that would otherwise panic:
+          a non-positive interval (the ticker panics) and a nil onChange (invoked
+          unchecked on the first detected change). Kept out of Watch so the polling
+          loop stays within the cyclomatic budget.
+        name: validateInputs
+        params: onChange func()
+        recv: w pollWatcher
+        results: error
+      - doc: stat returns the target's modification time (nanoseconds) and size.
+        name: stat
+        recv: w pollWatcher
+        results: mod, size int64, err error
+    name: pollWatcher
+  - fields:
+      - doc: |-
+          defaults is the layer this schema contributes, already through the
+          loader's JSON round trip so it holds exactly what a Source would have
+          produced. It is merged UNDER every Source, which is what makes a default
+          a default rather than a competitor.
+        name: defaults
+        type: map[string]any
+      - doc: |-
+          declared is every key a default was declared for, in declaration order.
+          It is what the construction-time contradiction check is scoped to: a
+          violation at a key nobody defaulted is the operator's to fix, while a
+          violation at a key the schema itself filled is the schema's.
+        name: declared
+        type: "[]string"
+      - doc: |-
+          required is every key a load must find, pre-split at construction so the
+          presence pass parses nothing.
+        name: required
+        type: "[]requiredKey"
+      - doc: |-
+          known is the target type's whole vocabulary, with each key marked leaf
+          or table. The unknown-key pass walks the merged map against it.
+        name: known
+        type: map[string]keyKind
+      - doc: |-
+          secrets is every key whose field holds a core/security/secret.Value, and how,
+          resolved once here so a load pays no walk for it (ADR 0097).
+        name: secrets
+        type: map[string]secretHold
+      - doc: |-
+          strict refuses a key outside `known`. It is the INVERSE of the spec's
+          AllowUnknownKeys so that the zero value of the spec is the strict one.
+        name: strict
+        type: bool
+      - doc: |-
+          constraint is the `validate` tags of T composed with SchemaSpec.Rules,
+          collect-all. It is compiled once here, never per load.
+        name: constraint
+        type: corevalidation.Constraint[T]
+    kind: struct
+    methods:
+      - name: Source
+        recv: s *SchemaValue[T]
+        results: coreconfig.Source
+      - name: Check
+        params: value T
+        recv: s *SchemaValue[T]
+        results: corevalidation.ReportValue
+      - doc: |-
+          checkKeys runs the schema's KEY pass over the merged map, before any decode.
+          It is one pass and it collects everything: every required key no source
+          supplied, and every key the target type cannot address.
+
+          Both answers are reported together, joined, so one restart tells an operator
+          the whole truth. They are not merged with the VALUE report that follows,
+          because a missing key decodes to a zero the operator never wrote — running
+          the bounds on it would name a rule nobody violated and bury the one fact that
+          matters under a derived one.
+        name: checkKeys
+        params: merged map[string]any
+        recv: s *SchemaValue[T]
+        results: error
+      - doc: |-
+          rejectSelfContradiction refuses a schema whose own defaults do not satisfy
+          the constraints it declares for them.
+
+          The check is deliberately SCOPED to the declared keys. A defaults-only
+          document is not a valid configuration — every key the operator is expected to
+          supply is still at its Go zero — so a violation at a key nobody defaulted is
+          the operator's to fix and says nothing about the schema. A violation at (or
+          under) a key the schema itself filled is another matter entirely: the schema
+          wrote that value, and it wrote a value its own rules reject.
+        name: rejectSelfContradiction
+        recv: s *SchemaValue[T]
+        results: error
+    name: SchemaValue
+    typeParams: T any
+  - doc: |-
+      compiledKeys is what a declaration resolves to once every key has been
+      proven to name something in the target type.
+    fields:
+      - doc: defaults is the normalised default layer, ready to merge.
+        name: defaults
+        type: map[string]any
+      - doc: declared is the defaulted keys, in declaration order.
+        name: declared
+        type: "[]string"
+      - doc: required is the required keys, pre-split, in declaration order.
+        name: required
+        type: "[]requiredKey"
+      - doc: known is the target type's whole addressable vocabulary.
+        name: known
+        type: map[string]keyKind
+      - doc: secrets is every key whose field holds a core/security/secret.Value, and how.
+        name: secrets
+        type: map[string]secretHold
+    kind: struct
+    name: compiledKeys
+  - doc: |-
+      secretHold says how a key's field holds a core/security/secret.Value, which decides
+      two different things: whether a traced load reports the key Secret (either
+      hold), and whether the loader may hand the field the environment's raw text
+      (only a DIRECT hold — a slice or a map of secrets is a JSON document on the
+      wire, and replacing it with one string would fail its decode).
+    kind: named
+    name: secretHold
+    underlying: uint8
+  - doc: |-
+      keyKind tells apart the two things an addressable key can be. The
+      distinction only matters for the unknown-key pass: it must descend into a
+      table and must NOT descend into a leaf, because a leaf's members are not
+      keys — they belong to a map, a slice, or a type that decodes itself.
+    kind: named
+    name: keyKind
+    underlying: uint8
+  - doc: keyWalk carries one walk's results and its recursion guard.
+    fields:
+      - doc: keys is the vocabulary, each key marked leaf or table.
+        name: keys
+        type: map[string]keyKind
+      - doc: secrets holds every key whose field holds a secret, and how.
+        name: secrets
+        type: map[string]secretHold
+      - doc: visiting holds the struct types on the current path, so a cycle ends.
+        name: visiting
+        type: map[reflect.Type]bool
+    kind: struct
+    methods:
+      - doc: walkKeys adds every key reachable below base.
+        name: walkKeys
+        params: typ reflect.Type, base string
+        recv: w keyWalk
+      - doc: walkField records one field's key, and descends when the decoder would.
+        name: walkField
+        params: field reflect.StructField, base string
+        recv: w keyWalk
+    name: keyWalk
+  - doc: |-
+      requiredKey is one key a load must find, pre-split at construction so the
+      presence pass parses nothing on the start-up path.
+    fields:
+      - doc: |-
+          key is the literal the author declared, and the only thing a failure
+          echoes.
+        name: key
+        type: string
+      - doc: segments is that literal already split into nesting levels.
+        name: segments
+        type: "[]string"
+    kind: struct
+    name: requiredKey
+  - doc: schemaSource adapts a compiled default layer to the Source port.
+    fields:
+      - doc: defaults is the compiled layer, shared and never mutated.
+        name: defaults
+        type: map[string]any
+    kind: struct
+    methods:
+      - doc: |-
+          Load returns a private copy of the default layer — every table and every
+          array in it, not only the top-level map. Defaults never fail to read: they
+          were resolved at construction, and there is no backing store.
+        name: Load
+        recv: s schemaSource
+        results: values map[string]any, err error
+      - doc: |-
+          Describe implements core/app/config.Describer: every key it supplies is a
+          schema default, and a default has no further detail.
+        name: Describe
+        params: _ string
+        recv: s schemaSource
+        results: layer, detail string
+    name: schemaSource
+  - fields:
+      - doc: |-
+          Required names the keys a load must find in some source. A key listed
+          here and absent from every layer fails the LOAD — at start-up, before
+          anything reads the value — and every missing key is named in one error
+          rather than the first one found.
+
+          It is a KEY-level statement, decided on the merged map while the key is
+          still a key. That is what distinguishes it from the validation domain's
+          `required` tag, which is a VALUE-level statement decided after the
+          decode, where an absent key and an explicit zero are the same bytes.
+          `port = 0` written in a file satisfies this and fails `validate:"required"`;
+          declare both when both are meant.
+
+          A required key may not also carry a default: see Defaults.
+        name: Required
+        type: "[]string"
+      - doc: |-
+          Defaults are the typed values keys take when NO Source supplied them.
+          Each is checked at construction against the type, against the grammar,
+          and against the constraints the schema itself declares for that key.
+
+          A key here may not also appear in Required — nor may either be nested
+          under the other. A required key the schema itself fills can never be
+          missing, so the requirement would be a clause that cannot fire, and a
+          clause that cannot fire is worse than no clause: it is read as
+          protection. The contradiction is refused at construction (ADR 0031).
+        name: Defaults
+        type: "[]coreconfig.DeclaredValue"
+      - doc: |-
+          AllowUnknownKeys stops the load refusing a key no field of T addresses.
+
+          The zero value REFUSES, and that is the whole point: a schema is the
+          statement "these are the keys I read", so a key outside it is either a
+          typo or a deliberate extra. Ignoring it silently is the classic
+          production incident — `APP_PORTT=9090` decodes into nothing, the process
+          starts on the old port, and the only evidence is the absence of an
+          effect.
+
+          Set it when the source genuinely carries more than this type reads: a
+          configuration file shared by two services, or an unprefixed EnvSource,
+          which hands over every variable in the process environment. Those are
+          facts about the SOURCE, and the opt-out is where the author says so.
+        name: AllowUnknownKeys
+        type: bool
+      - doc: |-
+          Rule is one extra constraint, composed with the `validate` tags of T
+          into a single report. It is where a CROSS-FIELD rule lives — "a TLS
+          certificate without its key", "a replica count above the node count" —
+          because a per-field tag has no vocabulary for a second field and
+          inventing one is how a tag dialect turns into a language (ADR 0046).
+
+          It is deliberately singular. The validation domain already ships the
+          combinator (validation.All), so a slice here would be a second spelling
+          of composition that the reader has to learn — and the one that cannot
+          express "all of these, but stop at the first" the way the real
+          combinators can. Pass validation.All(a, b) for several.
+
+          A rule reports at core/app/validation.RootPath when no single key is at
+          fault, which is exactly what the grammar reserves the root for.
+        name: Rule
+        type: corevalidation.Constraint[T]
+    kind: struct
+    name: SchemaSpec
+    typeParams: T any
+vars:
+  - doc: |-
+      secretKeysByType memoises the secret keys of every target type a schemaless
+      load has decoded into, so the reflection walk happens once per TYPE rather
+      than once per load — a Watcher replays a load on every change, and without
+      the memo the walk doubled a schemaless load (measured in BENCH.md). It holds
+      one entry per configuration type a program declares, which is a handful.
+    items:
+      - name: secretKeysByType
+        type: sync.Map
+    name: secretKeysByType
+  - doc: |-
+      jsonUnmarshalerType and textUnmarshalerType are the two interfaces that make
+      a struct a LEAF for this walk. A type that decodes itself — time.Time,
+      net.IP, a netip.Addr — receives raw bytes, so encoding/json never reaches its
+      members and a key naming one of them would silently address nothing. This is
+      the same trap ADR 0046 refuses to walk into automatically, decided here by a
+      mechanical property of the type rather than by a list of known names.
+    grouped: true
+    items:
+      - name: jsonUnmarshalerType
+        value: reflect.TypeFor[json.Unmarshaler]()
+      - name: textUnmarshalerType
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - doc: |-
+          secretValueType is the one type that makes a key secret (ADR 0097): a
+          field of it is reported Secret in a traced load, and the environment's
+          JSON coercion is bypassed for it so a secret arrives exactly as written.
+        name: secretValueType
+        value: reflect.TypeFor[coresecret.Value]()
+    name: jsonUnmarshalerType
+  - doc: keep the core import referenced even if a source file is built alone.
+    items:
+      - name: _
+        value: coreconfig.ConfigSourceFailed
+    name: _

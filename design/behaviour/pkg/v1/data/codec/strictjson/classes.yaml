@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson
+  name: strictjson
+  purpose: Package strictjson decodes exactly one JSON document into a Go value, within a byte bound, refusing what a permissive decoder lets through — and no refusal ever repeats a byte of the document.
+types: []

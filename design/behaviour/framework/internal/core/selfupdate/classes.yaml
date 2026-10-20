@@ -1,0 +1,82 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Getter
+      - FileSystem
+      - Copier
+    name: selfupdate_interface.go
+  - decls:
+      - UpdateValue
+      - CandidateValue
+    name: update_value.go
+imports:
+  http: net/http
+  io: io
+  os: os
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+  name: selfupdate
+  purpose: Package selfupdate — the error-code range owned by this domain (ADR 0005 §Registry).
+types:
+  - kind: named
+    name: Getter
+    underlying: |-
+      interface {
+      	// Get performs an HTTP GET request.
+      	Get(url string) (resp *http.Response, err error)
+      }
+  - kind: named
+    name: FileSystem
+    underlying: |-
+      interface {
+      	// Executable returns the path of the current executable.
+      	Executable() (path string, err error)
+      	// EvalSymlinks resolves symlinks in the given path.
+      	EvalSymlinks(path string) (resolved string, err error)
+      	// CreateTemp creates a temporary file.
+      	CreateTemp(dir, pattern string) (file *os.File, err error)
+      	// Chmod changes file permissions.
+      	Chmod(name string, mode os.FileMode) error
+      	// Rename renames a file. It is the atomic half of the replacement and must
+      	// happen on the same filesystem as the target.
+      	Rename(oldpath, newpath string) error
+      	// Remove removes a file.
+      	Remove(name string) error
+      }
+  - kind: named
+    name: Copier
+    underlying: |-
+      interface {
+      	// Copy copies from src to dst, returning the number of bytes written.
+      	Copy(dst io.Writer, src io.Reader) (written int64, err error)
+      }
+  - fields:
+      - doc: CurrentVersion is the version of the running binary.
+        name: CurrentVersion
+        type: string
+      - doc: |-
+          LatestVersion is the version that was found, or the empty string when
+          none was.
+        name: LatestVersion
+        type: string
+      - doc: Available reports whether LatestVersion is newer than CurrentVersion.
+        name: Available
+        type: bool
+    kind: struct
+    name: UpdateValue
+  - fields:
+      - doc: Tag is the release tag, e.g. "v1.9.0-rc.3".
+        name: Tag
+        type: string
+      - doc: Name is the release's human title, which a host may leave empty.
+        name: Name
+        type: string
+      - doc: CreatedAt is the RFC 3339 publication timestamp, as text.
+        name: CreatedAt
+        type: string
+    kind: struct
+    name: CandidateValue

@@ -1,0 +1,53 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - PeerValue
+      - Conn
+    name: ipc.go
+imports:
+  net: net
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/proc/ipc
+  name: ipc
+  purpose: Package ipc — the private socket's codes, range 0.3.91.* (ADR 0148).
+types:
+  - fields:
+      - doc: |-
+          UID and GID are the peer's effective user and group; -1 when the
+          kernel does not say (Verified is then false).
+        name: UID
+        type: int
+      - doc: |-
+          UID and GID are the peer's effective user and group; -1 when the
+          kernel does not say (Verified is then false).
+        name: GID
+        type: int
+      - doc: PID is the peer's process, 0 when the kernel does not say.
+        name: PID
+        type: int
+      - doc: |-
+          SID is the peer's account on Windows, read from its process token;
+          empty elsewhere.
+        name: SID
+        type: string
+      - doc: |-
+          Verified is true when the kernel named the peer — UID and GID by
+          SO_PEERCRED on Linux, SID from the process token on Windows —, false
+          when only the directory's permissions admitted it.
+        name: Verified
+        type: bool
+    kind: struct
+    name: PeerValue
+  - fields:
+      - name: ""
+        role: embedded
+        type: net.Conn
+      - doc: Peer is who connected (for a listener) or who listens (for a dialer).
+        name: Peer
+        type: PeerValue
+    kind: struct
+    name: Conn

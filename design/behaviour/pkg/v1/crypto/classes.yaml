@@ -1,0 +1,74 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      streamAlgorithm is the frozen algorithm key of the stdlib streaming scheme
+      SealStream / OpenStream dispatch to (activated by the blank import above).
+    items:
+      - name: streamAlgorithm
+        type: Algorithm
+        value: "\"aes-256-gcm-stream\""
+    name: streamAlgorithm
+  - doc: "AESGCM is the default algorithm: AES-256-GCM. Active out of the box."
+    items:
+      - name: AESGCM
+        type: Algorithm
+        value: "\"aes-256-gcm\""
+    name: AESGCM
+  - doc: |-
+      XChaCha20Poly1305 is the 192-bit-nonce AEAD, preferred for high-volume
+      random-nonce workloads. Pass it to SealAs after a blank import of
+      third-party/x-crypto/xchacha (which alone pulls golang.org/x/crypto):
+
+      	import _ "github.com/kitsunium/sdk/third-party/x-crypto/xchacha"
+      	box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, pt, aad)
+    items:
+      - name: XChaCha20Poly1305
+        type: Algorithm
+        value: "\"xchacha20poly1305\""
+    name: XChaCha20Poly1305
+  - doc: defaultAlgorithm is the scheme Seal uses when the caller does not pick one.
+    items:
+      - name: defaultAlgorithm
+        type: Algorithm
+        value: AESGCM
+    name: defaultAlgorithm
+files:
+  - decls:
+      - streamAlgorithm
+      - AESGCM
+      - XChaCha20Poly1305
+      - defaultAlgorithm
+      - Algorithm
+      - Seal
+      - SealAs
+      - SealStream
+      - OpenStream
+    name: crypto.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: Seal
+    params: k Key, plaintext, aad []byte
+    results: box []byte, err error
+  - name: SealAs
+    params: a Algorithm, k Key, plaintext, aad []byte
+    results: box []byte, err error
+  - name: SealStream
+    params: dst io.Writer, k Key, aad []byte
+    results: sealed io.WriteCloser, err error
+  - name: OpenStream
+    params: src io.Reader, k Key, aad []byte
+    results: opened io.Reader, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  io: io
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto
+  name: crypto
+  purpose: "Package crypto is the authenticated-encryption facade: Seal and Open with a hidden nonce."
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

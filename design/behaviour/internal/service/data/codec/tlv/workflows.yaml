@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: resolveFieldIndex
+    steps:
+      - opt:
+          do:
+            - bind: i, ok
+              eval: nameIndex[string(name)]
+            - opt:
+                do:
+                  - return: "-1, false"
+                when: "!ok"
+            - return: i, true
+          when: nameIndex != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i, true
+                when: bytes.Equal(info.fields[i].nameBytes, name)
+          key: i
+          range: info.fields
+      - return: "-1, false"

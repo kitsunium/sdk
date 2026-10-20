@@ -1,0 +1,599 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      minChainTiers is the smallest tier count that makes a chain mean anything.
+      One tier is the tier itself wearing an extra layer of indirection, so
+      building it is far more likely to be a mistake than an intention.
+    items:
+      - name: minChainTiers
+        type: int
+        value: "2"
+    name: minChainTiers
+  - doc: |-
+      initialIndexCapacity pre-sizes both index maps and each tag bucket. It is a
+      hint, not a bound: a store with no tagged entry must not pay for a large
+      allocation, and one with many grows past it in a handful of doublings.
+    items:
+      - name: initialIndexCapacity
+        type: int
+        value: "16"
+    name: initialIndexCapacity
+files:
+  - decls:
+      - _
+    name: cache_compliance.go
+  - decls:
+      - minChainTiers
+      - chainStore
+      - NewChain
+      - newTier
+      - chainRefusal
+      - (*chainStore).Fetch
+      - (*chainStore).FetchEntry
+      - (*chainStore).promote
+      - (*chainStore).reportPromoteError
+      - (*chainStore).Set
+      - (*chainStore).Delete
+      - (*chainStore).InvalidateTag
+      - (*chainStore).Load
+      - (*chainStore).fillOnce
+      - tierFailure
+    name: chain.go
+  - decls:
+      - ChainConfig
+    name: chain_config.go
+  - decls:
+      - MemoryConfig
+      - MemoryConfig.validate
+      - MemoryConfig.clockOrSystem
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - memoryStore
+      - NewMemory
+      - (*memoryStore).onEvict
+      - (*memoryStore).drainEvicted
+      - (*memoryStore).Fetch
+      - (*memoryStore).FetchEntry
+      - (*memoryStore).remaining
+      - (*memoryStore).fetchRecord
+      - (*memoryStore).Set
+      - (*memoryStore).Delete
+      - (*memoryStore).InvalidateTag
+      - (*memoryStore).Load
+      - (*memoryStore).fillOnce
+    name: memory.go
+  - decls:
+      - record
+    name: record.go
+  - decls:
+      - validateEntry
+      - primitiveTTL
+      - rejected
+      - fillFailure
+    name: refuse.go
+  - decls:
+      - initialIndexCapacity
+      - tagIndex
+      - newTagIndex
+      - (*tagIndex).add
+      - (*tagIndex).remove
+      - (*tagIndex).keysFor
+    name: tagindex.go
+  - decls:
+      - tier
+    name: tier.go
+functions:
+  - name: NewChain
+    params: cfg ChainConfig, stores ...corecache.Store[V]
+    results: chain corecache.Store[V], err error
+    typeParams: V any
+  - doc: newTier checks that store answers the whole tier contract.
+    name: newTier
+    params: position int, store corecache.Store[V]
+    results: built tier[V], err error
+    typeParams: V any
+  - doc: chainRefusal builds the construction-time refusal for one tier.
+    name: chainRefusal
+    params: position int, problem string
+    results: error
+  - doc: |-
+      tierFailure labels a tier's error with its position and the operation.
+
+      An untyped cause is labelled AND kept, the rule fillFailure follows: it used
+      to survive only as a string field, so a tier returning a backend's own
+      sentinel came back as an error for which errors.Is on that sentinel was
+      false. A typed cause still yields CACHE_TIER_FAILED as the code — the
+      position is the information the caller cannot reconstruct — which wrapping
+      it would lose to origin-wins, so it keeps travelling as fields. "Typed" is
+      decided by errors.AsType, the test Wrap itself makes: a direct assertion
+      missed an *errs.Error behind fmt.Errorf's %w, and Wrap then found it and
+      handed it the verdict.
+    name: tierFailure
+    params: position int, operation, key string, cause error
+    results: error
+  - name: NewMemory
+    params: cfg MemoryConfig
+    results: store corecache.Store[V], err error
+    typeParams: V any
+  - doc: |-
+      validateEntry rejects an entry no store can represent and returns the TTL to
+      hand the underlying primitive (0 = no deadline).
+
+      The three refusals are each the ADR 0031 "refuse" half applied to an
+      OPERATION rather than to a constructor: none of them has a sensible reading,
+      and every one of them would produce an entry the caller can never
+      deliberately reach again.
+
+      A key or a tag reaching an error FIELD reaches the operator's LOG. Fields
+      are log-only and never rendered by Error() (ADR 0005 §4), but a caller who
+      puts a secret in a cache key has put that secret in their logs, and this is
+      the place that says so.
+    name: validateEntry
+    params: key string, entry corecache.EntryValue[V]
+    results: error
+    typeParams: V any
+  - doc: |-
+      primitiveTTL maps the domain's three TTL meanings onto the kernel
+      primitive's two ("0 = forever", "positive = this long"). storeDefault is the
+      store's own DefaultTTL, itself already validated as non-negative.
+    name: primitiveTTL
+    params: ttl, storeDefault time.Duration
+    results: time.Duration
+  - doc: rejected builds the CACHE_ENTRY_REJECTED refusal, naming the offending part.
+    name: rejected
+    params: part, problem, key string
+    results: error
+  - doc: |-
+      fillFailure labels a caller's failed fill — unless it already carries an SDK
+      code, in which case it propagates untouched.
+
+      Relabelling a typed error would discard the origin's own diagnosis and
+      replace it with the generic one, which is precisely the trade ADR 0005
+      §"origin wins" refuses. It is the same normalisation config.Load performs at
+      its Source boundary, and for the same reason: Fill is caller code, so the
+      error can be anything.
+
+      An untyped cause is labelled AND kept. It used to survive only as a string
+      field, so a fill returning sql.ErrNoRows came back as an error for which
+      errors.Is(err, sql.ErrNoRows) was false — the caller's own "not found" was
+      indistinguishable from an outage. Wrapping the cause itself keeps both
+      answers: errs.HasCode sees CACHE_FILL_FAILED, errors.Is sees the cause.
+    name: fillFailure
+    params: key string, cause error
+    results: error
+  - doc: newTagIndex builds an empty index.
+    name: newTagIndex
+    results: "*tagIndex"
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corecache: github.com/kitsunium/sdk/internal/core/data/cache
+  errors: errors
+  kcache: github.com/kitsunium/sdk/internal/kernel/collections/cache
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maps: maps
+  singleflight: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
+  slices: slices
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/cache
+  name: cache
+  purpose: Package cache — hosts the compile-time interface assertions, keeping them out of the production source so the runtime binary carries no diagnostic-only declarations.
+types:
+  - doc: |-
+      chainStore reads near-to-far and writes far-to-near.
+
+      # Nothing here is atomic, and that is stated rather than papered over
+
+      A chain is two independent stores. There is no transaction across them, so
+      every multi-tier operation has a window in which they disagree. The design
+      choice is not whether that window exists but which side of it is safer:
+
+        - Set writes FAR first. A failure then leaves the near tier without the
+          new value, so the next read falls through and finds the old one — stale,
+          but consistent with what the far tier holds. Writing near first would
+          instead leave the near tier holding a value the far tier never accepted.
+        - Delete removes FAR first, and attempts EVERY tier even after a failure.
+          Near-first is strictly worse: if the far removal then failed, the next
+          read would miss in the near tier, hit in the far one, and PROMOTE the
+          value back — undoing the delete completely and permanently. Far-first
+          bounds the damage to one near-tier TTL, and the caller has an error.
+        - Fetch promotes on a far hit and never fails the read because the
+          promotion failed: the caller already has the value.
+    fields:
+      - name: tiers
+        type: "[]tier[V]"
+      - name: onPromoteError
+        type: func(key string, err error)
+      - name: group
+        type: singleflight.Group[string, V]
+    kind: struct
+    methods:
+      - doc: Fetch reads near-to-far and promotes a far hit into every nearer tier.
+        name: Fetch
+        params: ctx context.Context, key string
+        recv: c *chainStore[V]
+        results: value V, found bool, err error
+      - doc: FetchEntry is Fetch with the entry, and is where promotion happens.
+        name: FetchEntry
+        params: ctx context.Context, key string
+        recv: c *chainStore[V]
+        results: entry corecache.EntryValue[V], found bool, err error
+      - doc: |-
+          promote writes entry into every tier nearer than found.
+
+          A failure here never fails the read: the caller already has the value, and
+          turning a degraded cache into a degraded service would be a worse trade. It
+          is reported through ChainConfig.OnPromoteError instead — which is nil by
+          default, and a nil hook is exactly how a near tier that rejects everything
+          stays invisible.
+        name: promote
+        params: ctx context.Context, key string, entry corecache.EntryValue[V], found int
+        recv: c *chainStore[V]
+      - doc: reportPromoteError hands a failed promotion to the configured observer.
+        name: reportPromoteError
+        params: key string, err error
+        recv: c *chainStore[V]
+      - doc: Set writes far-to-near and stops at the first failure. See the type comment.
+        name: Set
+        params: ctx context.Context, key string, entry corecache.EntryValue[V]
+        recv: c *chainStore[V]
+        results: error
+      - doc: |-
+          Delete removes key from EVERY tier, far-to-near, and does not stop at the
+          first failure. See the type comment for why near-first would be worse.
+        name: Delete
+        params: ctx context.Context, key string
+        recv: c *chainStore[V]
+        results: error
+      - doc: |-
+          InvalidateTag invalidates in every tier, far-to-near, and reports the total.
+
+          The total counts REMOVALS, not distinct keys: an entry present in two tiers
+          counts twice. Deduplicating would require the chain to know which keys each
+          tier dropped, which is a list no tier returns — and a number that is quietly
+          approximate is worse than one whose unit is stated.
+        name: InvalidateTag
+        params: ctx context.Context, tag string
+        recv: c *chainStore[V]
+        results: removed int, err error
+      - doc: |-
+          Load fills a chain miss once per key per process, writing through every
+          tier. It does NOT coordinate across replicas — see [corecache.Loader].
+        name: Load
+        params: ctx context.Context, key string, fill corecache.Fill[V]
+        recv: c *chainStore[V]
+        results: value V, err error
+      - doc: fillOnce is the body of the deduplicated chain fill.
+        name: fillOnce
+        params: ctx context.Context, key string, fill corecache.Fill[V]
+        recv: c *chainStore[V]
+        results: value V, err error
+    name: chainStore
+    typeParams: V any
+  - fields:
+      - doc: |-
+          OnPromoteError, if non-nil, is called when a value served from a FAR
+          tier could not be written into a nearer one.
+
+          A failed promotion is not a failed read: the caller already has the
+          value, and failing the call would turn a degraded cache into a degraded
+          service. But it is also not nothing — a near tier that rejects every
+          promotion is a tier that will never be used again, and with this hook nil
+          that is completely invisible. Wire it.
+        name: OnPromoteError
+        type: func(key string, err error)
+    kind: struct
+    name: ChainConfig
+  - fields:
+      - doc: |-
+          MaxEntries caps the live entry count; the least-recently-used entry is
+          evicted above it. It MUST be positive.
+        name: MaxEntries
+        type: int
+      - doc: |-
+          DefaultTTL applies to every entry whose own TTL is zero. Zero means the
+          default is "no deadline", so entries leave only by eviction, by Delete,
+          or by tag invalidation. Negative is refused.
+        name: DefaultTTL
+        type: time.Duration
+      - doc: |-
+          Clock is the time source, injectable so TTL is testable. nil means
+          clock.System. Only the reading half of the port is used — a cache reads
+          time, it never waits for it (ADR 0039).
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          validate applies ADR 0031 to the configuration: refuse what the SDK cannot
+          choose on the caller's behalf, and reinterpret nothing.
+        name: validate
+        recv: c MemoryConfig
+        results: error
+      - doc: clockOrSystem resolves the configured time source.
+        name: clockOrSystem
+        recv: c MemoryConfig
+        results: clock.Clock
+    name: MemoryConfig
+  - doc: |-
+      memoryStore is the in-process store: the kernel LRU+TTL primitive, a tag
+      index beside it, and a singleflight group in front of the fill path.
+
+      # One mutex, taken for reads too
+
+      Everything is under a single sync.Mutex, and Fetch takes it exclusively.
+      That is not an oversight: the primitive's own Fetch already takes a WRITE
+      lock, because a hit promotes the entry and moves counters, so there was
+      never a shared-read path to lose. Serialising the tag index on the SAME lock
+      is what makes the index and the entries agree at every observable moment —
+      with two locks, a key would be briefly live but unindexed, and an
+      InvalidateTag crossing that window would report success while leaving the
+      entry fetchable.
+
+      # onEvict must never lock
+
+      The primitive calls OnEvict after releasing its own lock, but still on the
+      caller's goroutine — the goroutine that is inside one of the methods below,
+      holding s.mu. A callback that took s.mu would deadlock outright, sync.Mutex
+      not being reentrant. So onEvict only APPENDS to s.evicted, a field that is
+      by construction reachable solely while s.mu is held, and the surrounding
+      method drains it. The invariant is short and must stay that way: no path
+      into the primitive runs without s.mu, and onEvict takes no lock.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: lru
+        type: "*kcache.Cache[string, record[V]]"
+      - name: tags
+        type: "*tagIndex"
+      - name: clk
+        type: clock.Clock
+      - doc: ": defaultTTL is applied to an entry whose own TTL is zero."
+        name: defaultTTL
+        type: time.Duration
+      - doc: |-
+          : evicted collects the keys the primitive dropped during the call in
+          : progress. Guarded by mu; see the type comment.
+        name: evicted
+        type: "[]string"
+      - doc: ": group collapses concurrent Load misses on one key into one fill."
+        name: group
+        type: singleflight.Group[string, V]
+    kind: struct
+    methods:
+      - doc: |-
+          onEvict records a key the primitive dropped by capacity or expiry. It takes
+          NO lock — see the memoryStore type comment.
+        name: onEvict
+        params: key string, _ record[V]
+        recv: s *memoryStore[V]
+      - doc: |-
+          drainEvicted unlinks every key the primitive just dropped from the tag
+          index. Caller holds mu.
+        name: drainEvicted
+        recv: s *memoryStore[V]
+      - doc: |-
+          Fetch returns the value under key. It MUTATES the store — recency, counters,
+          lazy expiry — which is why the verb is Fetch.
+
+          ctx is unnamed on purpose: this store never blocks, so there is no point at
+          which a cancellation could be honoured, and consulting ctx would be a check
+          that can only ever pass. The parameter stays because the PORT needs it for
+          tiers that do block.
+        name: Fetch
+        params: _ context.Context, key string
+        recv: s *memoryStore[V]
+        results: value V, found bool, err error
+      - doc: |-
+          FetchEntry returns the whole entry, with the REMAINING lifetime rather than
+          the one originally supplied. See [record] for why that distinction matters.
+        name: FetchEntry
+        params: _ context.Context, key string
+        recv: s *memoryStore[V]
+        results: entry corecache.EntryValue[V], found bool, err error
+      - doc: |-
+          remaining converts a stored deadline into a TTL a caller can hand back to
+          Set. Caller holds nothing — it only reads the clock.
+        name: remaining
+        params: rec record[V]
+        recv: s *memoryStore[V]
+        results: time.Duration
+      - doc: fetchRecord is the one place that touches the primitive on a read path.
+        name: fetchRecord
+        params: key string
+        recv: s *memoryStore[V]
+        results: rec record[V], found bool
+      - doc: |-
+          Set stores entry under key. An entry the store cannot represent is REFUSED
+          rather than reinterpreted — see [validateEntry].
+        name: Set
+        params: _ context.Context, key string, entry corecache.EntryValue[V]
+        recv: s *memoryStore[V]
+        results: error
+      - doc: "Delete removes key. Idempotent: a key that names nothing reports nil."
+        name: Delete
+        params: _ context.Context, key string
+        recv: s *memoryStore[V]
+        results: error
+      - doc: |-
+          InvalidateTag removes every entry carrying tag.
+
+          The cost is O(k) in the entries carrying the tag plus O(T) per entry in that
+          entry's own tags — NOT O(N) in the store. See `tagindex.go` for why the
+          reverse index exists and `BENCH.md` for the measurement at two store sizes.
+
+          removed counts entries dropped from the store. An entry whose TTL had passed
+          but which nothing had yet touched is counted: expiry is lazy, so such an
+          entry still occupies capacity, and removing it is a removal.
+        name: InvalidateTag
+        params: _ context.Context, tag string
+        recv: s *memoryStore[V]
+        results: removed int, err error
+      - doc: |-
+          Load returns the value for key, running fill at most once across all
+          concurrent callers of this key IN THIS PROCESS. It does NOT coordinate
+          across replicas — see [corecache.Loader].
+        name: Load
+        params: ctx context.Context, key string, fill corecache.Fill[V]
+        recv: s *memoryStore[V]
+        results: value V, err error
+      - doc: "fillOnce is the body of the deduplicated call: re-check, fill, store."
+        name: fillOnce
+        params: ctx context.Context, key string, fill corecache.Fill[V]
+        recv: s *memoryStore[V]
+        results: value V, err error
+    name: memoryStore
+    typeParams: V any
+  - doc: |-
+      record is the value the kernel primitive holds: the caller's payload plus the
+      two things the primitive has no concept of.
+
+      expireAt is duplicated here even though the primitive tracks its own TTL,
+      because FetchEntry must report the REMAINING lifetime and the primitive does
+      not expose it. Promoting an entry between tiers with its ORIGINAL TTL would
+      refresh it on every move, so an entry that keeps being promoted would never
+      expire — a cache that cannot be emptied by time.
+
+      tags is the SAME slice the tag index owns, not a copy: one slice means the
+      entry and its index entry can never disagree, and the caller's own slice
+      never reaches in.
+    fields:
+      - name: value
+        type: V
+      - name: expireAt
+        type: time.Time
+      - name: tags
+        type: "[]string"
+    kind: struct
+    name: record
+    typeParams: V any
+  - doc: |-
+      tagIndex maps tags to the keys carrying them, and back.
+
+      # Why two maps and not one
+
+      The naive tag invalidation walks the whole cache and drops every entry whose
+      tag list contains the tag. That is O(N) in the STORE size for an operation
+      whose result is usually a handful of entries, and it puts a full scan under
+      the store's write lock — so a 100 000-entry cache stalls every reader to
+      delete three things.
+
+      byTag answers "which keys carry this tag" in one map lookup, so an
+      invalidation costs O(k) in the keys that actually carry the tag.
+
+      byKey exists only to keep byTag honest. Without it, an entry evicted by the
+      LRU or expired by TTL would leave its key in every one of its tag buckets
+      forever: the buckets would grow without bound, and an invalidation would
+      spend its time deleting keys that no longer exist. byKey is what makes
+      removal O(T) in that key's own tags instead of O(number of tags in the
+      store).
+
+      # What it costs
+
+      Per tagged key: one byKey entry — a string header (16 B) plus a slice header
+      (24 B) plus 16 B per tag — and one byTag inner-map entry per (tag, key) pair.
+      With Go's map overhead that lands near 100 B per key plus roughly 70 B per
+      (tag, key) pair on amd64. The tag TEXT is not duplicated: Go strings are
+      immutable, so both maps hold headers pointing at one backing array.
+      internal/service/data/cache/BENCH.md measures the difference between a tagged and
+      an untagged Set rather than leaving the estimate unchecked.
+
+      Not safe for concurrent use: every method is called with the owning store's
+      mutex held.
+    fields:
+      - name: byKey
+        type: map[string][]string
+      - name: byTag
+        type: map[string]map[string]struct{}
+    kind: struct
+    methods:
+      - doc: |-
+          add indexes key under tags, replacing whatever tags key had before, and
+          returns the deduplicated copy the index now owns.
+
+          The copy is not politeness: the caller's slice is theirs to reuse or mutate
+          after Set returns, and the store keeps this one instead so an entry and its
+          index entry are literally the same slice.
+        name: add
+        params: key string, tags []string
+        recv: t *tagIndex
+        results: "[]string"
+      - doc: |-
+          remove unlinks key from every tag it carried. It is the operation that keeps
+          the reverse index from growing without bound, so it MUST be called on every
+          path that drops an entry: Delete, overwrite, LRU eviction and TTL expiry.
+        name: remove
+        params: key string
+        recv: t *tagIndex
+      - doc: |-
+          keysFor returns the keys carrying tag, as a fresh slice.
+
+          The copy is not defensive politeness: the caller deletes each key, which
+          mutates the very bucket it would otherwise be ranging over.
+        name: keysFor
+        params: tag string
+        recv: t *tagIndex
+        results: "[]string"
+    name: tagIndex
+  - doc: |-
+      tier is one level of a chain, resolved to the three interfaces a tier must
+      answer. Resolving them ONCE at construction is what keeps promotion faithful
+      (see [corecache.CacheChainMisconfigured]) and keeps the read path free of
+      repeated type assertions.
+    fields:
+      - name: store
+        type: corecache.Store[V]
+      - name: entry
+        type: corecache.EntryFetcher[V]
+      - name: tags
+        type: corecache.Tagger
+    kind: struct
+    name: tier
+    typeParams: V any
+vars:
+  - doc: |-
+      Compile-time assertions that both stores still answer every contract they
+      claim. They matter more here than in most packages: NewMemory and NewChain
+      return the PORT, and the three capabilities beyond it are reached by type
+      assertion — so a sibling silently dropped would not fail to compile anywhere
+      and would not fail at run time either. It would take the caller's `ok ==
+      false` branch, which is written as the graceful fallback. A cache that
+      quietly stops being invalidatable is exactly the defect ADR 0049 spends its
+      tag section preventing.
+
+      Collecting them also makes the set greppable: every type that must satisfy a
+      port is named here, so a port that quietly lost an implementation is one diff
+      away from being visible.
+    grouped: true
+    items:
+      - name: _
+        type: corecache.Store[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.EntryFetcher[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.Tagger
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.Loader[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.Store[struct{}]
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.EntryFetcher[struct{}]
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.Tagger
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.Loader[struct{}]
+        value: (*chainStore[struct{}])(nil)
+    name: _

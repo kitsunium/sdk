@@ -1,0 +1,52 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: "Native reports that this GOOS has a file lock: flock(2), here."
+    items:
+      - name: Native
+        type: bool
+        value: "true"
+    name: Native
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - TryLock
+      - Unlock
+    name: flock.go
+  - decls:
+      - Native
+      - tryLock
+      - unlock
+    name: flock_unix.go
+functions:
+  - name: TryLock
+    params: file *os.File
+    results: held bool, err error
+  - name: Unlock
+    params: file *os.File
+    results: error
+  - doc: |-
+      tryLock is [TryLock] over flock(LOCK_EX|LOCK_NB).
+
+      It is deliberately non-blocking — see the package comment for what a
+      blocking LOCK_EX costs a caller with a deadline.
+    name: tryLock
+    params: file *os.File
+    results: held bool, err error
+  - doc: |-
+      unlock is [Unlock] over flock(LOCK_UN), on the descriptor the lock was taken
+      through.
+    name: unlock
+    params: file *os.File
+    results: error
+imports:
+  errors: errors
+  os: os
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/fs/flock
+  name: flock
+  purpose: "Package flock takes an exclusive lock on a whole file WITHOUT waiting for it, and gives it back: flock(2) on the Unix kernels that have it, LockFileEx over every byte of the file on Windows (ADR 0081, ADR 0159)."
+types: []

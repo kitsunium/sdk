@@ -1,0 +1,333 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: WithOnReap
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.onReap
+                value: fn
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: resolve
+        kind: internal
+    steps:
+      - bind: cfg
+        eval: resolve(opts)
+        to: resolve
+      - return: "&unixReaper{onReap: cfg.onReap, clk: clock.System, sweepEvery: timerSweepEvery, notify: signal.Notify}"
+  - of: (*unixReaper).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).Start
+        kind: self
+      - id: r.loop
+        kind: internal
+    steps:
+      - lock:
+          mutex: r.mu
+      - opt:
+          do:
+            - return: ""
+          when: r.running || r.stopping
+      - set: r.sigCh
+        value: make(chan os.Signal, 1)
+      - set: r.done
+        value: make(chan struct{})
+      - set: r.stopped
+        value: make(chan struct{})
+      - set: r.closeDone
+        value: "&sync.Once{}"
+      - set: r.running
+        value: "true"
+      - go: r.loop(r.sigCh, r.done, r.stopped)
+        to: r.loop
+  - of: (*unixReaper).loop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).loop
+        kind: self
+      - id: signal
+        kind: stdlib
+      - id: r.markStopped
+        kind: internal
+      - id: r.drain
+        kind: internal
+      - id: r.clk.NewTicker
+        kind: value
+      - id: ticker.Stop
+        kind: value
+      - id: ticker.C
+        kind: value
+    steps:
+      - eval: r.notify(sigCh, syscall.SIGCHLD)
+      - defer: signal.Stop(sigCh)
+        to: signal
+      - defer: close(stopped)
+      - defer: r.markStopped()
+        to: r.markStopped
+      - eval: r.drain()
+        to: r.drain
+      - var:
+          name: tick
+          type: <-chan time.Time
+      - opt:
+          do:
+            - bind: ticker
+              eval: r.clk.NewTicker(r.sweepEvery)
+              to: r.clk.NewTicker
+            - defer: ticker.Stop()
+              to: ticker.Stop
+            - set: tick
+              to: ticker.C
+              value: ticker.C()
+          when: r.sweepEvery > 0
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: _, ok := <-sigCh
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!ok"
+                      - eval: r.drain()
+                        to: r.drain
+                  - comm: <-tick
+                    do:
+                      - eval: r.drain()
+                        to: r.drain
+                  - comm: <-done
+                    do:
+                      - eval: r.drain()
+                        to: r.drain
+                      - return: ""
+          forever: true
+  - of: (*unixReaper).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).Stop
+        kind: self
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+      - id: closeDone.Do
+        kind: value
+    steps:
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - opt:
+          do:
+            - eval: r.mu.Unlock()
+              to: r.mu.Unlock
+            - return: ""
+          when: "!r.running"
+      - bind: stopped
+        eval: r.stopped
+      - opt:
+          do:
+            - eval: r.mu.Unlock()
+              to: r.mu.Unlock
+            - eval: <-stopped
+            - return: ""
+          when: r.stopping
+      - bind: done
+        eval: r.done
+      - bind: closeDone
+        eval: r.closeDone
+      - set: r.stopping
+        value: "true"
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
+      - eval: |-
+          closeDone.Do(func() {
+          		//: close exactly once for this cycle.
+          		close(done)
+          	})
+        to: closeDone.Do
+      - eval: <-stopped
+  - of: (*unixReaper).markStopped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).markStopped
+        kind: self
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+    steps:
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - set: r.running
+        value: "false"
+      - set: r.stopping
+        value: "false"
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
+  - of: (*unixReaper).ReapOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).ReapOnce
+        kind: self
+      - id: r.drainResult
+        kind: internal
+    steps:
+      - return: r.drainResult()
+        to: r.drainResult
+  - of: (*unixReaper).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).drain
+        kind: self
+      - id: r.drainResult
+        kind: internal
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+    steps:
+      - bind: _, err
+        eval: r.drainResult()
+        to: r.drainResult
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - set: r.lastErr
+        value: err
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
+  - of: (*unixReaper).LastError
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).LastError
+        kind: self
+      - id: r.mu.RLock
+        kind: value
+      - id: r.mu.RUnlock
+        kind: value
+    steps:
+      - eval: r.mu.RLock()
+        to: r.mu.RLock
+      - bind: err
+        eval: r.lastErr
+      - eval: r.mu.RUnlock()
+        to: r.mu.RUnlock
+      - return: err
+  - of: (*unixReaper).drainResult
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).drainResult
+        kind: self
+      - id: childwait
+        kind: package
+      - id: r.classifyWaitErr
+        kind: internal
+      - id: r.fireOnReap
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: pid, waitErr
+              eval: childwait.ReapAny()
+              to: childwait
+            - opt:
+                do:
+                  - bind: done, fatal
+                    eval: r.classifyWaitErr(waitErr, reaped)
+                    to: r.classifyWaitErr
+                  - opt:
+                      do:
+                        - continue: true
+                      when: "!done"
+                  - return: reaped, fatal
+                when: waitErr != nil
+            - opt:
+                do:
+                  - eval: r.fireOnReap(reaped)
+                    to: r.fireOnReap
+                  - return: reaped, nil
+                when: pid <= 0
+            - op: ++
+              set: reaped
+          forever: true
+  - of: (*unixReaper).classifyWaitErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*unixReaper).classifyWaitErr
+        kind: self
+      - id: r.fireOnReap
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: waitErr == syscall.EINTR
+      - opt:
+          do:
+            - eval: r.fireOnReap(reaped)
+              to: r.fireOnReap
+            - return: true, nil
+          when: waitErr == syscall.ECHILD
+      - eval: r.fireOnReap(reaped)
+        to: r.fireOnReap
+      - return: |-
+          true, errs.Wrap(waitErr, errs.WrapParams{
+          		Code:     coreproc.CodeReapFailed,
+          		Reason:   "REAP_FAILED",
+          		Public:   "Could not reap child processes",
+          		Private:  "service/proc/reaper.ReapOnce: wait4 failed with an error other than ECHILD",
+          		ExitCode: exitOSErr,
+          	}, errs.Int("reaped", reaped))
+  - of: (*unixReaper).fireOnReap
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.onReap == nil
+      - eval: r.onReap(n)
+  - of: IsPID1
+    steps:
+      - return: os.Getpid() == 1
+  - of: SetChildSubreaper
+    participants:
+      - id: caller
+        kind: actor
+      - id: SetChildSubreaper
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: _, _, errno
+        eval: syscall.Syscall6(syscall.SYS_PRCTL, prSetChildSubreaper, 1, 0, 0, 0, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: nil
+          when: errno == 0
+      - return: |-
+          errs.Wrap(errno, errs.WrapParams{
+          		Code:     coreproc.CodeSubreaperFailed,
+          		Reason:   "SUBREAPER_FAILED",
+          		Public:   "Could not enable child-subreaper mode",
+          		Private:  "service/proc/reaper.SetChildSubreaper: prctl(PR_SET_CHILD_SUBREAPER) failed",
+          		ExitCode: exitOSErr,
+          	})
+        to: errs

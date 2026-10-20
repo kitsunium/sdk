@@ -1,0 +1,832 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: readAllBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: readAllBounded
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: limit
+        eval: max
+      - opt:
+          do:
+            - op: ++
+              set: limit
+          when: limit < math.MaxInt64
+      - bind: limited
+        eval: io.LimitReader(r, limit)
+        to: io
+      - bind: buf, readErr
+        eval: io.ReadAll(limited)
+        to: io
+      - opt:
+          do:
+            - return: nil, false, readErr
+          when: readErr != nil
+      - opt:
+          do:
+            - return: nil, true, nil
+          when: int64(len(buf)) > max
+      - return: buf, false, nil
+  - of: flateCompressor.Algorithm
+    steps:
+      - return: "\"flate\""
+  - of: flateCompressor.Compress
+    participants:
+      - id: caller
+        kind: actor
+      - id: flateCompressor.Compress
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: takeFlateWriter
+        kind: internal
+      - id: releaseFlateWriter
+        kind: internal
+      - id: w.Write
+        kind: value
+      - id: w.Close
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - bind: buf
+        eval: bytes.NewBuffer(dst)
+        to: bytes
+      - bind: w, nerr
+        eval: takeFlateWriter(buf)
+        to: takeFlateWriter
+      - opt:
+          do:
+            - return: dst, errs.Wrap(nerr, flateWrap)
+          when: nerr != nil
+      - defer: releaseFlateWriter(w)
+        to: releaseFlateWriter
+      - opt:
+          do:
+            - return: dst, errs.Wrap(werr, flateWrap)
+          init:
+            bind: _, werr
+            eval: w.Write(src)
+            to: w.Write
+          when: werr != nil
+      - opt:
+          do:
+            - return: dst, errs.Wrap(cerr, flateWrap)
+          init:
+            bind: cerr
+            eval: w.Close()
+            to: w.Close
+          when: cerr != nil
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
+  - of: flateCompressor.DecompressBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: flateCompressor.DecompressBounded
+        kind: self
+      - id: flateDecompressCore
+        kind: internal
+    steps:
+      - bind: ceiling
+        eval: max
+      - opt:
+          do:
+            - set: ceiling
+              value: "0"
+          when: ceiling < 0
+      - bind: out, tooLarge, derr
+        eval: flateDecompressCore(dst, src, ceiling)
+        to: flateDecompressCore
+      - opt:
+          do:
+            - return: out, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, coretransform.DecompressedTooLarge
+          when: tooLarge
+      - return: out, nil
+  - of: flateCompressor.Decompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: flateCompressor.Decompress
+        kind: self
+      - id: flateDecompress
+        kind: internal
+    steps:
+      - return: flateDecompress(dst, src, maxDecompressedBytes)
+        to: flateDecompress
+  - of: flateDecompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: flateDecompress
+        kind: self
+      - id: flateDecompressCore
+        kind: internal
+    steps:
+      - bind: out, tooLarge, derr
+        eval: flateDecompressCore(dst, src, max)
+        to: flateDecompressCore
+      - opt:
+          do:
+            - return: out, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, coretransform.FlateFailed
+          when: tooLarge
+      - return: out, nil
+  - of: flateDecompressCore
+    participants:
+      - id: caller
+        kind: actor
+      - id: flateDecompressCore
+        kind: self
+      - id: takeFlateReader
+        kind: internal
+      - id: releaseFlateReader
+        kind: internal
+      - id: readAllBounded
+        kind: internal
+      - id: box.rc.Close
+        kind: value
+    steps:
+      - bind: box, rerr
+        eval: takeFlateReader(bytes.NewReader(src))
+        to: takeFlateReader
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(rerr, flateWrap)
+          when: rerr != nil
+      - defer: releaseFlateReader(box)
+        to: releaseFlateReader
+      - bind: plain, overflow, derr
+        eval: readAllBounded(box.rc, max)
+        to: readAllBounded
+      - opt:
+          do:
+            - set: derr
+              value: cerr
+          init:
+            bind: cerr
+            eval: box.rc.Close()
+            to: box.rc.Close
+          when: cerr != nil && derr == nil
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(derr, flateWrap)
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, true, nil
+          when: overflow
+      - return: append(dst, plain...), false, nil
+  - of: gzipCompressor.Algorithm
+    steps:
+      - return: "\"gzip\""
+  - of: gzipCompressor.Compress
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipCompressor.Compress
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: takeGzipWriter
+        kind: internal
+      - id: releaseGzipWriter
+        kind: internal
+      - id: w.Write
+        kind: value
+      - id: w.Close
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - bind: buf
+        eval: bytes.NewBuffer(dst)
+        to: bytes
+      - bind: w
+        eval: takeGzipWriter(buf)
+        to: takeGzipWriter
+      - defer: releaseGzipWriter(w)
+        to: releaseGzipWriter
+      - opt:
+          do:
+            - return: dst, errs.Wrap(werr, gzipWrap)
+          init:
+            bind: _, werr
+            eval: w.Write(src)
+            to: w.Write
+          when: werr != nil
+      - opt:
+          do:
+            - return: dst, errs.Wrap(cerr, gzipWrap)
+          init:
+            bind: cerr
+            eval: w.Close()
+            to: w.Close
+          when: cerr != nil
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
+  - of: gzipCompressor.DecompressBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipCompressor.DecompressBounded
+        kind: self
+      - id: gzipDecompressCore
+        kind: internal
+    steps:
+      - bind: ceiling
+        eval: max
+      - opt:
+          do:
+            - set: ceiling
+              value: "0"
+          when: ceiling < 0
+      - bind: out, tooLarge, derr
+        eval: gzipDecompressCore(dst, src, ceiling)
+        to: gzipDecompressCore
+      - opt:
+          do:
+            - return: out, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, coretransform.DecompressedTooLarge
+          when: tooLarge
+      - return: out, nil
+  - of: gzipCompressor.Decompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipCompressor.Decompress
+        kind: self
+      - id: gzipDecompress
+        kind: internal
+    steps:
+      - return: gzipDecompress(dst, src, maxDecompressedBytes)
+        to: gzipDecompress
+  - of: gzipDecompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipDecompress
+        kind: self
+      - id: gzipDecompressCore
+        kind: internal
+    steps:
+      - bind: out, tooLarge, derr
+        eval: gzipDecompressCore(dst, src, max)
+        to: gzipDecompressCore
+      - opt:
+          do:
+            - return: out, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, coretransform.GzipFailed
+          when: tooLarge
+      - return: out, nil
+  - of: gzipDecompressCore
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipDecompressCore
+        kind: self
+      - id: takeGzipReader
+        kind: internal
+      - id: releaseGzipReader
+        kind: internal
+      - id: readAllBounded
+        kind: internal
+      - id: box.rc.Close
+        kind: value
+    steps:
+      - bind: box, rerr
+        eval: takeGzipReader(bytes.NewReader(src))
+        to: takeGzipReader
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(rerr, gzipWrap)
+          when: rerr != nil
+      - defer: releaseGzipReader(box)
+        to: releaseGzipReader
+      - bind: plain, overflow, derr
+        eval: readAllBounded(box.rc, max)
+        to: readAllBounded
+      - opt:
+          do:
+            - set: derr
+              value: cerr
+          init:
+            bind: cerr
+            eval: box.rc.Close()
+            to: box.rc.Close
+          when: cerr != nil && derr == nil
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(derr, gzipWrap)
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, true, nil
+          when: overflow
+      - return: append(dst, plain...), false, nil
+  - of: newZlibWriterPools
+    steps:
+      - bind: pools
+        eval: make([]*recycler.Pool[*zlib.Writer], 0, zlib.BestCompression-zlib.HuffmanOnly+1)
+      - loop:
+          cond: level <= zlib.BestCompression
+          do:
+            - set: pools
+              value: append(pools, recycler.NewPool(func() *zlib.Writer { return nil }))
+          init: level := zlib.HuffmanOnly
+          post: level++
+      - return: pools
+  - of: zlibWriterPoolFor
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: level < zlib.HuffmanOnly || level > zlib.BestCompression
+      - return: zlibWriterPools[level-zlib.HuffmanOnly]
+  - of: takeGzipWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeGzipWriter
+        kind: self
+      - id: gzipWriterPool.Get
+        kind: value
+      - id: gzip
+        kind: stdlib
+      - id: w.Reset
+        kind: value
+    steps:
+      - bind: w
+        eval: gzipWriterPool.Get()
+        to: gzipWriterPool.Get
+      - opt:
+          do:
+            - return: gzip.NewWriter(dst)
+              to: gzip
+          when: w == nil
+      - eval: w.Reset(dst)
+        to: w.Reset
+      - return: w
+  - of: releaseGzipWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseGzipWriter
+        kind: self
+      - id: w.Reset
+        kind: value
+      - id: gzipWriterPool.Put
+        kind: value
+    steps:
+      - eval: w.Reset(io.Discard)
+        to: w.Reset
+      - eval: gzipWriterPool.Put(w)
+        to: gzipWriterPool.Put
+  - of: takeFlateWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeFlateWriter
+        kind: self
+      - id: flateWriterPool.Get
+        kind: value
+      - id: flate
+        kind: stdlib
+      - id: w.Reset
+        kind: value
+    steps:
+      - bind: w
+        eval: flateWriterPool.Get()
+        to: flateWriterPool.Get
+      - opt:
+          do:
+            - return: flate.NewWriter(dst, flate.DefaultCompression)
+              to: flate
+          when: w == nil
+      - eval: w.Reset(dst)
+        to: w.Reset
+      - return: w, nil
+  - of: releaseFlateWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseFlateWriter
+        kind: self
+      - id: w.Reset
+        kind: value
+      - id: flateWriterPool.Put
+        kind: value
+    steps:
+      - eval: w.Reset(io.Discard)
+        to: w.Reset
+      - eval: flateWriterPool.Put(w)
+        to: flateWriterPool.Put
+  - of: takeZlibWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeZlibWriter
+        kind: self
+      - id: zlibWriterPoolFor
+        kind: internal
+      - id: zlib
+        kind: stdlib
+      - id: pool.Get
+        kind: value
+      - id: w.Reset
+        kind: value
+    steps:
+      - bind: pool
+        eval: zlibWriterPoolFor(level)
+        to: zlibWriterPoolFor
+      - opt:
+          do:
+            - return: zlib.NewWriterLevel(dst, level)
+              to: zlib
+          when: pool == nil
+      - bind: w
+        eval: pool.Get()
+        to: pool.Get
+      - opt:
+          do:
+            - return: zlib.NewWriterLevel(dst, level)
+              to: zlib
+          when: w == nil
+      - eval: w.Reset(dst)
+        to: w.Reset
+      - return: w, nil
+  - of: releaseZlibWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseZlibWriter
+        kind: self
+      - id: w.Reset
+        kind: value
+      - id: zlibWriterPoolFor(level).Put
+        kind: value
+    steps:
+      - eval: w.Reset(io.Discard)
+        to: w.Reset
+      - eval: zlibWriterPoolFor(level).Put(w)
+        to: zlibWriterPoolFor(level).Put
+  - of: takeGzipReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeGzipReader
+        kind: self
+      - id: gzipReaderPool.Get
+        kind: value
+      - id: gzip
+        kind: stdlib
+      - id: gzipReaderPool.Put
+        kind: value
+      - id: decoder.Reset
+        kind: value
+    steps:
+      - bind: held
+        eval: gzipReaderPool.Get()
+        to: gzipReaderPool.Get
+      - bind: decoder, pooled
+        eval: held.rc.(*gzip.Reader)
+      - opt:
+          do:
+            - bind: r, nerr
+              eval: gzip.NewReader(src)
+              to: gzip
+            - opt:
+                do:
+                  - set: held.rc, held.scheme
+                    value: nil, schemeNone
+                  - eval: gzipReaderPool.Put(held)
+                    to: gzipReaderPool.Put
+                  - return: nil, nerr
+                when: nerr != nil
+            - set: held.rc, held.scheme
+              value: r, schemeGzip
+            - return: held, nil
+          when: "!pooled || held.scheme != schemeGzip"
+      - opt:
+          do:
+            - eval: gzipReaderPool.Put(held)
+              to: gzipReaderPool.Put
+            - return: nil, rerr
+          init:
+            bind: rerr
+            eval: decoder.Reset(src)
+            to: decoder.Reset
+          when: rerr != nil
+      - return: held, nil
+  - of: releaseGzipReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseGzipReader
+        kind: self
+      - id: gzipReaderPool.Put
+        kind: value
+    steps:
+      - eval: gzipReaderPool.Put(box)
+        to: gzipReaderPool.Put
+  - of: takeFlateReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeFlateReader
+        kind: self
+      - id: takeFlateReaderFrom
+        kind: internal
+    steps:
+      - return: takeFlateReaderFrom(flateReaderPool, src)
+        to: takeFlateReaderFrom
+  - of: takeFlateReaderFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeFlateReaderFrom
+        kind: self
+      - id: pool.Get
+        kind: internal
+      - id: resetter.Reset
+        kind: value
+      - id: pool.Put
+        kind: internal
+    steps:
+      - bind: held
+        eval: pool.Get()
+        to: pool.Get
+      - bind: resetter, pooled
+        eval: held.rc.(flate.Resetter)
+      - opt:
+          do:
+            - set: held.rc, held.scheme
+              value: flate.NewReader(src), schemeFlate
+            - return: held, nil
+          when: "!pooled || held.scheme != schemeFlate"
+      - opt:
+          do:
+            - eval: pool.Put(held)
+              to: pool.Put
+            - return: nil, rerr
+          init:
+            bind: rerr
+            eval: resetter.Reset(src, nil)
+            to: resetter.Reset
+          when: rerr != nil
+      - return: held, nil
+  - of: releaseFlateReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseFlateReader
+        kind: self
+      - id: flateReaderPool.Put
+        kind: value
+    steps:
+      - eval: flateReaderPool.Put(box)
+        to: flateReaderPool.Put
+  - of: takeZlibReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeZlibReader
+        kind: self
+      - id: zlibReaderPool.Get
+        kind: value
+      - id: zlib
+        kind: stdlib
+      - id: zlibReaderPool.Put
+        kind: value
+      - id: resetter.Reset
+        kind: value
+    steps:
+      - bind: held
+        eval: zlibReaderPool.Get()
+        to: zlibReaderPool.Get
+      - bind: resetter, pooled
+        eval: held.rc.(zlib.Resetter)
+      - opt:
+          do:
+            - bind: r, nerr
+              eval: zlib.NewReader(src)
+              to: zlib
+            - opt:
+                do:
+                  - set: held.rc, held.scheme
+                    value: nil, schemeNone
+                  - eval: zlibReaderPool.Put(held)
+                    to: zlibReaderPool.Put
+                  - return: nil, nerr
+                when: nerr != nil
+            - set: held.rc, held.scheme
+              value: r, schemeZlib
+            - return: held, nil
+          when: "!pooled || held.scheme != schemeZlib"
+      - opt:
+          do:
+            - eval: zlibReaderPool.Put(held)
+              to: zlibReaderPool.Put
+            - return: nil, rerr
+          init:
+            bind: rerr
+            eval: resetter.Reset(src, nil)
+            to: resetter.Reset
+          when: rerr != nil
+      - return: held, nil
+  - of: releaseZlibReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseZlibReader
+        kind: self
+      - id: zlibReaderPool.Put
+        kind: value
+    steps:
+      - eval: zlibReaderPool.Put(box)
+        to: zlibReaderPool.Put
+  - of: NewZlibCompressor
+    steps:
+      - return: "zlibCompressor{level: usableZlibLevel(level)}"
+  - of: usableZlibLevel
+    steps:
+      - opt:
+          do:
+            - return: zlib.DefaultCompression
+          when: level < zlib.HuffmanOnly || level > zlib.BestCompression || level == zlib.NoCompression
+      - return: level
+  - of: zlibCompressor.Algorithm
+    steps:
+      - return: "\"zlib\""
+  - of: zlibCompressor.Compress
+    participants:
+      - id: caller
+        kind: actor
+      - id: zlibCompressor.Compress
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: takeZlibWriter
+        kind: internal
+      - id: releaseZlibWriter
+        kind: internal
+      - id: w.Write
+        kind: value
+      - id: w.Close
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - bind: buf
+        eval: bytes.NewBuffer(dst)
+        to: bytes
+      - bind: w, nerr
+        eval: takeZlibWriter(buf, c.level)
+        to: takeZlibWriter
+      - opt:
+          do:
+            - return: dst, errs.Wrap(nerr, zlibWrap)
+          when: nerr != nil
+      - defer: releaseZlibWriter(w, c.level)
+        to: releaseZlibWriter
+      - opt:
+          do:
+            - return: dst, errs.Wrap(werr, zlibWrap)
+          init:
+            bind: _, werr
+            eval: w.Write(src)
+            to: w.Write
+          when: werr != nil
+      - opt:
+          do:
+            - return: dst, errs.Wrap(cerr, zlibWrap)
+          init:
+            bind: cerr
+            eval: w.Close()
+            to: w.Close
+          when: cerr != nil
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
+  - of: zlibCompressor.DecompressBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: zlibCompressor.DecompressBounded
+        kind: self
+      - id: zlibDecompressCore
+        kind: internal
+    steps:
+      - bind: ceiling
+        eval: max
+      - opt:
+          do:
+            - set: ceiling
+              value: "0"
+          when: ceiling < 0
+      - bind: out, tooLarge, derr
+        eval: zlibDecompressCore(dst, src, ceiling)
+        to: zlibDecompressCore
+      - opt:
+          do:
+            - return: out, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, coretransform.DecompressedTooLarge
+          when: tooLarge
+      - return: out, nil
+  - of: zlibCompressor.Decompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: zlibCompressor.Decompress
+        kind: self
+      - id: zlibDecompress
+        kind: internal
+    steps:
+      - return: zlibDecompress(dst, src, maxDecompressedBytes)
+        to: zlibDecompress
+  - of: zlibDecompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: zlibDecompress
+        kind: self
+      - id: zlibDecompressCore
+        kind: internal
+    steps:
+      - bind: out, tooLarge, derr
+        eval: zlibDecompressCore(dst, src, max)
+        to: zlibDecompressCore
+      - opt:
+          do:
+            - return: out, derr
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, coretransform.ZlibFailed
+          when: tooLarge
+      - return: out, nil
+  - of: zlibDecompressCore
+    participants:
+      - id: caller
+        kind: actor
+      - id: zlibDecompressCore
+        kind: self
+      - id: takeZlibReader
+        kind: internal
+      - id: releaseZlibReader
+        kind: internal
+      - id: readAllBounded
+        kind: internal
+      - id: box.rc.Close
+        kind: value
+    steps:
+      - bind: box, rerr
+        eval: takeZlibReader(bytes.NewReader(src))
+        to: takeZlibReader
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(rerr, zlibWrap)
+          when: rerr != nil
+      - defer: releaseZlibReader(box)
+        to: releaseZlibReader
+      - bind: plain, overflow, derr
+        eval: readAllBounded(box.rc, max)
+        to: readAllBounded
+      - opt:
+          do:
+            - set: derr
+              value: cerr
+          init:
+            bind: cerr
+            eval: box.rc.Close()
+            to: box.rc.Close
+          when: cerr != nil && derr == nil
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(derr, zlibWrap)
+          when: derr != nil
+      - opt:
+          do:
+            - return: dst, true, nil
+          when: overflow
+      - return: append(dst, plain...), false, nil

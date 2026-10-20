@@ -1,0 +1,302 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewCache
+    steps:
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - bind: maxEntries
+        eval: max(cfg.MaxEntries, 0)
+      - return: |-
+          &Cache[K, V]{
+          		clk:        clk,
+          		maxEntries: maxEntries,
+          		defaultTTL: cfg.DefaultTTL,
+          		onEvict:    cfg.OnEvict,
+          		items:      make(map[K]*entry[K, V], maxEntries),
+          	}
+  - of: (*Cache).Fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).Fetch
+        kind: self
+      - id: c.removeEvict
+        kind: internal
+      - id: c.moveFront
+        kind: internal
+    steps:
+      - var:
+          name: pending
+          type: "[]evictionValue[K, V]"
+      - defer: func() { c.notifyEvicted(pending) }()
+      - lock:
+          mutex: c.mu
+      - bind: ent, found
+        eval: c.items[key]
+      - opt:
+          do:
+            - op: ++
+              set: c.misses
+            - var:
+                name: zero
+                type: V
+            - return: zero, false
+          when: "!found"
+      - opt:
+          do:
+            - eval: c.removeEvict(ent, &pending)
+              to: c.removeEvict
+            - op: ++
+              set: c.misses
+            - var:
+                name: zero
+                type: V
+            - return: zero, false
+          when: c.expired(ent)
+      - eval: c.moveFront(ent)
+        to: c.moveFront
+      - op: ++
+        set: c.hits
+      - return: ent.val, true
+  - of: (*Cache).Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).Set
+        kind: self
+      - id: c.setTTL
+        kind: internal
+    steps:
+      - eval: c.setTTL(key, val, c.defaultTTL)
+        to: c.setTTL
+  - of: (*Cache).SetTTL
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).SetTTL
+        kind: self
+      - id: c.setTTL
+        kind: internal
+    steps:
+      - eval: c.setTTL(key, val, ttl)
+        to: c.setTTL
+  - of: (*Cache).setTTL
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).setTTL
+        kind: self
+      - id: c.clk.Now().Add
+        kind: value
+      - id: c.moveFront
+        kind: internal
+      - id: c.pushFront
+        kind: internal
+      - id: c.evictIfNeeded
+        kind: internal
+    steps:
+      - var:
+          name: pending
+          type: "[]evictionValue[K, V]"
+      - defer: func() { c.notifyEvicted(pending) }()
+      - lock:
+          mutex: c.mu
+      - var:
+          name: exp
+          type: time.Time
+      - opt:
+          do:
+            - set: exp
+              to: c.clk.Now().Add
+              value: c.clk.Now().Add(ttl)
+          when: ttl > 0
+      - opt:
+          do:
+            - set: ent.val
+              value: val
+            - set: ent.expireAt
+              value: exp
+            - eval: c.moveFront(ent)
+              to: c.moveFront
+            - return: ""
+          init:
+            bind: ent, found
+            eval: c.items[key]
+          when: found
+      - bind: ent
+        eval: "&entry[K, V]{key: key, val: val, expireAt: exp}"
+      - set: c.items[key]
+        value: ent
+      - eval: c.pushFront(ent)
+        to: c.pushFront
+      - eval: c.evictIfNeeded(&pending)
+        to: c.evictIfNeeded
+  - of: (*Cache).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).Delete
+        kind: self
+      - id: c.unlink
+        kind: internal
+    steps:
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - eval: c.unlink(ent)
+              to: c.unlink
+            - eval: delete(c.items, key)
+          init:
+            bind: ent, found
+            eval: c.items[key]
+          when: found
+  - of: (*Cache).Len
+    steps:
+      - lock:
+          mutex: c.mu
+          read: true
+      - return: len(c.items)
+  - of: (*Cache).Purge
+    steps:
+      - lock:
+          mutex: c.mu
+      - set: c.items
+        value: make(map[K]*entry[K, V], c.maxEntries)
+      - set: c.head
+        value: nil
+      - set: c.tail
+        value: nil
+  - of: (*Cache).Stats
+    steps:
+      - lock:
+          mutex: c.mu
+          read: true
+      - return: "StatsValue{Hits: c.hits, Misses: c.misses, Evictions: c.evictions}"
+  - of: (*Cache).expired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).expired
+        kind: self
+      - id: c.clk.Now().Before
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: ent.expireAt.IsZero()
+      - return: "!c.clk.Now().Before(ent.expireAt)"
+        to: c.clk.Now().Before
+  - of: (*Cache).evictIfNeeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).evictIfNeeded
+        kind: self
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - loop:
+          cond: c.maxEntries > 0 && len(c.items) > c.maxEntries
+          do:
+            - eval: c.removeEvict(c.tail, pending)
+              to: c.removeEvict
+  - of: (*Cache).removeEvict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).removeEvict
+        kind: self
+      - id: c.unlink
+        kind: internal
+    steps:
+      - eval: c.unlink(ent)
+        to: c.unlink
+      - eval: delete(c.items, ent.key)
+      - op: ++
+        set: c.evictions
+      - opt:
+          do:
+            - set: "*pending"
+              value: "append(*pending, evictionValue[K, V]{key: ent.key, val: ent.val})"
+          when: c.onEvict != nil
+  - of: (*Cache).notifyEvicted
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(pending) == 0
+      - loop:
+          do:
+            - eval: c.onEvict(ev.key, ev.val)
+          key: _
+          range: pending
+          value: ev
+  - of: (*Cache).moveFront
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).moveFront
+        kind: self
+      - id: c.unlink
+        kind: internal
+      - id: c.pushFront
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.head == ent
+      - eval: c.unlink(ent)
+        to: c.unlink
+      - eval: c.pushFront(ent)
+        to: c.pushFront
+  - of: (*Cache).pushFront
+    steps:
+      - set: ent.prev
+        value: nil
+      - set: ent.next
+        value: c.head
+      - opt:
+          do:
+            - set: c.head.prev
+              value: ent
+          when: c.head != nil
+      - set: c.head
+        value: ent
+      - opt:
+          do:
+            - set: c.tail
+              value: ent
+          when: c.tail == nil
+  - of: (*Cache).unlink
+    steps:
+      - alt:
+          - do:
+              - set: ent.prev.next
+                value: ent.next
+            when: ent.prev != nil
+          - do:
+              - set: c.head
+                value: ent.next
+            else: true
+      - alt:
+          - do:
+              - set: ent.next.prev
+                value: ent.prev
+            when: ent.next != nil
+          - do:
+              - set: c.tail
+                value: ent.prev
+            else: true
+      - set: ent.prev
+        value: nil
+      - set: ent.next
+        value: nil

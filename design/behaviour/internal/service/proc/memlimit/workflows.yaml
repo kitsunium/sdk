@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: dedupe
+    steps:
+      - bind: unique
+        eval: make([]string, 0, len(paths))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: slices.Contains(unique, candidate)
+            - set: unique
+              value: append(unique, candidate)
+          key: _
+          range: paths
+          value: candidate
+      - return: unique

@@ -1,0 +1,80 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: UUIDv4Scheme is the random-UUID scheme key.
+        name: UUIDv4Scheme
+        type: Scheme
+        value: "\"uuidv4\""
+      - doc: UUIDv7Scheme is the time-ordered UUID scheme key.
+        name: UUIDv7Scheme
+        type: Scheme
+        value: "\"uuidv7\""
+      - doc: ULIDScheme is the ULID scheme key.
+        name: ULIDScheme
+        type: Scheme
+        value: "\"ulid\""
+      - doc: SnowflakeScheme is the snowflake scheme key.
+        name: SnowflakeScheme
+        type: Scheme
+        value: "\"snowflake\""
+      - doc: NanoIDScheme is the NanoID scheme key.
+        name: NanoIDScheme
+        type: Scheme
+        value: "\"nanoid\""
+      - doc: KSUIDScheme is the KSUID scheme key.
+        name: KSUIDScheme
+        type: Scheme
+        value: "\"ksuid\""
+      - doc: |-
+          TypeIDScheme is the TypeID scheme key. It is the only scheme key New
+          cannot resolve: a TypeID needs a type prefix, and there is no
+          non-arbitrary prefix the SDK could choose on a caller's behalf, so no
+          generator is registered under it. New(TypeIDScheme) returns
+          UnknownScheme by design — build one with NewTypeID instead. The key is
+          exported because Generator.Scheme() reports it.
+        name: TypeIDScheme
+        type: Scheme
+        value: "\"typeid\""
+      - doc: |-
+          ksuidPayloadBytes is the width of a KSUID's random payload. It names the
+          array length in ParseKSUID's signature; the rendered type is [16]byte
+          either way, and it mirrors the service-layer constant.
+        name: ksuidPayloadBytes
+        type: int
+        value: "16"
+    name: UUIDv4Scheme
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - UUIDv4Scheme
+      - UUIDv4
+      - UUIDv7
+      - ULID
+      - Snowflake
+      - NanoID
+      - KSUID
+    name: id.go
+functions:
+  - name: UUIDv4
+    results: newID string, err error
+  - name: UUIDv7
+    results: newID string, err error
+  - name: ULID
+    results: newID string, err error
+  - name: Snowflake
+    results: newID string, err error
+  - name: NanoID
+    results: newID string, err error
+  - name: KSUID
+    results: newID string, err error
+imports:
+  svcid: github.com/kitsunium/sdk/internal/service/app/id
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/id
+  name: id
+  purpose: Package id is the public facade for SDK identifier generation.
+types: []

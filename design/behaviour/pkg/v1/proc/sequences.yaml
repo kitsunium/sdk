@@ -1,0 +1,88 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Capability.String
+    steps:
+      - opt:
+          do:
+            - return: "\"Capability(\" + strconv.Itoa(int(c)) + \")\""
+          init:
+            bind: i
+            eval: int(c)
+          when: i < 0 || i >= len(capabilityNames)
+      - return: capabilityNames[c]
+  - of: Supported
+    participants:
+      - id: caller
+        kind: actor
+      - id: Supported
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: goss, ok
+        eval: capabilityGOOS[c]
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - return: slices.Contains(goss, runtime.GOOS)
+        to: slices
+  - of: MustSupport
+    participants:
+      - id: caller
+        kind: actor
+      - id: MustSupport
+        kind: self
+      - id: MissingCapabilities
+        kind: internal
+    steps:
+      - bind: missing
+        eval: MissingCapabilities(caps...)
+        to: MissingCapabilities
+      - opt:
+          do:
+            - return: ""
+          when: len(missing) == 0
+      - panic: unsupportedError(missing)
+  - of: unsupportedError
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsupportedError
+        kind: self
+      - id: c.String
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: names
+        eval: make([]string, len(missing))
+      - loop:
+          do:
+            - set: names[i]
+              to: c.String
+              value: c.String()
+          key: i
+          range: missing
+          value: c
+      - bind: list
+        eval: strings.Join(names, ",")
+        to: strings
+      - bind: platform
+        eval: runtime.GOOS + "/" + runtime.GOARCH
+      - bind: public
+        eval: "\"process capability [\" + list + \"] unsupported on \" + platform"
+      - opt:
+          do:
+            - set: public
+              value: "\"required process capability unsupported on \" + platform"
+          when: len(public) > maxPublicLen
+      - return: |-
+          errs.New(coreproc.CodeUnsupportedPlatform, "UNSUPPORTED_PLATFORM",
+          		public,
+          		"proc.MustSupport: missing ["+list+"] on "+platform,
+          		errs.String("missing", list), errs.String("platform", platform))
+        to: errs

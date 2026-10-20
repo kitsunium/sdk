@@ -1,0 +1,1780 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: IsEngine
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsEngine
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.ContainsFunc(engines, func(e AdapterMessage) bool { return e.ID == backend })
+        to: slices
+  - of: queued
+    steps:
+      - return: n.Command != nil && n.Command.Mode == ModeQueued
+  - of: ConnectorCatalog
+    participants:
+      - id: caller
+        kind: actor
+      - id: ConnectorCatalog
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]ConnectorSpec, len(builtin))
+      - loop:
+          do:
+            - set: c.Roles
+              to: slices
+              value: slices.Clone(c.Roles)
+            - set: c.Settings
+              to: slices
+              value: slices.Clone(c.Settings)
+            - set: c.Declares
+              to: slices
+              value: slices.Clone(c.Declares)
+            - set: c.Adapters
+              to: slices
+              value: slices.Clone(c.Adapters)
+            - set: c.brings, c.detail
+              value: nil, nil
+            - set: out[i]
+              value: c
+          key: i
+          range: builtin
+          value: c
+      - eval: slices.SortFunc(out, func(a, b ConnectorSpec) int { return strings.Compare(a.ID, b.ID) })
+        to: slices
+      - return: out
+  - of: detailOf
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: c.detail == nil
+      - set: detail
+        value: c.detail(n)
+      - return: detail, detail != ""
+  - of: ConnectorsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ConnectorsOf
+        kind: self
+      - id: detailOf
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          type found struct {
+          		info    ConnectorSpec
+          		nodes   []string
+          		details []string
+          	}
+      - bind: by
+        eval: map[string]*found{}
+      - loop:
+          do:
+            - bind: "n"
+              eval: "&nodes[i]"
+            - loop:
+                do:
+                  - bind: f
+                    eval: by[info.ID]
+                  - opt:
+                      do:
+                        - set: f
+                          value: "&found{info: *info}"
+                        - set: by[info.ID]
+                          value: f
+                      when: f == nil
+                  - set: f.nodes
+                    value: append(f.nodes, n.ID)
+                  - opt:
+                      do:
+                        - set: f.details
+                          value: append(f.details, d)
+                      init:
+                        bind: d, ok
+                        eval: detailOf(info, n)
+                        to: detailOf
+                      when: ok && !slices.Contains(f.details, d)
+                key: _
+                range: connectorsFor(n)
+                value: info
+          key: i
+          range: nodes
+      - bind: out
+        eval: make([]ConnectorMessage, 0, len(by))
+      - loop:
+          do:
+            - bind: f
+              eval: by[id]
+            - eval: slices.Sort(f.nodes)
+              to: slices
+            - eval: slices.Sort(f.details)
+              to: slices
+            - set: out
+              value: |-
+                append(out, ConnectorMessage{
+                			ID: id, Kind: f.info.Kind, Roles: slices.Clone(f.info.Roles), Protocol: f.info.Protocol,
+                			Detail: strings.Join(f.details, ", "), Settings: slices.Clone(f.info.Settings), Nodes: slices.Compact(f.nodes),
+                		})
+          key: _
+          range: slices.Sorted(maps.Keys(by))
+          value: id
+      - return: out
+  - of: SplitDoc
+    participants:
+      - id: caller
+        kind: actor
+      - id: SplitDoc
+        kind: self
+      - id: splitTagged
+        kind: internal
+      - id: joinLines
+        kind: internal
+    steps:
+      - bind: def, docs
+        eval: splitTagged(text)
+        to: splitTagged
+      - bind: out
+        eval: map[string]string{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[tag]
+                    value: s
+                init:
+                  bind: s
+                  eval: joinLines(lines)
+                  to: joinLines
+                when: s != ""
+          key: tag
+          range: docs
+          value: lines
+      - bind: d
+        eval: joinLines(def)
+        to: joinLines
+      - opt:
+          do:
+            - set: d
+              value: out["en"]
+          when: d == ""
+      - eval: delete(out, "en")
+      - opt:
+          do:
+            - set: out
+              value: nil
+          when: len(out) == 0
+      - return: d, out
+  - of: splitTagged
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitTagged
+        kind: self
+      - id: parts.add
+        kind: internal
+    steps:
+      - var:
+          name: parts
+          type: taggedLines
+      - loop:
+          do:
+            - eval: parts.add(line)
+              to: parts.add
+          key: line
+          range: strings.SplitSeq(text, "\n")
+      - return: parts.def, parts.docs
+  - of: (*taggedLines).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*taggedLines).add
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: docTag().FindStringSubmatch
+        kind: value
+    steps:
+      - set: line
+        to: strings
+        value: strings.TrimSpace(line)
+      - opt:
+          do:
+            - set: p.lang, line
+              value: m[1], m[2]
+          init:
+            bind: m
+            eval: docTag().FindStringSubmatch(line)
+            to: docTag().FindStringSubmatch
+          when: m != nil
+      - opt:
+          do:
+            - set: p.def
+              value: append(p.def, line)
+            - return: ""
+          when: p.lang == ""
+      - opt:
+          do:
+            - set: p.docs
+              value: map[string][]string{}
+          when: p.docs == nil
+      - set: p.docs[p.lang]
+        value: append(p.docs[p.lang], line)
+  - of: joinLines
+    participants:
+      - id: caller
+        kind: actor
+      - id: joinLines
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: strings.Join(strings.Fields(strings.Join(lines, " ")), " ")
+        to: strings
+  - of: NodeID
+    steps:
+      - opt:
+          do:
+            - return: service
+          when: kind == KindService
+      - return: service + "/" + string(kind) + "/" + name
+  - of: EdgeID
+    steps:
+      - bind: id
+        eval: from + "|" + string(kind) + "|" + to
+      - opt:
+          do:
+            - op: +=
+              set: id
+              value: "\"|\" + label"
+          when: label != ""
+      - return: id
+  - of: (*GraphMessage).Files
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*GraphMessage).Files
+        kind: self
+      - id: nodeSources
+        kind: internal
+      - id: g.graphSources
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: seen
+        eval: map[FileMessage]bool{}
+      - bind: add
+        eval:
+          closure:
+            params: s *SourceMessage
+            steps:
+              - opt:
+                  do:
+                    - set: "seen[FileMessage{GoModule: s.GoModule, File: s.File}]"
+                      value: "true"
+                  when: s != nil && s.File != ""
+      - loop:
+          do:
+            - eval: nodeSources(&g.Nodes[i], add)
+              to: nodeSources
+          key: i
+          range: g.Nodes
+      - eval: g.graphSources(add)
+        to: g.graphSources
+      - bind: files
+        eval: slices.Collect(maps.Keys(seen))
+        to: slices
+      - eval: slices.SortFunc(files, compareFiles)
+        to: slices
+      - return: files
+  - of: (*GraphMessage).graphSources
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - eval: add(g.Architecture.Containers[i].Source)
+                key: i
+                range: g.Architecture.Containers
+          when: g.Architecture != nil
+      - loop:
+          do:
+            - loop:
+                do:
+                  - eval: add(&g.Edges[i].Static[j])
+                key: j
+                range: g.Edges[i].Static
+          key: i
+          range: g.Edges
+      - loop:
+          do:
+            - eval: add(g.Diagnostics[i].Source)
+          key: i
+          range: g.Diagnostics
+      - loop:
+          do:
+            - eval: add(g.Modules[i].Source)
+            - eval: add(g.Modules[i].Mount)
+          key: i
+          range: g.Modules
+  - of: nodeSources
+    participants:
+      - id: caller
+        kind: actor
+      - id: nodeSources
+        kind: self
+      - id: workflowSources
+        kind: internal
+      - id: storeSources
+        kind: internal
+      - id: codeSources
+        kind: internal
+    steps:
+      - eval: add(n.Source)
+      - eval: add(n.Handler)
+      - opt:
+          do:
+            - eval: workflowSources(n.Workflow, add)
+              to: workflowSources
+          when: n.Workflow != nil
+      - opt:
+          do:
+            - eval: storeSources(n.Store, add)
+              to: storeSources
+          when: n.Store != nil
+      - opt:
+          do:
+            - loop:
+                do:
+                  - eval: add(n.Loop.Wakes[j].Func)
+                key: j
+                range: n.Loop.Wakes
+            - loop:
+                do:
+                  - eval: add(n.Loop.Selects[j].Source)
+                key: j
+                range: n.Loop.Selects
+          when: n.Loop != nil
+      - eval: add(n.authorization())
+      - opt:
+          do:
+            - eval: codeSources(n.Code, add)
+              to: codeSources
+          when: n.Code != nil
+  - of: storeSources
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - eval: add(src)
+                key: _
+                range: st.Privacy.sources()
+                value: src
+          when: st.Privacy != nil
+      - loop:
+          do:
+            - eval: add(src)
+          key: _
+          range: st.History.sources()
+          value: src
+  - of: workflowSources
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - eval: add(&st.OnEnter[j])
+                key: j
+                range: st.OnEnter
+          key: _
+          range: w.States
+          value: st
+      - loop:
+          do:
+            - eval: add(tr.Guard)
+            - eval: add(tr.Source)
+          key: _
+          range: w.Transitions
+          value: tr
+  - of: codeSources
+    steps:
+      - loop:
+          do:
+            - eval: add(c.Funcs[j].Source)
+          key: j
+          range: c.Funcs
+      - loop:
+          do:
+            - loop:
+                do:
+                  - eval: add(&c.Uses[j].Sites[k])
+                key: k
+                range: c.Uses[j].Sites
+          key: j
+          range: c.Uses
+  - of: (*GraphMessage).Normalize
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*GraphMessage).Normalize
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: EdgeID
+        kind: internal
+      - id: normalizeModules
+        kind: internal
+      - id: linkCallers
+        kind: internal
+      - id: ConnectorsOf
+        kind: internal
+      - id: ConnectorCatalog
+        kind: internal
+      - id: g.structureHash
+        kind: internal
+    steps:
+      - set: g.Version
+        value: Version
+      - opt:
+          do:
+            - set: g.Edges
+              value: "[]EdgeMessage{}"
+          when: g.Edges == nil
+      - eval: slices.SortFunc(g.Nodes, func(a, b NodeEntity) int { return cmp.Compare(a.ID, b.ID) })
+        to: slices
+      - loop:
+          do:
+            - bind: e
+              eval: "&g.Edges[i]"
+            - opt:
+                do:
+                  - set: e.ID
+                    to: EdgeID
+                    value: EdgeID(e.From, e.Kind, e.To, e.Label)
+                when: e.ID == ""
+            - eval: slices.SortFunc(e.Static, CompareSource)
+              to: slices
+            - set: e.Static
+              to: slices
+              value: slices.CompactFunc(e.Static, func(a, b SourceMessage) bool { return CompareSource(a, b) == 0 })
+          key: i
+          range: g.Edges
+      - eval: slices.SortFunc(g.Edges, func(a, b EdgeMessage) int { return cmp.Compare(a.ID, b.ID) })
+        to: slices
+      - eval: |-
+          slices.SortStableFunc(g.Diagnostics, func(a, b DiagnosticMessage) int {
+          		return cmp.Or(cmp.Compare(a.Severity, b.Severity), cmp.Compare(a.Node, b.Node), cmp.Compare(a.Message, b.Message))
+          	})
+        to: slices
+      - eval: normalizeModules(g.Modules)
+        to: normalizeModules
+      - eval: linkCallers(g)
+        to: linkCallers
+      - set: g.Connectors
+        to: ConnectorsOf
+        value: ConnectorsOf(g.Nodes)
+      - set: g.ConnectorCatalog
+        to: ConnectorCatalog
+        value: ConnectorCatalog()
+      - set: g.Revision
+        to: g.structureHash
+        value: g.structureHash()
+  - of: CompareSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: CompareSource
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - return: cmp.Or(cmp.Compare(a.GoModule, b.GoModule), cmp.Compare(a.File, b.File), cmp.Compare(a.Line, b.Line), cmp.Compare(a.EndLine, b.EndLine))
+        to: cmp
+  - of: structuralNode
+    participants:
+      - id: caller
+        kind: actor
+      - id: structuralNode
+        kind: self
+      - id: st.Privacy.structure
+        kind: internal
+      - id: st.History.structure
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: "n"
+        eval: "*in"
+      - set: n.Stats
+        value: nil
+      - opt:
+          do:
+            - bind: st
+              eval: "*n.Store"
+            - set: st.Count
+              value: nil
+            - set: st.Privacy
+              to: st.Privacy.structure
+              value: st.Privacy.structure()
+            - set: st.History
+              to: st.History.structure
+              value: st.History.structure()
+            - set: n.Store
+              value: "&st"
+          when: n.Store != nil
+      - opt:
+          do:
+            - bind: sub
+              eval: "*n.Subscription"
+            - set: sub.DeadLetters
+              value: nil
+            - set: n.Subscription
+              value: "&sub"
+          when: n.Subscription != nil
+      - opt:
+          do:
+            - bind: m
+              eval: "*n.Mailer"
+            - set: m.Queued, m.Sent, m.DeadLetters
+              value: nil, nil, nil
+            - set: n.Mailer
+              value: "&m"
+          when: n.Mailer != nil
+      - opt:
+          do:
+            - bind: c
+              eval: "*n.Command"
+            - set: c.DeadLetters
+              value: nil
+            - set: n.Command
+              value: "&c"
+          when: n.Command != nil
+      - opt:
+          do:
+            - bind: wf
+              eval: "*n.Workflow"
+            - set: wf.States
+              to: slices
+              value: slices.Clone(wf.States)
+            - loop:
+                do:
+                  - set: wf.States[j].Count
+                    value: nil
+                key: j
+                range: wf.States
+            - set: n.Workflow
+              value: "&wf"
+          when: n.Workflow != nil
+      - return: "n"
+  - of: (*GraphMessage).structureHash
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*GraphMessage).structureHash
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: sha256
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          type structural struct {
+          		App         string
+          		Nodes       []NodeEntity
+          		Edges       []EdgeMessage
+          		Diagnostics []DiagnosticMessage
+          		Modules     []ModuleMessage
+          	}
+      - bind: nodes
+        eval: make([]NodeEntity, 0, len(g.Nodes))
+      - loop:
+          do:
+            - set: nodes
+              value: append(nodes, structuralNode(&g.Nodes[i]))
+          key: i
+          range: g.Nodes
+      - bind: edges
+        eval: make([]EdgeMessage, 0, len(g.Edges))
+      - loop:
+          do:
+            - set: e.Observed
+              value: nil
+            - set: edges
+              value: append(edges, e)
+          key: _
+          range: g.Edges
+          value: e
+      - bind: s
+        eval: "structural{App: g.App.Name, Nodes: nodes, Edges: edges, Diagnostics: g.Diagnostics, Modules: g.Modules}"
+      - bind: raw, err
+        eval: json.Marshal(s)
+        to: json
+      - opt:
+          do:
+            - return: "\"\""
+          when: err != nil
+      - bind: sum
+        eval: sha256.Sum256(raw)
+        to: sha256
+      - return: hex.EncodeToString(sum[:6])
+        to: hex
+  - of: Merge
+    participants:
+      - id: caller
+        kind: actor
+      - id: Merge
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: out.Normalize
+        kind: internal
+      - id: chosenByBase
+        kind: internal
+      - id: mergeNodes
+        kind: internal
+      - id: mergeEdges
+        kind: internal
+    steps:
+      - bind: out
+        eval: "*base"
+      - set: out.Nodes
+        to: slices
+        value: slices.Clone(base.Nodes)
+      - set: out.Edges
+        to: slices
+        value: slices.Clone(base.Edges)
+      - set: out.Modules
+        to: slices
+        value: slices.Clone(base.Modules)
+      - opt:
+          do:
+            - eval: out.Normalize()
+              to: out.Normalize
+            - return: "&out"
+          when: extra == nil
+      - bind: chosen
+        eval: chosenByBase(out.Nodes)
+        to: chosenByBase
+      - bind: known
+        eval: mergeNodes(out.Nodes, extra)
+        to: mergeNodes
+      - set: out.Edges
+        to: mergeEdges
+        value: mergeEdges(out.Edges, extra.Edges, known, chosen)
+      - set: out.Diagnostics
+        value: append(out.Diagnostics, mergedDiagnostics(known, extra)...)
+      - eval: out.Normalize()
+        to: out.Normalize
+      - return: "&out"
+  - of: mergeNodes
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeNodes
+        kind: self
+      - id: extra.Node
+        kind: internal
+      - id: mergeNode
+        kind: internal
+    steps:
+      - bind: known
+        eval: make(map[string]bool, len(nodes))
+      - loop:
+          do:
+            - bind: "n"
+              eval: "&nodes[i]"
+            - set: known[n.ID]
+              value: "true"
+            - opt:
+                do:
+                  - eval: mergeNode(n, x)
+                    to: mergeNode
+                init:
+                  bind: x
+                  eval: extra.Node(n.ID)
+                  to: extra.Node
+                when: x != nil
+          key: i
+          range: nodes
+      - return: known
+  - of: mergeEdges
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeEdges
+        kind: self
+      - id: indexEdges
+        kind: internal
+      - id: EdgeID
+        kind: internal
+    steps:
+      - bind: index
+        eval: indexEdges(edges)
+        to: indexEdges
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!known[e.From] || !known[e.To]"
+            - opt:
+                do:
+                  - set: e.ID
+                    to: EdgeID
+                    value: EdgeID(e.From, e.Kind, e.To, e.Label)
+                when: e.ID == ""
+            - opt:
+                do:
+                  - bind: cur
+                    eval: "&edges[i]"
+                  - set: cur.Static
+                    value: append(cur.Static, e.Static...)
+                  - set: cur.Declared
+                    value: cur.Declared || e.Declared
+                  - continue: true
+                init:
+                  bind: i, ok
+                  eval: index[e.ID]
+                when: ok
+            - opt:
+                do:
+                  - set: e.Observed
+                    value: nil
+                  - set: index[e.ID]
+                    value: len(edges)
+                  - set: edges
+                    value: append(edges, e)
+                when: "!chosen(e)"
+          key: _
+          range: extra
+          value: e
+      - return: edges
+  - of: indexEdges
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexEdges
+        kind: self
+      - id: EdgeID
+        kind: internal
+    steps:
+      - bind: index
+        eval: make(map[string]int, len(edges))
+      - loop:
+          do:
+            - bind: e
+              eval: "&edges[i]"
+            - opt:
+                do:
+                  - set: e.ID
+                    to: EdgeID
+                    value: EdgeID(e.From, e.Kind, e.To, e.Label)
+                when: e.ID == ""
+            - set: index[e.ID]
+              value: i
+          key: i
+          range: edges
+      - return: index
+  - of: mergeNode
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeNode
+        kind: self
+      - id: mergeDocs
+        kind: internal
+      - id: mergeLoop
+        kind: internal
+      - id: mergeSources
+        kind: internal
+      - id: mergeAuthorize
+        kind: internal
+      - id: mergeTransitions
+        kind: internal
+    steps:
+      - eval: mergeDocs(n, x)
+        to: mergeDocs
+      - eval: mergeLoop(n, x)
+        to: mergeLoop
+      - eval: mergeSources(n, x)
+        to: mergeSources
+      - eval: mergeAuthorize(n, x)
+        to: mergeAuthorize
+      - eval: mergeTransitions(n, x)
+        to: mergeTransitions
+  - of: mergeDocs
+    steps:
+      - opt:
+          do:
+            - set: n.Doc
+              value: x.Doc
+          when: n.Doc == ""
+      - opt:
+          do:
+            - set: n.Docs
+              value: x.Docs
+          when: n.Docs == nil
+      - opt:
+          do:
+            - set: n.Code
+              value: x.Code
+          when: n.Code == nil
+  - of: mergeLoop
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.Loop == nil || x.Loop == nil || len(n.Loop.Selects) > 0 || len(x.Loop.Selects) == 0
+      - bind: l
+        eval: "*n.Loop"
+      - set: l.Selects
+        value: x.Loop.Selects
+      - set: n.Loop
+        value: "&l"
+  - of: mergeSources
+    steps:
+      - opt:
+          do:
+            - set: n.Source
+              value: x.Source
+          when: wider(n.Source, x.Source)
+      - opt:
+          do:
+            - set: n.Handler
+              value: x.Handler
+          when: wider(n.Handler, x.Handler)
+  - of: wider
+    steps:
+      - return: read != nil && (have == nil || have.EndLine == 0)
+  - of: mergeTransitions
+    participants:
+      - id: caller
+        kind: actor
+      - id: mergeTransitions
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: transitionSource
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.Workflow == nil || x.Workflow == nil
+      - bind: wf
+        eval: "*n.Workflow"
+      - set: wf.Transitions
+        to: slices
+        value: slices.Clone(wf.Transitions)
+      - loop:
+          do:
+            - bind: t
+              eval: "&wf.Transitions[i]"
+            - opt:
+                do:
+                  - set: t.Source
+                    to: transitionSource
+                    value: transitionSource(x.Workflow.Transitions, t)
+                when: t.Source == nil
+          key: i
+          range: wf.Transitions
+      - set: n.Workflow
+        value: "&wf"
+  - of: mergeAuthorize
+    steps:
+      - opt:
+          do:
+            - bind: c
+              eval: "*n.Command"
+            - set: c.Authorize
+              value: x.Command.Authorize
+            - set: n.Command
+              value: "&c"
+          when: n.Command != nil && x.Command != nil && widerRange(n.Command.Authorize, x.Command.Authorize)
+      - opt:
+          do:
+            - bind: q
+              eval: "*n.Query"
+            - set: q.Authorize
+              value: x.Query.Authorize
+            - set: n.Query
+              value: "&q"
+          when: n.Query != nil && x.Query != nil && widerRange(n.Query.Authorize, x.Query.Authorize)
+  - of: widerRange
+    steps:
+      - return: read != nil && read.EndLine > 0 && (have == nil || have.EndLine == 0)
+  - of: linkCallers
+    participants:
+      - id: caller
+        kind: actor
+      - id: linkCallers
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: callers
+        eval: map[string][]string{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - bind: k
+                    eval: e.To + "|" + e.Label
+                  - set: callers[k]
+                    value: append(callers[k], e.From)
+                when: e.Kind == EdgeTransitions && e.Label != ""
+          key: _
+          range: g.Edges
+          value: e
+      - loop:
+          do:
+            - bind: wf
+              eval: g.Nodes[i].Workflow
+            - opt:
+                do:
+                  - continue: true
+                when: wf == nil
+            - loop:
+                do:
+                  - bind: t
+                    eval: "&wf.Transitions[j]"
+                  - opt:
+                      do:
+                        - continue: true
+                      when: t.Trigger != TriggerEvent
+                  - bind: c
+                    eval: slices.Clone(callers[g.Nodes[i].ID+"|"+t.Event])
+                    to: slices
+                  - eval: slices.Sort(c)
+                    to: slices
+                  - set: t.Callers
+                    to: slices
+                    value: slices.Compact(c)
+                key: j
+                range: wf.Transitions
+          key: i
+          range: g.Nodes
+  - of: ServiceOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ServiceOf
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: svc, _, _
+        eval: strings.Cut(id, "/")
+        to: strings
+      - return: svc
+  - of: (*StoreHistoryMessage).sources
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: h == nil
+      - bind: out
+        eval: make([]*SourceMessage, 0, len(h.Passwords))
+      - loop:
+          do:
+            - set: out
+              value: append(out, h.Passwords[i].Source)
+          key: i
+          range: h.Passwords
+      - return: out
+  - of: (*StoreHistoryMessage).structure
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: h == nil
+      - bind: cp
+        eval: "*h"
+      - set: cp.Kept, cp.Bytes
+        value: nil, nil
+      - set: cp.Versions, cp.Trashed, cp.VersionBytes
+        value: nil, nil, nil
+      - return: "&cp"
+  - of: kindAlternatives
+    participants:
+      - id: caller
+        kind: actor
+      - id: kindAlternatives
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: kinds
+        eval: make([]string, 0, len(serviceKinds))
+      - loop:
+          do:
+            - set: kinds
+              value: append(kinds, string(k))
+          key: k
+          range: serviceKinds
+      - eval: slices.Sort(kinds)
+        to: slices
+      - return: strings.Join(kinds, "|")
+        to: strings
+  - of: ValidSegment
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidSegment
+        kind: self
+      - id: wordOf
+        kind: internal
+    steps:
+      - return: wordOf(s, isLower, isSegmentByte)
+        to: wordOf
+  - of: ValidName
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidName
+        kind: self
+      - id: wordOf
+        kind: internal
+    steps:
+      - return: wordOf(s, isLetter, isNameByte)
+        to: wordOf
+  - of: ValidContract
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidContract
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: name, version, found
+        eval: strings.Cut(s, "/v")
+        to: strings
+      - return: |-
+          found && ValidSegment(name) && len(version) <= maxVersionDigits &&
+          		version != "" && version[0] != '0' && strings.IndexFunc(version, notDigit) < 0
+  - of: ParseID
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseID
+        kind: self
+      - id: parseScoped
+        kind: internal
+      - id: parseNodeID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: id, err
+          init:
+            bind: id, scoped, err
+            eval: parseScoped(s)
+            to: parseScoped
+          when: scoped
+      - return: parseNodeID(s)
+        to: parseNodeID
+  - of: parseScoped
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseScoped
+        kind: self
+      - id: parseBinary
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: s == ExternalID
+              do:
+                - return: "IDValue{Kind: KindExternal, Name: ExternalID}, true, nil"
+            - case: strings.HasPrefix(s, BinaryScope)
+              do:
+                - set: id, err
+                  to: parseBinary
+                  value: parseBinary(strings.TrimPrefix(s, BinaryScope))
+                - return: id, true, err
+            - case: strings.HasPrefix(s, LibraryScope)
+              do:
+                - bind: name
+                  eval: strings.TrimPrefix(s, LibraryScope)
+                  to: strings
+                - opt:
+                    do:
+                      - return: IDValue{}, true, invalidID("library name")
+                    when: "!ValidSegment(name)"
+                - return: "IDValue{Scope: name, Kind: KindLibrary, Name: name}, true, nil"
+            - default: true
+              do:
+                - return: IDValue{}, false, nil
+  - of: parseNodeID
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseNodeID
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseService
+        kind: internal
+    steps:
+      - bind: service, rest, nested
+        eval: strings.Cut(s, "/")
+        to: strings
+      - bind: module, name, err
+        eval: parseService(service)
+        to: parseService
+      - opt:
+          do:
+            - return: IDValue{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: "IDValue{Module: module, Service: name, Kind: KindService, Name: service}, nil"
+          when: "!nested"
+      - bind: kind, node, ok
+        eval: strings.Cut(rest, "/")
+        to: strings
+      - bind: nodeKind
+        eval: NodeKind(kind)
+      - opt:
+          do:
+            - return: IDValue{}, invalidID("kind")
+          when: "!ok || !serviceKinds[nodeKind]"
+      - opt:
+          do:
+            - return: IDValue{}, invalidID("node name")
+          when: "!ValidName(node) && (nodeKind != KindEndpoint || !validRoute(node))"
+      - return: "IDValue{Module: module, Service: name, Kind: nodeKind, Name: node}, nil"
+  - of: parseBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseBinary
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: binary, role, isRole
+        eval: strings.Cut(rest, "/role/")
+        to: strings
+      - opt:
+          do:
+            - return: IDValue{}, invalidID("binary name")
+          when: "!ValidSegment(binary)"
+      - opt:
+          do:
+            - return: "IDValue{Scope: binary, Kind: KindBinary, Name: binary}, nil"
+          when: "!isRole"
+      - opt:
+          do:
+            - return: IDValue{}, invalidID("role name")
+          when: "!ValidSegment(role)"
+      - return: "IDValue{Scope: binary, Kind: KindRole, Name: role}, nil"
+  - of: parseService
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseService
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: module, service, qualified
+        eval: strings.Cut(s, ".")
+        to: strings
+      - opt:
+          do:
+            - set: module, service
+              value: "\"\", s"
+          when: "!qualified"
+      - opt:
+          do:
+            - return: "\"\", \"\", invalidID(\"service name\")"
+          when: "!ValidSegment(service) || (qualified && !ValidSegment(module))"
+      - return: module, service, nil
+  - of: (*IDValue).QualifiedServiceName
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: id.Service == ""
+      - opt:
+          do:
+            - return: id.Service
+          when: id.Module == ""
+      - return: id.Module + "." + id.Service
+  - of: (*IDValue).String
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IDValue).String
+        kind: self
+      - id: id.QualifiedServiceName
+        kind: internal
+      - id: NodeID
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: KindExternal
+              do:
+                - return: ExternalID
+            - case: KindBinary
+              do:
+                - return: BinaryScope + id.Scope
+            - case: KindRole
+              do:
+                - return: BinaryScope + id.Scope + "/role/" + id.Name
+            - case: KindLibrary
+              do:
+                - return: LibraryScope + id.Scope
+            - case: KindService
+              do:
+                - return: id.QualifiedServiceName()
+                  to: id.QualifiedServiceName
+            - default: true
+              do:
+                - return: NodeID(id.QualifiedServiceName(), id.Kind, id.Name)
+                  to: NodeID
+          "on": id.Kind
+  - of: BinaryID
+    steps:
+      - return: BinaryScope + binary
+  - of: RoleID
+    steps:
+      - return: BinaryScope + binary + "/role/" + role
+  - of: LibraryID
+    steps:
+      - return: LibraryScope + library
+  - of: invalidID
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidID
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(InvalidID, errs.WrapParams{}, errs.String("part", part))
+        to: errs
+  - of: validRoute
+    participants:
+      - id: caller
+        kind: actor
+      - id: validRoute
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: method, path, found
+        eval: strings.Cut(s, " /")
+        to: strings
+      - return: |-
+          found && method != "" && strings.IndexFunc(method, notUpper) < 0 &&
+          		!strings.ContainsAny(path, routeWhitespace)
+  - of: isLower
+    steps:
+      - return: c >= 'a' && c <= 'z'
+  - of: isLetter
+    steps:
+      - return: isLower(c) || (c >= 'A' && c <= 'Z')
+  - of: isDigit
+    steps:
+      - return: c >= '0' && c <= '9'
+  - of: isSegmentByte
+    steps:
+      - return: isLower(c) || isDigit(c) || c == '-'
+  - of: isNameByte
+    steps:
+      - return: isLetter(c) || isDigit(c) || c == '_' || c == '.' || c == '-'
+  - of: notDigit
+    steps:
+      - return: r < '0' || r > '9'
+  - of: notUpper
+    steps:
+      - return: r < 'A' || r > 'Z'
+  - of: Mermaid
+    participants:
+      - id: caller
+        kind: actor
+      - id: Mermaid
+        kind: self
+      - id: chart.WriteString
+        kind: value
+      - id: fmt
+        kind: stdlib
+      - id: groupNodes
+        kind: internal
+      - id: writeServices
+        kind: internal
+      - id: chart.String
+        kind: value
+    steps:
+      - var:
+          name: chart
+          type: strings.Builder
+      - eval: chart.WriteString("flowchart LR\n")
+        to: chart.WriteString
+      - bind: ids
+        eval: map[string]string{}
+      - bind: mid
+        eval:
+          closure:
+            params: id string
+            results: string
+            steps:
+              - opt:
+                  do:
+                    - return: m
+                  init:
+                    bind: m, ok
+                    eval: ids[id]
+                  when: ok
+              - bind: m
+                eval: fmt.Sprintf("n%d", len(ids))
+                to: fmt
+              - set: ids[id]
+                value: m
+              - return: m
+      - bind: services, byService
+        eval: groupNodes(&chart, g.Nodes, mid)
+        to: groupNodes
+      - eval: writeServices(&chart, g, services, byService, mid)
+        to: writeServices
+      - loop:
+          do:
+            - bind: e
+              eval: "&g.Edges[i]"
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, ok
+                  eval: ids[e.From]
+                when: "!ok"
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, ok
+                  eval: ids[e.To]
+                when: "!ok"
+            - bind: arrow
+              eval: "\"-->\""
+            - opt:
+                do:
+                  - set: arrow
+                    value: "\"-.->\""
+                when: (e.Observed == nil && !e.Declared) || fallbackBinding(g, e)
+            - eval: fmt.Fprintf(&chart, "  %s %s|%s| %s\n", mid(e.From), arrow, mermaidText(edgeLabel(e)), mid(e.To))
+              to: fmt
+          key: i
+          range: g.Edges
+      - return: chart.String()
+        to: chart.String
+  - of: groupNodes
+    participants:
+      - id: caller
+        kind: actor
+      - id: groupNodes
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - set: byService
+        value: map[string][]NodeEntity{}
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: KindService
+                    do:
+                      - set: services
+                        value: append(services, n)
+                  - case: KindExternal
+                    do:
+                      - eval: fmt.Fprintf(chart, "  %s((%q))\n", mid(n.ID), n.Name)
+                        to: fmt
+                  - default: true
+                    do:
+                      - set: byService[n.Service]
+                        value: append(byService[n.Service], n)
+                "on": n.Kind
+          key: _
+          range: nodes
+          value: "n"
+      - return: services, byService
+  - of: edgeLabel
+    steps:
+      - opt:
+          do:
+            - return: string(e.Kind)
+          when: e.Label == ""
+      - return: string(e.Kind) + " " + e.Label
+  - of: writeServices
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeServices
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: b.WriteString
+        kind: value
+    steps:
+      - bind: service
+        eval:
+          closure:
+            params: svc NodeEntity, indent string
+            steps:
+              - eval: fmt.Fprintf(b, "%ssubgraph %s[%q]\n", indent, mid(svc.ID), svc.Name)
+                to: fmt
+              - loop:
+                  do:
+                    - eval: fmt.Fprintf(b, "%s  %s%s\n", indent, mid(n.ID), shape(&n))
+                      to: fmt
+                  key: _
+                  range: byService[svc.ID]
+                  value: "n"
+              - eval: b.WriteString(indent + "end\n")
+                to: b.WriteString
+      - loop:
+          do:
+            - eval: fmt.Fprintf(b, "  subgraph %s[%q]\n", mid("module:"+m.Name), "module "+m.Name)
+              to: fmt
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - eval: service(svc, "    ")
+                      when: svc.Module == m.Name
+                key: _
+                range: services
+                value: svc
+            - eval: b.WriteString("  end\n")
+              to: b.WriteString
+          key: _
+          range: g.Modules
+          value: m
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: service(svc, "  ")
+                when: svc.Module == "" || g.ModuleOf(svc.Module) == nil
+          key: _
+          range: services
+          value: svc
+  - of: fallbackBinding
+    participants:
+      - id: caller
+        kind: actor
+      - id: fallbackBinding
+        kind: self
+      - id: g.Node
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: g.Node(e.From)
+        to: g.Node
+      - return: n != nil && n.Port != nil && n.Port.Via == ViaFallback && n.Port.Bound == e.To
+  - of: shape
+    participants:
+      - id: caller
+        kind: actor
+      - id: shape
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: endpointShape
+        kind: internal
+      - id: subscriptionShape
+        kind: internal
+      - id: loopShape
+        kind: internal
+      - id: operationShape
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: fmt.Sprintf(format, n.Name)
+              to: fmt
+          init:
+            bind: format, ok
+            eval: simpleShapes[n.Kind]
+          when: ok
+      - switch:
+          cases:
+            - case: KindEndpoint
+              do:
+                - return: endpointShape(n)
+                  to: endpointShape
+            - case: KindSubscription
+              do:
+                - return: subscriptionShape(n, n.Name)
+                  to: subscriptionShape
+            - case: KindLoop
+              do:
+                - return: loopShape(n)
+                  to: loopShape
+            - case: KindCommand, KindQuery
+              do:
+                - return: operationShape(n, n.Name)
+                  to: operationShape
+            - default: true
+              do:
+                - return: fmt.Sprintf("[%q]", n.Name)
+                  to: fmt
+          "on": n.Kind
+  - of: endpointShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: endpointShape
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: label
+        eval: n.Name
+      - opt:
+          do:
+            - return: fmt.Sprintf("[%q]", label)
+              to: fmt
+          when: n.Endpoint == nil
+      - opt:
+          do:
+            - set: label
+              value: n.Endpoint.Method + " " + n.Endpoint.Path
+          when: n.Endpoint.Method != ""
+      - switch:
+          cases:
+            - case: AuthRequired
+              do:
+                - op: +=
+                  set: label
+                  value: "\" · auth\""
+            - case: AuthOptional
+              do:
+                - op: +=
+                  set: label
+                  value: "\" · auth optional\""
+            - default: true
+          "on": n.Endpoint.Auth
+      - return: fmt.Sprintf("[%q]", label)
+        to: fmt
+  - of: loopShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: loopShape
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: fmt.Sprintf("(((%q)))", n.Name)
+              to: fmt
+          when: n.Loop != nil && n.Loop.Style == LoopGoroutine
+      - return: fmt.Sprintf("((%q))", n.Name)
+        to: fmt
+  - of: subscriptionShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: subscriptionShape
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - op: +=
+              set: label
+              value: "\" · watches \" + n.Subscription.Mark"
+          when: n.Subscription != nil && n.Subscription.Mark != ""
+      - return: fmt.Sprintf("[/%q/]", label)
+        to: fmt
+  - of: operationShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: operationShape
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: fmt.Sprintf("{%q}", label)
+              to: fmt
+          when: n.Kind == KindQuery
+      - opt:
+          do:
+            - op: +=
+              set: label
+              value: "\" · queued\""
+          when: n.Command != nil && n.Command.Mode == ModeQueued
+      - return: fmt.Sprintf("[\\%q\\]", label)
+        to: fmt
+  - of: mermaidText
+    participants:
+      - id: caller
+        kind: actor
+      - id: mermaidText
+        kind: self
+      - id: strings.NewReplacer("|", "/", `"`, "'").Replace
+        kind: value
+    steps:
+      - return: strings.NewReplacer("|", "/", `"`, "'").Replace(s)
+        to: strings.NewReplacer("|", "/", `"`, "'").Replace
+  - of: QualifiedService
+    steps:
+      - switch:
+          cases:
+            - case: module == ""
+              do:
+                - return: service
+            - case: service == module
+              do:
+                - return: module
+      - return: module + "." + service
+  - of: ModulePrefix
+    steps:
+      - return: "\"/\" + name + \"/\""
+  - of: UnderPrefix
+    steps:
+      - opt:
+          do:
+            - return: path
+          when: prefix == "" || prefix == "/"
+      - return: strings.TrimSuffix(prefix, "/") + path
+  - of: compareFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareFiles
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - return: cmp.Or(cmp.Compare(a.GoModule, b.GoModule), cmp.Compare(a.File, b.File))
+        to: cmp
+  - of: normalizeModules
+    participants:
+      - id: caller
+        kind: actor
+      - id: normalizeModules
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: slices.SortFunc(modules, func(a, b ModuleMessage) int { return cmp.Compare(a.Name, b.Name) })
+        to: slices
+      - loop:
+          do:
+            - eval: slices.Sort(modules[i].RequiredBy)
+              to: slices
+            - eval: slices.Sort(modules[i].Only)
+              to: slices
+            - opt:
+                do:
+                  - set: modules[i].Services
+                    value: "[]string{}"
+                when: modules[i].Services == nil
+          key: i
+          range: modules
+  - of: (*NodeEntity).authorization
+    steps:
+      - switch:
+          cases:
+            - case: n.Command != nil
+              do:
+                - return: n.Command.Authorize
+            - case: n.Query != nil
+              do:
+                - return: n.Query.Authorize
+      - return: nil
+  - of: (*StorePrivacyMessage).structure
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: pv == nil
+      - bind: cp
+        eval: "*pv"
+      - set: cp.Held, cp.Due, cp.Erased, cp.Deleted
+        value: nil, nil, nil, nil
+      - return: "&cp"
+  - of: TableName
+    participants:
+      - id: caller
+        kind: actor
+      - id: TableName
+        kind: self
+      - id: strings.NewReplacer("-", "_", ".", "_").Replace
+        kind: value
+      - id: strings
+        kind: stdlib
+      - id: sha256
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: service + "__" + node + suffix
+      - bind: underscored
+        eval: strings.NewReplacer("-", "_", ".", "_").Replace(raw)
+        to: strings.NewReplacer("-", "_", ".", "_").Replace
+      - bind: name
+        eval: strings.ToLower(underscored)
+        to: strings
+      - opt:
+          do:
+            - return: name
+          when: name == underscored && len(name) <= MaxTableLen && !strings.Contains(name, "___") && !strings.HasPrefix(name, "sqlite_")
+      - bind: sum
+        eval: sha256.Sum256([]byte(raw))
+        to: sha256
+      - bind: digest
+        eval: hex.EncodeToString(sum[:4])
+        to: hex
+      - loop:
+          cond: strings.Contains(name, "___")
+          do:
+            - set: name
+              to: strings
+              value: strings.ReplaceAll(name, "___", "__")
+      - set: name
+        to: strings
+        value: strings.TrimPrefix(name, "sqlite_")
+      - opt:
+          do:
+            - set: name
+              value: name[:keep]
+          init:
+            bind: keep
+            eval: MaxTableLen - len(digest) - 1
+          when: len(name) > keep
+      - return: strings.TrimRight(name, "_") + "_" + digest

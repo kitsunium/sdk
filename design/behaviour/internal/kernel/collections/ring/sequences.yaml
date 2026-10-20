@@ -1,0 +1,100 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - opt:
+          do:
+            - return: nil, CapZero
+          when: capacity <= 0
+      - return: "&queueRing[T]{slots: allocateSlots[T](capacity + 1), cap: uint64(capacity)}, nil"
+  - of: allocateSlots
+    steps:
+      - return: make([]T, n)
+  - of: (*queueRing).Capacity
+    steps:
+      - return: int(b.cap)
+  - of: (*queueRing).Len
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queueRing).Len
+        kind: self
+      - id: b.head.Load
+        kind: value
+      - id: b.tail.Load
+        kind: value
+    steps:
+      - bind: head
+        eval: b.head.Load()
+        to: b.head.Load
+      - bind: tail
+        eval: b.tail.Load()
+        to: b.tail.Load
+      - return: int((tail + b.cap + 1 - head) % (b.cap + 1))
+  - of: (*queueRing).TryWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queueRing).TryWrite
+        kind: self
+      - id: b.tail.Load
+        kind: value
+      - id: b.head.Load
+        kind: value
+      - id: b.tail.Store
+        kind: value
+    steps:
+      - bind: tail
+        eval: b.tail.Load()
+        to: b.tail.Load
+      - bind: head
+        eval: b.head.Load()
+        to: b.head.Load
+      - bind: next
+        eval: (tail + 1) % (b.cap + 1)
+      - opt:
+          do:
+            - return: Full
+          when: next == head
+      - set: b.slots[tail]
+        value: item
+      - eval: b.tail.Store(next)
+        to: b.tail.Store
+      - return: nil
+  - of: (*queueRing).TryRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queueRing).TryRead
+        kind: self
+      - id: b.head.Load
+        kind: value
+      - id: b.tail.Load
+        kind: value
+      - id: b.head.Store
+        kind: value
+    steps:
+      - bind: head
+        eval: b.head.Load()
+        to: b.head.Load
+      - bind: tail
+        eval: b.tail.Load()
+        to: b.tail.Load
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: T
+            - return: zero, Empty
+          when: head == tail
+      - set: value
+        value: b.slots[head]
+      - var:
+          name: zero
+          type: T
+      - set: b.slots[head]
+        value: zero
+      - eval: b.head.Store((head + 1) % (b.cap + 1))
+        to: b.head.Store
+      - return: value, nil

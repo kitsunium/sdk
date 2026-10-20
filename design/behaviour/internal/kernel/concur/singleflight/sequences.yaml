@@ -1,0 +1,257 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*call).capturePanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*call).capturePanic
+        kind: self
+      - id: newPanicValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.panicked
+              to: newPanicValue
+              value: newPanicValue(raised)
+          init:
+            bind: raised
+            eval: recover()
+          when: raised != nil
+  - of: (*call).repanic
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.panicked == nil
+      - panic: "*c.panicked"
+  - of: newPanicValue
+    steps:
+      - return: "&PanicValue{Raised: raised, Stack: debug.Stack()}"
+  - of: PanicValue.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: PanicValue.String
+        kind: self
+      - id: out.WriteString
+        kind: value
+      - id: out.Write
+        kind: value
+      - id: out.String
+        kind: value
+    steps:
+      - var:
+          name: out
+          type: strings.Builder
+      - eval: "out.WriteString(\"singleflight: panic in deduplicated call: \")"
+        to: out.WriteString
+      - eval: out.WriteString(renderRaised(p.Raised))
+        to: out.WriteString
+      - eval: out.WriteString("\noriginating goroutine stack:\n")
+        to: out.WriteString
+      - eval: out.Write(p.Stack)
+        to: out.Write
+      - return: out.String()
+        to: out.String
+  - of: renderRaised
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderRaised
+        kind: self
+      - id: typed.Error
+        kind: value
+      - id: typed.String
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: typed
+          cases:
+            - do:
+                - return: typed
+              types: string
+            - do:
+                - return: typed.Error()
+                  to: typed.Error
+              types: error
+            - do:
+                - return: typed.String()
+                  to: typed.String
+              types: interface{ String() string }
+          "on": raised
+      - return: "\"non-textual panic value (see PanicValue.Raised)\""
+  - of: (*Group).Do
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Do
+        kind: self
+      - id: g.join
+        kind: internal
+      - id: g.await
+        kind: internal
+    steps:
+      - bind: entry, joined
+        eval: g.join(ctx, key, fn)
+        to: g.join
+      - return: g.await(ctx, key, entry, joined)
+        to: g.await
+  - of: (*Group).Forget
+    steps:
+      - lock:
+          mutex: g.mu
+      - eval: delete(g.calls, key)
+  - of: (*Group).InFlight
+    steps:
+      - lock:
+          mutex: g.mu
+          read: true
+      - return: len(g.calls)
+  - of: (*Group).join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).join
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: g.run
+        kind: internal
+    steps:
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - op: ++
+              set: existing.refs
+            - return: existing, true
+          init:
+            bind: existing, found
+            eval: g.calls[key]
+          when: found
+      - bind: callCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - bind: fresh
+        eval: "&call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}"
+      - opt:
+          do:
+            - set: g.calls
+              value: make(map[K]*call[V], initialCallsCapacity)
+          when: g.calls == nil
+      - set: g.calls[key]
+        value: fresh
+      - go: g.run(callCtx, key, fresh, fn)
+        to: g.run
+      - return: fresh, false
+  - of: (*Group).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).run
+        kind: self
+      - id: g.publish
+        kind: internal
+      - id: entry.capturePanic
+        kind: internal
+    steps:
+      - defer: entry.cancel()
+      - defer: g.publish(key, entry)
+        to: g.publish
+      - defer: entry.capturePanic()
+        to: entry.capturePanic
+      - set: entry.val, entry.err
+        value: fn(ctx)
+  - of: (*Group).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).publish
+        kind: self
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+      - id: entry.publishOnce.Do
+        kind: value
+    steps:
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - opt:
+          do:
+            - eval: delete(g.calls, key)
+          when: g.calls[key] == entry
+      - set: entry.retired
+        value: "true"
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+      - eval: entry.publishOnce.Do(func() { close(entry.done) })
+        to: entry.publishOnce.Do
+  - of: (*Group).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).await
+        kind: self
+      - id: entry.repanic
+        kind: internal
+      - id: g.abandon
+        kind: internal
+    steps:
+      - select:
+          cases:
+            - comm: <-entry.done
+              do:
+                - eval: entry.repanic()
+                  to: entry.repanic
+                - return: entry.val, shared, entry.err
+            - comm: <-ctx.Done()
+              do:
+                - select:
+                    cases:
+                      - comm: <-entry.done
+                        do:
+                          - eval: entry.repanic()
+                            to: entry.repanic
+                          - return: entry.val, shared, entry.err
+                      - default: true
+                - eval: g.abandon(key, entry)
+                  to: g.abandon
+                - var:
+                    name: zero
+                    type: V
+                - return: zero, shared, ctx.Err()
+  - of: (*Group).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).abandon
+        kind: self
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+    steps:
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - op: "--"
+        set: entry.refs
+      - bind: orphaned
+        eval: entry.refs == 0 && !entry.retired
+      - opt:
+          do:
+            - set: entry.retired
+              value: "true"
+            - opt:
+                do:
+                  - eval: delete(g.calls, key)
+                when: g.calls[key] == entry
+          when: orphaned
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+      - opt:
+          do:
+            - eval: entry.cancel()
+          when: orphaned

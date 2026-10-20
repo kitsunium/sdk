@@ -1,0 +1,76 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: splitDive
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: items[:index], items[index+1:], true
+                when: item == diveRule
+          key: index
+          range: items
+          value: item
+      - return: items, nil, false
+  - of: elementPlan.apply
+    steps:
+      - set: report
+        value: sofar
+      - loop:
+          do:
+            - bind: found
+              eval: check(path, value)
+            - opt:
+                do:
+                  - continue: true
+                when: len(found) == 0
+            - opt:
+                do:
+                  - return: found, true
+                when: p.stopAtFirst
+            - set: report
+              value: append(report, found...)
+          key: _
+          range: checks
+          value: check
+      - return: report, false
+  - of: validJSONTagName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: name == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!strings.ContainsRune(jsonTagPunctuation, char) && !unicode.IsLetter(char) && !unicode.IsDigit(char)"
+          key: _
+          range: name
+          value: char
+      - return: "true"
+  - of: (*structPlan).run
+    steps:
+      - var:
+          name: report
+          type: corevalidation.ReportValue
+      - loop:
+          do:
+            - bind: found
+              eval: step(base, structValue)
+            - opt:
+                do:
+                  - continue: true
+                when: len(found) == 0
+            - opt:
+                do:
+                  - return: found
+                when: p.stopAtFirst
+            - set: report
+              value: append(report, found...)
+          key: _
+          range: p.steps
+          value: step
+      - return: report

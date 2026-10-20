@@ -1,0 +1,531 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The kinds.
+    grouped: true
+    items:
+      - doc: KindSpan is one unit of work that ended on a node.
+        name: KindSpan
+        type: Kind
+        value: "1"
+      - doc: |-
+          KindPhase is the process changing phase: starting, serving, draining,
+          stopped, failed — Op carries it.
+        name: KindPhase
+        type: Kind
+        value: "2"
+    name: KindSpan
+  - doc: The operations, in the order of their names in [OpNames]; zero is none.
+    grouped: true
+    items:
+      - name: OpNone
+        type: Op
+        value: iota
+      - name: OpRequest
+      - name: OpCall
+      - name: OpRead
+      - name: OpWrite
+      - name: OpPublish
+      - name: OpDeliver
+      - name: OpTransition
+      - name: OpRun
+      - name: OpAuth
+      - name: OpSend
+      - name: OpDeliverMail
+      - name: OpSecret
+      - name: OpDispatch
+      - name: OpAsk
+      - name: OpHandle
+      - name: OpConnect
+      - name: OpCLI
+      - doc: The phases, for KindPhase.
+        name: OpStarting
+      - name: OpServing
+      - name: OpDraining
+      - name: OpStopped
+      - name: OpFailed
+      - name: opCount
+    name: OpNone
+  - doc: The outcomes.
+    grouped: true
+    items:
+      - name: OutcomeOK
+        type: Outcome
+        value: "1"
+      - name: OutcomeError
+        type: Outcome
+        value: "2"
+    name: OutcomeOK
+  - doc: RecordSize is the size of one record on the wire.
+    items:
+      - name: RecordSize
+        type: int
+        value: "64"
+    name: RecordSize
+  - doc: recordVersion is the first byte of every record.
+    items:
+      - name: recordVersion
+        type: byte
+        value: "1"
+    name: recordVersion
+  - doc: |-
+      Protocol names the wire this package speaks, in the handshake. Since
+      ADR 0180 step 4 it is app-telemetry/v1, a name the product sends; the
+      wire is unchanged, and a collector accepts kit-telemetry/v1 as the
+      same for two minors.
+    items:
+      - name: Protocol
+        type: string
+        value: "\"app-telemetry/v1\""
+    name: Protocol
+  - doc: The ring's bounds and default, in events.
+    grouped: true
+    items:
+      - name: MinBuffer
+        type: int
+        value: "64"
+      - name: MaxBuffer
+        type: int
+        value: 1 << 20
+      - name: DefaultBuffer
+        type: int
+        value: "4096"
+    name: MinBuffer
+  - doc: |-
+      writeTimeout bounds one write to a client: a client that does not read is
+      dropped rather than waited for.
+    items:
+      - name: writeTimeout
+        type: time.Duration
+        value: 250 * time.Millisecond
+    name: writeTimeout
+  - doc: |-
+      drainTick is how often the drainer looks at the ring when no producer woke
+      it: the bound on how long an event waits when its wake was coalesced.
+    items:
+      - name: drainTick
+        type: time.Duration
+        value: 50 * time.Millisecond
+    name: drainTick
+  - doc: batchRecords is how many records one write carries at most.
+    items:
+      - name: batchRecords
+        type: int
+        value: "64"
+    name: batchRecords
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - NewExporter
+      - ringSize
+      - nodeRefs
+      - (*Exporter).Ref
+      - (*Exporter).Instance
+      - (*Exporter).Dropped
+      - (*Exporter).Sent
+      - (*Exporter).Emit
+      - (*Exporter).take
+      - (*Exporter).Start
+      - (*Exporter).accept
+      - (*Exporter).greet
+      - (*Exporter).drain
+      - (*Exporter).flush
+      - (*Exporter).send
+      - (*Exporter).write
+      - (*Exporter).Stop
+      - closeBestEffort
+    name: exporter.go
+  - decls:
+      - _
+    name: exporter_compliance.go
+  - decls:
+      - KindSpan
+      - OpNone
+      - OutcomeOK
+      - RecordSize
+      - recordVersion
+      - Protocol
+      - MinBuffer
+      - writeTimeout
+      - drainTick
+      - batchRecords
+      - OpNames
+      - Kind
+      - Op
+      - Outcome
+      - NodeRef
+      - Event
+      - slot
+      - ring
+      - nop
+      - HelloValue
+      - handshake
+      - ExporterConfig
+      - counter
+      - Exporter
+      - nop.Emit
+      - OpOf
+      - encode
+      - Decode
+    name: telemetry.go
+  - decls:
+      - Emitter
+      - writer
+      - accepter
+    name: telemetry_interface.go
+functions:
+  - name: NewExporter
+    params: cfg *ExporterConfig
+    results: "*Exporter, error"
+  - doc: ringSize is the ring's size cfg asks for, a power of two within bounds.
+    name: ringSize
+    params: cfg *ExporterConfig
+    results: int, error
+  - doc: nodeRefs numbers the node table from 1, refusing an ID outside the grammar.
+    name: nodeRefs
+    params: nodes []string
+    results: map[string]NodeRef, error
+  - doc: |-
+      closeBestEffort closes a client the exporter drops. Its error changes
+      nothing — the client is gone either way — so it is logged, not returned.
+    name: closeBestEffort
+    params: c io.Closer
+  - name: OpOf
+    params: name string
+    results: Op
+  - doc: |-
+      encode writes e, with its sequence number, as one record into b, which is
+      RecordSize long. Little-endian, every field at a fixed offset:
+
+      	0 version  1 kind  2 op  3 outcome  4 node  8 from  12 code
+      	16 sequence  24 start  32 duration  40 trace id  56 span id
+    name: encode
+    params: b []byte, seq uint64, e *Event
+  - name: Decode
+    params: b []byte
+    results: e Event, seq uint64, ok bool
+imports:
+  atomic: sync/atomic
+  binary: encoding/binary
+  bits: math/bits
+  context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  io: io
+  ipc: github.com/kitsunium/sdk/pkg/v1/proc/ipc
+  json: encoding/json
+  log: log
+  model: github.com/kitsunium/sdk/framework/model
+  rand: crypto/rand
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/telemetry
+  name: telemetry
+  purpose: "Package telemetry — the exporter: a bounded ring producers never wait on, drained to the clients attached to a private socket, which it never reads."
+types:
+  - kind: named
+    name: Kind
+    underlying: uint8
+  - kind: named
+    name: Op
+    underlying: uint8
+  - kind: named
+    name: Outcome
+    underlying: uint8
+  - kind: named
+    name: NodeRef
+    underlying: uint32
+  - fields:
+      - name: Kind
+        type: Kind
+      - name: Op
+        type: Op
+      - name: Outcome
+        type: Outcome
+      - doc: Node is where the work ran; From, the node it came from, if any.
+        name: Node
+        type: NodeRef
+      - doc: Node is where the work ran; From, the node it came from, if any.
+        name: From
+        type: NodeRef
+      - doc: Code is the dotted-quad code of the error that ended it, 0 for none.
+        name: Code
+        type: uint32
+      - doc: Start is when it began, in Unix nanoseconds; Duration, how long it took.
+        name: Start
+        type: int64
+      - doc: Start is when it began, in Unix nanoseconds; Duration, how long it took.
+        name: Duration
+        type: int64
+      - doc: TraceID and SpanID are the trace's, when there is one.
+        name: TraceID
+        type: "[16]byte"
+      - name: SpanID
+        type: "[8]byte"
+    kind: struct
+    name: Event
+  - doc: |-
+      slot is one cell of the exporter's ring: seq says whose turn it is — the
+      producer at position p writes when seq == p, the drainer reads when
+      seq == p+1.
+    fields:
+      - name: seq
+        type: atomic.Uint64
+      - name: ev
+        type: Event
+    kind: struct
+    name: slot
+  - doc: ring is the exporter's bounded buffer, a power of two of slots.
+    kind: named
+    name: ring
+    underlying: "[]slot"
+  - doc: nop is the emitter of Nop.
+    kind: struct
+    methods:
+      - doc: Emit reports nothing.
+        name: Emit
+        params: _ *Event
+        recv: nop
+    name: nop
+  - fields:
+      - doc: |-
+          Product, Binary and Role name what runs: the app, the binary and the
+          process role it is (framework/model's IDs).
+        name: Product
+        type: string
+      - doc: |-
+          Product, Binary and Role name what runs: the app, the binary and the
+          process role it is (framework/model's IDs).
+        name: Binary
+        type: string
+      - doc: |-
+          Product, Binary and Role name what runs: the app, the binary and the
+          process role it is (framework/model's IDs).
+        name: Role
+        type: string
+      - doc: Revision is the VCS commit the binary was built from (vcs.revision).
+        name: Revision
+        type: string
+      - doc: Digest is the design's digest the code was generated from, when known.
+        name: Digest
+        type: string
+      - doc: "Nodes are the node IDs events refer to: Nodes[i] is NodeRef(i+1)."
+        name: Nodes
+        type: "[]string"
+    kind: struct
+    name: HelloValue
+  - doc: handshake is the first line a client reads.
+    fields:
+      - name: Protocol
+        type: string
+      - name: Product
+        type: string
+      - name: Binary
+        type: string
+      - name: Role
+        type: string
+      - name: Instance
+        type: string
+      - name: Revision
+        type: string
+      - name: ModelVersion
+        type: int
+      - name: Digest
+        type: string
+      - name: RecordSize
+        type: int
+      - name: Seq
+        type: uint64
+      - name: Ops
+        type: "[]string"
+      - name: Nodes
+        type: "[]string"
+    kind: struct
+    name: handshake
+  - fields:
+      - doc: Path is the private socket's absolute path (pkg/v1/proc/ipc).
+        name: Path
+        type: string
+      - doc: |-
+          AllowUIDs and AllowGIDs admit accounts besides the product's own: the
+          on-call group declared at deployment.
+        name: AllowUIDs
+        type: "[]int"
+      - doc: |-
+          AllowUIDs and AllowGIDs admit accounts besides the product's own: the
+          on-call group declared at deployment.
+        name: AllowGIDs
+        type: "[]int"
+      - doc: |-
+          Buffer is the ring's size in events, rounded up to a power of two, in
+          [MinBuffer, MaxBuffer]; zero is DefaultBuffer.
+        name: Buffer
+        type: int
+      - doc: Hello is what the handshake says.
+        name: Hello
+        type: HelloValue
+    kind: struct
+    name: ExporterConfig
+  - doc: |-
+      counter is a padded atomic, so the producers' and the drainer's hot
+      counters never share a cache line.
+    fields:
+      - name: ""
+        role: embedded
+        type: atomic.Uint64
+      - name: _
+        type: "[56]byte"
+    kind: struct
+    name: counter
+  - fields:
+      - name: cfg
+        type: ExporterConfig
+      - name: refs
+        type: map[string]NodeRef
+      - name: instance
+        type: string
+      - name: ring
+        type: ring
+      - name: mask
+        type: uint64
+      - name: tail
+        type: counter
+      - name: head
+        type: uint64
+      - name: wake
+        type: chan struct{}
+      - name: dropped
+        type: counter
+      - name: sent
+        type: counter
+      - name: seq
+        type: uint64
+      - name: mu
+        type: sync.Mutex
+      - name: ln
+        type: ipc.Listener
+      - name: clients
+        type: "[]*ipc.Conn"
+      - name: cancel
+        type: context.CancelFunc
+      - name: done
+        type: sync.WaitGroup
+      - name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: Ref
+        params: id string
+        recv: e *Exporter
+        results: NodeRef
+      - name: Instance
+        recv: e *Exporter
+        results: string
+      - name: Dropped
+        recv: e *Exporter
+        results: uint64
+      - name: Sent
+        recv: e *Exporter
+        results: uint64
+      - name: Emit
+        params: ev *Event
+        recv: e *Exporter
+      - doc: take removes the oldest event from the ring, if any. One goroutine takes.
+        name: take
+        params: ev *Event
+        recv: e *Exporter
+        results: bool
+      - name: Start
+        params: ctx context.Context
+        recv: e *Exporter
+        results: error
+      - doc: |-
+          accept greets each client with the handshake and adds it to the readers,
+          until the listener closes.
+        name: accept
+        params: ln accepter
+        recv: e *Exporter
+      - doc: greet writes the handshake line to c. The caller holds e.mu.
+        name: greet
+        params: c writer
+        recv: e *Exporter
+        results: error
+      - doc: |-
+          drain moves the ring's events to the clients, a batch at a time, until ctx
+          ends. Without a client the events are taken and dropped: the ring must not
+          fill because nobody listens.
+        name: drain
+        params: ctx context.Context
+        recv: e *Exporter
+      - doc: |-
+          flush takes one batch from the ring and sends it; it reports whether the
+          batch was full, so more may be waiting.
+        name: flush
+        recv: e *Exporter
+        results: bool
+      - doc: |-
+          send writes the batch to every client, dropping one that does not take it
+          within writeTimeout. The caller holds e.mu.
+        name: send
+        recv: e *Exporter
+      - doc: write sends the batch to one client within writeTimeout.
+        name: write
+        params: c writer
+        recv: e *Exporter
+        results: error
+      - name: Stop
+        params: ctx context.Context
+        recv: e *Exporter
+        results: error
+    name: Exporter
+  - kind: named
+    name: Emitter
+    underlying: |-
+      interface {
+      	Emit(e *Event)
+      }
+  - doc: writer is what a greeting or a batch needs of a client.
+    kind: named
+    name: writer
+    underlying: |-
+      interface {
+      	SetWriteDeadline(t time.Time) error
+      	Write(b []byte) (n int, err error)
+      }
+  - doc: accepter is what the accept loop needs of a listener.
+    kind: named
+    name: accepter
+    underlying: |-
+      interface {
+      	Accept() (*ipc.Conn, error)
+      }
+vars:
+  - doc: ": Asserts at compile time that *Exporter satisfies Emitter."
+    items:
+      - name: _
+        type: Emitter
+        value: (*Exporter)(nil)
+    name: _
+  - grouped: true
+    items:
+      - doc: |-
+          OpNames are the operations' names, as framework/model spells them,
+          indexed by Op. The handshake sends them, so a reader never hard-codes
+          the table.
+        name: OpNames
+        value: |-
+          [opCount]string{
+          		"", "request", "call", "read", "write", "publish", "deliver", "transition", "run", "auth", "send",
+          		"deliver-mail", "secret", "dispatch", "ask", "handle", "connect", "cli",
+          		"starting", "serving", "draining", "stopped", "failed",
+          	}
+      - doc: |-
+          Nop is the emitter that reports nothing: what a product holds unless it
+          was started with an exporter.
+        name: Nop
+        type: Emitter
+        value: nop{}
+    name: OpNames

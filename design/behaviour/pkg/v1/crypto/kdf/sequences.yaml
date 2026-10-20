@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Subkey
+    participants:
+      - id: caller
+        kind: actor
+      - id: Subkey
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.Subkey(corecrypto.Algorithm(a), secret, salt, info, length)
+        to: corecrypto
+  - of: NewKeyTree
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewKeyTree
+        kind: self
+      - id: keytree
+        kind: package
+    steps:
+      - return: keytree.NewKeyTree(corecrypto.Algorithm(algo), master)
+        to: keytree

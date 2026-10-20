@@ -1,0 +1,71 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: IsCommon
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsCommon
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(password) == 0
+      - bind: _, found
+        eval: slices.BinarySearchFunc(sorted(), password, compareFolded)
+        to: slices
+      - return: found
+  - of: compareFolded
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareFolded
+        kind: self
+      - id: utf8
+        kind: stdlib
+      - id: cmp
+        kind: stdlib
+    steps:
+      - var:
+          name: encoded
+          type: "[utf8.UTFMax]byte"
+      - bind: at
+        eval: "0"
+      - loop:
+          cond: len(password) > 0
+          do:
+            - bind: r, size
+              eval: utf8.DecodeRune(password)
+              to: utf8
+            - set: password
+              value: password[size:]
+            - bind: "n"
+              eval: utf8.EncodeRune(encoded[:], unicode.ToLower(r))
+              to: utf8
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: "-1"
+                      when: at == len(entry)
+                  - opt:
+                      do:
+                        - return: c
+                      init:
+                        bind: c
+                        eval: cmp.Compare(entry[at], b)
+                        to: cmp
+                      when: c != 0
+                  - op: ++
+                    set: at
+                key: _
+                range: encoded[:n]
+                value: b
+      - return: cmp.Compare(len(entry), at)
+        to: cmp
+  - of: Len
+    steps:
+      - return: len(sorted())

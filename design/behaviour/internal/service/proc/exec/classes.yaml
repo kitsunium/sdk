@@ -1,0 +1,1380 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      prioProcess is the PRIO_PROCESS "which" selector for setpriority(2); it is not
+      exported by package syscall on every Unix, so it is named here as the portable
+      POSIX constant value 0.
+    items:
+      - name: prioProcess
+        type: int
+        value: "0"
+    name: prioProcess
+  - doc: |-
+      cgroupProcsFile is the cgroup v2 control file that attaches a process to the
+      group when its pid is written (one pid per write).
+    items:
+      - name: cgroupProcsFile
+        type: string
+        value: "\"cgroup.procs\""
+    name: cgroupProcsFile
+  - doc: |-
+      cgroup2SuperMagic is the statfs f_type of the unified cgroup v2 filesystem
+      (CGROUP2_SUPER_MAGIC, the ASCII "cgrp"). Typed uint64 and compared against
+      uint64(st.Type) so the arch-dependent Statfs_t.Type field (int64 on amd64/arm64,
+      int32 on 386/arm) widens cleanly — the conversion is real on every GOARCH (the
+      source is signed, the target unsigned), so it is never a redundant cast.
+    items:
+      - name: cgroup2SuperMagic
+        type: uint64
+        value: "0x63677270"
+    name: cgroup2SuperMagic
+  - doc: |-
+      cgroupProcsPerm is the perm passed to os.WriteFile; cgroup.procs always exists
+      so the mode is never used to create it — it mirrors the cgroup package's
+      controllerPerm for consistency.
+    items:
+      - name: cgroupProcsPerm
+        type: os.FileMode
+        value: "0o755"
+    name: cgroupProcsPerm
+  - doc: |-
+      idBase / idBits are the strconv.ParseUint base and bit-size for parsing the
+      32-bit decimal uid/gid strings os/user returns.
+    grouped: true
+    items:
+      - name: idBase
+        type: int
+        value: "10"
+      - name: idBits
+        type: int
+        value: "32"
+    name: idBase
+  - doc: |-
+      signalledCode is the ExitValue.Code reported for a signalled (non-normal)
+      termination; the port reserves -1 for "died by signal, no status".
+    items:
+      - name: signalledCode
+        type: int
+        value: "-1"
+    name: signalledCode
+  - doc: |-
+      killResendInterval is how long a SIGKILL escalation waits for the reap
+      before it sends SIGKILL again. NetBSD up to 10.1 discards a signal posted to
+      a process still inside execve (PR kern/58091, fixed in 10.2 and 11.0), and
+      Start returns from inside the child's execve, so the first SIGKILL sent to a
+      child just started can be lost; a single SIGKILL followed by an unbounded
+      wait then never ends. A SIGKILL that landed kills at once, so on every other
+      kernel the reap comes first and nothing is ever resent.
+    items:
+      - name: killResendInterval
+        type: time.Duration
+        value: 100 * time.Millisecond
+    name: killResendInterval
+  - doc: |-
+      drainPoll and drainPolls bound how long SignalGroup watches a group that
+      darwin refused with EPERM after its leader was reaped (groupDrains): a
+      group of zombies empties as soon as init reaps them, which launchd does
+      within milliseconds, while a live member this process may not signal stays.
+    grouped: true
+    items:
+      - name: drainPoll
+        type: time.Duration
+        value: 10 * time.Millisecond
+      - name: drainPolls
+        type: int
+        value: "100"
+    name: drainPoll
+  - doc: |-
+      defaultHandshakeFD is the fallback descriptor for the trampoline status pipe
+      when no fd number was passed (a spawn with no ExtraFiles): the pipe follows the
+      three std streams at fd 3. With ExtraFiles present the parent appends the pipe
+      AFTER them (so ExtraFiles keep fd 3..) and passes the real fd via
+      trampolineHsFdEnv; the trampoline reads it through childHandshakeFD.
+    items:
+      - name: defaultHandshakeFD
+        type: int
+        value: "3"
+    name: defaultHandshakeFD
+  - doc: Status bytes the trampoline writes to handshakeFD before it exits on failure.
+    grouped: true
+    items:
+      - comment: a setrlimit/umask application failed.
+        name: handshakeApplyFail
+        type: byte
+        value: "'A'"
+      - comment: the execve of the real target failed.
+        name: handshakeExecFail
+        type: byte
+        value: "'E'"
+      - comment: the pre-exec cgroup.procs placement failed.
+        name: handshakeCgroupFail
+        type: byte
+        value: "'C'"
+    name: handshakeApplyFail
+  - doc: pathVariable is the environment variable listing the directories searched.
+    items:
+      - name: pathVariable
+        type: string
+        value: "\"PATH\""
+    name: pathVariable
+  - doc: |-
+      anyExecuteBit is the owner, group and other execute bits. os/exec.LookPath
+      accepts a file carrying any of them; so does this search.
+    items:
+      - name: anyExecuteBit
+        type: fs.FileMode
+        value: "0o111"
+    name: anyExecuteBit
+  - doc: |-
+      rssUnitsPerKiB is 1 because Linux, FreeBSD, OpenBSD, NetBSD and DragonFly
+      report ru_maxrss in kilobytes, the unit the port documents. illumos and
+      Solaris define the field in pages but leave it 0, so the figure there is 0
+      whatever the unit.
+    items:
+      - name: rssUnitsPerKiB
+        type: int64
+        value: "1"
+    name: rssUnitsPerKiB
+  - doc: |-
+      procFileMode is the os.WriteFile mode for procfs control files; the kernel
+      ignores it for existing procfs entries, so it only satisfies the signature.
+    items:
+      - name: procFileMode
+        type: os.FileMode
+        value: "0o644"
+    name: procFileMode
+  - doc: |-
+      Standard-stream fd indices and their count, named so the wiring carries no
+      bare magic numbers. The values are the kernel's fixed fd numbers (0/1/2), so
+      iota lines up with them and stdioFdCount is the natural fourth value.
+    grouped: true
+    items:
+      - name: fdStdin
+        type: int
+        value: iota
+      - name: fdStdout
+      - name: fdStderr
+      - name: stdioFdCount
+    name: fdStdin
+  - doc: |-
+      trampolineEnv is the sentinel environment variable carrying the encoded
+      rlimit/umask payload to the trampoline child. Deliberately ugly + namespaced so
+      it never collides with a real variable.
+    items:
+      - name: trampolineEnv
+        type: string
+        value: "\"__KITSUNIUM_SDK_PROC_TRAMPOLINE\""
+    name: trampolineEnv
+  - doc: |-
+      trampolineCgroupEnv carries the cgroup v2 directory the trampoline must place
+      its pid into (write to <dir>/cgroup.procs) before execve. Kept in its own
+      sentinel var rather than the ';'-delimited payload so a path containing any
+      byte never needs escaping. Stripped before the target execs, like trampolineEnv.
+    items:
+      - name: trampolineCgroupEnv
+        type: string
+        value: "\"__KITSUNIUM_SDK_PROC_CGROUP\""
+    name: trampolineCgroupEnv
+  - doc: |-
+      trampolineHsFdEnv carries the descriptor number the parent placed the handshake
+      pipe's write end at. The pipe is appended AFTER any Spec.ExtraFiles, so its fd
+      is 3+len(ExtraFiles), not a fixed 3 — keeping ExtraFiles at their documented fd
+      3.. for socket activation. Absent (legacy/no-extras spawns) the trampoline
+      falls back to defaultHandshakeFD.
+    items:
+      - name: trampolineHsFdEnv
+        type: string
+        value: "\"__KITSUNIUM_SDK_PROC_HSFD\""
+    name: trampolineHsFdEnv
+  - doc: |-
+      Trampoline child exit codes (distinct from any the target could use before it
+      execs, so a supervisor can tell a trampoline failure from a target failure).
+    grouped: true
+    items:
+      - comment: a setrlimit/umask application failed.
+        name: trampolineApplyExit
+        type: int
+        value: "126"
+      - comment: the execve of the real target failed.
+        name: trampolineExecExit
+        type: int
+        value: "127"
+    name: trampolineApplyExit
+  - doc: "trampolineMinArgs is the minimum argv the trampoline child needs: [self, target]."
+    items:
+      - name: trampolineMinArgs
+        type: int
+        value: "2"
+    name: trampolineMinArgs
+  - doc: decimalRadix is the base used when encoding/decoding the payload integers.
+    items:
+      - name: decimalRadix
+        type: int
+        value: "10"
+    name: decimalRadix
+  - doc: |-
+      uintBits is the bit size passed to strconv.ParseUint for the soft/hard fields,
+      matching coreproc.LimitValue's uint64 members.
+    items:
+      - name: uintBits
+        type: int
+        value: "64"
+    name: uintBits
+  - doc: |-
+      sysexits exit-code constants mirrored from internal/core/proc/codes.go so the
+      wrapped Errors carry the same status as their bare-sentinel siblings.
+    grouped: true
+    items:
+      - comment: EX_NOUSER — a named user/group did not resolve.
+        name: exitNoUser
+        type: int
+        value: "67"
+      - comment: EX_UNAVAILABLE — a required facility is absent.
+        name: exitUnavailable
+        type: int
+        value: "69"
+      - comment: EX_OSERR — an OS-level operation failed.
+        name: exitOSErr
+        type: int
+        value: "71"
+      - comment: EX_IOERR — an I/O error occurred (capture writer failed).
+        name: exitIOErr
+        type: int
+        value: "74"
+    name: exitNoUser
+  - doc: |-
+      zombiesRefused is false: every other kernel counts a zombie when it signals
+      a group, so a group of zombies is signalled and an emptied one is ESRCH.
+    items:
+      - name: zombiesRefused
+        type: bool
+        value: "false"
+    name: zombiesRefused
+files:
+  - decls:
+      - prioProcess
+      - applyNice
+      - applyOOMScoreAdj
+      - containsESRCH
+    name: attrs_unix.go
+  - decls:
+      - cgroupProcsFile
+      - cgroup2SuperMagic
+      - cgroupProcsPerm
+      - validateCgroupPath
+      - applyCgroupPlacement
+    name: cgroup_placement_linux.go
+  - decls:
+      - idBase
+      - wantsIdentity
+      - resolveCredential
+      - applyUserGroup
+      - resolveUser
+      - parseUserIDs
+      - resolveGroup
+      - resolveGroups
+    name: creds_unix.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - validateSpec
+    name: exec.go
+  - decls:
+      - Start
+      - teardown
+      - spawn
+      - awaitTrampoline
+      - forkClaimed
+      - spawnFiles
+      - childFileTable
+      - resolveSpawn
+      - buildProcAttr
+      - appendExtraFiles
+      - buildArgv
+      - applyPostStart
+    name: exec_unix.go
+  - decls:
+      - signalledCode
+      - killResendInterval
+      - drainPoll
+      - handle
+      - newHandle
+      - (*handle).groupTarget
+      - (*handle).PID
+      - (*handle).Wait
+      - waiter
+      - releaser
+      - collectExit
+      - (*handle).releaseProc
+      - (*handle).leaderReaped
+      - (*handle).Signal
+      - (*handle).SignalGroup
+      - (*handle).Stop
+      - (*handle).killUntilReaped
+      - (*handle).awaitKill
+      - (*handle).signalGroupAllowGone
+      - (*handle).zombieGroupRefused
+      - (*handle).groupDrains
+      - (*handle).awaitExit
+      - (*handle).reapInBackground
+      - exitValueFrom
+      - exitValue
+      - readRusage
+      - timevalToDuration
+      - processGone
+    name: handle_unix.go
+  - decls:
+      - defaultHandshakeFD
+      - handshakeApplyFail
+      - handshake
+      - newHandshake
+      - (*handshake).childFile
+      - (*handshake).await
+      - (*handshake).closeBoth
+      - closeHandshake
+      - handshakeError
+    name: handshake_unix.go
+  - decls:
+      - resourceLimits
+      - checkLimits
+    name: limits_unix.go
+  - decls:
+      - addPlatformLimits
+    name: limittable_as.go
+  - decls:
+      - buildResourceLimits
+    name: limittable_unix.go
+  - decls:
+      - pathVariable
+      - resolveSpec
+      - searchPathOf
+      - envValue
+      - lookPath
+      - isExecutable
+    name: lookpath.go
+  - decls:
+      - anyExecuteBit
+      - candidates
+      - executableMode
+      - isPath
+      - sameVariable
+    name: lookpath_unix.go
+  - decls:
+      - peakKiB
+    name: maxrss.go
+  - decls:
+      - maxRSSKB
+    name: maxrss_rss64_unix.go
+  - decls:
+      - rssUnitsPerKiB
+    name: maxrss_unit_kib_unix.go
+  - decls:
+      - procFileMode
+      - writeProcFile
+    name: procfile_unix.go
+  - decls:
+      - fdStdin
+      - stdioField
+      - swallowErr
+      - stdioState
+      - (*stdioState).recordCopyErr
+      - (*stdioState).copyError
+      - buildStdio
+      - (*stdioState).build
+      - (*stdioState).wireInput
+      - (*stdioState).wireOutput
+      - (*stdioState).wireNull
+      - openNull
+      - (*stdioState).afterStart
+      - (*stdioState).drainOutput
+      - (*stdioState).feedInput
+      - (*stdioState).wait
+      - (*stdioState).closeAll
+      - outName
+    name: stdio.go
+  - decls:
+      - trampolineEnv
+      - trampolineCgroupEnv
+      - trampolineHsFdEnv
+      - trampolineApplyExit
+      - trampolineMinArgs
+      - decimalRadix
+      - uintBits
+      - _
+      - installTrampoline
+      - runTrampoline
+      - childHandshakeFD
+      - reportHandshake
+      - armHandshakeClose
+      - stderrLine
+      - applyTrampoline
+      - applyToken
+      - applyUmaskToken
+      - applyRlimitToken
+      - environWithout
+      - needsTrampoline
+      - encodeTrampoline
+      - trampolineSpawn
+    name: trampoline_unix.go
+  - decls:
+      - exitNoUser
+      - wrapSpawn
+      - wrapWait
+      - wrapSignal
+      - wrapStop
+      - wrapRlimit
+      - wrapCgroupUnavailable
+      - wrapStdioCapture
+      - wrapUnknownUser
+      - wrapUnknownGroup
+    name: wrap.go
+  - decls:
+      - zombiesRefused
+      - leaderIsZombie
+    name: zombie_other.go
+functions:
+  - doc: |-
+      applyNice sets the child's scheduling priority via setpriority(2). A nil Nice
+      leaves the inherited value untouched; a refusal (e.g. lowering niceness
+      without privilege) surfaces as RLIMIT_FAILED rather than a silent no-op.
+    name: applyNice
+    params: pid int, nice *int
+    results: error
+  - doc: |-
+      applyOOMScoreAdj writes the child's /proc/<pid>/oom_score_adj. It is
+      Linux-only behaviour; on a Unix kernel without procfs the write fails and is
+      reported, never silently ignored. A nil pointer leaves the default untouched.
+    name: applyOOMScoreAdj
+    params: pid int, adj *int
+    results: error
+  - doc: |-
+      containsESRCH reports whether err's chain carries the syscall.ESRCH errno,
+      the "no such process" signal that a group already exited.
+    name: containsESRCH
+    params: err error
+    results: bool
+  - doc: |-
+      validateCgroupPath checks, before any spawn, that a non-empty Spec.CgroupPath
+      names an existing directory that ACTUALLY lives on the cgroup v2 filesystem.
+      An empty path is a no-op (nil). A missing path, a non-directory, or a directory
+      not on a cgroup2 mount surfaces CgroupUnavailable. The statfs magic check is
+      load-bearing: a plain directory (even one containing a file literally named
+      cgroup.procs) must NOT pass, or the trampoline's pid-write would silently no-op
+      and the child would run UNCONFINED while Start reported success. The writability
+      ("delegated") check is deferred to the trampoline write, which surfaces
+      CgroupWriteFailed — a stat cannot reliably predict a cgroupfs write refusal.
+    name: validateCgroupPath
+    params: path string
+    results: error
+  - doc: |-
+      applyCgroupPlacement writes the calling (trampoline) process's pid into
+      <path>/cgroup.procs, moving it — and thus the target it is about to exec — into
+      the cgroup before execve. Returns "" on success or a diagnostic message the
+      trampoline reports to the parent as a CgroupWriteFailed handshake. An empty
+      path is a no-op (the trampoline only calls this when a path was encoded).
+    name: applyCgroupPlacement
+    params: path string
+    results: string
+  - doc: wantsIdentity reports whether spec requests any credential change at all.
+    name: wantsIdentity
+    params: spec coreproc.Spec
+    results: bool
+  - doc: |-
+      resolveCredential builds the syscall.Credential implied by spec, or returns a
+      nil cred when no user, group, or supplementary groups are requested (leaving
+      the child at the parent's identity). It resolves names and numeric ids alike.
+    name: resolveCredential
+    params: spec coreproc.Spec
+    results: cred *syscall.Credential, err error
+  - doc: |-
+      applyUserGroup resolves spec.User and spec.Group into out's Uid/Gid, with an
+      explicit Group overriding the login gid derived from the user.
+    name: applyUserGroup
+    params: spec coreproc.Spec, out *syscall.Credential
+    results: error
+  - doc: |-
+      resolveUser maps a user name or numeric uid to its uid and primary gid,
+      surfacing UnknownUser when neither lookup succeeds.
+    name: resolveUser
+    params: name string
+    results: uid, gid uint32, err error
+  - doc: parseUserIDs extracts the numeric uid and gid from a resolved *user.User.
+    name: parseUserIDs
+    params: usr *user.User
+    results: uid, gid uint32, err error
+  - doc: |-
+      resolveGroup maps a group name or numeric gid to its gid, surfacing
+      UnknownGroup when the name does not resolve.
+    name: resolveGroup
+    params: name string
+    results: gid uint32, err error
+  - doc: |-
+      resolveGroups maps each supplementary group name or gid to a numeric gid,
+      preserving order and failing the batch on the first unresolvable entry.
+    name: resolveGroups
+    params: names []string
+    results: gids []uint32, err error
+  - doc: |-
+      validateSpec rejects a malformed spec before any OS work happens. An empty
+      Path is the one structural invariant the port mandates; everything else is
+      resolved (and may fail with its own typed error) during the spawn.
+    name: validateSpec
+    params: spec coreproc.Spec
+    results: error
+  - doc: |-
+      Start spawns the process described by spec and returns a live coreproc.Process
+      handle. ctx is honoured up to the fork/exec boundary: a ctx already cancelled
+      is reported before any OS work. The child runs with an explicit (possibly
+      empty) environment, the requested credentials, and — when Setpgid is set — its
+      own process group so the whole tree can be group-killed.
+    name: Start
+    params: ctx context.Context, spec coreproc.Spec
+    results: proc coreproc.Process, err error
+  - doc: |-
+      teardown kills and reaps a partially-configured child so a post-start
+      attribute failure leaves no leaked process or zombie behind. The child has
+      just been started and may still be inside its execve, where NetBSD up to
+      10.1 discards a signal (PR kern/58091): the SIGKILL is resent until the
+      reap (killUntilReaped), so the teardown cannot wait for ever on a signal
+      the kernel dropped.
+    name: teardown
+    params: live *handle
+  - doc: |-
+      spawn resolves the spawn target (direct or via the limits trampoline),
+      assembles the os.ProcAttr, and forks/execs. On any failure it releases the
+      stdio fds (so the aborted spawn leaks nothing) and returns the typed error; on
+      success it returns the live OS process, still awaiting post-start attributes,
+      and the claim on its exit status (ADR 0093).
+    name: spawn
+    params: spec coreproc.Spec, sio *stdioState
+    results: started *os.Process, claim *childwait.Claim, err error
+  - doc: |-
+      awaitTrampoline blocks a trampolined spawn on its handshake until the child
+      execs the target (EOF, nil) or reports a pre-exec failure, which it returns
+      as the typed RLIMIT_FAILED / SPAWN_FAILED after cleaning up: the exited
+      trampoline child is reaped — through the claim, since a running reaper may
+      already have collected it — and the stdio fds are released, so the aborted
+      spawn leaks nothing. A spawn with no trampoline has no handshake: nil.
+    name: awaitTrampoline
+    params: hs *handshake, proc releaser, claim *childwait.Claim, sio *stdioState
+    results: error
+  - doc: |-
+      forkClaimed forks/execs through the child ledger, so the child's exit status
+      is claimed before a running reaper can collect it as an orphan's: the child
+      may exit — and the reaper sweep — before os.StartProcess has even returned.
+    name: forkClaimed
+    params: path string, argv []string, attr *os.ProcAttr
+    results: started *os.Process, claim *childwait.Claim, err error
+  - doc: |-
+      spawnFiles returns the stdio file table and, for a trampolined spawn, the
+      handshake pipe. It deliberately does NOT place the pipe in the table: spawn
+      appends it AFTER any Spec.ExtraFiles so the extras keep their documented fd 3..
+      positions (socket activation), with the handshake landing at fd 3+len(extras).
+    name: spawnFiles
+    params: spec coreproc.Spec, sio *stdioState
+    results: files []*os.File, hs *handshake, err error
+  - doc: |-
+      childFileTable assembles the child's full fd table — stdio (0-2), then
+      Spec.ExtraFiles at fd 3.. (socket activation), then the handshake pipe LAST so
+      the extras keep their contracted positions. When a handshake is present it
+      also returns the env entry carrying the pipe's descriptor (3+len(ExtraFiles))
+      so the trampoline reports through the right fd; the slice has no handshake and
+      the addon is empty for a direct spawn.
+    name: childFileTable
+    params: stdio, extra []*os.File, hs *handshake
+    results: files []*os.File, hsAddon []string
+  - doc: |-
+      resolveSpawn returns the (path, argv, envAddon) for os.StartProcess. A spec
+      with no pre-exec limits spawns the target verbatim with no env addon; a spec
+      setting an Rlimit or a Umask spawns the re-exec trampoline (this binary)
+      carrying the encoded limits, which applies them then execs the real target.
+    name: resolveSpawn
+    params: spec coreproc.Spec
+    results: path string, argv, envAddon []string, err error
+  - doc: |-
+      buildProcAttr assembles the os.ProcAttr for the spawn: the working directory,
+      the explicit environment (empty, never inherited, when Spec.Env is nil) plus
+      any trampoline sentinel entry from envAddon, the inherited std streams, and the
+      SysProcAttr carrying credentials and the group/session topology.
+    name: buildProcAttr
+    params: spec coreproc.Spec, files []*os.File, envAddon []string
+    results: attr *os.ProcAttr, err error
+  - doc: |-
+      appendExtraFiles returns std (the three std fds) followed by the caller's
+      extra inherited files at fd 3+, without mutating either input slice.
+    name: appendExtraFiles
+    params: std, extra []*os.File
+    results: "[]*os.File"
+  - doc: |-
+      buildArgv returns the argv for the spawn: the caller-supplied Args verbatim,
+      or [coreproc.Spec.Path] when Args is empty (the port's argv[0] default).
+    name: buildArgv
+    params: spec coreproc.Spec
+    results: "[]string"
+  - doc: |-
+      applyPostStart applies the best-effort scheduling attributes that can only be
+      set on a live pid (Nice, OOMScoreAdj). The first refusal returns its typed
+      error so the caller can tear the child down.
+    name: applyPostStart
+    params: pid int, spec coreproc.Spec
+    results: error
+  - doc: |-
+      newHandle wraps a freshly started *os.Process and the claim on its exit
+      status as a handle. setpgid records whether the child leads its own process
+      group (Spec.Setpgid): only then is the leader pid a valid pgid for
+      group-directed kills. stdio owns the capture copiers that Wait joins so no
+      output is lost and no goroutine leaks.
+    name: newHandle
+    params: p *os.Process, claim *childwait.Claim, setpgid bool, stdio *stdioState
+    results: "*handle"
+  - doc: |-
+      collectExit obtains proc's exit status from whichever waiter took it, and
+      ends the claim. Without a running reaper that is always proc's own wait, and
+      nothing changes from a plain os.Process.Wait. With one, a sweep may collect
+      the child first; its status is then on the claim — before the wait, when the
+      sweep came first, or after the wait failed with ECHILD, once the sweep's
+      hand-off has landed. swept reports that case: proc's own Wait never
+      completed, so the caller must Release proc. err is the wait's own error only
+      when the status is truly unobservable: something outside the SDK reaped the
+      child, or wait4 failed for another reason.
+    name: collectExit
+    params: proc waiter, claim *childwait.Claim
+    results: exit coreproc.ExitValue, swept bool, err error
+  - doc: |-
+      exitValueFrom converts a finished *os.ProcessState into the port's ExitValue,
+      reading exit status / terminating signal from WaitStatus and CPU/RSS from the
+      wait4 rusage.
+    name: exitValueFrom
+    params: state *os.ProcessState
+    results: coreproc.ExitValue
+  - doc: |-
+      exitValue converts a wait4 status word and its rusage into the port's
+      ExitValue — the one translation for a status collected by the handle's own
+      wait and for one a reaper sweep handed over. ru may be nil.
+    name: exitValue
+    params: ws syscall.WaitStatus, ru *syscall.Rusage
+    results: coreproc.ExitValue
+  - doc: readRusage fills out's CPU times and MaxRSS from the wait4 rusage ru.
+    name: readRusage
+    params: ru *syscall.Rusage, out *coreproc.ExitValue
+  - doc: |-
+      timevalToDuration converts a syscall.Timeval (seconds + microseconds) to a
+      time.Duration.
+    name: timevalToDuration
+    params: tv syscall.Timeval
+    results: time.Duration
+  - doc: |-
+      processGone reports whether err's root cause is the benign "no such process"
+      condition (ESRCH) — the group already exited.
+    name: processGone
+    params: err error
+    results: bool
+  - doc: |-
+      newHandshake creates the status pipe. The returned write end must be placed at
+      handshakeFD in the child's file table (right after the three std streams).
+    name: newHandshake
+    results: hs *handshake, err error
+  - doc: closeHandshake releases a (possibly nil) handshake pipe on an aborted spawn.
+    name: closeHandshake
+    params: hs *handshake
+  - doc: handshakeError maps a trampoline status byte to its central typed sentinel.
+    name: handshakeError
+    params: code byte
+    results: error
+  - doc: |-
+      checkLimits validates the rlimit/umask fields of spec before the spawn and
+      returns the typed error the caller must surface. An Rlimits key naming a
+      resource with no stdlib RLIMIT_* mapping (ResourceNProc / ResourceMemLock) is
+      UnknownResource. Every mappable Rlimit and a non-nil Umask are honourable via
+      the trampoline, so they pass validation here and are applied pre-exec. A spec
+      requesting none of these returns nil and spawns unaffected.
+    name: checkLimits
+    params: spec coreproc.Spec
+    results: error
+  - doc: addPlatformLimits adds the address-space limit (RLIMIT_AS) to the table.
+    name: addPlatformLimits
+    params: limits map[coreproc.Resource]int
+  - doc: |-
+      buildResourceLimits returns the Resource→RLIMIT_* map. It is a function rather
+      than a literal so the platform constants resolve under the unix build tag and
+      the package keeps to the no-init rule via a package-level var initialiser.
+    name: buildResourceLimits
+    results: map[coreproc.Resource]int
+  - doc: |-
+      resolveSpec returns spec with Path resolved to the executable the spawn
+      runs, and — when the caller gave no Args — argv defaulted to the name as the
+      caller WROTE it, which is what os/exec puts in argv[0] and what a program
+      reading its own name expects.
+
+      A Path containing a separator is a file path and is left as written: a
+      relative one is resolved by the kernel against Spec.Dir, as os/exec
+      documents. A bare name is searched in the PATH the CHILD will see — the PATH
+      entry of Spec.Env when it carries one (the last, as os/exec reads a
+      duplicated key), the parent's otherwise, including when Spec.Env is nil and
+      the child's environment is empty. A match found through a relative PATH
+      entry ("." or an empty one) is refused, which is Go 1.19's exec.ErrDot rule:
+      running whatever file happens to sit in the working directory under a
+      command's name is how a checked-out repository executes code nobody chose.
+    name: resolveSpec
+    params: spec coreproc.Spec
+    results: resolved coreproc.Spec, err error
+  - doc: |-
+      searchPathOf returns the PATH a bare name is searched in, and whether it is
+      the child's own: Spec.Env's PATH whenever Spec.Env NAMES one — an explicitly
+      empty `PATH=` included, which searches nothing, because that is the PATH the
+      child runs with and falling back would run a program the caller's
+      environment excluded — and the parent's only when Spec.Env names none.
+    name: searchPathOf
+    params: env []string
+    results: searchPath string, fromSpec bool
+  - doc: |-
+      envValue returns the last value of key in env, compared as the platform
+      compares variable names, and whether env names key at all.
+    name: envValue
+    params: env []string, key string
+    results: value string, named bool
+  - doc: |-
+      lookPath searches name in every directory of searchPath, in order, and
+      returns the first executable candidate. A candidate found through a relative
+      directory is refused with exec.ErrDot rather than skipped, exactly as
+      os/exec.LookPath refuses it: skipping would silently run a DIFFERENT program
+      from the one the PATH order selects.
+    name: lookPath
+    params: name, searchPath string, env []string
+    results: path string, err error
+  - doc: |-
+      isExecutable reports whether path is a regular file this platform would
+      run: any execute bit on Unix, any existing regular file on Windows (where
+      the extension, not a mode, decides).
+    name: isExecutable
+    params: path string
+    results: bool
+  - doc: candidates is the one file name could be in dir.
+    name: candidates
+    params: dir, name string, _ []string
+    results: "[]string"
+  - doc: executableMode reports whether a regular file's mode lets something run it.
+    name: executableMode
+    params: mode fs.FileMode
+    results: bool
+  - doc: |-
+      isPath reports whether name is a file path rather than a command name: on
+      Unix, any slash makes it one, as os/exec.LookPath decides.
+    name: isPath
+    params: name string
+    results: bool
+  - doc: |-
+      sameVariable compares two environment variable names; Unix names are
+      case-sensitive.
+    name: sameVariable
+    params: left, right string
+    results: bool
+  - doc: |-
+      peakKiB converts a raw ru_maxrss figure into the KiB the
+      coreproc.ExitValue.MaxRSS port field documents. unitsPerKiB is how many of
+      the kernel's units make one KiB: 1 where getrusage(2) reports kilobytes
+      (Linux, the BSDs), so the figure passes through unchanged, and 1024 where it
+      reports bytes (darwin and ios), so the figure is divided and rounded up — a
+      child that touched any memory at all never reads as 0 KiB.
+
+      It is platform-neutral so its arithmetic is tested on every GOOS, not only on
+      the one host whose kernel reports bytes.
+    name: peakKiB
+    params: raw, unitsPerKiB int64
+    results: int64
+  - doc: |-
+      maxRSSKB reports the peak resident set size in KiB from the wait4 rusage. On
+      a 64-bit GOARCH Rusage.Maxrss is already int64, so no widening cast is
+      needed; the unit is normalised by peakKiB, which passes a kilobyte figure
+      through and converts darwin's bytes.
+    name: maxRSSKB
+    params: ru *syscall.Rusage
+    results: int64
+  - doc: writeProcFile writes data to a procfs control file at path.
+    name: writeProcFile
+    params: path, data string
+    results: error
+  - doc: stdioField tags a wrapped stdio-setup failure with the stream it concerns.
+    name: stdioField
+    params: stream string
+    results: errs.FieldValue
+  - doc: |-
+      swallowErr intentionally discards a non-actionable cleanup error — a copier's
+      drained-pipe io.Copy or a best-effort close — recording the discard so the
+      error audit treats it as deliberate rather than dropped.
+    name: swallowErr
+    params: err error
+  - doc: |-
+      buildStdio assembles the stdioState for spec.Stdio. Any fd-setup failure
+      (os.Pipe / opening the null device) closes whatever was opened and returns a
+      typed SPAWN_FAILED — the spawn cannot proceed without its standard streams.
+    name: buildStdio
+    params: spec coreproc.Spec
+    results: state *stdioState, err error
+  - doc: |-
+      openNull opens the platform null device with flag and returns the descriptor;
+      the caller owns and eventually closes it. Returning the fd (rather than storing
+      it inline) keeps ownership transfer explicit.
+    name: openNull
+    params: flag int
+    results: f *os.File, err error
+  - doc: outName maps an output fd index to its stream name for diagnostics.
+    name: outName
+    params: idx int
+    results: string
+  - doc: |-
+      installTrampoline acts as the trampoline when this process was spawned as one
+      (the sentinel env var is present), else returns a zero marker so the
+      package-level var initialiser above has a value to bind.
+    name: installTrampoline
+    results: struct{}
+  - doc: |-
+      runTrampoline applies the encoded limits then execve()s the real target
+      (os.Args[1] with argv os.Args[2:]). It never returns on success; on any failure
+      it reports a status byte to the parent (handshakeFD), writes a diagnostic to
+      stderr, and exits with a distinct status.
+    name: runTrampoline
+    params: payload string
+  - doc: |-
+      childHandshakeFD returns the descriptor the parent placed the handshake pipe's
+      write end at: the value of trampolineHsFdEnv when set (the pipe sits after
+      Spec.ExtraFiles at fd 3+len(ExtraFiles)), else defaultHandshakeFD (no extras).
+    name: childHandshakeFD
+    results: int
+  - doc: |-
+      reportHandshake writes a single status byte to the handshake fd so the parent's
+      Start surfaces a typed error. Best-effort: a write fault changes nothing before
+      the imminent exit (the parent then falls back to the child's exit code).
+    name: reportHandshake
+    params: code byte
+  - doc: |-
+      armHandshakeClose marks the handshake fd close-on-exec so a successful execve
+      closes it (the parent reads EOF = success) while a failed execve leaves it open
+      for the failure byte. It uses syscall.CloseOnExec rather than a raw
+      Syscall(SYS_FCNTL, …): OpenBSD's kernel rejects an fcntl issued outside libc
+      (the pinsyscalls hardening) with ENOSYS, whereas CloseOnExec routes through the
+      platform's libc-backed fcntl and works on every Unix target. It cannot fail for
+      the live pipe descriptor the parent just created and the child inherited.
+    name: armHandshakeClose
+  - doc: |-
+      stderrLine writes a single diagnostic line to standard error, ignoring any
+      write error (the trampoline is about to exit regardless).
+    name: stderrLine
+    params: msg string
+  - doc: |-
+      applyTrampoline applies every token in the payload, returning the first failure
+      message or "" on success.
+    name: applyTrampoline
+    params: payload string
+    results: string
+  - doc: |-
+      applyToken applies one payload token: "u<mask>" sets the umask, "r<num>,<soft>,
+      <hard>" sets one rlimit. It returns "" on success or a diagnostic message.
+    name: applyToken
+    params: tok string
+    results: string
+  - doc: applyUmaskToken parses a decimal umask and applies it via umask(2).
+    name: applyUmaskToken
+    params: s string
+    results: string
+  - doc: applyRlimitToken parses "num,soft,hard" and applies it via setrlimit(2).
+    name: applyRlimitToken
+    params: s string
+    results: string
+  - doc: environWithout returns env with any entry whose key is key removed.
+    name: environWithout
+    params: env []string, key string
+    results: "[]string"
+  - doc: |-
+      needsTrampoline reports whether spec requests a pre-exec limit (any Rlimit or a
+      Umask) that the stdlib spawn cannot apply directly, so Start must route through
+      the re-exec trampoline.
+    name: needsTrampoline
+    params: spec coreproc.Spec
+    results: bool
+  - doc: |-
+      encodeTrampoline builds the payload env value for spec: a ';'-separated list of
+      a "u<mask>" umask token (when set) and one "r<num>,<soft>,<hard>" token per
+      rlimit (the resource already validated against resourceLimits by checkLimits).
+    name: encodeTrampoline
+    params: spec coreproc.Spec
+    results: string
+  - doc: |-
+      trampolineSpawn returns the (path, argv, envAddon) that make os.StartProcess run
+      the trampoline: exec this binary (os.Executable()) with argv [self, target,
+      targetArgv...] and an extra env entry carrying the encoded limits.
+    name: trampolineSpawn
+    params: spec coreproc.Spec
+    results: path string, argv, envAddon []string, err error
+  - doc: wrapSpawn wraps a fork/exec cause onto the central SpawnFailed sentinel.
+    name: wrapSpawn
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: wrapWait wraps a wait4 host fault onto the central WaitFailed sentinel.
+    name: wrapWait
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: wrapSignal wraps a kill(2) cause onto the central SignalFailed sentinel.
+    name: wrapSignal
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: wrapStop wraps a failed SIGKILL escalation onto the central StopFailed sentinel.
+    name: wrapStop
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapRlimit wraps a refused scheduling/limit attribute onto the central
+      RlimitFailed sentinel.
+    name: wrapRlimit
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapCgroupUnavailable wraps a stat/validation cause onto the central
+      CgroupUnavailable sentinel — the pre-spawn check that Spec.CgroupPath names an
+      existing, delegated cgroup v2 directory.
+    name: wrapCgroupUnavailable
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapStdioCapture wraps a StdioCapture writer failure onto the central
+      StdioCaptureFailed sentinel.
+    name: wrapStdioCapture
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapUnknownUser wraps an os/user resolution cause onto the central UnknownUser
+      sentinel.
+    name: wrapUnknownUser
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapUnknownGroup wraps an os/user resolution cause onto the central
+      UnknownGroup sentinel.
+    name: wrapUnknownGroup
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      leaderIsZombie answers false: only darwin refuses a group of zombies with
+      EPERM, so no other kernel consults it — and getpgid(2) still finds a zombie
+      on Linux, where reading it would call a dead leader alive. solaris, illumos
+      and aix have no getpgid in the syscall package at all.
+    name: leaderIsZombie
+    params: _ int
+    results: bool
+imports:
+  childwait: github.com/kitsunium/sdk/internal/service/proc/childwait
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  fs: io/fs
+  io: io
+  os: os
+  osexec: os/exec
+  rlim: github.com/kitsunium/sdk/internal/service/proc/internal/rlim
+  strconv: strconv
+  strings: strings
+  sync: sync
+  syscall: syscall
+  time: time
+  user: os/user
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/exec
+  name: exec
+  purpose: "Package exec — Unix best-effort post-start attributes: scheduling priority (Nice), OOM-killer bias (OOMScoreAdj)."
+types:
+  - doc: |-
+      handle is the live supervision handle for one spawned process. It owns the
+      *os.Process and the claim on its exit status, remembers the leader pid and
+      process-group id, and memoises the single Wait outcome so
+      PID/Wait/Signal/SignalGroup/Stop satisfy the coreproc.Process port. It is
+      safe for concurrent use.
+    fields:
+      - name: proc
+        type: "*os.Process"
+      - name: claim
+        type: "*childwait.Claim"
+      - name: pid
+        type: int
+      - name: pgid
+        type: int
+      - name: setpgid
+        type: bool
+      - name: stdio
+        type: "*stdioState"
+      - doc: |-
+          procMu serialises the leader-only Signal against the release of proc
+          after a reaper sweep took its status: os.Process.Release writes the Pid
+          field that a pid-mode os.Process.Signal reads.
+        name: procMu
+        type: sync.RWMutex
+      - name: waitOnce
+        type: sync.Once
+      - name: waitVal
+        type: coreproc.ExitValue
+      - name: waitErr
+        type: error
+      - name: done
+        type: chan struct{}
+      - doc: |-
+          clk is what Stop's grace window and the SIGKILL resend interval are
+          measured on: clock.System from newHandle, a ManualClock in a white-box
+          test.
+        name: clk
+        type: clock.Waiter
+      - doc: |-
+          kill is the kill(2) SignalGroup sends through: syscall.Kill from
+          newHandle, a double that drops a signal in a white-box test.
+        name: kill
+        type: func(pid int, sig syscall.Signal) error
+    kind: struct
+    methods:
+      - doc: |-
+          groupTarget returns the kill(2) target for group-directed operations: the
+          negated pgid when the child leads its own group (Setpgid), otherwise the leader
+          pid. Without a private group, -pgid would address no group (ESRCH, silently
+          swallowed) or, worse, the supervisor's own inherited group — so a non-grouped
+          child is only ever signalled at its leader.
+        name: groupTarget
+        recv: h *handle
+        results: int
+      - doc: PID reports the leader process identifier.
+        name: PID
+        recv: h *handle
+        results: int
+      - doc: |-
+          Wait blocks until the process exits and returns its ExitValue. It is
+          idempotent: the first call collects the exit status and every caller observes
+          the same memoised outcome. The status is the child's own even when a running
+          reaper collected the child first (ADR 0093).
+        name: Wait
+        recv: h *handle
+        results: exit coreproc.ExitValue, err error
+      - doc: |-
+          releaseProc frees the handle the runtime keeps for proc (a pidfd on Linux)
+          once a reaper sweep took its status: proc's own Wait never completed, so
+          nothing else would release it before a garbage collection. It excludes a
+          concurrent leader-only Signal, which reads what Release writes.
+        name: releaseProc
+        recv: h *handle
+      - doc: |-
+          leaderReaped reports whether the leader's exit status has been collected —
+          by Wait, or by a reaper sweep that handed it over. Its pid may by then belong
+          to another process, so nothing may be sent to it by number.
+        name: leaderReaped
+        recv: h *handle
+        results: bool
+      - doc: |-
+          Signal delivers sig to the leader process only (kill(pid, sig)). A leader
+          already reaped — by Wait or by a reaper sweep — is reported finished and
+          never signalled by pid: that pid may by now be another process's.
+        name: Signal
+        params: sig coreproc.Signal
+        recv: h *handle
+        results: error
+      - doc: |-
+          SignalGroup delivers sig to the leader's entire process group via
+          kill(-pgid, sig) when the child leads its own group (Spec.Setpgid), reaching
+          forked grandchildren (the control-group analogue). Without a private group it
+          degrades to the leader process alone, so it never signals the supervisor's
+          inherited group — and once that leader is reaped it reports ESRCH rather
+          than signal a pid another process may now hold. A group that holds nothing
+          alive is reported ESRCH too on darwin, whose kill(2) answers it EPERM
+          (zombieGroupRefused): the answer Linux and the BSDs give once the group is
+          reaped, never a SIGNAL_FAILED a caller would read as a live process it may
+          not signal.
+        name: SignalGroup
+        params: sig coreproc.Signal
+        recv: h *handle
+        results: error
+      - doc: |-
+          Stop terminates the process group gracefully: it signals the whole group with
+          sig, waits up to grace for exit, then escalates to SIGKILL on the group —
+          at once when grace is not positive. It returns nil once the group has
+          exited, ctx's error if cancelled first, or StopFailed if the group survives
+          the SIGKILL escalation. The escalation sends SIGKILL again every
+          killResendInterval until the leader is reaped (killUntilReaped), so a
+          SIGKILL the kernel discarded does not leave Stop waiting for ever.
+        name: Stop
+        params: ctx context.Context, grace time.Duration, sig coreproc.Signal
+        recv: h *handle
+        results: error
+      - doc: |-
+          killUntilReaped sends SIGKILL to the group and waits for the leader's reap,
+          sending SIGKILL again every killResendInterval on the handle's clock until
+          the reap or ctx ends the wait. It returns nil once the leader is reaped,
+          ctx's error if cancelled first, or StopFailed if a SIGKILL cannot be
+          delivered for a reason other than the group being gone.
+
+          A single SIGKILL is not enough: NetBSD up to 10.1 discards a signal posted
+          to a process still inside execve (PR kern/58091), and a child that Start
+          has just returned may be there. A SIGKILL that landed kills the child
+          within the first interval on every kernel, so the resend costs nothing
+          where the signal is never lost. The first SIGKILL is sent even when the
+          leader is already reaped — a private group can outlive its leader — but a
+          resend is not: once the reap is in hand there is nothing left to wait for.
+
+          Goroutine lifecycle: it launches reapInBackground, which returns once the
+          leader is reaped; the resend is what guarantees that happens.
+        name: killUntilReaped
+        params: ctx context.Context
+        recv: h *handle
+        results: error
+      - doc: |-
+          awaitKill waits one killResendInterval, on the handle's clock, for the reap
+          a SIGKILL should cause. over reports a terminal outcome — the leader reaped
+          (err nil) or ctx cancelled (err is ctx's error); false means the interval
+          closed with the leader unreaped, and the SIGKILL is due again. A reap that
+          landed as the interval closed is terminal, so it costs no extra signal.
+        name: awaitKill
+        params: ctx context.Context
+        recv: h *handle
+        results: over bool, err error
+      - doc: |-
+          signalGroupAllowGone delivers sig to the group but treats an already-exited
+          group as success, since a vanished target needs no further signal: ESRCH on
+          every kernel — darwin's EPERM for a group holding nothing alive included,
+          which SignalGroup reports as ESRCH (zombieGroupRefused).
+        name: signalGroupAllowGone
+        params: sig coreproc.Signal
+        recv: h *handle
+        results: error
+      - doc: |-
+          zombieGroupRefused reports whether err is darwin's answer for a process
+          group none of whose members is alive. XNU's kill(-pgid) skips zombies and,
+          finding no live member it may signal, answers EPERM (killpg1: "nfound" is
+          0, so EPERM under POSIX semantics), where Linux and the BSDs count the
+          zombie and report success. darwin's EPERM therefore means "nothing alive
+          this process may signal": a group of zombies, or live members it may not
+          signal — a leader that changed its credentials, a setuid program — and
+          only the first is gone. It holds in two states:
+
+            - the leader was unreaped when the signal left and is dead now: collected
+              since (leaderReaped), or a zombie the kernel no longer lists
+              (leaderIsZombie, darwin's own probe). A leader that died inside the
+              grace window, before the reaper collected it, made Stop's escalation
+              report SIGNAL_FAILED for a group that was already gone;
+            - the leader was collected before the signal, and what is left are its
+              orphans — dead, but zombies until init reaps them, since the leader
+              that would have is gone. The group empties when init reaps them, so
+              groupDrains watches it for a bounded time: ESRCH is gone, while a live
+              member this process may not signal keeps it EPERM, and the refusal
+              stands. Stop on a handle already waited, or an escalation that follows
+              a leader the background reap had just collected, answered SIGNAL_FAILED
+              for a dead group whenever the child had forked.
+
+          It is false on every kernel but darwin (zombiesRefused).
+        name: zombieGroupRefused
+        params: err error, reapedBefore bool
+        recv: h *handle
+        results: bool
+      - doc: |-
+          groupDrains reports whether the private group empties within drainPolls
+          polls drainPoll apart on the handle's clock: kill(-pgid, 0) answering
+          ESRCH. Any other answer than EPERM — a live member it may signal after all —
+          ends the watch: the group is not gone.
+        name: groupDrains
+        recv: h *handle
+        results: bool
+      - doc: |-
+          awaitExit blocks until the process is reaped, ctx is cancelled, or the grace
+          timer fires. settled reports whether a terminal outcome was reached; when
+          false the caller must escalate. A non-positive grace closes the window at
+          once.
+
+          Goroutine lifecycle: it launches reapInBackground, which drives the once-only
+          Wait and returns as soon as the reap completes (closing h.done). The goroutine
+          cannot outlive the process: it blocks only inside os.Process.Wait, which
+          returns when the child is reaped, so no leak survives this call.
+        name: awaitExit
+        params: ctx context.Context, grace time.Duration
+        recv: h *handle
+        results: settled bool, err error
+      - doc: |-
+          reapInBackground triggers the once-only Wait so Stop's select can observe
+          h.done without leaking a blocked goroutine. Any reap error is intentionally
+          not returned here: it is memoised in h.waitErr by Wait itself and surfaced to
+          whoever calls h.Wait() directly, so this driver has nowhere to propagate it.
+        name: reapInBackground
+        recv: h *handle
+    name: handle
+  - doc: |-
+      waiter is what collectExit needs from the process it reaps: its own wait,
+      and nothing else. Production hands it an *os.Process; the narrower type is
+      the statement that collecting an exit status neither signals nor releases
+      the process — the caller decides that from the swept flag.
+    kind: named
+    name: waiter
+    underlying: |-
+      interface {
+      	// Wait blocks until the process exits and returns its state.
+      	Wait() (*os.ProcessState, error)
+      }
+  - doc: |-
+      releaser is what an aborted spawn needs from the child it abandons: its own
+      wait, to reap it, and the release of its handle when a sweep reaped it
+      first. Production hands it an *os.Process.
+    kind: named
+    name: releaser
+    underlying: |-
+      interface {
+      	waiter
+      	// Release frees the process handle without waiting for the process.
+      	Release() error
+      }
+  - doc: |-
+      handshake is the parent side of the trampoline status pipe: the child inherits
+      the write end as handshakeFD and reports a failure byte through it, while the
+      parent reads the read end to learn the trampoline's outcome.
+    fields:
+      - doc: read is the parent's read end; EOF means the trampoline exec'd the target.
+        name: read
+        type: "*os.File"
+      - doc: write is the child's inherited write end, handed to os.StartProcess.
+        name: write
+        type: "*os.File"
+    kind: struct
+    methods:
+      - doc: childFile returns the write end to hand to os.StartProcess as handshakeFD.
+        name: childFile
+        recv: h *handshake
+        results: "*os.File"
+      - doc: |-
+          await closes the parent's write end and reads the trampoline's outcome: a nil
+          return on an empty read (EOF) means the execve succeeded and the target is
+          running; any bytes return the matching typed sentinel, and the caller must reap
+          the exited child.
+        name: await
+        recv: h *handshake
+        results: error
+      - doc: closeBoth releases both pipe ends when the spawn aborts before await runs.
+        name: closeBoth
+        recv: h *handshake
+    name: handshake
+  - doc: |-
+      stdioState carries the child's three standard-stream files and the parent-side
+      machinery to manage them across the spawn. It is built before os.StartProcess,
+      closed via closeAll on a spawn failure, or driven by afterStart on success;
+      Handle.Wait joins its output copiers so every byte is delivered before Wait
+      returns. outSrc/outSink are parallel: outSrc[i] drains into outSink[i].
+    fields:
+      - name: files
+        type: "[stdioFdCount]*os.File"
+      - name: opened
+        type: "[]*os.File"
+      - name: closeChild
+        type: "[]*os.File"
+      - name: outSrc
+        type: "[]*os.File"
+      - name: outSink
+        type: "[]io.Writer"
+      - name: inDst
+        type: "*os.File"
+      - name: inSrc
+        type: io.Reader
+      - name: wg
+        type: sync.WaitGroup
+      - name: copyMu
+        type: sync.RWMutex
+      - name: copyErr
+        type: error
+    kind: struct
+    methods:
+      - doc: recordCopyErr latches the first output-copier failure so Wait can surface it.
+        name: recordCopyErr
+        params: err error
+        recv: s *stdioState
+      - doc: |-
+          copyError returns the latched first output-copier failure, or nil when capture
+          delivered cleanly. Read it after wait() has joined the copiers.
+        name: copyError
+        recv: s *stdioState
+        results: error
+      - doc: |-
+          build wires stdin from in, stdout to out, and stderr to errw. A nil stream
+          falls back to the null device (StdioNull passes all-nil; StdioCapture passes
+          the caller's values, nil meaning "discard this one stream").
+        name: build
+        params: in io.Reader, out, errw io.Writer
+        recv: s *stdioState
+        results: error
+      - doc: |-
+          wireInput connects the child's fd 0. A nil reader gives an immediate-EOF stdin
+          from the null device; otherwise a pipe feeds reader→child, closed at EOF by a
+          fire-and-forget copier that never blocks Wait.
+        name: wireInput
+        params: reader io.Reader
+        recv: s *stdioState
+        results: error
+      - doc: |-
+          wireOutput connects the child's fd idx (1=stdout, 2=stderr). A nil writer
+          discards to the null device; otherwise a pipe drains child→writer via a copier
+          joined by wait(), so every byte lands before Wait returns.
+        name: wireOutput
+        params: idx int, w io.Writer
+        recv: s *stdioState
+        results: error
+      - doc: wireNull points the child's fd idx at the platform null device opened with flag.
+        name: wireNull
+        params: idx, flag int
+        recv: s *stdioState
+        results: error
+      - doc: |-
+          afterStart runs once os.StartProcess has succeeded: the child holds its own dup
+          of every fd, so the parent closes its child-side copies (making EOF propagate
+          on child exit) and launches the copiers. Output copiers are tracked by the
+          WaitGroup; the stdin feeder is fire-and-forget so a non-EOF reader never blocks
+          Wait.
+        name: afterStart
+        recv: s *stdioState
+      - doc: |-
+          drainOutput copies the pipe read end src into sink until EOF, then releases src
+          and signals the WaitGroup. A writer failure is latched (recordCopyErr) so Wait
+          can surface it as StdioCaptureFailed — output is not silently truncated.
+        name: drainOutput
+        params: src io.ReadCloser, sink io.Writer
+        recv: s *stdioState
+      - doc: |-
+          feedInput copies the caller's reader src into the pipe write end dst, then
+          closes dst so the child's stdin sees EOF. It is fire-and-forget: never joined,
+          so a reader that does not EOF cannot block Wait.
+        name: feedInput
+        params: dst io.WriteCloser, src io.Reader
+        recv: s *stdioState
+      - doc: |-
+          wait blocks until every output copier has drained its pipe to EOF, so Handle.Wait
+          returns only after 100% of the child's stdout/stderr has reached the caller's
+          writers. It is a no-op for StdioInherit/StdioNull (no copiers).
+        name: wait
+        recv: s *stdioState
+      - doc: |-
+          closeAll releases every fd buildStdio opened. It is used only on the spawn
+          failure path (before afterStart), so it never races the copiers and never
+          touches os.Std*.
+        name: closeAll
+        recv: s *stdioState
+    name: stdioState
+vars:
+  - doc: |-
+      resourceLimits maps each coreproc.Resource to its platform RLIMIT_* constant,
+      backing the spec validation. It is a flat lookup so checking a requested
+      resource stays O(1) rather than a high-complexity switch.
+    items:
+      - name: resourceLimits
+        value: buildResourceLimits()
+    name: resourceLimits
+  - doc: |-
+      The blank-var initialiser fires the pre-main trampoline check via package-level
+      variable initialisation — the no-init idiom (KTN-FUNC-NOINIT). In any process
+      that links this package the initialiser runs before main, exactly as an init()
+      would but without an init() function: installTrampoline is a no-op unless the
+      sentinel env var is set (only the trampoline child sees it), in which case the
+      process applies the limits and execve()s the real target — never returning.
+    items:
+      - name: _
+        value: installTrampoline()
+    name: _

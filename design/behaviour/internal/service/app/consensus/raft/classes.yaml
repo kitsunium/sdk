@@ -1,0 +1,2039 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The refusals the step function returns, short names for the domain's codes:
+      it answers with a code rather than an error, so a refusal costs no
+      allocation on the event loop.
+    grouped: true
+    items:
+      - doc: |-
+          maxFwdAnswers bounds the answers a node keeps of the forwards it
+          received. A duplicate is a frame a transport resent with
+          its batch on a fresh connection, right behind its original (#377,
+          #401): the newest answers are the ones kept, the oldest go first.
+        name: maxFwdAnswers
+        type: int
+        value: "4096"
+      - doc: codeNotLeader refuses what only the leader of this term may do.
+        name: codeNotLeader
+        type: errs.Code
+        value: core.CodeNotLeader
+      - doc: |-
+          codeChangePending refuses a membership change while another is not
+          yet committed, or before the term's no-op is.
+        name: codeChangePending
+        type: errs.Code
+        value: core.CodeMembershipChangePending
+      - doc: |-
+          codeMembershipInvalid refuses a change, a transfer or a target the
+          current configuration does not allow.
+        name: codeMembershipInvalid
+        type: errs.Code
+        value: core.CodeMembershipInvalid
+      - doc: codeRetired refuses a node id a Remove retired for good.
+        name: codeRetired
+        type: errs.Code
+        value: core.CodeNodeIDRetired
+      - doc: |-
+          codePrecondition refuses an admin operation whose expected state is
+          not the current one.
+        name: codePrecondition
+        type: errs.Code
+        value: core.CodeAdminPreconditionFailed
+      - doc: codeTransferFailed ends a transfer that did not complete in time.
+        name: codeTransferFailed
+        type: errs.Code
+        value: core.CodeTransferFailed
+      - doc: codeVersion refuses an entry kind or a payload this node cannot read.
+        name: codeVersion
+        type: errs.Code
+        value: core.CodeVersionUnsupported
+      - doc: codeMisconfigured refuses a timing contract that cannot hold.
+        name: codeMisconfigured
+        type: errs.Code
+        value: core.CodeConsensusMisconfigured
+    name: maxFwdAnswers
+  - grouped: true
+    items:
+      - doc: |-
+          mutAckBeforeSync acknowledges an append before its sync (raft-sql-poc's
+          unsafeAckBeforeSync).
+        name: mutAckBeforeSync
+        type: mutation
+        value: 1 << iota
+      - doc: mutSameTermVoteClear forgets the vote when stepping down in one term.
+        name: mutSameTermVoteClear
+      - doc: |-
+          mutCommitBeyondVerified advances a follower's commit past the prefix
+          the append verified.
+        name: mutCommitBeyondVerified
+      - doc: mutAckLastIndex acknowledges lastIndex instead of the verified prefix.
+        name: mutAckLastIndex
+      - doc: |-
+          mutCommitOldTermByCount commits an older term's entry by counting
+          replicas (Figure 8).
+        name: mutCommitOldTermByCount
+      - doc: mutNoRestrictionVote drops the election restriction from RequestVote.
+        name: mutNoRestrictionVote
+      - doc: mutNoRestrictionPreVote drops it from PreVote.
+        name: mutNoRestrictionPreVote
+      - doc: mutTransferAnyTerm honours a transfer flag at any term.
+        name: mutTransferAnyTerm
+      - doc: mutHeartbeatUnclamped sends the raw leader commit in a heartbeat.
+        name: mutHeartbeatUnclamped
+      - doc: mutNoRestartRefusal votes at once after a restart.
+        name: mutNoRestartRefusal
+      - doc: mutTimeoutNowAnyTerm accepts TimeoutNow without the term check.
+        name: mutTimeoutNowAnyTerm
+      - doc: mutStaleCompletion counts a storage completion a truncation superseded.
+        name: mutStaleCompletion
+      - doc: mutLeaseAfterTransfer keeps the lease after a transfer attempt.
+        name: mutLeaseAfterTransfer
+      - doc: |-
+          mutMembershipBeforeNoOp accepts a membership change before the term's
+          no-op commits.
+        name: mutMembershipBeforeNoOp
+      - doc: |-
+          mutLiveLeaderPreVoteOnly applies the live-leader refusal in PreVote
+          only.
+        name: mutLiveLeaderPreVoteOnly
+      - doc: |-
+          mutRestrictionUnderTransfer skips the election restriction under the
+          transfer flag.
+        name: mutRestrictionUnderTransfer
+      - doc: |-
+          mutLeaseLeaderView computes the lease from the leader's own contract,
+          not the minimum over the acknowledging majority.
+        name: mutLeaseLeaderView
+      - doc: |-
+          mutReadNoRound answers a ReadIndex at once, with no confirmation
+          round: the read a deposed leader serves stale.
+        name: mutReadNoRound
+      - doc: |-
+          mutSnapshotAckLastIndex acknowledges a snapshot install at lastIndex,
+          over a kept suffix nothing verified.
+        name: mutSnapshotAckLastIndex
+      - doc: |-
+          mutInstallBelowBase lets a node with no table install a snapshot
+          below its log's base.
+        name: mutInstallBelowBase
+      - doc: mutChainSkip appends an entry whose chain value does not match.
+        name: mutChainSkip
+      - doc: |-
+          mutForwardNoDedupe proposes a forward each time it is delivered, the
+          duplicate a transport resent included (#401).
+        name: mutForwardNoDedupe
+    name: mutAckBeforeSync
+  - doc: The facts a PeerStatValue carries.
+    grouped: true
+    items:
+      - doc: StatVoter is set for a voter, clear for a learner.
+        name: StatVoter
+        type: PeerStatFlags
+        value: 1 << iota
+      - doc: |-
+          StatHeard is set once the peer answered in this term; LastHeard is
+          meaningful only then.
+        name: StatHeard
+      - doc: StatProbing is set while the leader probes for the peer's match.
+        name: StatProbing
+      - doc: StatSnapshot is set while a snapshot is being sent to the peer.
+        name: StatSnapshot
+    name: StatVoter
+  - doc: The facts a progress holds, one bit each in peerFacts.
+    grouped: true
+    items:
+      - doc: |-
+          peerProbeSent pauses a probing peer until it answers or a heartbeat
+          passes.
+        name: peerProbeSent
+        type: peerFacts
+        value: 1 << iota
+      - doc: peerHeard is clear until the peer answered once in this term.
+        name: peerHeard
+      - doc: |-
+          peerFetching pauses the peer while the driver reads entries the step
+          function evicted.
+        name: peerFetching
+    name: peerProbeSent
+  - grouped: true
+    items:
+      - doc: stateProbe sends one append at a time until the peer's log matches.
+        name: stateProbe
+        type: progressState
+        value: iota
+      - doc: stateReplicate pipelines appends up to the inflight window.
+        name: stateReplicate
+      - doc: stateSnapshot waits for a snapshot transfer to end.
+        name: stateSnapshot
+    name: stateProbe
+  - doc: |-
+      The facts a Raft holds, one bit each in raftFacts: set with |=, cleared
+      with &^= and read with &, plain operators that keep the step function's
+      small methods within the inliner's budget.
+    grouped: true
+    items:
+      - doc: |-
+          raftSelfVoteDurable is set once the write that carries this
+          candidate's own vote is durable: its vote counts from then on (D5b).
+        name: raftSelfVoteDurable
+        type: raftFacts
+        value: 1 << iota
+      - doc: raftTransferSent is set once TimeoutNow left for the transfer target.
+        name: raftTransferSent
+      - doc: |-
+          raftLeaseDropped is set when the lease must not be served until a new
+          round confirms leadership (D9).
+        name: raftLeaseDropped
+      - doc: |-
+          raftOverloaded is the driver's apply backpressure, set each turn: a
+          forwarded command is refused while it holds, as a local one is.
+        name: raftOverloaded
+    name: raftSelfVoteDurable
+  - doc: |-
+      ProtocolMax is the highest protocol version this engine speaks: a cluster
+      version above it is refused, and stops a node that finds it committed.
+    items:
+      - name: ProtocolMax
+        type: uint32
+        value: "1"
+    name: ProtocolMax
+files:
+  - decls:
+      - (*Raft).Debug
+    name: debug.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxFwdAnswers
+      - (*Raft).becomeLeader
+      - (*Raft).appendAsLeader
+      - (*Raft).tickLeader
+      - (*Raft).quorumActive
+      - (*Raft).broadcastHeartbeat
+      - (*Raft).peers
+      - (*Raft).broadcastAppend
+      - (*Raft).sendAppend
+      - (*Raft).Fetched
+      - (*Raft).fetchedMatch
+      - (*Raft).sendEntries
+      - (*Raft).maybeCommit
+      - (*Raft).stepLeader
+      - (*Raft).handleHeartbeatResp
+      - (*Raft).ackRounds
+      - (*Raft).handleAppResp
+      - (*Raft).handleAppReject
+      - (*Raft).Propose
+      - (*Raft).checkProposed
+      - (*Raft).validateAdmin
+      - (*Raft).checkAdmin
+      - (*Raft).checkMembership
+      - (*Raft).checkTimingContract
+      - (*Raft).checkClusterVersion
+      - (*Raft).checkNoSpaceClear
+      - (*Raft).checkTransfer
+      - (*Raft).nextConf
+      - (*Raft).addLearner
+      - (*Raft).promote
+      - (*Raft).removeMember
+      - (*Raft).updateAddress
+      - denyPin
+      - (*Raft).activeMajority
+      - fwdKey
+      - fwdAnswer
+      - fwdTable
+      - (*fwdTable).lookup
+      - (*fwdTable).remember
+      - (*Raft).handleForward
+      - (*Raft).answerForward
+      - (*Raft).admitForward
+      - (*Raft).ReadIndex
+      - (*Raft).serveLeaseRead
+      - (*Raft).flushReads
+      - (*Raft).contractWindow
+      - (*Raft).confirmRounds
+      - (*Raft).lastConfirmedRound
+      - (*Raft).roundAcks
+      - (*Raft).extendLease
+      - (*Raft).answerConfirmed
+      - (*Raft).dropRoundsThrough
+      - (*Raft).answerRead
+      - (*Raft).TransferLeadership
+      - (*Raft).startTransfer
+      - (*Raft).maybeSendTimeoutNow
+      - (*Raft).CheckOffer
+      - (*Raft).InstallSnapshot
+      - (*Raft).ignoresInstall
+      - (*Raft).installEngine
+      - (*Raft).restartLogAt
+      - (*Raft).dropConfsThrough
+      - ownCopy
+    name: leader.go
+  - decls:
+      - memLog
+      - (*memLog).lastIndex
+      - (*memLog).lastTerm
+      - (*memLog).term
+      - (*memLog).chain
+      - (*memLog).at
+      - (*memLog).matchTerm
+      - (*memLog).slice
+      - (*memLog).resident
+      - (*memLog).evict
+      - (*memLog).truncateFrom
+      - (*memLog).compactTo
+    name: log.go
+  - decls:
+      - mutation
+      - mutAckBeforeSync
+      - (*Raft).mutated
+    name: mutation.go
+  - decls:
+      - StatVoter
+      - PeerStatValue
+      - PeerStatFlags
+      - PeerStatFlags.Has
+      - statFlag
+    name: peerstat.go
+  - decls:
+      - peerProbeSent
+      - peerFacts
+      - progressState
+      - stateProbe
+      - progress
+      - (*progress).becomeProbe
+      - (*progress).becomeReplicate
+      - (*progress).becomeSnapshot
+      - (*progress).freeAll
+      - (*progress).freeTo
+      - (*progress).add
+      - (*progress).paused
+      - (*progress).rejectCounts
+      - (*progress).maybeUpdate
+    name: progress.go
+  - decls:
+      - raftSelfVoteDurable
+      - ProtocolMax
+      - raftFacts
+      - Config
+      - fwdEntry
+      - (*Raft).SetOverloaded
+      - StartState
+      - ReadState
+      - TransferResult
+      - ReadyValue
+      - UnsupportedEntryValue
+      - FetchSpec
+      - (*ReadyValue).NeedsWrite
+      - confAt
+      - readReq
+      - round
+      - Raft
+      - NewRaft
+      - (*Raft).Tick
+      - (*Raft).StorageDone
+      - (*Raft).noteSelfVote
+      - (*Raft).ReportUnreachable
+      - (*Raft).SnapshotDone
+      - (*Raft).Compact
+      - (*Raft).NoTable
+      - (*Raft).SetCanVote
+      - (*Raft).SnapshotIndex
+      - (*Raft).Entry
+      - (*Raft).ConfAt
+      - (*Raft).ChainAt
+      - (*Raft).EngineAt
+      - (*Raft).TermAt
+      - StatusValue
+      - (*Raft).Status
+      - (*Raft).Progress
+      - (*Raft).LeaseValid
+      - (*Raft).DropLease
+      - (*Raft).HasReady
+      - (*ReadyValue).hasLogWork
+      - (*ReadyValue).hasNotices
+      - (*Raft).Ready
+      - (*Raft).numberWrite
+      - (*Raft).conf
+      - (*Raft).confAt
+      - (*Raft).isVoter
+      - (*Raft).voters
+      - (*Raft).quorum
+      - (*Raft).promotable
+      - (*Raft).randomTimeout
+      - (*Raft).resetElection
+      - (*Raft).admitted
+      - (*Raft).send
+      - (*Raft).waitsForSync
+      - (*Raft).noteAppended
+      - (*Raft).confChanged
+      - (*Raft).trackMembers
+      - (*Raft).truncateFrom
+      - (*Raft).appendEntries
+      - (*Raft).applyCommitEffects
+      - (*Raft).applyCommitEffect
+      - EngineValue
+      - engineAt
+      - (*Raft).engine
+      - (*Raft).noteEngine
+      - (*Raft).compactEngines
+      - (*Raft).resetEngines
+      - actsAtCommit
+      - foundingContract
+      - (*Raft).commitFounding
+      - adoptsTiming
+      - (*Raft).applyAdmin
+      - (*Raft).commitTimingContract
+      - (*Raft).commitClusterVersion
+      - (*Raft).commitTo
+      - (*Raft).PeerStats
+      - (*Raft).FailureTolerance
+      - (*Raft).QuorumActive
+      - (*Raft).ChainRefusal
+    name: raft.go
+  - decls:
+      - (*Raft).Step
+      - (*Raft).stepTerm
+      - (*Raft).stepHigherTerm
+      - (*Raft).adoptTerm
+      - (*Raft).answerOlderTerm
+      - (*Raft).stepAnyRole
+      - (*Raft).refuseForLiveLeader
+      - (*Raft).validTransferFlag
+      - (*Raft).upToDate
+      - (*Raft).handleVote
+      - (*Raft).mayGrant
+      - (*Raft).voteRestricted
+      - (*Raft).becomeFollower
+      - (*Raft).abortLeadership
+      - (*Raft).campaign
+      - (*Raft).tallyVotes
+      - (*Raft).countVotes
+      - (*Raft).stepCandidate
+      - (*Raft).stepFollower
+      - (*Raft).followHeartbeat
+      - (*Raft).followTimeoutNow
+      - (*Raft).handleAppend
+      - (*Raft).rebaseOnCommit
+      - (*Raft).dropUnknownKinds
+      - (*Raft).firstNewEntry
+      - (*Raft).appendNew
+      - (*Raft).verifyChain
+      - (*Raft).acknowledgeAppend
+      - (*Raft).chainRefused
+      - (*Raft).maybeEndSilence
+    name: step.go
+functions:
+  - doc: |-
+      denyPin withdraws the pin of the member at idx: its connections are
+      refused from then on, while it stays a member.
+    name: denyPin
+    params: cur *core.MembershipValue, idx int
+    results: errs.Code
+  - doc: |-
+      ownCopy returns a copy of b the step function owns, out of a frame the
+      transport reuses. An empty b yields nil, exactly as the append([]byte(nil),
+      b...) it replaces did, so a copied entry compares equal to its original.
+    name: ownCopy
+    params: b []byte
+    results: "[]byte"
+  - doc: statFlag is x when on, else nothing.
+    name: statFlag
+    params: x PeerStatFlags, on bool
+    results: PeerStatFlags
+  - name: NewRaft
+    params: cfg *Config, st *StartState
+    results: "*Raft"
+  - doc: |-
+      actsAtCommit reports whether an entry of kind changes the engine's own
+      replicated state when it commits. A membership does only when it is the
+      founding one, which carries the generation 1 contract (#421).
+    name: actsAtCommit
+    params: kind core.EntryKind
+    results: bool
+  - doc: |-
+      foundingContract is the generation 1 contract a founding membership
+      entry carries; ok is false for any other membership, and for a founding
+      entry with no contract.
+    name: foundingContract
+    params: admin *wire.AdminValue
+    results: core.TimingContractSpec, bool
+  - doc: |-
+      adoptsTiming reports whether a snapshot's contract c replaces the one in
+      force, cur: at a higher generation, and at the same one too, which is the
+      same contract by determinism unless cur is still a node's own
+      InitialTiming (#421). A snapshot with no contract replaces nothing.
+    name: adoptsTiming
+    params: c, cur core.TimingContractSpec
+    results: bool
+imports:
+  core: github.com/kitsunium/sdk/internal/core/app/consensus
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  rand: math/rand/v2
+  slices: slices
+  strings: strings
+  time: time
+  wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/consensus/raft
+  name: raft
+  purpose: "Package raft is the consensus engine's step function (ADR 0152 D15): a value with no goroutine, no I/O and no clock."
+types:
+  - doc: |-
+      fwdKey names one submission: the follower that forwarded it and its
+      submission id, which never repeats across the follower's restarts (R7-23).
+      Two frames with one key are one submission delivered twice.
+    fields:
+      - name: from
+        type: core.NodeID
+      - name: ctx
+        type: uint64
+    kind: struct
+    name: fwdKey
+  - doc: |-
+      fwdAnswer is what a forward was answered: the position its entry was
+      appended at, or a refusal with its code and the leader hinted.
+    fields:
+      - name: reject
+        type: bool
+      - name: code
+        type: errs.Code
+      - name: hint
+        type: uint64
+      - name: index
+        type: uint64
+      - name: logTerm
+        type: uint64
+    kind: struct
+    name: fwdAnswer
+  - doc: |-
+      fwdTable keeps the answers given to forwards, bounded by maxFwdAnswers,
+      the oldest evicted first. It outlives a term: a duplicate that arrives
+      after this node changed term, or led again, is still the submission it
+      answered, and replaying an old answer is harmless, the follower having
+      taken the first one (#401).
+    fields:
+      - name: byKey
+        type: map[fwdKey]fwdAnswer
+      - doc: order is a ring of the kept keys, oldest at next once it is full.
+        name: order
+        type: "[]fwdKey"
+      - name: next
+        type: int
+    kind: struct
+    methods:
+      - doc: lookup returns the answer kept for k.
+        name: lookup
+        params: k fwdKey
+        recv: a *fwdTable
+        results: fwdAnswer, bool
+      - doc: remember keeps v for k, evicting the oldest answer when limit are kept.
+        name: remember
+        params: k fwdKey, v fwdAnswer, limit int
+        recv: a *fwdTable
+    name: fwdTable
+  - doc: |-
+      memLog is the step function's view of the log: the snapshot base and every
+      entry after it. The driver loads it at start and trims it after each
+      compaction, so it holds no more than the store retains (D6).
+    fields:
+      - name: snapIndex
+        type: uint64
+      - name: snapTerm
+        type: uint64
+      - name: snapChain
+        type: uint32
+      - name: ents
+        type: "[]core.EntryValue"
+      - name: committed
+        type: uint64
+      - name: stable
+        type: uint64
+      - name: applied
+        type: uint64
+      - doc: |-
+          evicted is the highest index whose payload was dropped from memory;
+          its metadata stays. window counts the payload bytes still resident
+          above it (D6, RecentEntriesBytes).
+        name: evicted
+        type: uint64
+      - name: window
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          lastIndex is the index of the last entry held, the snapshot base when
+          none is.
+        name: lastIndex
+        recv: l *memLog
+        results: uint64
+      - doc: |-
+          lastTerm is the term of the last entry held, the snapshot's term when
+          none is: what the election restriction compares.
+        name: lastTerm
+        recv: l *memLog
+        results: uint64
+      - doc: term returns the term at i; ok is false below the snapshot or past the end.
+        name: term
+        params: i uint64
+        recv: l *memLog
+        results: uint64, bool
+      - doc: chain returns the chain value at i, the snapshot's tip at its index.
+        name: chain
+        params: i uint64
+        recv: l *memLog
+        results: uint32
+      - doc: |-
+          at returns the entry at i in place. The caller guarantees
+          snapIndex < i <= lastIndex; anything else panics on the slice bound.
+        name: at
+        params: i uint64
+        recv: l *memLog
+        results: "*core.EntryValue"
+      - doc: |-
+          matchTerm reports whether the log holds index i at term t: false for an
+          index it does not hold, so a compacted or missing entry never matches.
+        name: matchTerm
+        params: i, t uint64
+        recv: l *memLog
+        results: bool
+      - doc: |-
+          slice returns the entries in [lo, hi), at least one, at most maxBytes,
+          as a copy: a message queued over them is serialised after Ready, whose
+          eviction blanks the log's own entries in place (#422).
+        name: slice
+        params: lo, hi uint64, maxBytes int
+        recv: l *memLog
+        results: "[]core.EntryValue"
+      - doc: resident sums the payload bytes held for (from, to].
+        name: resident
+        params: from, to uint64
+        recv: l *memLog
+        results: int64
+      - doc: |-
+          evict drops payloads, oldest first, while the window is above limit,
+          never above through: only applied and durable entries are dropped, so
+          Apply never needs the disk and a lagging peer is fed by a fetch.
+        name: evict
+        params: limit int64, through uint64
+        recv: l *memLog
+      - doc: truncateFrom drops every entry from index i on.
+        name: truncateFrom
+        params: i uint64
+        recv: l *memLog
+      - doc: compactTo forgets the entries through i, which a snapshot now covers.
+        name: compactTo
+        params: i, t uint64, chain uint32
+        recv: l *memLog
+    name: memLog
+  - doc: |-
+      mutation reintroduces one cited bug behind a test-only switch (D15). The
+      field that holds it is unexported and only the package's own tests set it,
+      so no build of the engine can turn one on.
+    kind: named
+    name: mutation
+    underlying: uint32
+  - fields:
+      - name: ID
+        type: core.NodeID
+      - name: Flags
+        type: PeerStatFlags
+      - name: Match
+        type: uint64
+      - name: Next
+        type: uint64
+      - name: Inflight
+        type: int
+      - name: LastHeard
+        type: time.Time
+    kind: struct
+    name: PeerStatValue
+  - kind: named
+    methods:
+      - name: Has
+        params: x PeerStatFlags
+        recv: f PeerStatFlags
+        results: bool
+    name: PeerStatFlags
+    underlying: uint8
+  - doc: peerFacts are a peer's yes/no state in the leader's progress, one bit each.
+    kind: named
+    name: peerFacts
+    underlying: uint8
+  - doc: progressState is how the leader feeds a peer (D6).
+    kind: named
+    name: progressState
+    underlying: uint8
+  - doc: progress is the leader's view of one peer.
+    fields:
+      - name: match
+        type: uint64
+      - name: next
+        type: uint64
+      - name: state
+        type: progressState
+      - doc: facts are the peer's yes/no state (peerFacts).
+        name: facts
+        type: peerFacts
+      - doc: pendingSnapshot is the index of the snapshot being sent.
+        name: pendingSnapshot
+        type: uint64
+      - doc: |-
+          inflight holds the last index of each append in the window, oldest
+          first, and their sizes.
+        name: inflight
+        type: "[]uint64"
+      - name: inflightBytes
+        type: "[]int"
+      - name: bytes
+        type: int
+      - doc: lastHeard is the instant of the peer's last message in this term.
+        name: lastHeard
+        type: time.Time
+      - doc: |-
+          hbMatch is match at the previous heartbeat answer: a replicating
+          peer whose match did not move across two answers while appends are in
+          flight lost one, and is probed again.
+        name: hbMatch
+        type: uint64
+    kind: struct
+    methods:
+      - doc: |-
+          becomeProbe restarts the peer at one append at a time from its match. Out
+          of a snapshot transfer it resumes after the snapshot it was sent, since the
+          peer's log starts there.
+        name: becomeProbe
+        recv: p *progress
+      - doc: |-
+          becomeReplicate pipelines appends from just after the peer's match, with
+          an empty window.
+        name: becomeReplicate
+        recv: p *progress
+      - doc: |-
+          becomeSnapshot pauses appends to the peer until the snapshot at index has
+          been sent and answered.
+        name: becomeSnapshot
+        params: index uint64
+        recv: p *progress
+      - doc: freeAll empties the inflight window, keeping its capacity.
+        name: freeAll
+        recv: p *progress
+      - doc: freeTo releases every append of the window through index.
+        name: freeTo
+        params: index uint64
+        recv: p *progress
+      - doc: add records an append ending at last, of size bytes, in the window.
+        name: add
+        params: last uint64, size int
+        recv: p *progress
+      - doc: paused reports whether the leader must not send more to the peer now.
+        name: paused
+        params: maxInflight, maxBytes int
+        recv: p *progress
+        results: bool
+      - doc: |-
+          rejectCounts reports whether a rejection of the append after index still
+          answers something outstanding (R2-07): the probe in flight, or an append
+          in the window. Any other rejection is stale.
+        name: rejectCounts
+        params: index uint64
+        recv: p *progress
+        results: bool
+      - doc: maybeUpdate records an acknowledgement of n; it reports whether match grew.
+        name: maybeUpdate
+        params: n uint64
+        recv: p *progress
+        results: bool
+    name: progress
+  - doc: raftFacts are the step function's own yes/no state, one bit each.
+    kind: named
+    name: raftFacts
+    underlying: uint8
+  - fields:
+      - doc: ID is this node.
+        name: ID
+        type: core.NodeID
+      - doc: Group is the consensus group.
+        name: Group
+        type: core.GroupID
+      - doc: Log is the identity of the log, checked against an admin precondition.
+        name: Log
+        type: core.LogIdentityValue
+      - doc: Seed draws the randomized election timeouts.
+        name: Seed
+        type: uint64
+      - doc: Timing is the committed timing contract at start.
+        name: Timing
+        type: core.TimingContractSpec
+      - doc: MaxInflight bounds the appends in flight per peer.
+        name: MaxInflight
+        type: int
+      - doc: MaxInflightBytes bounds their bytes.
+        name: MaxInflightBytes
+        type: int
+      - doc: MaxBatchBytes bounds one append.
+        name: MaxBatchBytes
+        type: int
+      - doc: MinVoters is the floor a Remove may not cross.
+        name: MinVoters
+        type: int
+      - doc: PromoteLag is how far behind the commit a learner may be promoted.
+        name: PromoteLag
+        type: uint64
+      - doc: Lease turns on lease reads.
+        name: Lease
+        type: bool
+      - doc: |-
+          CanVote is false while the directory is joining or silent: such a
+          node neither votes nor acknowledges.
+        name: CanVote
+        type: bool
+      - doc: MaxChainRefusals is N of D4's "no silent loop".
+        name: MaxChainRefusals
+        type: int
+      - doc: |-
+          NoTable is set while the node holds no usable snapshot: it votes and
+          stores the log but never campaigns, and asks for a snapshot (R7-18).
+        name: NoTable
+        type: bool
+      - doc: |-
+          SilentTerm and SilentIndex are the silence condition
+          TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
+          not 0 the node grants no vote and acknowledges no append, until a
+          leader of a term at least SilentTerm has rewritten its log past
+          SilentIndex and committed an entry of its own term.
+        name: SilentTerm
+        type: uint64
+      - doc: |-
+          SilentTerm and SilentIndex are the silence condition
+          TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
+          not 0 the node grants no vote and acknowledges no append, until a
+          leader of a term at least SilentTerm has rewritten its log past
+          SilentIndex and committed an entry of its own term.
+        name: SilentIndex
+        type: uint64
+      - doc: |-
+          RecentEntriesBytes bounds the payloads held in memory; 0 holds them
+          all. Older ones are fetched from the store when a peer needs them.
+        name: RecentEntriesBytes
+        type: int64
+      - doc: |-
+          MaxEntryBytes bounds a forwarded command's payload as the driver
+          bounds a local one; 0 does not bound it.
+        name: MaxEntryBytes
+        type: int
+      - doc: |-
+          MaxForwardBytes bounds the payload bytes of forwarded commands this
+          leader appended and has not committed yet; 0 does not bound them.
+        name: MaxForwardBytes
+        type: int64
+      - doc: mut is set by the package's own tests only.
+        name: mut
+        type: mutation
+    kind: struct
+    name: Config
+  - doc: fwdEntry is one forwarded command a leader appended.
+    fields:
+      - name: index
+        type: uint64
+      - name: size
+        type: int64
+    kind: struct
+    name: fwdEntry
+  - fields:
+      - doc: HardState is the last hard state on disk.
+        name: HardState
+        type: core.HardState
+      - doc: Snapshot is the base the log continues, zero for none.
+        name: Snapshot
+        type: core.SnapshotMetaValue
+      - doc: Entries are the durable entries after the snapshot.
+        name: Entries
+        type: "[]core.EntryValue"
+      - doc: Applied is where the state machine resumes, at least the snapshot.
+        name: Applied
+        type: uint64
+      - doc: "Now is the start instant: the restart vote-refusal window opens here."
+        name: Now
+        type: time.Time
+    kind: struct
+    name: StartState
+  - fields:
+      - name: Context
+        type: uint64
+      - name: Index
+        type: uint64
+      - name: Code
+        type: errs.Code
+    kind: struct
+    name: ReadState
+  - fields:
+      - name: To
+        type: core.NodeID
+      - name: Code
+        type: errs.Code
+    kind: struct
+    name: TransferResult
+  - fields:
+      - doc: Seq names the write when there is one; completions carry it.
+        name: Seq
+        type: uint64
+      - doc: |-
+          HardState is set when the term or the vote changed: it is durable
+          before anything in AfterSync leaves.
+        name: HardState
+        type: "*core.HardState"
+      - doc: Commit is the new commit index, written lazily, 0 when unchanged.
+        name: Commit
+        type: uint64
+      - doc: TruncateFrom removes every entry from that index on, before Entries.
+        name: TruncateFrom
+        type: uint64
+      - doc: Entries are appended after the truncation.
+        name: Entries
+        type: "[]core.EntryValue"
+      - doc: Messages leave at once.
+        name: Messages
+        type: "[]core.MessageValue"
+      - doc: AfterSync leave once this write is durable.
+        name: AfterSync
+        type: "[]core.MessageValue"
+      - doc: Apply are committed, locally durable entries, in order.
+        name: Apply
+        type: "[]core.EntryValue"
+      - doc: SendSnapshot names the peers that need a snapshot.
+        name: SendSnapshot
+        type: "[]core.NodeID"
+      - doc: ReadStates answer reads.
+        name: ReadStates
+        type: "[]ReadState"
+      - doc: Forwarded are answers to this node's forwarded proposals.
+        name: Forwarded
+        type: "[]core.MessageValue"
+      - doc: Transfers end transfers.
+        name: Transfers
+        type: "[]TransferResult"
+      - doc: |-
+          Compact drops the log's prefix through that index, which a durable
+          snapshot covers.
+        name: Compact
+        type: uint64
+      - doc: |-
+          SilenceEnded is set once the silence condition held: the driver
+          removes it durably.
+        name: SilenceEnded
+        type: bool
+      - doc: |-
+          Fetch asks the driver to read entries the step function no longer
+          holds, off the event loop, and hand them back with Fetched.
+        name: Fetch
+        type: "[]FetchSpec"
+      - doc: Membership is set when the admitted set changed.
+        name: Membership
+        type: "[]core.MemberValue"
+      - doc: |-
+          Unsupported names an entry whose kind this version does not know:
+          the driver stops the node with VERSION_UNSUPPORTED.
+        name: Unsupported
+        type: UnsupportedEntryValue
+      - doc: |-
+          ChainRefusedBy names, once per refusal, the leader whose append this
+          follower refused for a broken chain, for D13's
+          consensus_chain_refusals_total.
+        name: ChainRefusedBy
+        type: "[]core.NodeID"
+    kind: struct
+    methods:
+      - name: NeedsWrite
+        recv: rd *ReadyValue
+        results: bool
+      - doc: hasLogWork reports whether the Ready queues a log change or a message.
+        name: hasLogWork
+        recv: rd *ReadyValue
+        results: bool
+      - doc: |-
+          hasNotices reports whether the Ready queues anything else for the
+          driver: snapshots to send, answers, a membership, fetches, the end of the
+          silence, an entry this version cannot apply.
+        name: hasNotices
+        recv: rd *ReadyValue
+        results: bool
+    name: ReadyValue
+  - fields:
+      - name: Index
+        type: uint64
+      - name: Kind
+        type: core.EntryKind
+    kind: struct
+    name: UnsupportedEntryValue
+  - fields:
+      - name: To
+        type: core.NodeID
+      - name: Lo
+        type: uint64
+      - name: Hi
+        type: uint64
+    kind: struct
+    name: FetchSpec
+  - fields:
+      - name: index
+        type: uint64
+      - name: m
+        type: core.MembershipValue
+    kind: struct
+    name: confAt
+  - fields:
+      - name: ctx
+        type: uint64
+      - name: index
+        type: uint64
+      - name: from
+        type: core.NodeID
+      - name: round
+        type: uint64
+    kind: struct
+    name: readReq
+  - fields:
+      - name: id
+        type: uint64
+      - name: sentAt
+        type: time.Time
+      - name: acks
+        type: map[core.NodeID]uint64
+      - name: conf
+        type: uint64
+    kind: struct
+    name: round
+  - fields:
+      - name: cfg
+        type: Config
+      - name: rng
+        type: "*rand.Rand"
+      - name: mut
+        type: mutation
+      - doc: |-
+          facts are the step function's yes/no state (raftFacts): the vote
+          counted once durable, the transfer sent, the lease dropped, and the
+          driver's apply backpressure.
+        name: facts
+        type: raftFacts
+      - doc: |-
+          fwd lists the forwarded commands appended in fwdTerm and not yet
+          known committed, with fwdBytes their payload total.
+        name: fwd
+        type: "[]fwdEntry"
+      - name: fwdBytes
+        type: int64
+      - name: fwdTerm
+        type: uint64
+      - doc: |-
+          fwdAnswers are the answers given to the latest forwards, whatever
+          their term, so a forward delivered twice is answered twice and
+          proposed once (#401).
+        name: fwdAnswers
+        type: fwdTable
+      - name: id
+        type: core.NodeID
+      - name: term
+        type: uint64
+      - name: vote
+        type: core.NodeID
+      - name: lead
+        type: core.NodeID
+      - name: role
+        type: core.Role
+      - name: log
+        type: memLog
+      - name: base
+        type: core.MembershipValue
+      - name: confs
+        type: "[]confAt"
+      - name: prs
+        type: map[core.NodeID]*progress
+      - name: votes
+        type: map[core.NodeID]bool
+      - name: electionDeadline
+        type: time.Time
+      - name: heartbeatDue
+        type: time.Time
+      - name: lastLeaderContact
+        type: time.Time
+      - name: now
+        type: time.Time
+      - doc: |-
+          selfVoteSeq is the write that carries this candidate's own vote; its
+          vote counts once that write is durable (D5b).
+        name: selfVoteSeq
+        type: uint64
+      - doc: termStart is the index of this leader's no-op.
+        name: termStart
+        type: uint64
+      - name: transferTo
+        type: core.NodeID
+      - name: transferDeadline
+        type: time.Time
+      - name: leaseStart
+        type: time.Time
+      - doc: |-
+          leaseLen is the lease the last confirmed round grants: computed
+          from the minimum timing contract over the acknowledging majority,
+          never from the leader's newer view (D9 d).
+        name: leaseLen
+        type: time.Duration
+      - name: contracts
+        type: map[uint64]core.TimingContractSpec
+      - doc: campaignTransfer is the flag the current campaign carries.
+        name: campaignIssuer
+        type: core.NodeID
+      - name: campaignTerm
+        type: uint64
+      - name: nextRound
+        type: uint64
+      - name: rounds
+        type: "[]*round"
+      - name: pendingReads
+        type: "[]readReq"
+      - name: waitingReads
+        type: "[]readReq"
+      - name: timing
+        type: core.TimingContractSpec
+      - name: voteWindow
+        type: time.Duration
+      - name: clusterVer
+        type: uint32
+      - name: clusterGen
+        type: uint64
+      - name: noSpace
+        type: core.AlarmID
+      - name: engBase
+        type: EngineValue
+      - name: engines
+        type: "[]engineAt"
+      - name: refusedLead
+        type: core.NodeID
+      - name: refusedAt
+        type: uint64
+      - name: refusedFrom
+        type: core.NodeID
+      - name: refusals
+        type: int
+      - name: seq
+        type: uint64
+      - name: rd
+        type: ReadyValue
+      - name: hs
+        type: core.HardState
+    kind: struct
+    methods:
+      - name: Debug
+        recv: r *Raft
+        results: string
+      - doc: |-
+          becomeLeader takes leadership of the current term: a fresh progress per
+          member, no lease and no read until the term's no-op, which it appends and
+          broadcasts at once.
+        name: becomeLeader
+        recv: r *Raft
+      - doc: |-
+          appendAsLeader assigns positions and chain values at the leader's
+          serialized append point (D4) and appends.
+        name: appendAsLeader
+        params: es []core.EntryValue
+        recv: r *Raft
+        results: "[]core.PositionValue"
+      - doc: |-
+          tickLeader runs the leader's timers: CheckQuorum, the transfer deadline,
+          then the heartbeat, in that order, so a deposed leader sends nothing.
+        name: tickLeader
+        params: now time.Time
+        recv: r *Raft
+      - doc: |-
+          quorumActive reports whether a majority of the voters, this node counted,
+          was heard within window before now.
+        name: quorumActive
+        params: now time.Time, window time.Duration
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          broadcastHeartbeat opens a confirmation round, keeping the last 64, and
+          sends it to every peer with a commit clamped to the peer's match, so a
+          heartbeat never commits an entry the peer may not hold.
+        name: broadcastHeartbeat
+        params: now time.Time
+        recv: r *Raft
+      - doc: |-
+          peers returns the other members with a progress, in configuration order,
+          so that a run stays a pure function of its inputs (D15): a map's order is
+          not.
+        name: peers
+        recv: r *Raft
+        results: "[]core.NodeID"
+      - doc: broadcastAppend feeds every peer, in configuration order.
+        name: broadcastAppend
+        params: sendIfEmpty bool
+        recv: r *Raft
+      - doc: |-
+          sendAppend feeds one peer what it lacks: entries when the log holds them,
+          a fetch when their payloads were evicted, a snapshot when the log no
+          longer reaches back to the peer. A paused peer gets nothing.
+        name: sendAppend
+        params: to core.NodeID, sendIfEmpty bool
+        recv: r *Raft
+      - name: Fetched
+        params: to core.NodeID, lo uint64, ents []core.EntryValue, compacted bool
+        recv: r *Raft
+      - doc: |-
+          fetchedMatch reports whether ents are the entries from lo on, one per
+          index, at the terms the log still holds: a read that raced a truncation
+          is not sent.
+        name: fetchedMatch
+        params: lo uint64, ents []core.EntryValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          sendEntries sends one append after prev and accounts for it: a replicating
+          peer's window grows by it, a probing peer pauses until it answers.
+        name: sendEntries
+        params: pr *progress, to core.NodeID, prev, prevTerm uint64, ents []core.EntryValue
+        recv: r *Raft
+      - doc: |-
+          maybeCommit advances the commit to the highest index a quorum of voters
+          matches, if that entry is of the leader's own term; it reports whether the
+          commit moved.
+        name: maybeCommit
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          stepLeader handles a message of the leader's term. Any answer from a
+          member counts as contact for CheckQuorum, the lease and promotion.
+        name: stepLeader
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          handleHeartbeatResp acknowledges every round up to the one answered,
+          recording the contract generation the peer applied, and refills a window
+          that a lost append left stalled.
+        name: handleHeartbeatResp
+        params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          ackRounds records from's answer to every round up to round, with the
+          contract generation it applied, stored plus one so that 0 stays "no
+          answer".
+        name: ackRounds
+        params: from core.NodeID, round, contract uint64
+        recv: r *Raft
+      - doc: |-
+          handleAppResp moves a peer's progress on an append's answer, commits what
+          a quorum now holds, and feeds the peer what it still lacks.
+        name: handleAppResp
+        params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          handleAppReject backs a peer off after a refused append: to a snapshot it
+          asked for, to the truncation it reports, or to the hint of a rejection
+          that still answers an outstanding append; any other rejection is stale and
+          ignored.
+        name: handleAppReject
+        params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - name: Propose
+        params: now time.Time, es []core.EntryValue
+        recv: r *Raft
+        results: "[]core.PositionValue, errs.Code"
+      - doc: |-
+          checkProposed admits one proposed entry that would land at index: a
+          command as it is, a no-op or an unknown kind never, an engine entry once
+          validateAdmin accepts and rewrites it. It returns the target of a
+          transfer the entry asks for.
+        name: checkProposed
+        params: e *core.EntryValue, index uint64
+        recv: r *Raft
+        results: core.NodeID, errs.Code
+      - doc: |-
+          validateAdmin re-validates an engine entry against the leader's own state
+          and rewrites a membership change into the whole configuration (D8).
+        name: validateAdmin
+        params: e *core.EntryValue, index uint64
+        recv: r *Raft
+        results: core.NodeID, errs.Code
+      - doc: |-
+          checkAdmin holds an engine entry of kind to the leader's state, rewriting
+          admin in place where the entry it replicates differs from the one
+          proposed. It returns the transfer target of an EntryTransfer.
+        name: checkAdmin
+        params: kind core.EntryKind, admin *wire.AdminValue, index uint64
+        recv: r *Raft
+        results: core.NodeID, errs.Code
+      - doc: |-
+          checkMembership admits one membership change at a time, only once the
+          term's no-op committed, and rewrites it into the whole configuration that
+          takes effect at index.
+        name: checkMembership
+        params: admin *wire.AdminValue, index uint64
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          checkTimingContract admits a contract proposed against the current
+          generation that can hold: a heartbeat at most a fifth of the minimum
+          election timeout, a non-empty randomization range and a drift in [0, 1).
+          Admitting it drops the lease at once (D9 d).
+        name: checkTimingContract
+        params: admin *wire.AdminValue
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          checkClusterVersion admits only a raise, proposed against the current
+          cluster generation of this log.
+        name: checkClusterVersion
+        params: admin *wire.AdminValue
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          checkNoSpaceClear admits clearing only the alarm that is raised now, so a
+          late clear cannot end a newer alarm.
+        name: checkNoSpaceClear
+        params: admin *wire.AdminValue
+        recv: r *Raft
+        results: errs.Code
+      - doc: checkTransfer admits a transfer to another voter and returns it.
+        name: checkTransfer
+        params: admin *wire.AdminValue
+        recv: r *Raft
+        results: core.NodeID, errs.Code
+      - doc: |-
+          nextConf computes the configuration a single-server change produces, and
+          refuses it on its merits (D8). On a refusal the configuration returned is
+          not to be used.
+        name: nextConf
+        params: admin wire.AdminValue
+        recv: r *Raft
+        results: core.MembershipValue, errs.Code
+      - doc: |-
+          addLearner adds the one member admin carries as a learner: a new id with
+          a key no member holds, never retired, with a pin, and only while a quorum
+          answers so the change can commit.
+        name: addLearner
+        params: cur *core.MembershipValue, admin *wire.AdminValue
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          promote makes the learner at idx a voter, only once it caught up and was
+          heard recently, and only if the new voter set still answers by a majority.
+        name: promote
+        params: cur *core.MembershipValue, target core.NodeID, idx int
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          removeMember removes the member at idx, never this leader, and retires
+          its id; a voter's removal may not cross MinVoters nor leave a voter set
+          without an answering majority.
+        name: removeMember
+        params: cur *core.MembershipValue, target core.NodeID, idx int
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          updateAddress changes the address of the member at idx to the one admin
+          carries, while a majority answers.
+        name: updateAddress
+        params: cur *core.MembershipValue, admin *wire.AdminValue, idx int
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          activeMajority is etcd's strict reconfiguration check: the voters of m
+          that answer the leader NOW form a majority of m (R2-27).
+        name: activeMajority
+        params: m core.MembershipValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          handleForward answers a forward once per submission. A transport that
+          resends a batch on a fresh connection can deliver a forward twice (#377);
+          proposed twice, its command would be applied twice, the follower having
+          taken the first answer and dropped the second (#401). A forward already
+          answered, in this term or an earlier one, is answered again with the same
+          answer, position or refusal, and nothing is proposed.
+        name: handleForward
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          answerForward proposes the one entry a follower forwarded and returns its
+          position or a refusal. The entry is copied out of the frame first, and a
+          body that does not match its checksum is never proposed.
+        name: answerForward
+        params: m core.MessageValue
+        recv: r *Raft
+        results: fwdAnswer
+      - doc: |-
+          admitForward applies to a forwarded command the bounds the driver applies
+          to a local one before anything is appended: the entry size, the bytes
+          appended and not committed, the apply backpressure (D6, review M2).
+        name: admitForward
+        params: size int
+        recv: r *Raft
+        results: errs.Code
+      - name: ReadIndex
+        params: now time.Time, ctx uint64, noLease bool
+        recv: r *Raft
+      - doc: |-
+          serveLeaseRead answers every pending read at the commit index at once,
+          with no round, while the lease holds and the caller allows it; otherwise
+          the reads wait for flushReads.
+        name: serveLeaseRead
+        params: allowLease bool
+        recv: r *Raft
+      - doc: |-
+          flushReads starts ONE round for every read that arrived since the last
+          one: a read never rides a round already in flight (D9).
+        name: flushReads
+        recv: r *Raft
+      - doc: |-
+          contractWindow is the minimum election timeout of the contract a voter
+          applied; an unknown generation counts as the shortest contract known.
+        name: contractWindow
+        params: gen uint64
+        recv: r *Raft
+        results: time.Duration
+      - doc: |-
+          confirmRounds settles the latest round a quorum of the current
+          configuration acknowledged: it extends the lease from that round's send
+          instant, answers every read waiting on it or an earlier one, and forgets
+          those rounds.
+        name: confirmRounds
+        recv: r *Raft
+      - doc: |-
+          lastConfirmedRound returns the latest round of the current configuration
+          a quorum acknowledged, its send instant and the lease it grants; a zero
+          id when there is none. A round of an older configuration never counts
+          (R2-15).
+        name: lastConfirmedRound
+        recv: r *Raft
+        results: uint64, time.Time, time.Duration
+      - doc: |-
+          roundAcks counts the voters that acknowledged rd and returns the shortest
+          election window among the contracts they applied: the lease a round may
+          grant is the one every acknowledging voter honours (D9 d).
+        name: roundAcks
+        params: rd *round
+        recv: r *Raft
+        results: int, time.Duration
+      - doc: |-
+          extendLease moves the lease start to a confirmed round sent later than
+          the current one, shortened by the drift budget; a dropped lease stays
+          dropped for the term.
+        name: extendLease
+        params: sentAt time.Time, leaseLen time.Duration
+        recv: r *Raft
+      - doc: |-
+          answerConfirmed answers, in arrival order, every read waiting on a round
+          through confirmed, and keeps the others waiting.
+        name: answerConfirmed
+        params: confirmed uint64
+        recv: r *Raft
+      - doc: |-
+          dropRoundsThrough forgets every round through confirmed, keeping the
+          slice's storage.
+        name: dropRoundsThrough
+        params: confirmed uint64
+        recv: r *Raft
+      - doc: |-
+          answerRead answers a read at index, or refuses it with code: locally in
+          Ready.ReadStates, or with a message to the follower that forwarded it.
+        name: answerRead
+        params: q readReq, index uint64, code errs.Code
+        recv: r *Raft
+      - name: TransferLeadership
+        params: now time.Time, to core.NodeID
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          startTransfer starts a transfer to to unless one runs: from now on the
+          leader proposes nothing and holds no lease, catches the target up, and
+          sends TimeoutNow once it holds the whole log.
+        name: startTransfer
+        params: to core.NodeID
+        recv: r *Raft
+      - doc: |-
+          maybeSendTimeoutNow sends TimeoutNow only once every proposed entry is
+          committed and the target holds them all (D8, from raft-sql-poc).
+        name: maybeSendTimeoutNow
+        recv: r *Raft
+      - name: CheckOffer
+        params: from core.NodeID, o core.InstallOfferValue, needTable bool
+        recv: r *Raft
+        results: errs.Code
+      - name: InstallSnapshot
+        params: meta core.SnapshotMetaValue
+        recv: r *Raft
+      - doc: |-
+          ignoresInstall reports whether an install at idx must leave the log as it
+          is. One below the base never moves it back: CheckOffer refuses it.
+
+          The offer was checked fresh before its body streamed and the machine
+          restored it, which takes seconds on a large state. Meanwhile this node
+          may have been elected, or committed past the snapshot through a new
+          leader's appends: its log and its engine state then hold everything the
+          snapshot holds, and the effects of the engine entries committed past it
+          besides. Moving onto the snapshot would roll that engine state back, and
+          a later cut would carry the regression to the other nodes (#416). A node
+          with no table still installs (installEngine replays those effects).
+        name: ignoresInstall
+        params: idx uint64
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          installEngine replaces the engine's own replicated state with the
+          snapshot's, then applies again the effects of the entries this node holds
+          committed past it, which only a node with no table can (#416).
+        name: installEngine
+        params: meta *core.SnapshotMetaValue
+        recv: r *Raft
+      - doc: |-
+          restartLogAt discards the whole log, whose boundary entry does not match
+          the snapshot at (idx, t), and restarts it empty on that snapshot: the
+          entries dropped are truncated in the Ready and the store compacted to idx.
+        name: restartLogAt
+        params: idx, t uint64, chainTip uint32
+        recv: r *Raft
+      - doc: |-
+          dropConfsThrough forgets every configuration appended at or before index,
+          which the snapshot base now carries, keeping the slice's storage.
+        name: dropConfsThrough
+        params: index uint64
+        recv: r *Raft
+      - doc: |-
+          mutated reports whether a test switched mutation m on; it is false in every
+          build of the engine, whose Config cannot set the field.
+        name: mutated
+        params: m mutation
+        recv: r *Raft
+        results: bool
+      - name: SetOverloaded
+        params: on bool
+        recv: r *Raft
+      - name: Tick
+        params: now time.Time
+        recv: r *Raft
+      - name: StorageDone
+        params: seq, index, term uint64
+        recv: r *Raft
+      - doc: |-
+          noteSelfVote counts this candidate's own vote once the write seq that
+          carries it is durable (D5b), and tallies the campaign then.
+        name: noteSelfVote
+        params: seq uint64
+        recv: r *Raft
+      - name: ReportUnreachable
+        params: id core.NodeID
+        recv: r *Raft
+      - name: SnapshotDone
+        params: to core.NodeID, ok bool
+        recv: r *Raft
+      - name: Compact
+        params: index uint64
+        recv: r *Raft
+      - name: NoTable
+        recv: r *Raft
+        results: bool
+      - name: SetCanVote
+        params: v bool
+        recv: r *Raft
+      - name: SnapshotIndex
+        recv: r *Raft
+        results: uint64
+      - name: Entry
+        params: i uint64
+        recv: r *Raft
+        results: core.EntryValue, bool
+      - name: ConfAt
+        params: i uint64
+        recv: r *Raft
+        results: core.MembershipValue
+      - name: ChainAt
+        params: i uint64
+        recv: r *Raft
+        results: uint32
+      - name: EngineAt
+        params: i uint64
+        recv: r *Raft
+        results: EngineValue
+      - name: TermAt
+        params: i uint64
+        recv: r *Raft
+        results: uint64, bool
+      - name: Status
+        recv: r *Raft
+        results: StatusValue
+      - name: Progress
+        params: id core.NodeID
+        recv: r *Raft
+        results: match uint64, lastHeard time.Time, ok bool
+      - name: LeaseValid
+        params: now time.Time
+        recv: r *Raft
+        results: bool
+      - name: DropLease
+        recv: r *Raft
+      - name: HasReady
+        recv: r *Raft
+        results: bool
+      - name: Ready
+        recv: r *Raft
+        results: ReadyValue
+      - doc: |-
+          numberWrite gives a Ready that asks the storage actor for anything the
+          next write sequence number, and remembers it as the write carrying a
+          candidate's own vote when this one persists that vote (D5b).
+        name: numberWrite
+        params: rd *ReadyValue, hsChanged bool
+        recv: r *Raft
+      - doc: |-
+          conf is the latest appended configuration, which governs this node from
+          the moment it is appended (D8).
+        name: conf
+        recv: r *Raft
+        results: "*core.MembershipValue"
+      - doc: |-
+          confAt is the configuration in force at index i: the latest appended at
+          or before it, else the snapshot base's.
+        name: confAt
+        params: i uint64
+        recv: r *Raft
+        results: "*core.MembershipValue"
+      - doc: isVoter reports whether id votes in the current configuration.
+        name: isVoter
+        params: id core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: voters lists the current configuration's voters, in its order.
+        name: voters
+        recv: r *Raft
+        results: "[]core.NodeID"
+      - doc: quorum is the size of a majority of the current voters.
+        name: quorum
+        recv: r *Raft
+        results: int
+      - doc: |-
+          promotable reports whether this node may campaign: a voter of the current
+          configuration, whose directory may vote.
+        name: promotable
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          randomTimeout draws an election timeout in [min, max) from the seeded
+          generator, one draw per call, so a run replays from its seed (D15).
+        name: randomTimeout
+        recv: r *Raft
+        results: time.Duration
+      - doc: resetElection arms the election timer at a fresh random timeout from now.
+        name: resetElection
+        params: now time.Time
+        recv: r *Raft
+      - doc: |-
+          admitted is the transport's admission set: the union of the latest
+          appended configuration and the latest committed one (D4).
+        name: admitted
+        recv: r *Raft
+        results: "[]core.MemberValue"
+      - doc: |-
+          send stamps m with this node's identity and term and queues it. An
+          acknowledgement or a vote waits in AfterSync for the write it vouches for
+          (D5b), and a silent node sends no positive acknowledgement at all.
+        name: send
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          waitsForSync reports whether a message of kind vouches for durable state,
+          an append's acknowledgement or a granted vote, and so leaves only after
+          the write (D5b).
+        name: waitsForSync
+        params: kind core.MessageKind
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          noteAppended records what an appended entry changes at append time: a
+          membership takes effect when appended (D8), and every contract present
+          widens the vote-refusal window (R3-07).
+        name: noteAppended
+        params: e *core.EntryValue
+        recv: r *Raft
+      - doc: |-
+          confChanged follows a change of the latest configuration: the admission
+          set is republished, a leader tracks exactly the new members, and a
+          follower or learner takes the role the new configuration gives it.
+        name: confChanged
+        recv: r *Raft
+      - doc: |-
+          trackMembers gives every new member a progress, drops the progress of
+          every removed one, and restarts every read round (R2-15).
+        name: trackMembers
+        recv: r *Raft
+      - doc: truncateFrom removes entries from i on and rolls the configuration back.
+        name: truncateFrom
+        params: i uint64
+        recv: r *Raft
+      - doc: |-
+          appendEntries appends es to the log and to the Ready's write, noting what
+          each changes at append time.
+        name: appendEntries
+        params: es []core.EntryValue
+        recv: r *Raft
+      - doc: |-
+          applyCommitEffects applies the engine's own replicated state of the
+          entries newly committed in [lo, hi]. It stops at the first entry this
+          version cannot apply, leaving the ones after it untouched.
+        name: applyCommitEffects
+        params: lo, hi uint64
+        recv: r *Raft
+      - doc: |-
+          applyCommitEffect applies the committed entry e at index i to the
+          engine's own replicated state. An engine entry whose payload does not
+          parse changes nothing, whatever its kind. It reports whether the walk
+          must stop because the entry is one this version cannot apply.
+        name: applyCommitEffect
+        params: i uint64, e *core.EntryValue
+        recv: r *Raft
+        results: bool
+      - doc: engine is the engine state as it stands.
+        name: engine
+        recv: r *Raft
+        results: EngineValue
+      - doc: |-
+          noteEngine records the engine state the committed entry at i left, when
+          it changed it: EngineAt answers a past index from these records. Only an
+          engine entry changes it, so there are as many records as such entries
+          above the base.
+        name: noteEngine
+        params: i uint64
+        recv: r *Raft
+      - doc: |-
+          compactEngines folds the records through index into the base: the log
+          forgets those entries, and no snapshot is cut below its base.
+        name: compactEngines
+        params: index uint64
+        recv: r *Raft
+      - doc: |-
+          resetEngines makes the state as it stands the base, with no record: an
+          install replaced the state with the snapshot's.
+        name: resetEngines
+        recv: r *Raft
+      - doc: |-
+          commitFounding makes the founding contract the one in force when its
+          entry commits, unless a later generation already is: Bootstrap proposed
+          it, and every node runs on it rather than on its own InitialTiming, or
+          two nodes started with different values would agree that generation 1
+          is in force while timing it differently (#421).
+        name: commitFounding
+        params: admin *wire.AdminValue
+        recv: r *Raft
+      - doc: |-
+          applyAdmin applies the committed engine entry at index i, of kind, whose
+          payload is admin, and reports whether it is one this version cannot
+          apply, which stops the walk over the committed entries.
+        name: applyAdmin
+        params: i uint64, kind core.EntryKind, admin *wire.AdminValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          commitTimingContract makes a committed contract the current one when it
+          was proposed against the current generation, and widens the vote-refusal
+          window to it.
+        name: commitTimingContract
+        params: admin *wire.AdminValue
+        recv: r *Raft
+      - doc: |-
+          commitClusterVersion raises the cluster version a committed entry at
+          index i proposed against the current generation, never lowering it. A
+          version above ProtocolMax is not applied: it is named in the Ready for the
+          driver to stop the node, and true stops the walk there.
+        name: commitClusterVersion
+        params: i uint64, admin *wire.AdminValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          commitTo advances the commit to i, never back, applying the engine's own
+          effects of the entries it covers and republishing the admission set.
+        name: commitTo
+        params: i uint64
+        recv: r *Raft
+      - name: PeerStats
+        recv: r *Raft
+        results: "[]PeerStatValue"
+      - name: FailureTolerance
+        params: now time.Time
+        recv: r *Raft
+        results: int
+      - name: QuorumActive
+        params: now time.Time
+        recv: r *Raft
+        results: bool
+      - name: ChainRefusal
+        recv: r *Raft
+        results: core.NodeID, uint64, int
+      - name: Step
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          stepTerm reconciles m's term with this node's before anything else reads
+          m: a higher term makes it a follower, unless the message is one a higher
+          term must not impose; an older term is answered so its sender steps down.
+          It reports whether m goes on to be handled at this node's term.
+        name: stepTerm
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          stepHigherTerm adopts the higher term m carries, or refuses it; it
+          reports whether m goes on to be handled.
+        name: stepHigherTerm
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          adoptTerm makes this node a follower at m's higher term, following its
+          sender when m comes from a leader. A PreVote, and the granted answer to
+          one, carry a prospective term and move nothing.
+        name: adoptTerm
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          answerOlderTerm tells the sender of an older term's append, heartbeat or
+          PreVote of the current term; anything else of an older term is dropped
+          unanswered.
+        name: answerOlderTerm
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          stepAnyRole handles the kinds every role handles the same way: votes,
+          forwarded proposals and the answers to this node's own forwards and
+          reads. It reports whether it handled m.
+        name: stepAnyRole
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          refuseForLiveLeader is D5's vote-side CheckQuorum: a node that heard from
+          a live leader within the window, or that just started, refuses a vote of
+          a higher term unless the request carries a valid transfer flag. A leader
+          refuses too while a majority answers it (R7-19).
+        name: refuseForLiveLeader
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          validTransferFlag honours a transfer flag only for one campaign: issued by
+          the leader this node knows for the flag's term, for the very next term
+          (R7-17, R8-37).
+        name: validTransferFlag
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          upToDate is the election restriction: m's log is at least as recent as
+          this node's, by last term and then by last index.
+        name: upToDate
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          handleVote answers a vote or a PreVote of this node's term, after the
+          live-leader refusal already passed. Only a real vote is recorded, and its
+          grant leaves after the vote is durable (send, D5b).
+        name: handleVote
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          mayGrant reports whether this node is free to grant m: it already voted
+          for the sender, or it has neither voted nor a leader this term, or m is a
+          PreVote for a later term, which binds nothing.
+        name: mayGrant
+        params: pre bool, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          voteRestricted reports whether the election restriction applies to m: it
+          always does, unless a test mutation lifts it.
+        name: voteRestricted
+        params: pre bool, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          becomeFollower moves to term, following lead (0 when unknown). The vote
+          is forgotten only with a new term, and a deposed leader refuses what it
+          still held for its clients.
+        name: becomeFollower
+        params: term uint64, lead core.NodeID
+        recv: r *Raft
+      - doc: abortLeadership refuses what the old leader still held for its clients.
+        name: abortLeadership
+        recv: r *Raft
+      - doc: |-
+          campaign starts a PreVote round (pre) or an election at the next term.
+          A PreVote round moves no term and persists nothing; an election votes for
+          itself, which counts once durable (D5b), and carries the transfer flag of
+          issuer for issuerTerm when a TimeoutNow started it.
+        name: campaign
+        params: pre bool, issuer core.NodeID, issuerTerm uint64
+        recv: r *Raft
+      - doc: |-
+          tallyVotes moves a campaign on once a quorum granted; it reports whether
+          the role changed.
+        name: tallyVotes
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          countVotes counts the current voters' answers to the campaign; a voter
+          that has not answered counts in neither total.
+        name: countVotes
+        recv: r *Raft
+        results: granted, rejected int
+      - doc: |-
+          stepCandidate handles a message of the campaign's term: an append or a
+          heartbeat means a leader won it, an answer is tallied, a read is refused.
+        name: stepCandidate
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          stepFollower handles a message of the leader's term at a follower or a
+          learner; an append or a heartbeat is contact with the leader.
+        name: stepFollower
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          followHeartbeat records the leader's contact, commits what the heartbeat
+          allows of the entries held, and answers the round, unless this leader
+          was refused for good this term.
+        name: followHeartbeat
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          followTimeoutNow starts an election at once, carrying the transfer flag,
+          when the leader of this term hands leadership over and this node may
+          campaign.
+        name: followTimeoutNow
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          handleAppend is the follower's side of AppendEntries, with the three rules
+          raft-sql-poc learned as safety bugs (D6).
+        name: handleAppend
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          rebaseOnCommit handles an append that starts below the commit. Its
+          entries past the commit are still news: it is re-based on the committed
+          entry when it carries that entry with our term. A node that acknowledges
+          nothing — a silent one — learns the rest of the log no other way. It
+          reports false, having answered with the commit, when m cannot be re-based.
+        name: rebaseOnCommit
+        params: m *core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          dropUnknownKinds cuts m's entries at the first one whose kind this
+          version does not know and names it in the Ready: that entry and the ones
+          after it are never appended, acknowledged or skipped, the ones before it
+          are, and the driver stops the node with VERSION_UNSUPPORTED (review M3).
+        name: dropUnknownKinds
+        params: m *core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          firstNewEntry skips the entries of m the log already holds at the same
+          term and returns the position in m.Entries of the first one it does not,
+          -1 when it holds them all, with the chain value before it. ok is false,
+          and the append is dropped unanswered, when the entries are not one per
+          index after m.Index.
+        name: firstNewEntry
+        params: m *core.MessageValue
+        recv: r *Raft
+        results: start int, prevChain uint32, ok bool
+      - doc: |-
+          appendNew verifies and appends m's entries from start on, truncating a
+          conflicting suffix first. It reports false, and the append goes
+          unacknowledged, when a body or a chain does not verify or when the
+          conflict would truncate a committed entry.
+        name: appendNew
+        params: m *core.MessageValue, start int, prevChain uint32
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          verifyChain checks the body and the chain of m's entries from start on
+          before anything is appended: a mismatch refuses the acknowledgement, and
+          the leader resends (D4).
+        name: verifyChain
+        params: m *core.MessageValue, start int, prevChain uint32
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          acknowledgeAppend acknowledges the prefix m verified and commits up to
+          the leader's commit within it: never past what this append proved
+          matches the leader's log.
+        name: acknowledgeAppend
+        params: m *core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          chainRefused counts a refused append from m's sender at index at and
+          answers it with a rejection; after MaxChainRefusals in a row at one
+          index, that leader's heartbeats go unanswered for the term (D4, R6-05).
+        name: chainRefused
+        params: m core.MessageValue, at uint64
+        recv: r *Raft
+      - doc: |-
+          maybeEndSilence lifts the silence condition once a leader of a term at
+          least the node's own has rewritten its log past the truncation point and
+          committed an entry of its current term (R3-09).
+        name: maybeEndSilence
+        params: m core.MessageValue
+        recv: r *Raft
+    name: Raft
+  - fields:
+      - name: Role
+        type: core.Role
+      - name: Term
+        type: uint64
+      - name: Lead
+        type: core.NodeID
+      - name: Commit
+        type: uint64
+      - name: Last
+        type: uint64
+      - name: Stable
+        type: uint64
+      - name: Timing
+        type: core.TimingContractSpec
+      - name: Cluster
+        type: uint32
+      - name: ClusterG
+        type: uint64
+      - name: NoSpace
+        type: core.AlarmID
+      - name: Conf
+        type: core.MembershipValue
+      - name: Committed
+        type: core.MembershipValue
+      - name: Transfer
+        type: core.NodeID
+    kind: struct
+    name: StatusValue
+  - fields:
+      - name: Timing
+        type: core.TimingContractSpec
+      - name: Cluster
+        type: uint32
+      - name: ClusterG
+        type: uint64
+      - name: NoSpace
+        type: core.AlarmID
+    kind: struct
+    name: EngineValue
+  - doc: engineAt is the engine state the committed entry at index left.
+    fields:
+      - name: index
+        type: uint64
+      - name: v
+        type: EngineValue
+    kind: struct
+    name: engineAt

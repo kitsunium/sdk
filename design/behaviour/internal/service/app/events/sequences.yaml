@@ -1,0 +1,441 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    steps:
+      - return: "&bus{}"
+  - of: (*bus).Subscribe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bus).Subscribe
+        kind: self
+      - id: validateEventType
+        kind: internal
+      - id: validateSubscription
+        kind: internal
+      - id: b.members.Update
+        kind: value
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateEventType(eventType, "subscribe")
+            to: validateEventType
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateSubscription(sub, eventType)
+            to: validateSubscription
+          when: err != nil
+      - bind: duplicate
+        eval: "false"
+      - eval: |-
+          b.members.Update(func(current *state) *state {
+          		//: a duplicate name would make every error ambiguous and every
+          		//: Unsubscribe a coin toss.
+          		if holds(current, eventType, sub.Name) {
+          			duplicate = true
+          			//: returning current is Update's documented way to abort without
+          			//: republishing anything.
+          			return current
+          		}
+          		//: copy-on-write: a publisher may be ranging over the current list.
+          		return cloneStateWith(current, eventType, sub)
+          	})
+        to: b.members.Update
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.DuplicateListener, kerrs.WrapParams{},
+                			kerrs.String("listener", sub.Name), kerrs.String("event", eventType.String()))
+              to: kerrs
+          when: duplicate
+      - return: nil
+  - of: (*bus).Unsubscribe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bus).Unsubscribe
+        kind: self
+      - id: validateEventType
+        kind: internal
+      - id: b.members.Update
+        kind: value
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateEventType(eventType, "unsubscribe")
+            to: validateEventType
+          when: err != nil
+      - bind: found
+        eval: "false"
+      - eval: |-
+          b.members.Update(func(current *state) *state {
+          		next, ok := cloneStateWithout(current, eventType, name)
+          		found = ok
+          		//: cloneStateWithout returns current unchanged when there is nothing
+          		//: to remove, which aborts the rewrite.
+          		return next
+          	})
+        to: b.members.Update
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.UnknownListener, kerrs.WrapParams{},
+                			kerrs.String("listener", name), kerrs.String("event", eventType.String()))
+              to: kerrs
+          when: "!found"
+      - return: nil
+  - of: validateEventType
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateEventType
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.InvalidEventType, kerrs.WrapParams{},
+                			kerrs.String("at", at), kerrs.String("kind", "nil"))
+              to: kerrs
+          when: eventType == nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.InvalidEventType, kerrs.WrapParams{},
+                			kerrs.String("at", at), kerrs.String("kind", "interface"),
+                			kerrs.String("event", eventType.String()))
+              to: kerrs
+          when: eventType.Kind() == reflect.Interface
+      - return: nil
+  - of: validateSubscription
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSubscription
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.InvalidSubscription, kerrs.WrapParams{},
+                			kerrs.String("missing", "Name"), kerrs.String("event", eventType.String()))
+              to: kerrs
+          when: sub.Name == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.InvalidSubscription, kerrs.WrapParams{},
+                			kerrs.String("missing", "Listener"), kerrs.String("listener", sub.Name),
+                			kerrs.String("event", eventType.String()))
+              to: kerrs
+          when: sub.Listener == nil
+      - return: nil
+  - of: "On"
+    participants:
+      - id: caller
+        kind: actor
+      - id: "On"
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: bus.Subscribe
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corev.InvalidSubscription, kerrs.WrapParams{},
+                			kerrs.String("missing", "Handle"), kerrs.String("listener", handler.Name))
+              to: kerrs
+          when: handler.Handle == nil
+      - return: |-
+          bus.Subscribe(reflect.TypeFor[E](), corev.SubscriptionValue{
+          		Name:     handler.Name,
+          		Priority: handler.Priority,
+          		MayHalt:  handler.MayHalt,
+          		Listener: erase(handler.Handle),
+          	})
+        to: bus.Subscribe
+  - of: "Off"
+    participants:
+      - id: caller
+        kind: actor
+      - id: "Off"
+        kind: self
+      - id: bus.Unsubscribe
+        kind: value
+    steps:
+      - return: bus.Unsubscribe(reflect.TypeFor[E](), name)
+        to: bus.Unsubscribe
+  - of: erase
+    participants:
+      - id: caller
+        kind: actor
+      - id: erase
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return:
+          closure:
+            params: ctx context.Context, event any
+            results: error
+            steps:
+              - bind: typed, ok
+                eval: event.(E)
+              - opt:
+                  do:
+                    - return: |-
+                        kerrs.Wrap(corev.InvalidEventType, kerrs.WrapParams{},
+                        				kerrs.String("at", "deliver"), kerrs.String("event", reflect.TypeOf(event).String()),
+                        				kerrs.String("want", reflect.TypeFor[E]().String()))
+                      to: kerrs
+                  when: "!ok"
+              - return: handle(ctx, typed)
+  - of: (*bus).Publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bus).Publish
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: b.members.Load
+        kind: value
+      - id: dispatch
+        kind: internal
+    steps:
+      - bind: eventType
+        eval: reflect.TypeOf(event)
+        to: reflect
+      - opt:
+          do:
+            - return: |-
+                corev.DispatchValue{}, kerrs.Wrap(corev.InvalidEventType, kerrs.WrapParams{},
+                			kerrs.String("at", "publish"), kerrs.String("kind", "nil"))
+          when: eventType == nil
+      - bind: current
+        eval: b.members.Load()
+        to: b.members.Load
+      - opt:
+          do:
+            - return: corev.DispatchValue{}, nil
+          when: current == nil
+      - return: dispatch(ctx, eventType, event, current.byType[eventType])
+        to: dispatch
+  - of: dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: dispatch
+        kind: self
+      - id: call
+        kind: internal
+    steps:
+      - var:
+          name: failures
+          type: "[]error"
+      - loop:
+          do:
+            - bind: err
+              eval: call(ctx, eventType, sub, event)
+              to: call
+            - opt:
+                do:
+                  - op: ++
+                    set: report.Delivered
+                  - continue: true
+                when: err == nil
+            - opt:
+                do:
+                  - set: report.Skipped
+                    value: len(subs) - index - 1
+                  - return: report, errors.Join(failures...)
+                when: classify(&report, &failures, sub, eventType, err)
+          key: index
+          range: subs
+          value: sub
+      - return: report, errors.Join(failures...)
+  - of: classify
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: report.Failed
+            - set: "*failures"
+              value: append(*failures, err)
+            - return: "false"
+          when: kerrs.HasCode(err, corev.CodeListenerPanicked)
+      - op: ++
+        set: report.Delivered
+      - opt:
+          do:
+            - op: ++
+              set: report.Failed
+            - set: "*failures"
+              value: append(*failures, joinListenerFailure(sub.Name, eventType, err))
+            - return: "false"
+          when: "!kerrs.HasCode(err, corev.CodeHalt)"
+      - opt:
+          do:
+            - op: ++
+              set: report.Failed
+            - set: "*failures"
+              value: |-
+                append(*failures, kerrs.Wrap(corev.HaltNotPermitted, kerrs.WrapParams{},
+                			kerrs.String("listener", sub.Name), kerrs.String("event", eventType.String())))
+            - return: "false"
+          when: "!sub.MayHalt"
+      - set: report.Halted
+        value: "true"
+      - set: report.HaltedBy
+        value: sub.Name
+      - return: "true"
+  - of: joinListenerFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: joinListenerFailure
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: |-
+          errors.Join(kerrs.Wrap(corev.ListenerFailed, kerrs.WrapParams{},
+          		kerrs.String("listener", name), kerrs.String("event", eventType.String())), err)
+        to: errors
+  - of: call
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: leave err as the listener returned it.
+          			return
+          		}
+          		//: the recovered value travels as a FIELD, never as the wrap origin,
+          		//: so a panic carrying an *errs.Error cannot hijack LISTENER_PANICKED.
+          		err = kerrs.Wrap(corev.ListenerPanicked, kerrs.WrapParams{},
+          			kerrs.String("listener", sub.Name), kerrs.String("event", eventType.String()),
+          			kerrs.String("panic", fmt.Sprint(value)), kerrs.String("stack", string(debug.Stack())))
+          	}()
+      - return: sub.Listener(ctx, event)
+  - of: cloneStateWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneStateWith
+        kind: self
+      - id: cloneByType
+        kind: internal
+      - id: insertOrdered
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                &state{byType: map[corev.EventType][]corev.SubscriptionValue{
+                			eventType: {sub},
+                		}}
+          when: current == nil
+      - bind: next
+        eval: cloneByType(current.byType)
+        to: cloneByType
+      - set: next[eventType]
+        to: insertOrdered
+        value: insertOrdered(current.byType[eventType], sub)
+      - return: "&state{byType: next}"
+  - of: cloneStateWithout
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneStateWithout
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: cloneByType
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: current == nil
+      - bind: subs
+        eval: current.byType[eventType]
+      - bind: index
+        eval: |-
+          slices.IndexFunc(subs, func(s corev.SubscriptionValue) bool {
+          		//: identity is the registered name, which Subscribe keeps unique per type.
+          		return s.Name == name
+          	})
+        to: slices
+      - opt:
+          do:
+            - return: current, false
+          when: index < 0
+      - bind: rebuilt
+        eval: cloneByType(current.byType)
+        to: cloneByType
+      - set: rebuilt[eventType]
+        to: slices
+        value: slices.Delete(slices.Clone(subs), index, index+1)
+      - opt:
+          do:
+            - eval: delete(rebuilt, eventType)
+          when: len(rebuilt[eventType]) == 0
+      - return: "&state{byType: rebuilt}, true"
+  - of: cloneByType
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneByType
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - bind: next
+        eval: maps.Clone(current)
+        to: maps
+      - opt:
+          do:
+            - return: map[corev.EventType][]corev.SubscriptionValue{}
+          when: next == nil
+      - return: next
+  - of: insertOrdered
+    steps:
+      - bind: at
+        eval: len(current)
+      - loop:
+          cond: at > 0 && current[at-1].Priority > sub.Priority
+          do:
+            - op: "--"
+              set: at
+      - bind: next
+        eval: make([]corev.SubscriptionValue, 0, len(current)+1)
+      - set: next
+        value: append(next, current[:at]...)
+      - set: next
+        value: append(next, sub)
+      - set: next
+        value: append(next, current[at:]...)
+      - return: next

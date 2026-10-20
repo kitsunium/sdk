@@ -1,0 +1,363 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: dropErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: clearCloexec
+    participants:
+      - id: caller
+        kind: actor
+      - id: clearCloexec
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: _, _, errno
+        eval: syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: ""
+          when: errno != 0
+  - of: wrapListen
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapListen
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeListenFailed,
+          		Reason:   "LISTEN_FAILED",
+          		Public:   "Could not set up the activation socket",
+          		Private:  "service/proc/systemd/listen: a passed listen fd could not be recovered or wrapped",
+          		ExitCode: exitOSErr,
+          	}, fields...)
+        to: errs
+  - of: fdCount
+    participants:
+      - id: caller
+        kind: actor
+      - id: fdCount
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: os.Getenv(envFds)
+        to: os
+      - opt:
+          do:
+            - return: 0, false, nil
+          when: raw == ""
+      - bind: count, perr
+        eval: strconv.Atoi(raw)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false, wrapListen(os.ErrInvalid, errs.String(envFds, raw))
+          when: perr != nil || count < 0
+      - opt:
+          do:
+            - return: 0, false, nil
+          when: count == 0 || !pidMatches()
+      - return: count, true, nil
+  - of: pidMatches
+    participants:
+      - id: caller
+        kind: actor
+      - id: pidMatches
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: os.Getenv(envPID)
+        to: os
+      - opt:
+          do:
+            - return: "true"
+          when: raw == ""
+      - bind: want, perr
+        eval: strconv.Atoi(raw)
+        to: strconv
+      - opt:
+          do:
+            - return: "false"
+          when: perr != nil
+      - return: want == os.Getpid()
+  - of: splitNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitNames
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: parts
+          type: "[]string"
+      - opt:
+          do:
+            - set: parts
+              to: strings
+              value: strings.Split(raw, ":")
+          init:
+            bind: raw
+            eval: os.Getenv(envFdNames)
+            to: os
+          when: raw != ""
+      - bind: out
+        eval: make([]string, 0, n)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, "")
+                  - continue: true
+                when: i >= len(parts)
+            - set: out
+              value: append(out, parts[i])
+          key: i
+          range: "n"
+      - return: out
+  - of: Files
+    participants:
+      - id: caller
+        kind: actor
+      - id: Files
+        kind: self
+      - id: clearEnv
+        kind: internal
+      - id: fdCount
+        kind: internal
+      - id: splitNames
+        kind: internal
+      - id: clearCloexec
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - defer: clearEnv()
+              to: clearEnv
+          when: unsetEnv
+      - bind: n, ok, cerr
+        eval: fdCount()
+        to: fdCount
+      - opt:
+          do:
+            - return: nil, cerr
+          when: cerr != nil
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!ok"
+      - bind: names
+        eval: splitNames(n)
+        to: splitNames
+      - bind: out
+        eval: make([]*os.File, 0, n)
+      - loop:
+          do:
+            - bind: fd
+              eval: listenFdStart + i
+            - eval: clearCloexec(fd)
+              to: clearCloexec
+            - set: out
+              value: append(out, os.NewFile(uintptr(fd), names[i]))
+          key: i
+          range: "n"
+      - return: out, nil
+  - of: Listeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: Listeners
+        kind: self
+      - id: Files
+        kind: internal
+      - id: net
+        kind: stdlib
+      - id: dropErr
+        kind: internal
+    steps:
+      - bind: files, ferr
+        eval: Files(unsetEnv)
+        to: Files
+      - opt:
+          do:
+            - return: nil, ferr
+          when: ferr != nil
+      - bind: out
+        eval: make([]net.Listener, 0, len(files))
+      - loop:
+          do:
+            - bind: ln, lerr
+              eval: net.FileListener(f)
+              to: net
+            - opt:
+                do:
+                  - return: nil, wrapListen(lerr, errs.String("name", f.Name()))
+                when: lerr != nil
+            - eval: dropErr(f.Close())
+              to: dropErr
+            - set: out
+              value: append(out, ln)
+          key: _
+          range: files
+          value: f
+      - return: out, nil
+  - of: WithNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: WithNames
+        kind: self
+      - id: Files
+        kind: internal
+    steps:
+      - bind: files, ferr
+        eval: Files(unsetEnv)
+        to: Files
+      - opt:
+          do:
+            - return: nil, ferr
+          when: ferr != nil
+      - bind: out
+        eval: make(map[string][]*os.File, len(files))
+      - loop:
+          do:
+            - set: out[f.Name()]
+              value: append(out[f.Name()], f)
+          key: _
+          range: files
+          value: f
+      - return: out, nil
+  - of: Prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: Prepare
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: listenerFile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(named) == 0
+      - bind: names
+        eval: slices.Sorted(maps.Keys(named))
+        to: slices
+      - bind: acts
+        eval: make([]*os.File, 0, len(names))
+      - loop:
+          do:
+            - bind: f, ferr
+              eval: listenerFile(named[name])
+              to: listenerFile
+            - opt:
+                do:
+                  - return: ferr
+                when: ferr != nil
+            - set: acts
+              value: append(acts, f)
+          key: _
+          range: names
+          value: name
+      - set: child.ExtraFiles
+        value: append(acts, child.ExtraFiles...)
+      - set: child.Env
+        value: |-
+          append(envWithout(child.Env, envFds, envPID, envFdNames),
+          		envFds+"="+strconv.Itoa(len(names)),
+          		envFdNames+"="+strings.Join(names, ":"))
+      - return: nil
+  - of: listenerFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: listenerFile
+        kind: self
+      - id: fileOrWrap
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: v
+          cases:
+            - do:
+                - return: fileOrWrap(v.File())
+                  to: fileOrWrap
+              types: "*net.TCPListener"
+            - do:
+                - return: fileOrWrap(v.File())
+                  to: fileOrWrap
+              types: "*net.UnixListener"
+            - default: true
+              do:
+                - return: nil, wrapListen(os.ErrInvalid, errs.String("listener", "unsupported type"))
+          "on": ln
+  - of: fileOrWrap
+    steps:
+      - opt:
+          do:
+            - return: nil, wrapListen(ferr)
+          when: ferr != nil
+      - return: f, nil
+  - of: envWithout
+    participants:
+      - id: caller
+        kind: actor
+      - id: envWithout
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]string, 0, len(env))
+      - loop:
+          do:
+            - bind: key, _, _
+              eval: strings.Cut(kv, "=")
+              to: strings
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, kv)
+                when: "!slices.Contains(keys, key)"
+          key: _
+          range: env
+          value: kv
+      - return: out
+  - of: clearEnv
+    participants:
+      - id: caller
+        kind: actor
+      - id: clearEnv
+        kind: self
+      - id: dropErr
+        kind: internal
+    steps:
+      - eval: dropErr(os.Unsetenv(envFds))
+        to: dropErr
+      - eval: dropErr(os.Unsetenv(envPID))
+        to: dropErr
+      - eval: dropErr(os.Unsetenv(envFdNames))
+        to: dropErr

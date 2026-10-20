@@ -1,0 +1,28 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*MachineSpec).see
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: d.order
+                    value: append(d.order, st)
+                when: "!slices.Contains(d.order, st)"
+          key: _
+          range: states
+          value: st
+  - of: inside
+    steps:
+      - bind: scope, _
+        eval: ctx.Value(hookScopeKey{}).(*hookScope)
+      - loop:
+          cond: scope != nil
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: scope.locks == locks
+          post: scope = scope.parent
+      - return: "false"

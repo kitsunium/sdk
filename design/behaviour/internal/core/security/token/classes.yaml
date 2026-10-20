@@ -1,0 +1,271 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Registered claim names (RFC 7519 §4.1). PASETO v4 reuses the same seven
+      names, with a different value encoding — see internal/service/security/token.
+    grouped: true
+    items:
+      - doc: ClaimIssuer is "iss" — who minted the token.
+        name: ClaimIssuer
+        type: string
+        value: "\"iss\""
+      - doc: ClaimSubject is "sub" — who the token is about.
+        name: ClaimSubject
+        type: string
+        value: "\"sub\""
+      - doc: ClaimAudience is "aud" — who the token is FOR. Checked, never assumed.
+        name: ClaimAudience
+        type: string
+        value: "\"aud\""
+      - doc: ClaimExpiry is "exp" — the instant after which the token is dead.
+        name: ClaimExpiry
+        type: string
+        value: "\"exp\""
+      - doc: ClaimNotBefore is "nbf" — the instant before which it is not yet alive.
+        name: ClaimNotBefore
+        type: string
+        value: "\"nbf\""
+      - doc: ClaimIssuedAt is "iat" — when it was minted.
+        name: ClaimIssuedAt
+        type: string
+        value: "\"iat\""
+      - doc: ClaimID is "jti" — a unique id for the token.
+        name: ClaimID
+        type: string
+        value: "\"jti\""
+    name: ClaimIssuer
+  - doc: |-
+      MaxPrivateClaims caps how many application claims one token may carry. The
+      number is a bound, not a budget: a claim set is an authorisation statement,
+      and a token that needs more than this many members is describing a database
+      row rather than a subject. The cap keeps a hostile payload's decode cost
+      linear and bounded, which is the same reason the wire size is capped.
+    items:
+      - name: MaxPrivateClaims
+        type: int
+        value: "64"
+    name: MaxPrivateClaims
+  - doc: |-
+      claimSlots is how many registered claims RFC 7519 §4.1 defines, and hence
+      the width of the presence vector registeredCount folds.
+    items:
+      - name: claimSlots
+        type: int
+        value: "7"
+    name: claimSlots
+  - grouped: true
+    items:
+      - doc: |-
+          AlgorithmUnknown is the zero value — the algorithm nobody chose. Every
+          constructor refuses it rather than defaulting to one.
+        name: AlgorithmUnknown
+        type: Algorithm
+        value: iota
+      - doc: |-
+          AlgorithmHS256 is JOSE "HS256": HMAC-SHA-256 over a 256-bit shared
+          secret (RFC 7518 §3.2). Symmetric — a verifier can also mint tokens.
+        name: AlgorithmHS256
+      - doc: |-
+          AlgorithmES256 is JOSE "ES256": ECDSA on NIST P-256 with SHA-256 and the
+          fixed-width R||S signature encoding of RFC 7518 §3.4.
+        name: AlgorithmES256
+      - doc: |-
+          AlgorithmEdDSA is JOSE "EdDSA": Ed25519 over the JWS signing input
+          (RFC 8037 §3.1).
+        name: AlgorithmEdDSA
+      - doc: |-
+          AlgorithmPasetoV4Public is PASETO v4.public: Ed25519 over the
+          pre-authentication encoding of the version header, payload and footer.
+          It is a distinct Algorithm from AlgorithmEdDSA even though both use
+          Ed25519, because the bytes that get signed are not the same bytes.
+        name: AlgorithmPasetoV4Public
+    name: AlgorithmUnknown
+files:
+  - decls:
+      - ClaimIssuer
+      - MaxPrivateClaims
+      - claimSlots
+      - registeredClaims
+      - IsRegisteredClaim
+      - ClaimsValue
+      - NewClaimsValue
+      - ClaimsValue.Issuer
+      - ClaimsValue.Subject
+      - ClaimsValue.ID
+      - ClaimsValue.Audience
+      - ClaimsValue.Expiry
+      - ClaimsValue.NotBefore
+      - ClaimsValue.IssuedAt
+      - ClaimsValue.PrivateNames
+      - ClaimsValue.PrivateRaw
+      - ClaimsValue.IsZero
+      - ClaimsValue.String
+      - ClaimsValue.GoString
+      - ClaimsValue.registeredCount
+    name: claims.go
+  - decls:
+      - ClaimsValue.WithIssuer
+      - ClaimsValue.WithSubject
+      - ClaimsValue.WithID
+      - ClaimsValue.WithAudience
+      - ClaimsValue.WithExpiry
+      - ClaimsValue.WithNotBefore
+      - ClaimsValue.WithIssuedAt
+      - ClaimsValue.WithPrivateRaw
+    name: claims_with.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Algorithm
+      - AlgorithmUnknown
+      - Algorithm.String
+      - Algorithm.Known
+    name: token.go
+functions:
+  - name: IsRegisteredClaim
+    params: name string
+    results: bool
+  - name: NewClaimsValue
+    results: ClaimsValue
+imports:
+  maps: maps
+  slices: slices
+  strconv: strconv
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/security/token
+  name: token
+  purpose: Package token — the immutable claim set every concrete token format decodes into and every issuer renders from.
+types:
+  - fields:
+      - doc: issuer is the "iss" claim, empty when absent.
+        name: issuer
+        type: string
+      - doc: subject is the "sub" claim, empty when absent.
+        name: subject
+        type: string
+      - doc: id is the "jti" claim, empty when absent.
+        name: id
+        type: string
+      - doc: |-
+          audience is the "aud" claim. JWT allows one string or an array of them
+          (RFC 7519 §4.1.3), so the general shape is a slice; PASETO allows only
+          one, which its encoder enforces.
+        name: audience
+        type: "[]string"
+      - doc: expiry is the "exp" claim; the zero Time means the claim was absent.
+        name: expiry
+        type: time.Time
+      - doc: notBefore is the "nbf" claim; the zero Time means it was absent.
+        name: notBefore
+        type: time.Time
+      - doc: issuedAt is the "iat" claim; the zero Time means it was absent.
+        name: issuedAt
+        type: time.Time
+      - doc: |-
+          private maps an application claim name to its raw JSON encoding. Raw,
+          because re-encoding a decoded value would change bytes the issuer signed.
+        name: private
+        type: map[string][]byte
+    kind: struct
+    methods:
+      - name: Issuer
+        recv: c ClaimsValue
+        results: string
+      - name: Subject
+        recv: c ClaimsValue
+        results: string
+      - name: ID
+        recv: c ClaimsValue
+        results: string
+      - name: Audience
+        recv: c ClaimsValue
+        results: "[]string"
+      - name: Expiry
+        recv: c ClaimsValue
+        results: time.Time
+      - name: NotBefore
+        recv: c ClaimsValue
+        results: time.Time
+      - name: IssuedAt
+        recv: c ClaimsValue
+        results: time.Time
+      - name: PrivateNames
+        recv: c ClaimsValue
+        results: "[]string"
+      - name: PrivateRaw
+        params: name string
+        recv: c ClaimsValue
+        results: raw []byte, found bool
+      - name: IsZero
+        recv: c ClaimsValue
+        results: bool
+      - name: String
+        recv: c ClaimsValue
+        results: string
+      - name: GoString
+        recv: c ClaimsValue
+        results: string
+      - doc: registeredCount reports how many of the seven registered claims are present.
+        name: registeredCount
+        recv: c ClaimsValue
+        results: int
+      - name: WithIssuer
+        params: iss string
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithSubject
+        params: sub string
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithID
+        params: jti string
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithAudience
+        params: aud ...string
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithExpiry
+        params: exp time.Time
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithNotBefore
+        params: nbf time.Time
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithIssuedAt
+        params: iat time.Time
+        recv: c ClaimsValue
+        results: ClaimsValue
+      - name: WithPrivateRaw
+        params: name string, raw []byte
+        recv: c ClaimsValue
+        results: claims ClaimsValue, err error
+    name: ClaimsValue
+  - kind: named
+    methods:
+      - name: String
+        recv: a Algorithm
+        results: string
+      - name: Known
+        recv: a Algorithm
+        results: bool
+    name: Algorithm
+    underlying: uint8
+vars:
+  - doc: |-
+      registeredClaims is the closed set of names this domain owns. A private
+      claim may not use one of them, because a second spelling of "exp" that the
+      validator never reads is a claim an application would trust and nothing
+      would enforce.
+    items:
+      - name: registeredClaims
+        value: |-
+          []string{
+          	ClaimIssuer, ClaimSubject, ClaimAudience,
+          	ClaimExpiry, ClaimNotBefore, ClaimIssuedAt, ClaimID,
+          }
+    name: registeredClaims

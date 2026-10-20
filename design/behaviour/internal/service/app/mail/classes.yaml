@@ -1,0 +1,1431 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The octet bounds the address and header grammars are written in.
+    grouped: true
+    items:
+      - doc: |-
+          maxLocalPartOctets and maxDomainOctets are the RFC 5321 §4.5.3.1
+          ceilings. They are the protocol's, not this domain's: a longer local part
+          or domain is not merely unusual, it is undeliverable, and discovering
+          that after the DATA command has been accepted is worse than discovering
+          it in a constructor.
+        name: maxLocalPartOctets
+        type: int
+        value: "64"
+      - name: maxDomainOctets
+        type: int
+        value: "255"
+      - doc: |-
+          minPrintableASCII is "!", the first character RFC 5322 §3.6.8 admits in
+          a field name. It and the three below are named because a bare 0x21 in a
+          comparison is a number a reader has to look up, and because the same
+          four bounds are used by three different guards.
+        name: minPrintableASCII
+        type: byte
+        value: "0x21"
+      - doc: maxPrintableASCII is "~", the last one.
+        name: maxPrintableASCII
+        type: byte
+        value: "0x7E"
+      - doc: spaceOctet is the space, which ends an atom rather than belonging to one.
+        name: spaceOctet
+        type: byte
+        value: "0x20"
+      - doc: delOctet is DEL, the first octet above the printable range.
+        name: delOctet
+        type: byte
+        value: "0x7F"
+    name: maxLocalPartOctets
+  - doc: |-
+      specials is RFC 5322 §3.2.3's "specials" production. A display name
+      containing one of these MUST be a quoted-string, or the receiver parses the
+      name as structure: "Doe, John <j@x>" is two addresses, one of them
+      syntactically broken, and every client shows something different.
+    items:
+      - name: specials
+        type: string
+        value: "`()<>[]:;@\\,.\"`"
+    name: specials
+  - doc: |-
+      pathSeparators are the two characters a filename may not carry. A path
+      separator in a filename is how an unpacking client is talked into writing
+      outside the directory it chose.
+    items:
+      - name: pathSeparators
+        type: string
+        value: "`/\\`"
+    name: pathSeparators
+  - doc: Media types this composer emits for the two body forms.
+    grouped: true
+    items:
+      - name: typeTextPlain
+        type: string
+        value: "\"text/plain\""
+      - name: typeTextHTML
+        type: string
+        value: "\"text/html\""
+    name: typeTextPlain
+  - doc: mimeVersion is the only value RFC 2045 §4 defines.
+    items:
+      - name: mimeVersion
+        type: string
+        value: "\"1.0\""
+    name: mimeVersion
+  - doc: |-
+      boundaryTokenOctets is the number of random bytes behind every boundary in
+      one message. 16 is 128 bits, which is not a probability argument here — see
+      [composition.newBoundary] for why a collision is impossible rather than
+      unlikely.
+    items:
+      - name: boundaryTokenOctets
+        type: int
+        value: "16"
+    name: boundaryTokenOctets
+  - doc: |-
+      minBracketedLen is the shortest string that can already carry both angle
+      brackets a Message-ID or Content-ID needs.
+    items:
+      - name: minBracketedLen
+        type: int
+        value: "2"
+    name: minBracketedLen
+  - doc: |-
+      Per-message allowances for [estimateSize]. They are deliberately generous:
+      the cost of over-estimating is one larger allocation that is released
+      immediately, and the cost of under-estimating is the doubling growth this
+      function exists to avoid.
+    grouped: true
+    items:
+      - name: headerBlockSlack
+        type: int
+        value: "512"
+      - name: perAddressOctets
+        type: int
+        value: "96"
+      - name: perAttachmentSlack
+        type: int
+        value: "384"
+      - name: subjectExpansion
+        type: int
+        value: "4"
+      - doc: |-
+          quotedPrintableSlack is the denominator of the fraction added to a text
+          body: QP expands ASCII by about 2 % and non-ASCII by three, so a quarter
+          is a middle that is wrong cheaply in both directions.
+        name: quotedPrintableSlack
+        type: int
+        value: "4"
+      - doc: |-
+          crlfOctets is the two-octet line terminator every wrapped base64 line
+          costs on top of its content.
+        name: crlfOctets
+        type: int
+        value: "2"
+    name: headerBlockSlack
+  - doc: |-
+      base64LineOctets is the RFC 2045 §6.8 ceiling: "no more than 76 characters"
+      per encoded line.
+    items:
+      - name: base64LineOctets
+        type: int
+        value: "76"
+    name: base64LineOctets
+  - doc: Content-Transfer-Encoding values this domain emits (RFC 2045 §6).
+    grouped: true
+    items:
+      - name: encodingQuotedPrintable
+        type: string
+        value: "\"quoted-printable\""
+      - name: encodingBase64
+        type: string
+        value: "\"base64\""
+    name: encodingQuotedPrintable
+  - doc: |-
+      forbiddenHeaderOctets are the three octets a header value may never carry.
+      CR and LF end a field; NUL terminates the value for any consumer that
+      reaches C and is never meaningful in a header.
+    items:
+      - name: forbiddenHeaderOctets
+        type: string
+        value: "\"\\r\\n\\x00\""
+    name: forbiddenHeaderOctets
+  - doc: |-
+      RFC 5322 §2.1.1's two line limits. They are not the same kind of rule: 998 is
+      a MUST NOT (excluding the CRLF) and 78 is a SHOULD. So 78 is where folding
+      starts and 998 is where refusal starts.
+    grouped: true
+    items:
+      - name: softLineOctets
+        type: int
+        value: "78"
+      - name: hardLineOctets
+        type: int
+        value: "998"
+    name: softLineOctets
+  - doc: |-
+      crlf is the only line terminator this domain writes. RFC 5322 §2.1 makes it
+      the terminator; a lone LF is what a Unix-shaped writer produces by accident
+      and what an MTA silently repairs — differently from the next MTA.
+    items:
+      - name: crlf
+        type: string
+        value: "\"\\r\\n\""
+    name: crlf
+  - doc: |-
+      minFoldTail is the smallest continuation a fold may leave behind: the space
+      it folds at, plus at least one octet after it. A fold that left only the
+      space would emit a line of whitespace, which unfolds to nothing.
+    items:
+      - name: minFoldTail
+        type: int
+        value: "2"
+    name: minFoldTail
+  - doc: |-
+      DefaultCaptureKeep is how many deliveries [NewCapture] keeps when it is
+      given a non-positive number: enough for a person to scroll a mailbox, and a
+      bound on the memory a development server holds for mail nobody will read.
+    items:
+      - name: DefaultCaptureKeep
+        type: int
+        value: "200"
+    name: DefaultCaptureKeep
+  - doc: SMTP extension names, as they appear in an EHLO response.
+    grouped: true
+    items:
+      - name: extensionStartTLS
+        type: string
+        value: "\"STARTTLS\""
+      - name: extensionAuth
+        type: string
+        value: "\"AUTH\""
+    name: extensionStartTLS
+  - doc: |-
+      defaultDialTimeout bounds the TCP connection when the caller sets none and
+      the context carries no deadline. It CLAMPS rather than refuses: unlike a TLS
+      mode, "wait forever" is not a policy anybody chooses on purpose, and thirty
+      seconds needs no explanation (ADR 0031's clamping half).
+    items:
+      - name: defaultDialTimeout
+        type: time.Duration
+        value: 30 * time.Second
+    name: defaultDialTimeout
+  - doc: maxPort is the highest TCP port number.
+    items:
+      - name: maxPort
+        type: int
+        value: "65535"
+    name: maxPort
+  - doc: |-
+      defaultLocalName is the EHLO name net/smtp itself uses when given none. A
+      submission server ignores which one it receives.
+    items:
+      - name: defaultLocalName
+        type: string
+        value: "\"localhost\""
+    name: defaultLocalName
+  - grouped: true
+    items:
+      - doc: TLSUnset is the zero value and is refused at construction.
+        name: TLSUnset
+        type: TLSMode
+        value: iota
+      - doc: |-
+          TLSStartTLS connects in the clear, sends EHLO, and REQUIRES the server
+          to advertise STARTTLS (RFC 3207). A server that does not is refused with
+          [coremail.TLSRequired] — the session is never continued unencrypted. This is the
+          submission port 587 shape.
+        name: TLSStartTLS
+      - doc: |-
+          TLSImplicit negotiates TLS before the SMTP greeting, which RFC 8314 §3.3
+          recommends over STARTTLS because there is no plaintext phase for an
+          attacker to interfere with. This is the submissions port 465 shape.
+        name: TLSImplicit
+      - doc: |-
+          TLSDisabled sends everything in the clear, and must be spelled out loud.
+          It exists for a relay on a loopback or a private segment where TLS is
+          somebody else's layer. Credentials are REFUSED with it at construction:
+          there is no combination of settings in this package that sends a
+          password over an unencrypted socket.
+        name: TLSDisabled
+    name: TLSUnset
+  - doc: |-
+      viewTypeName and configTypeName are the two spellings of the struct's name
+      %#v produces: the view's, and the one a reader of the rendering expects.
+    grouped: true
+    items:
+      - doc: viewTypeName is how fmt names smtpConfigView in Go syntax.
+        name: viewTypeName
+        type: string
+        value: "\"mail.smtpConfigView\""
+      - doc: configTypeName is how the rendering names the type it describes.
+        name: configTypeName
+        type: string
+        value: "\"mail.SMTPConfig\""
+    name: viewTypeName
+  - doc: The two schemes ParseURL reads, and the one parameter.
+    grouped: true
+    items:
+      - doc: |-
+          schemeSMTP is submission: STARTTLS unless the tls parameter says
+          otherwise.
+        name: schemeSMTP
+        type: string
+        value: "\"smtp\""
+      - doc: |-
+          schemeSMTPS is submissions: implicit TLS, which the tls parameter may
+          only repeat.
+        name: schemeSMTPS
+        type: string
+        value: "\"smtps\""
+      - doc: tlsParameter is the only query parameter understood.
+        name: tlsParameter
+        type: string
+        value: "\"tls\""
+    name: schemeSMTP
+  - doc: |-
+      The default port of each mode: RFC 8314 §3.3 submission with STARTTLS, §3.1
+      submissions with implicit TLS, and the relay port for a plaintext relay.
+    grouped: true
+    items:
+      - doc: portStartTLS is submission (RFC 6409).
+        name: portStartTLS
+        type: int
+        value: "587"
+      - doc: portImplicit is submissions (RFC 8314 §3.1).
+        name: portImplicit
+        type: int
+        value: "465"
+      - doc: portRelay is SMTP relay (RFC 5321).
+        name: portRelay
+        type: int
+        value: "25"
+    name: portStartTLS
+files:
+  - decls:
+      - maxLocalPartOctets
+      - specials
+      - ValidateAddress
+      - refuseUnsupportedAddress
+      - validateAddrSpec
+      - IsDotAtom
+      - isAtextRun
+      - NeedsQuotedDisplayName
+    name: address.go
+  - decls:
+      - pathSeparators
+      - ValidateAttachment
+      - validateMediaType
+      - validateContentID
+    name: attachment.go
+  - decls:
+      - typeTextPlain
+      - mimeVersion
+      - boundaryTokenOctets
+      - minBracketedLen
+      - headerBlockSlack
+      - bracket
+      - splitAttachments
+      - textEntity
+      - attachmentEntity
+      - derivedType
+      - formatMediaType
+      - mediaTypeOnly
+      - estimateSize
+    name: compose.go
+  - decls:
+      - Composer
+      - NewComposer
+      - (*Composer).Compose
+      - (*Composer).writeMessageHeaders
+      - appendAddressFields
+      - (*Composer).dateValue
+    name: composer.go
+  - decls:
+      - ComposerConfig
+    name: composer_config.go
+  - decls:
+      - composition
+      - (*Composer).newComposition
+      - (*composition).newBoundary
+      - (*composition).buildBody
+      - (*composition).buildBodyRoot
+      - (*composition).buildRelated
+      - (*composition).buildMixed
+      - (*composition).multipart
+    name: composition.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - base64LineOctets
+      - encodingQuotedPrintable
+      - entity
+      - entity.writeHeaders
+      - entity.writeBody
+      - entity.writeMultipartBody
+      - writeBase64
+    name: entity.go
+  - decls:
+      - Envelope
+    name: envelope.go
+  - decls:
+      - wrapAs
+    name: errors.go
+  - decls:
+      - forbiddenHeaderOctets
+      - reservedHeaders
+      - IsReservedHeader
+      - ValidateHeaderName
+      - ValidateHeaderValue
+      - ValidateHeader
+    name: header.go
+  - decls:
+      - softLineOctets
+      - crlf
+      - minFoldTail
+      - encodeUnstructured
+      - formatAddress
+      - addressField
+      - quoteEscaper
+      - formatAddressList
+      - writeHeader
+      - foldHeaderLine
+      - foldAtWhitespace
+      - foldPoint
+    name: headerwrite.go
+  - decls:
+      - lineWrapper
+      - (*lineWrapper).Write
+      - (*lineWrapper).finish
+    name: line_wrapper.go
+  - decls:
+      - DefaultCaptureKeep
+      - memoryTransport
+      - NewMemory
+      - NewCapture
+      - (*memoryTransport).Send
+      - (*memoryTransport).SendBatch
+      - (*memoryTransport).Sent
+      - (*memoryTransport).Reset
+    name: memory.go
+  - decls:
+      - session
+    name: session.go
+  - decls:
+      - extensionStartTLS
+      - smtpTransport
+      - NewSMTP
+      - (*smtpTransport).Send
+      - (*smtpTransport).prepare
+      - (*smtpTransport).SendBatch
+      - (*smtpTransport).deliver
+      - (*session).run
+      - (*session).negotiate
+      - (*session).startTLS
+      - (*session).authenticate
+      - (*session).sendOne
+      - (*smtpTransport).dial
+      - (*smtpTransport).tlsConfig
+      - watchContext
+      - setDeadlineBestEffort
+      - closeBestEffort
+    name: smtp.go
+  - decls:
+      - _
+    name: smtp_compliance.go
+  - decls:
+      - defaultDialTimeout
+      - maxPort
+      - defaultLocalName
+      - TLSMode
+      - TLSUnset
+      - TLSMode.String
+      - SMTPConfig
+      - SMTPConfig.validate
+      - SMTPConfig.validateEndpoint
+      - SMTPConfig.validateSecurity
+      - SMTPConfig.resolvedDialTimeout
+      - SMTPConfig.resolvedLocalName
+    name: smtpconfig.go
+  - decls:
+      - viewTypeName
+      - smtpConfigView
+      - SMTPConfig.redacted
+      - SMTPConfig.String
+      - SMTPConfig.GoString
+      - SMTPConfig.Format
+      - SMTPConfig.MarshalJSON
+      - writeRendering
+    name: smtpconfig_render.go
+  - decls:
+      - schemeSMTP
+      - portStartTLS
+      - tlsModesByName
+      - ParseURL
+      - modeOf
+      - portOf
+      - invalidURL
+    name: smtpurl.go
+  - decls:
+      - addressGroup
+      - Validate
+      - validateAllAddresses
+      - validateContent
+      - validateOnePart
+    name: validate.go
+functions:
+  - name: ValidateAddress
+    params: field string, a coremail.AddressValue
+    results: error
+  - doc: |-
+      refuseUnsupportedAddress names the two legal address forms this domain
+      declines to carry, so that neither is reported as a syntax error.
+    name: refuseUnsupportedAddress
+    params: field, addr string
+    results: error
+  - doc: |-
+      validateAddrSpec applies the dot-atom grammar and the RFC 5321 §4.5.3.1
+      ceilings to an addr-spec already known to be ASCII and free of CR, LF and
+      NUL.
+    name: validateAddrSpec
+    params: field, addr string
+    results: error
+  - name: IsDotAtom
+    params: s string
+    results: bool
+  - doc: |-
+      isAtextRun reports whether every octet of s is atext or the dot separator:
+      printable ASCII that is neither a special nor a space.
+    name: isAtextRun
+    params: s string
+    results: bool
+  - name: NeedsQuotedDisplayName
+    params: name string
+    results: bool
+  - name: ValidateAttachment
+    params: field string, a *coremail.AttachmentValue
+    results: error
+  - doc: |-
+      validateMediaType refuses a declared Content-Type that is not a plausible
+      "type/subtype", leaving the full RFC 2045 §5.1 parameter grammar to the
+      composer's mime.ParseMediaType call.
+    name: validateMediaType
+    params: field, declared string
+    results: error
+  - doc: |-
+      validateContentID refuses a Content-ID that would not survive being written
+      between angle brackets and referenced from a cid: URL.
+    name: validateContentID
+    params: field, id string
+    results: error
+  - doc: |-
+      bracket wraps an identifier in the angle brackets RFC 5322 §3.6.4 requires,
+      tolerating a caller who already wrote them.
+    name: bracket
+    params: id string
+    results: string
+  - doc: |-
+      splitAttachments separates the inline parts from the file attachments,
+      preserving the caller's relative order within each group.
+    name: splitAttachments
+    params: all []coremail.AttachmentValue
+    results: inlines, files []coremail.AttachmentValue
+  - doc: |-
+      textEntity builds a text leaf. An empty body still produces a part, because
+      the alternative is a message whose body a client cannot find.
+    name: textEntity
+    params: mediaType, content string
+    results: entity
+  - doc: attachmentEntity builds a file or inline leaf.
+    name: attachmentEntity
+    params: attachment *coremail.AttachmentValue, index int
+    results: part entity, err error
+  - doc: |-
+      derivedType maps a filename extension to a media type, falling back to
+      RFC 2046 §4.5.1's application/octet-stream.
+    name: derivedType
+    params: filename string
+    results: string
+  - doc: |-
+      formatMediaType renders a media type with parameters, refusing what
+      mime.FormatMediaType cannot spell.
+
+      mime.FormatMediaType returns "" on invalid input rather than an error, which
+      is exactly the silence this domain refuses: an unspellable Content-Type would
+      become an empty header and the message would go out untyped.
+    name: formatMediaType
+    params: mediaType string, params map[string]string
+    results: rendered string, err error
+  - doc: |-
+      mediaTypeOnly strips the parameters from a rendered Content-Type value,
+      leaving the "type/subtype" a multipart/related "type" parameter needs.
+    name: mediaTypeOnly
+    params: contentType string
+    results: string
+  - doc: |-
+      estimateSize returns an upper-ish bound on the composed message, so the
+      output buffer is allocated once instead of doubled.
+
+      It is a measured optimisation and not a guess. Before it, a 1 MiB attachment
+      allocated 4.20 MB to produce a 1.44 MB message — 2.9x the result — and
+      bytes.growSlice was 43.7 % of all bytes allocated by a simple compose
+      (go tool pprof -top -sample_index=alloc_space). The base64 half of the
+      estimate is EXACT, because RFC 2045 §6.8 fixes both the 4/3 expansion and the
+      76-octet line width; only the text half is approximate, and it is the half
+      that is small.
+    name: estimateSize
+    params: msg coremail.MessageValue
+    results: int
+  - name: NewComposer
+    params: cfg ComposerConfig
+    results: "*Composer"
+  - doc: |-
+      appendAddressFields adds To, Cc and Reply-To, skipping every list the caller
+      left empty. Bcc is deliberately absent.
+    name: appendAddressFields
+    params: |2
+
+      	fields []coremail.HeaderFieldValue, msg coremail.MessageValue,
+    results: "[]coremail.HeaderFieldValue"
+  - doc: |-
+      writeBase64 encodes content at [base64LineOctets] characters per line,
+      streaming rather than materialising the whole encoded string.
+
+      The wrapping matters beyond conformance: an unwrapped 1 MiB attachment is one
+      1.4-million-octet line, which violates RFC 5322 §2.1.1 by three orders of
+      magnitude and is truncated — silently — by more than one MTA.
+    name: writeBase64
+    params: dst io.Writer, content []byte
+    results: error
+  - name: Envelope
+    params: m coremail.MessageValue
+    results: envelope coremail.EnvelopeValue, err error
+  - doc: |-
+      wrapAs returns the given mail sentinel as the error origin — its code,
+      reason and public message win — attaching the cause's message and any extra
+      fields as structured metadata.
+
+      Wrapping the sentinel rather than the cause is what keeps this domain's code
+      intact: errs.Wrap is origin-wins, so passing an *errs.Error cause first would
+      let it hijack the verdict. A nil cause yields the sentinel with only the
+      caller's fields.
+    name: wrapAs
+    params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
+    results: error
+  - name: IsReservedHeader
+    params: name string
+    results: bool
+  - name: ValidateHeaderName
+    params: name string
+    results: error
+  - name: ValidateHeaderValue
+    params: name, value string
+    results: error
+  - name: ValidateHeader
+    params: field coremail.HeaderFieldValue
+    results: error
+  - doc: |-
+      encodeUnstructured applies RFC 2047 "encoded-word" form to a header value,
+      and applies it ONLY when the value needs it.
+
+      mime.QEncoding.Encode is the whole implementation, and its behaviour is the
+      decision: a pure-ASCII value is returned untouched, so "Invoice 4711" stays
+      "Invoice 4711" in the raw message rather than becoming
+      "=?utf-8?q?Invoice_4711?=". Encoding unconditionally would be simpler and
+      would be worse — every log line, every mail-store search, every operator
+      reading a captured message would face an encoded blob to buy nothing, since
+      a receiver renders both identically.
+
+      One thing this function does NOT do is protect against injection. Handed a
+      CRLF, mime.QEncoding.Encode returns "=0D=0A" — a deliverable header carrying
+      a value the caller never wrote, reported as success. Every value reaching
+      here has already passed ValidateHeaderValue, and writeHeader checks
+      again at the point of writing.
+    name: encodeUnstructured
+    params: value string
+    results: string
+  - doc: |-
+      formatAddress renders one mailbox as RFC 5322 §3.4 name-addr, or as a bare
+      angle-addr when there is no display name.
+
+      The display name is the interesting half and has three cases, not two:
+
+        - non-ASCII → RFC 2047 encoded-word. RFC 2047 §5 forbids an encoded-word
+          inside a quoted-string, so this case must NOT also be quoted.
+        - ASCII carrying a special (RFC 5322 §3.2.3) → quoted-string. This is the
+          case everyone forgets: an unquoted "Doe, John <j@x>" parses as TWO
+          addresses, the first of which is not an address at all, and the
+          recipient's client shows something different from the sender's.
+        - anything else → emitted bare.
+    name: formatAddress
+    params: a coremail.AddressValue
+    results: string
+  - doc: |-
+      formatAddressList renders a mailbox-list (RFC 5322 §3.4). The separator is
+      ", " so that folding has a space to fold at — a comma alone would make a
+      hundred-recipient To field one unfoldable token.
+    name: formatAddressList
+    params: list []coremail.AddressValue
+    results: string
+  - doc: |-
+      writeHeader emits one already-encoded header field, folded to the RFC 5322
+      §2.1.1 limits and terminated by CRLF.
+
+      It re-runs the injection gate on both halves. That is not belt-and-braces
+      theatre: this is the last function before bytes reach a buffer, some of the
+      values arriving here were built by this package rather than supplied by the
+      caller (a Content-Disposition assembled from a filename, an address list
+      joined from mailboxes), and mime/multipart's own CreatePart writes header
+      values VERBATIM — handed "a\r\nBcc: x@y" it emits exactly that, injected
+      header and all. A gate at the point of writing is the only one that covers
+      every path into it.
+    name: writeHeader
+    params: dst io.Writer, name, value string
+    results: error
+  - doc: |-
+      foldHeaderLine wraps "name: value" onto continuation lines per RFC 5322
+      §2.2.3, and returns [coremail.HeaderTooLong] when it cannot.
+
+      Folding is legal ONLY at existing whitespace. §2.2.3 defines unfolding as
+      "removing any CRLF that is immediately followed by WSP" — the whitespace
+      stays, the CRLF goes — so a fold placed at a space reconstructs the original
+      value exactly, and a fold placed anywhere else would insert a character the
+      caller never wrote.
+
+      That is why an over-long token is refused instead of being cut. A 1200-octet
+      URL in a header has no legal fold point; breaking it anyway would deliver a
+      different URL and report success, which is the failure mode this whole
+      domain is organised against.
+    name: foldHeaderLine
+    params: name, value string
+    results: folded string, err error
+  - doc: |-
+      foldAtWhitespace splits one long line into a first line and continuation
+      lines, each continuation beginning with the space it was folded at.
+    name: foldAtWhitespace
+    params: line string
+    results: "[]string"
+  - doc: |-
+      foldPoint returns the index of the space to fold at, or -1 when the line
+      offers none that leaves a non-empty continuation.
+
+      It prefers the LAST space at or before the soft limit, which keeps lines as
+      full as possible; failing that it takes the first space after it, which
+      produces one over-long line rather than giving up on the rest.
+    name: foldPoint
+    params: line string
+    results: int
+  - name: NewMemory
+    results: coremail.FullTransport
+  - name: NewCapture
+    params: keep int
+    results: coremail.FullTransport
+  - name: NewSMTP
+    params: cfg SMTPConfig
+    results: transport coremail.Transport, err error
+  - doc: |-
+      watchContext severs conn when ctx ends, and returns the function that stops
+      watching.
+
+      This is how a context reaches a client that has none. It is deliberately a
+      severance and not a cancellation: net/smtp is blocked in a socket read, and
+      the only thing that unblocks it is the socket becoming unreadable. The
+      returned release must run before the connection is closed normally, or the
+      goroutine outlives the send.
+    name: watchContext
+    params: ctx context.Context, conn net.Conn
+    results: release func()
+  - doc: |-
+      setDeadlineBestEffort applies a socket deadline and swallows a refusal.
+
+      It is a named function rather than an inline "_ =" so that the swallowing is
+      a documented decision at one place: the goroutine in [watchContext] is the
+      mechanism that actually stops a send, and this deadline is the belt beside
+      it. A connection that has no deadline to set is still severed.
+    name: setDeadlineBestEffort
+    params: conn net.Conn, deadline time.Time
+  - doc: |-
+      closeBestEffort severs a connection and swallows a refusal, for the paths
+      where the caller is already failing with a better error than a close.
+    name: closeBestEffort
+    params: conn net.Conn
+  - doc: |-
+      writeRendering writes a rendering into the state fmt handed to Format.
+      fmt.Formatter has no error return and fmt drops what a write into its own
+      buffer reports, so the error is read and dropped here, visibly.
+    name: writeRendering
+    params: state fmt.State, text string
+  - name: ParseURL
+    params: raw string
+    results: cfg SMTPConfig, err error
+  - doc: |-
+      modeOf reads the TLS mode from the scheme and the tls parameter, refusing an
+      unknown scheme, any parameter but tls, a repeated or unknown tls value, and
+      an smtps:// URL asking for anything but implicit TLS.
+    name: modeOf
+    params: parsed *url.URL
+    results: mode TLSMode, err error
+  - doc: |-
+      portOf reads the URL's port, defaulting by mode, and refuses a URL with no
+      host or a port outside 1–65535.
+    name: portOf
+    params: host, written string, mode TLSMode
+    results: port int, err error
+  - doc: invalidURL is the InvalidURL verdict with its clause.
+    name: invalidURL
+    params: problem string
+    results: error
+  - name: Validate
+    params: m coremail.MessageValue
+    results: error
+  - doc: |-
+      validateAllAddresses runs [ValidateAddress] over From and every list, naming
+      each position so a caller with fifty recipients learns which one is wrong.
+    name: validateAllAddresses
+    params: m coremail.MessageValue
+    results: error
+  - doc: |-
+      validateContent refuses an empty message and checks every attachment,
+      including the one structural rule an inline part depends on.
+    name: validateContent
+    params: m coremail.MessageValue
+    results: error
+  - doc: |-
+      validateOnePart runs the per-attachment guards and the one structural rule
+      an inline part depends on.
+    name: validateOnePart
+    params: attachment *coremail.AttachmentValue, index int, hasBody bool
+    results: error
+imports:
+  base64: encoding/base64
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
+  context: context
+  coremail: github.com/kitsunium/sdk/internal/core/app/mail
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  coresecret: github.com/kitsunium/sdk/internal/core/security/secret
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  fmt: fmt
+  hex: encoding/hex
+  io: io
+  json: encoding/json
+  maps: maps
+  mime: mime
+  net: net
+  quotedprintable: mime/quotedprintable
+  rand: crypto/rand
+  slices: slices
+  smtp: net/smtp
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  tls: crypto/tls
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/mail
+  name: mail
+  purpose: Package mail — the addr-spec subset this domain accepts, and the display-name rule the composer depends on.
+types:
+  - fields:
+      - name: clock
+        type: clock.Clock
+      - name: random
+        type: io.Reader
+    kind: struct
+    methods:
+      - name: Compose
+        params: msg coremail.MessageValue
+        recv: c *Composer
+        results: raw []byte, err error
+      - doc: |-
+          writeMessageHeaders emits the RFC 5322 header block, in a fixed order.
+
+          Bcc is absent, and its absence is the domain's headline decision: the blind
+          recipients reach RCPT TO through [Envelope] and no header names them. See
+          that function for why the other two treatments RFC 5322 §3.6.3 permits are
+          not taken.
+        name: writeMessageHeaders
+        params: dst io.Writer, msg coremail.MessageValue
+        recv: c *Composer
+        results: error
+      - doc: dateValue renders the origination date in the RFC 5322 §3.3 date-time form.
+        name: dateValue
+        params: msg coremail.MessageValue
+        recv: c *Composer
+        results: string
+      - doc: newComposition draws the one random token this message's boundaries share.
+        name: newComposition
+        recv: c *Composer
+        results: builder *composition, err error
+    name: Composer
+  - fields:
+      - doc: |-
+          Clock supplies the Date header for a message that carries no explicit
+          one. Nil selects the system clock; a ManualClock makes composition
+          byte-deterministic, which is what the golden tests use.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          Rand supplies the randomness behind multipart boundaries. Nil selects
+          crypto/rand.
+        name: Rand
+        type: io.Reader
+    kind: struct
+    name: ComposerConfig
+  - doc: |-
+      composition is the per-message state the boundary generator needs: one random
+      token, and a counter that makes every container in this message distinct from
+      every other.
+
+      It exists rather than living on the [Composer] because a Composer is shared
+      and safe for concurrent use, so a counter on it would either race or be
+      non-deterministic — and determinism is what lets a consumer golden-test its
+      own templates.
+    fields:
+      - name: ""
+        role: embedded
+        type: "*Composer"
+      - name: token
+        type: string
+      - name: counter
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          newBoundary returns a delimiter that cannot collide with anything in the
+          message — which is a structural claim here and not a probabilistic one.
+
+          Two things have to be impossible. A boundary must not appear inside a part's
+          content: every leaf this composer emits is quoted-printable or base64, and
+          both alphabets reach "=" only as an escape prefix, a soft line break or
+          trailing padding, so the literal two octets "=_" cannot occur in either — and
+          every boundary starts with them. And two boundaries in one message must
+          differ: they share one random token and differ by a counter, so they are
+          pairwise distinct by construction rather than by luck.
+
+          TestBoundaryCannotAppearInAnyEncodedBody and
+          TestNestedBoundariesAreAlwaysDistinct are the guards; the second runs with a
+          randomness source that returns a CONSTANT, so a design relying on the draw
+          would fail every time.
+        name: newBoundary
+        recv: c *composition
+        results: string
+      - doc: buildBody assembles the MIME entity tree for msg.
+        name: buildBody
+        params: msg coremail.MessageValue
+        recv: c *composition
+        results: root entity, err error
+      - doc: |-
+          buildBodyRoot returns the entity that holds the human-readable body: one
+          leaf, or the multipart/alternative that carries both forms.
+        name: buildBodyRoot
+        params: msg coremail.MessageValue
+        recv: c *composition
+        results: root entity, err error
+      - doc: buildRelated wraps the body and its inline parts in a multipart/related.
+        name: buildRelated
+        params: |2
+
+          	body entity, inlines []coremail.AttachmentValue,
+        recv: c *composition
+        results: related entity, err error
+      - doc: buildMixed wraps the body and the file attachments in a multipart/mixed.
+        name: buildMixed
+        params: |2
+
+          	body entity, files []coremail.AttachmentValue,
+        recv: c *composition
+        results: mixed entity, err error
+      - doc: multipart builds a container entity with a fresh boundary.
+        name: multipart
+        params: |2
+
+          	subtype string, params map[string]string, children []entity,
+        recv: c *composition
+        results: container entity, err error
+    name: composition
+  - doc: |-
+      entity is one MIME body part: its already-rendered header values, and either
+      content or children.
+
+      The header values are strings rather than structured fields because they are
+      built once, by the composer, from values core/app/mail has already validated —
+      and because the exact bytes of a Content-Type are what a test asserts on.
+    fields:
+      - doc: contentType is the full Content-Type field value, parameters included.
+        name: contentType
+        type: string
+      - doc: |-
+          encoding is the Content-Transfer-Encoding value, empty for a multipart
+          (RFC 2045 §6.4 restricts those to 7bit/8bit/binary, and 7bit is the
+          default, so emitting it says nothing).
+        name: encoding
+        type: string
+      - doc: |-
+          disposition is the Content-Disposition value (RFC 2183), empty for a
+          body part that is not a file.
+        name: disposition
+        type: string
+      - doc: |-
+          contentID is the Content-ID value INCLUDING its angle brackets, empty
+          unless this part is referenced by a cid: URL.
+        name: contentID
+        type: string
+      - doc: boundary is non-empty exactly when this entity is a multipart.
+        name: boundary
+        type: string
+      - doc: content is a leaf's decoded bytes.
+        name: content
+        type: "[]byte"
+      - doc: |-
+          text marks a leaf whose content is text and is therefore
+          quoted-printable rather than base64.
+        name: text
+        type: bool
+      - doc: children are a multipart's parts, in the order they must appear.
+        name: children
+        type: "[]entity"
+    kind: struct
+    methods:
+      - doc: |-
+          writeHeaders emits this entity's own MIME header fields, in a fixed order so
+          a composed message is byte-deterministic.
+        name: writeHeaders
+        params: dst io.Writer
+        recv: e entity
+        results: error
+      - doc: |-
+          writeBody emits this entity's content: the encoded bytes of a leaf, or the
+          delimited parts of a multipart.
+        name: writeBody
+        params: dst io.Writer
+        recv: e entity
+        results: error
+      - doc: |-
+          writeMultipartBody frames every child with this entity's boundary, per
+          RFC 2046 §5.1.1.
+
+          No preamble and no epilogue are written. Both are legal and both are ignored
+          by every conforming receiver, and the "this is a multi-part message in MIME
+          format" preamble every mail client emits is addressed to readers who have
+          not existed for two decades.
+        name: writeMultipartBody
+        params: dst io.Writer
+        recv: e entity
+        results: error
+    name: entity
+  - doc: |-
+      addressField pairs a header name with the mailbox list emitted under it, so
+      the composer's header block is built from a table rather than three copies of
+      the same four lines.
+    fields:
+      - name: name
+        type: string
+      - name: addrs
+        type: "[]coremail.AddressValue"
+    kind: struct
+    name: addressField
+  - doc: |-
+      lineWrapper breaks a stream into fixed-width CRLF-terminated lines.
+
+      It exists so a 1 MiB attachment never becomes one 1.4-million-octet line: RFC
+      2045 §6.8 caps a base64 line at 76 characters, RFC 5322 §2.1.1 caps ANY line
+      at 998 octets, and more than one MTA truncates a longer one silently.
+    fields:
+      - name: dst
+        type: io.Writer
+      - name: width
+        type: int
+      - name: used
+        type: int
+    kind: struct
+    methods:
+      - doc: Write emits p, inserting a CRLF every [lineWrapper.width] octets.
+        name: Write
+        params: p []byte
+        recv: w *lineWrapper
+        results: n int, err error
+      - doc: |-
+          finish terminates a partially filled line, so the body does not run into the
+          boundary delimiter that follows it.
+        name: finish
+        recv: w *lineWrapper
+        results: error
+    name: lineWrapper
+  - doc: memoryTransport records what it was asked to send instead of sending it.
+    fields:
+      - name: composer
+        type: "*Composer"
+      - name: sent
+        type: "[]coremail.DeliveryValue"
+      - name: mutex
+        type: sync.RWMutex
+      - doc: keep bounds the record, oldest dropped first; zero keeps everything.
+        name: keep
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          Send composes msg and records the delivery. ctx is honoured — a cancelled
+          context refuses before anything is recorded — so a test exercising
+          cancellation behaves the way the real transport does.
+        name: Send
+        params: ctx context.Context, msg coremail.MessageValue
+        recv: t *memoryTransport
+        results: error
+      - doc: |-
+          SendBatch sends every message and joins the failures, so one bad recipient
+          in five hundred does not silence the other four hundred and ninety-nine.
+        name: SendBatch
+        params: ctx context.Context, msgs []coremail.MessageValue
+        recv: t *memoryTransport
+        results: error
+      - doc: |-
+          Sent returns the deliveries recorded so far, oldest first, as the caller's
+          own copy — including the raw bytes, so a test that mutates what it asserts
+          on cannot corrupt what a later assertion reads.
+        name: Sent
+        recv: t *memoryTransport
+        results: "[]coremail.DeliveryValue"
+      - doc: Reset discards the record, so one test's messages are not another's.
+        name: Reset
+        recv: t *memoryTransport
+    name: memoryTransport
+  - doc: |-
+      session is one open SMTP conversation: the client, and the configuration that
+      decides what is allowed to happen on it.
+
+      It exists so that the policy steps take no *smtp.Client parameter. That is
+      not only a matter of shape: keeping the client and the configuration together
+      is what makes "check the ACTUAL TLS state before writing AUTH" a property of
+      the session rather than an argument a later refactor can drop.
+    fields:
+      - name: transport
+        type: "*smtpTransport"
+      - name: cfg
+        type: SMTPConfig
+      - name: client
+        type: "*smtp.Client"
+    kind: struct
+    methods:
+      - doc: run negotiates the session, issues every delivery, and closes it cleanly.
+        name: run
+        params: deliveries []coremail.DeliveryValue
+        recv: s *session
+        results: error
+      - doc: |-
+          negotiate runs EHLO and then the whole security policy: encryption first,
+          credentials only over an encrypted session.
+        name: negotiate
+        recv: s *session
+        results: error
+      - doc: |-
+          startTLS upgrades the session, refusing rather than continuing when the
+          server offers no upgrade.
+        name: startTLS
+        recv: s *session
+        results: error
+      - doc: authenticate issues AUTH, and refuses to issue it over anything unencrypted.
+        name: authenticate
+        recv: s *session
+        results: error
+      - doc: sendOne issues MAIL, every RCPT, and DATA for a single delivery.
+        name: sendOne
+        params: delivery coremail.DeliveryValue
+        recv: s *session
+        results: error
+    name: session
+  - doc: smtpTransport dials a server per Send. It holds no connection between calls.
+    fields:
+      - name: cfg
+        type: SMTPConfig
+      - name: composer
+        type: "*Composer"
+      - name: address
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          Send composes msg and delivers it over one SMTP session.
+
+          It shares the composition path with [smtpTransport.SendBatch] on purpose: a
+          message that would be refused must be refused identically whichever call site
+          it arrives through, and before a socket exists either way.
+        name: Send
+        params: ctx context.Context, msg coremail.MessageValue
+        recv: t *smtpTransport
+        results: error
+      - doc: |-
+          prepare validates and composes every message, returning the deliveries that
+          survived and the refusals that did not.
+
+          Composition happens before any dial, so a message that will be refused costs
+          no connection — which matters for a caller taking untrusted input: there is
+          no message it can construct that makes this SDK open a socket.
+        name: prepare
+        params: |2
+
+          	msgs []coremail.MessageValue,
+        recv: t *smtpTransport
+        results: deliveries []coremail.DeliveryValue, failures []error
+      - doc: |-
+          SendBatch composes every message first, then delivers all of them over ONE
+          session — which is the whole reason this capability exists rather than
+          leaving the caller to loop.
+
+          Composition happens before the dial for every message, so a batch containing
+          one unusable message does not open a connection at all. The delivery failures
+          that follow are joined rather than short-circuited: one refused recipient in
+          a batch of five hundred must not silence the rest.
+        name: SendBatch
+        params: ctx context.Context, msgs []coremail.MessageValue
+        recv: t *smtpTransport
+        results: error
+      - doc: deliver opens one session and issues every delivery through it.
+        name: deliver
+        params: ctx context.Context, deliveries []coremail.DeliveryValue
+        recv: t *smtpTransport
+        results: error
+      - doc: |-
+          dial opens the TCP connection and, for implicit TLS, completes the handshake
+          before any SMTP byte is exchanged.
+        name: dial
+        params: ctx context.Context
+        recv: t *smtpTransport
+        results: conn net.Conn, err error
+      - doc: |-
+          tlsConfig derives the client configuration from the identity, filling in the
+          verified name when the identity names none.
+
+          The fill is load-bearing. net/smtp.StartTLS hands the config to tls.Client
+          exactly as given, so an empty ServerName makes the handshake fail with "either
+          ServerName or InsecureSkipVerify must be specified" — and the obvious way out
+          of that message, setting InsecureSkipVerify, accepts a certificate from
+          anybody. Naming the configured host is the correct third option.
+        name: tlsConfig
+        recv: t *smtpTransport
+        results: "*tls.Config"
+    name: smtpTransport
+  - kind: named
+    methods:
+      - name: String
+        recv: m TLSMode
+        results: string
+    name: TLSMode
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Host is the server's name. It is also the name TLS verifies the
+          certificate against, and the name EHLO is answered by — so it is not
+          interchangeable with an IP address.
+        name: Host
+        type: string
+      - doc: |-
+          Port is the TCP port: 587 for submission with STARTTLS, 465 for
+          submissions with implicit TLS (RFC 8314 §3.1), 25 for a relay.
+        name: Port
+        type: int
+      - doc: TLS selects the encryption mode. The zero value is refused.
+        name: TLS
+        type: TLSMode
+      - doc: |-
+          Identity carries the trust anchors, the client certificate for mutual
+          TLS, and the minimum protocol version. It is core/net's opaque identity,
+          reused rather than twinned: a mail server's TLS is the same TLS every
+          other outbound connection in this SDK uses, and a second configuration
+          type would be a second place for a minimum version to be wrong.
+
+          Its zero value is usable and means "the platform trust store, TLS 1.3
+          minimum". [SMTPConfig.Host] is used as the verified name when the
+          identity names none.
+        name: Identity
+        type: corenet.IdentityValue
+      - doc: |-
+          Username is the SASL authentication identity. Empty means no AUTH
+          command is issued at all.
+        name: Username
+        type: string
+      - doc: |-
+          Password is the secret for Username. It never appears in an error, a
+          field or a log line emitted by this package.
+        name: Password
+        type: string
+      - doc: |-
+          LocalName is the domain given in EHLO. Empty selects "localhost", which
+          is what net/smtp uses and what a submission server ignores.
+        name: LocalName
+        type: string
+      - doc: |-
+          DialTimeout bounds the TCP connection. Non-positive clamps to
+          [defaultDialTimeout]; a shorter context deadline still wins.
+        name: DialTimeout
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: validate refuses a configuration that cannot be honoured as written.
+        name: validate
+        recv: c SMTPConfig
+        results: error
+      - doc: validateEndpoint refuses a host or a port the transport could never dial.
+        name: validateEndpoint
+        recv: c SMTPConfig
+        results: error
+      - doc: |-
+          validateSecurity refuses an unset or invented TLS mode, and any credential
+          the configured mode would have to send in the clear.
+        name: validateSecurity
+        recv: c SMTPConfig
+        results: error
+      - doc: resolvedDialTimeout applies the clamp.
+        name: resolvedDialTimeout
+        recv: c SMTPConfig
+        results: time.Duration
+      - doc: resolvedLocalName applies net/smtp's own default.
+        name: resolvedLocalName
+        recv: c SMTPConfig
+        results: string
+      - doc: |-
+          redacted is the configuration with its password replaced by the placeholder
+          every secret in the SDK renders as. An EMPTY password stays empty: that no
+          password is set is not a secret, and a rendering that showed a placeholder
+          for nothing would mislead whoever debugs a failed AUTH.
+        name: redacted
+        recv: c SMTPConfig
+        results: smtpConfigView
+      - name: String
+        recv: c SMTPConfig
+        results: string
+      - name: GoString
+        recv: c SMTPConfig
+        results: string
+      - name: Format
+        params: state fmt.State, verb rune
+        recv: c SMTPConfig
+      - name: MarshalJSON
+        recv: c SMTPConfig
+        results: encoded []byte, err error
+    name: SMTPConfig
+  - doc: |-
+      smtpConfigView is SMTPConfig's field set with no methods. Formatting a value
+      of it reaches fmt's default struct rendering instead of recursing into
+      SMTPConfig's own Format, and the conversion between the two only compiles
+      while their fields are identical — so a field added to SMTPConfig and not
+      here breaks the build rather than escaping the redaction.
+    fields:
+      - doc: Host mirrors SMTPConfig.Host.
+        name: Host
+        type: string
+      - doc: Port mirrors SMTPConfig.Port.
+        name: Port
+        type: int
+      - doc: TLS mirrors SMTPConfig.TLS.
+        name: TLS
+        type: TLSMode
+      - doc: Identity mirrors SMTPConfig.Identity, which redacts itself.
+        name: Identity
+        type: corenet.IdentityValue
+      - doc: Username mirrors SMTPConfig.Username.
+        name: Username
+        type: string
+      - doc: Password holds the placeholder when a password is set.
+        name: Password
+        type: string
+      - doc: LocalName mirrors SMTPConfig.LocalName.
+        name: LocalName
+        type: string
+      - doc: DialTimeout mirrors SMTPConfig.DialTimeout.
+        name: DialTimeout
+        type: time.Duration
+    kind: struct
+    name: smtpConfigView
+  - doc: |-
+      addressGroup pairs a header name with the list emitted under it, so the
+      refusal a caller reads names the position in the message rather than the
+      position in a loop.
+    fields:
+      - name: field
+        type: string
+      - name: addrs
+        type: "[]coremail.AddressValue"
+    kind: struct
+    name: addressGroup
+vars:
+  - doc: |-
+      reservedHeaders is the set of lower-cased names the composer emits itself. A
+      caller-supplied field with one of these names is [coremail.ReservedHeader].
+
+      The membership is not a style preference. RFC 5322 §3.6 permits exactly one
+      From, Date, Subject and Message-ID per message, so a duplicate leaves every
+      receiver free to believe a different one — and "Bcc" in this list is the
+      header-injection attack arriving through a supported API instead of through
+      a CRLF.
+    items:
+      - name: reservedHeaders
+        value: |-
+          map[string]struct{}{
+          	strings.ToLower(coremail.HeaderFrom):                    {},
+          	strings.ToLower(coremail.HeaderTo):                      {},
+          	strings.ToLower(coremail.HeaderCc):                      {},
+          	strings.ToLower(coremail.HeaderBcc):                     {},
+          	strings.ToLower(coremail.HeaderReplyTo):                 {},
+          	strings.ToLower(coremail.HeaderSubject):                 {},
+          	strings.ToLower(coremail.HeaderDate):                    {},
+          	strings.ToLower(coremail.HeaderMessageID):               {},
+          	strings.ToLower(coremail.HeaderMIMEVersion):             {},
+          	strings.ToLower(coremail.HeaderContentType):             {},
+          	strings.ToLower(coremail.HeaderContentTransferEncoding): {},
+          	strings.ToLower(coremail.HeaderContentDisposition):      {},
+          	strings.ToLower(coremail.HeaderContentID):               {},
+          }
+    name: reservedHeaders
+  - doc: |-
+      quoteEscaper escapes the two characters RFC 5322 §3.2.4 requires escaping
+      inside a quoted-string. CR, LF and NUL are not in the list because they are
+      refused upstream rather than escaped.
+    items:
+      - name: quoteEscaper
+        value: strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+    name: quoteEscaper
+  - grouped: true
+    items:
+      - doc: The SMTP transport implements the frozen port.
+        name: _
+        type: coremail.Transport
+        value: (*smtpTransport)(nil)
+      - doc: |-
+          It also implements the batching sibling, which is its reason for
+          existing: one session for N messages amortises the handshake.
+        name: _
+        type: coremail.BatchSender
+        value: (*smtpTransport)(nil)
+      - doc: |-
+          The in-memory transport implements all three, which is what lets a
+          consumer wire it wherever a batching transport is expected.
+        name: _
+        type: coremail.FullTransport
+        value: (*memoryTransport)(nil)
+    name: _
+  - grouped: true
+    items:
+      - doc: tlsModesByName is the tls parameter's closed vocabulary.
+        name: tlsModesByName
+        value: |-
+          map[string]TLSMode{
+          		"starttls": TLSStartTLS,
+          		"implicit": TLSImplicit,
+          		"none":     TLSDisabled,
+          	}
+      - doc: defaultPorts is the port each mode listens on when the URL names none.
+        name: defaultPorts
+        value: |-
+          map[TLSMode]int{
+          		TLSStartTLS: portStartTLS,
+          		TLSImplicit: portImplicit,
+          		TLSDisabled: portRelay,
+          	}
+    name: tlsModesByName

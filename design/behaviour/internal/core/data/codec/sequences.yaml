@@ -1,0 +1,254 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: conflictText
+    participants:
+      - id: caller
+        kind: actor
+      - id: conflictText
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString(err.Error())
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(":")
+                    to: b.WriteString
+                when: i == 0
+            - eval: b.WriteString(" " + f.Key() + "=" + strconv.Quote(f.StringValue()))
+              to: b.WriteString
+          key: i
+          range: errs.FieldsOf(err)
+          value: f
+      - return: b.String()
+        to: b.String
+  - of: Format.Known
+    participants:
+      - id: caller
+        kind: actor
+      - id: Format.Known
+        kind: self
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: f == ""
+      - bind: _, found
+        eval: Lookup(f)
+        to: Lookup
+      - return: found
+  - of: Format.String
+    steps:
+      - return: string(f)
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: plugin
+        kind: package
+      - id: publishCodec
+        kind: internal
+      - id: indexAliases
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "fmt.Sprintf(\"codec.Register [%s CODEC_NIL]: %s\", CodeCodecNil, why)"
+          init:
+            bind: why
+            eval: plugin.Unusable(c)
+            to: plugin
+          when: why != ""
+      - bind: name
+        eval: Format(c.Name())
+      - opt:
+          do:
+            - panic: conflictText(err)
+          init:
+            bind: err
+            eval: publishCodec(name, c)
+            to: publishCodec
+          when: err != nil
+      - eval: indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME", normalizeMIME)
+        to: indexAliases
+      - eval: indexAliases(&extIndex, c.Extensions(), name, "extension", strings.ToLower)
+        to: indexAliases
+      - return: c
+  - of: publishCodec
+    participants:
+      - id: caller
+        kind: actor
+      - id: publishCodec
+        kind: self
+      - id: registry.Claim
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: _, taken
+            eval: registry.Claim(name, c)
+            to: registry.Claim
+          when: "!taken"
+      - return: |-
+          errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+          		errs.String("registrar", "codec.Register"), errs.String("name", string(name)))
+        to: errs
+  - of: indexAliases
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexAliases
+        kind: self
+      - id: publishAlias
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: key
+              eval: normalize(alias)
+            - opt:
+                do:
+                  - panic: conflictText(err)
+                init:
+                  bind: err
+                  eval: publishAlias(dst, key, name, kind, alias)
+                  to: publishAlias
+                when: err != nil
+          key: _
+          range: aliases
+          value: alias
+  - of: normalizeMIME
+    participants:
+      - id: caller
+        kind: actor
+      - id: normalizeMIME
+        kind: self
+      - id: mime
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: mediaType, _, perr
+        eval: mime.ParseMediaType(raw)
+        to: mime
+      - opt:
+          do:
+            - bind: before, _, _
+              eval: strings.Cut(raw, ";")
+              to: strings
+            - set: mediaType
+              to: strings
+              value: strings.ToLower(strings.TrimSpace(before))
+          when: perr != nil
+      - return: mediaType
+  - of: publishAlias
+    participants:
+      - id: caller
+        kind: actor
+      - id: publishAlias
+        kind: self
+      - id: dst.Claim
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: owner, taken
+        eval: dst.Claim(key, name)
+        to: dst.Claim
+      - opt:
+          do:
+            - return: nil
+          when: "!taken || owner == name"
+      - return: |-
+          errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+          		errs.String("registrar", "codec.Register"), errs.String("kind", kind),
+          		errs.String("alias", alias), errs.String("owner", string(owner)),
+          		errs.String("requester", string(name)))
+        to: errs
+  - of: Lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: Lookup
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - return: registry.Lookup(f)
+        to: registry.Lookup
+  - of: LookupMIME
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupMIME
+        kind: self
+      - id: mimeIndex.Lookup
+        kind: value
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: raw == ""
+      - bind: name, found
+        eval: mimeIndex.Lookup(normalizeMIME(raw))
+        to: mimeIndex.Lookup
+      - opt:
+          do:
+            - return: nil, false
+          when: "!found"
+      - return: Lookup(name)
+        to: Lookup
+  - of: LookupExt
+    participants:
+      - id: caller
+        kind: actor
+      - id: LookupExt
+        kind: self
+      - id: extIndex.Lookup
+        kind: value
+      - id: Lookup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: ext == ""
+      - bind: name, found
+        eval: extIndex.Lookup(strings.ToLower(ext))
+        to: extIndex.Lookup
+      - opt:
+          do:
+            - return: nil, false
+          when: "!found"
+      - return: Lookup(name)
+        to: Lookup
+  - of: Available
+    participants:
+      - id: caller
+        kind: actor
+      - id: Available
+        kind: self
+      - id: registry.Names
+        kind: value
+    steps:
+      - return: registry.Names()
+        to: registry.Names

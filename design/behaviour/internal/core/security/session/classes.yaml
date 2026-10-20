@@ -1,0 +1,228 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      IDLen is the required identifier length in bytes. 32 bytes is 256 bits of
+      entropy from crypto/rand: guessing one is not a threat model, it is a
+      rounding error. The length is fixed rather than configurable because every
+      value a caller could choose below it is a weaker session and every value
+      above it only lengthens the cookie.
+    items:
+      - name: IDLen
+        type: int
+        value: "32"
+    name: IDLen
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - IDLen
+      - canonicalEncoding
+      - ID
+      - NewID
+      - ParseID
+      - ID.Reveal
+      - ID.Digest
+      - ID.Equal
+      - ID.IsZero
+      - ID.String
+      - ID.GoString
+    name: id.go
+  - decls:
+      - SessionValue
+      - NewSessionValue
+      - SessionValue.ID
+      - SessionValue.Subject
+      - SessionValue.CreatedAt
+      - SessionValue.LastSeen
+      - SessionValue.ExpiresAt
+      - SessionValue.LiveAt
+      - SessionValue.IsZero
+      - SessionValue.Get
+      - SessionValue.Set
+      - SessionValue.Delete
+      - SessionValue.Keys
+      - SessionValue.Data
+      - SessionValue.String
+      - SessionValue.GoString
+    name: session_value.go
+  - decls:
+      - StateValue
+    name: state_value.go
+functions:
+  - name: NewID
+    params: raw []byte
+    results: id ID, err error
+  - name: ParseID
+    params: encoded string
+    results: id ID, err error
+  - name: NewSessionValue
+    params: state StateValue
+    results: session SessionValue, err error
+imports:
+  base64: encoding/base64
+  hex: encoding/hex
+  maps: maps
+  sha256: crypto/sha256
+  slices: slices
+  strconv: strconv
+  subtle: crypto/subtle
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/security/session
+  name: session
+  purpose: Package session — ranges 0.2.14.* (the port's verdicts) and 0.3.46.* (the engines' own refusals) — ADR 0045, declared here since ADR 0160.
+types:
+  - fields:
+      - doc: |-
+          raw holds exactly IDLen bytes; the zero value holds nil and is not
+          usable. NewID and ParseID are the only producers, and both copy.
+        name: raw
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: Reveal
+        recv: i ID
+        results: string
+      - name: Digest
+        recv: i ID
+        results: string
+      - name: Equal
+        params: other ID
+        recv: i ID
+        results: bool
+      - name: IsZero
+        recv: i ID
+        results: bool
+      - name: String
+        recv: i ID
+        results: string
+      - name: GoString
+        recv: i ID
+        results: string
+    name: ID
+  - fields:
+      - doc: |-
+          id names the session; it is the presented identifier, never one read
+          back from storage (a store keeps only ID.Digest, see id.go).
+        name: id
+        type: ID
+      - doc: |-
+          subject is the authenticated principal, or "" for anonymous. Written
+          only by the regeneration path.
+        name: subject
+        type: string
+      - doc: |-
+          createdAt anchors the absolute deadline and never moves for the life of
+          this identifier.
+        name: createdAt
+        type: time.Time
+      - doc: lastSeen anchors the idle deadline and moves on every Load.
+        name: lastSeen
+        type: time.Time
+      - doc: |-
+          absoluteExpiry is createdAt + AbsoluteTimeout — the ceiling. It is
+          stamped once and no operation extends it.
+        name: absoluteExpiry
+        type: time.Time
+      - doc: |-
+          idleExpiry is lastSeen + IdleTimeout, ALREADY CLAMPED to absoluteExpiry
+          by whoever built the value, so ExpiresAt needs no special case.
+        name: idleExpiry
+        type: time.Time
+      - doc: data is the caller's key/value payload; nil until something is set.
+        name: data
+        type: map[string]string
+    kind: struct
+    methods:
+      - name: ID
+        recv: s SessionValue
+        results: ID
+      - name: Subject
+        recv: s SessionValue
+        results: string
+      - name: CreatedAt
+        recv: s SessionValue
+        results: time.Time
+      - name: LastSeen
+        recv: s SessionValue
+        results: time.Time
+      - name: ExpiresAt
+        recv: s SessionValue
+        results: time.Time
+      - name: LiveAt
+        params: now time.Time
+        recv: s SessionValue
+        results: bool
+      - name: IsZero
+        recv: s SessionValue
+        results: bool
+      - name: Get
+        params: key string
+        recv: s SessionValue
+        results: value string, ok bool
+      - name: Set
+        params: key, value string
+        recv: s SessionValue
+        results: SessionValue
+      - name: Delete
+        params: key string
+        recv: s SessionValue
+        results: SessionValue
+      - name: Keys
+        recv: s SessionValue
+        results: "[]string"
+      - name: Data
+        recv: s SessionValue
+        results: map[string]string
+      - name: String
+        recv: s SessionValue
+        results: string
+      - name: GoString
+        recv: s SessionValue
+        results: string
+    name: SessionValue
+  - fields:
+      - doc: ID names the session. NewSessionValue refuses a zero one.
+        name: ID
+        type: ID
+      - doc: Subject is the authenticated principal, or "" for anonymous.
+        name: Subject
+        type: string
+      - doc: CreatedAt anchors the absolute deadline.
+        name: CreatedAt
+        type: time.Time
+      - doc: LastSeen anchors the idle deadline.
+        name: LastSeen
+        type: time.Time
+      - doc: |-
+          AbsoluteExpiry is the ceiling — CreatedAt + the store's absolute
+          timeout. Nothing extends it.
+        name: AbsoluteExpiry
+        type: time.Time
+      - doc: |-
+          IdleExpiry is LastSeen + the store's idle timeout. NewSessionValue clamps
+          to AbsoluteExpiry, so a store cannot accidentally publish a sliding
+          window that outlives the ceiling.
+        name: IdleExpiry
+        type: time.Time
+      - doc: |-
+          Data is the caller's payload; it is copied, so the caller keeps
+          ownership of the map it passed.
+        name: Data
+        type: map[string]string
+    kind: struct
+    name: StateValue
+vars:
+  - doc: |-
+      canonicalEncoding is the one spelling an identifier has: unpadded base64url,
+      decoded STRICTLY. 32 bytes are 256 bits and 43 characters carry 258, so the
+      last character holds two bits no byte uses; a lenient decoder ignores them,
+      and four different strings would then name one session. Strict refuses any
+      of those bits set. It is built once because Strict returns a new copy of the
+      encoding on every call.
+    items:
+      - name: canonicalEncoding
+        value: base64.RawURLEncoding.Strict()
+    name: canonicalEncoding

@@ -1,0 +1,215 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewTeeSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTeeSink
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: cp
+        eval: slices.Clone(cfg.Primaries)
+        to: slices
+      - return: "&TeeSink{primaries: cp, spill: cfg.Spill}"
+  - of: (*TeeSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TeeSink).Write
+        kind: self
+      - id: t.fanOut
+        kind: internal
+    steps:
+      - bind: n, accepted, causes
+        eval: t.fanOut(ctx, r, p)
+        to: t.fanOut
+      - opt:
+          do:
+            - return: n, nil
+          when: accepted
+      - return: 0, t.handleAllFailed(ctx, r, p, errors.Join(causes...))
+  - of: (*TeeSink).fanOut
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TeeSink).fanOut
+        kind: self
+      - id: s.Write
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: written, werr
+              eval: s.Write(ctx, r, p)
+              to: s.Write
+            - opt:
+                do:
+                  - set: causes
+                    value: append(causes, werr)
+                  - continue: true
+                when: werr != nil
+            - set: accepted
+              value: "true"
+            - opt:
+                do:
+                  - set: "n"
+                    value: written
+                when: n == 0
+          key: _
+          range: t.primaries
+          value: s
+      - return: n, accepted, causes
+  - of: (*TeeSink).handleAllFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TeeSink).handleAllFailed
+        kind: self
+      - id: wrapAllBranchesFailed
+        kind: internal
+      - id: t.spill.Write
+        kind: value
+      - id: wrapSpillFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAllBranchesFailed(joined)
+              to: wrapAllBranchesFailed
+          when: t.spill == nil
+      - opt:
+          do:
+            - return: wrapSpillFailed(errors.Join(joined, serr))
+              to: wrapSpillFailed
+          init:
+            bind: _, serr
+            eval: t.spill.Write(ctx, r, p)
+            to: t.spill.Write
+          when: serr != nil
+      - return: wrapAllBranchesFailed(joined)
+        to: wrapAllBranchesFailed
+  - of: wrapAllBranchesFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAllBranchesFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coretee.CodeTeeAllBranchesFailed,
+          		Reason:  "ALL_BRANCHES_FAILED",
+          		Public:  "every primary sink rejected the record",
+          		Private: "service/observe/logger/middleware/tee: all primary sinks failed to write the record",
+          	})
+        to: errs
+  - of: wrapSpillFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapSpillFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coretee.CodeSpillFailed,
+          		Reason:  "SPILL_FAILED",
+          		Public:  "failed to spill record to the dead-letter sink",
+          		Private: "service/observe/logger/middleware/tee: the dead-letter spill sink rejected the record",
+          	})
+        to: errs
+  - of: (*TeeSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TeeSink).Flush
+        kind: self
+      - id: s.Flush
+        kind: value
+      - id: t.spill.Flush
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - var:
+          name: causes
+          type: "[]error"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: causes
+                    value: append(causes, cerr)
+                init:
+                  bind: cerr
+                  eval: s.Flush(ctx)
+                  to: s.Flush
+                when: cerr != nil
+          key: _
+          range: t.primaries
+          value: s
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: causes
+                    value: append(causes, cerr)
+                init:
+                  bind: cerr
+                  eval: t.spill.Flush(ctx)
+                  to: t.spill.Flush
+                when: cerr != nil
+          when: t.spill != nil
+      - return: errors.Join(causes...)
+        to: errors
+  - of: (*TeeSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TeeSink).Close
+        kind: self
+      - id: s.Close
+        kind: value
+      - id: t.spill.Close
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - var:
+          name: causes
+          type: "[]error"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: causes
+                    value: append(causes, cerr)
+                init:
+                  bind: cerr
+                  eval: s.Close()
+                  to: s.Close
+                when: cerr != nil
+          key: _
+          range: t.primaries
+          value: s
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: causes
+                    value: append(causes, cerr)
+                init:
+                  bind: cerr
+                  eval: t.spill.Close()
+                  to: t.spill.Close
+                when: cerr != nil
+          when: t.spill != nil
+      - return: errors.Join(causes...)
+        to: errors

@@ -1,0 +1,29 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: Get
+        kind: self
+      - id: bytePool.Get
+        kind: value
+    steps:
+      - return: bytePool.Get()
+        to: bytePool.Get
+  - of: Put
+    participants:
+      - id: caller
+        kind: actor
+      - id: Put
+        kind: self
+      - id: bytePool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: b == nil
+      - eval: bytePool.Put(b)
+        to: bytePool.Put

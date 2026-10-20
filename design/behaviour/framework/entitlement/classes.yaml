@@ -1,0 +1,387 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      RosterLifetime is how long a signed roster stays usable. It bounds how long a
+      revoked subject keeps working offline, and how long a captured roster can be
+      replayed — the same bound, read from either side.
+    items:
+      - name: RosterLifetime
+        type: time.Duration
+        value: coreent.RosterLifetime
+    name: RosterLifetime
+  - doc: CodeNoLicence identifies a machine with no entitlement key at all.
+    items:
+      - name: CodeNoLicence
+        type: errs.Code
+        value: coreent.CodeNoLicence
+    name: CodeNoLicence
+  - doc: |-
+      CodeRosterUnsigned identifies a roster carrying no valid vendor signature —
+      the spoofing signal, since a substituted endpoint cannot produce one.
+    items:
+      - name: CodeRosterUnsigned
+        type: errs.Code
+        value: coreent.CodeRosterUnsigned
+    name: CodeRosterUnsigned
+  - doc: CodeRosterStale identifies a roster that verified but whose window has closed.
+    items:
+      - name: CodeRosterStale
+        type: errs.Code
+        value: coreent.CodeRosterStale
+    name: CodeRosterStale
+  - doc: CodeRevoked identifies a subject absent from a roster that was itself valid.
+    items:
+      - name: CodeRevoked
+        type: errs.Code
+        value: coreent.CodeRevoked
+    name: CodeRevoked
+  - doc: CodeLicenceExpired identifies a subject whose own term has closed.
+    items:
+      - name: CodeLicenceExpired
+        type: errs.Code
+        value: coreent.CodeLicenceExpired
+    name: CodeLicenceExpired
+  - doc: |-
+      CodeKeyMismatch identifies a local key that does not match the published
+      fingerprint.
+    items:
+      - name: CodeKeyMismatch
+        type: errs.Code
+        value: coreent.CodeKeyMismatch
+    name: CodeKeyMismatch
+  - doc: |-
+      CodeRosterUnreachable identifies a check that could not decide either way. It
+      is NOT a refusal, and a caller that treats it as one turns an outage into a
+      revocation.
+    items:
+      - name: CodeRosterUnreachable
+        type: errs.Code
+        value: coreent.CodeRosterUnreachable
+    name: CodeRosterUnreachable
+  - doc: |-
+      CodeAmbiguousLicence identifies more than one identity on one machine, which
+      no automatic choice can resolve safely.
+    items:
+      - name: CodeAmbiguousLicence
+        type: errs.Code
+        value: coreent.CodeAmbiguousLicence
+    name: CodeAmbiguousLicence
+  - doc: CodeCIUnverifiable identifies a CI run whose provenance could not be proven.
+    items:
+      - name: CodeCIUnverifiable
+        type: errs.Code
+        value: coreent.CodeCIUnverifiable
+    name: CodeCIUnverifiable
+  - doc: |-
+      CodeCIUnknownKey identifies a CI token signed by a key the issuer does not
+      publish.
+    items:
+      - name: CodeCIUnknownKey
+        type: errs.Code
+        value: coreent.CodeCIUnknownKey
+    name: CodeCIUnknownKey
+  - doc: CodeCINotEntitled identifies a CI account the roster does not cover.
+    items:
+      - name: CodeCINotEntitled
+        type: errs.Code
+        value: coreent.CodeCINotEntitled
+    name: CodeCINotEntitled
+  - doc: CodeNoPossession identifies a holder who could not prove possession.
+    items:
+      - name: CodeNoPossession
+        type: errs.Code
+        value: coreent.CodeNoPossession
+    name: CodeNoPossession
+  - doc: |-
+      CodeClockRegressed identifies a clock behind the last signed document this
+      machine verified — the anti-rollback ratchet.
+    items:
+      - name: CodeClockRegressed
+        type: errs.Code
+        value: coreent.CodeClockRegressed
+    name: CodeClockRegressed
+  - doc: CodeUpdateRequired identifies a build below the floor the roster mandates.
+    items:
+      - name: CodeUpdateRequired
+        type: errs.Code
+        value: coreent.CodeUpdateRequired
+    name: CodeUpdateRequired
+  - doc: |-
+      CodeProductInvalid identifies a Product whose origin list could not survive
+      the day it is needed — see Product.Validate.
+    items:
+      - name: CodeProductInvalid
+        type: errs.Code
+        value: coreent.CodeProductInvalid
+    name: CodeProductInvalid
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - RosterLifetime
+      - CodeNoLicence
+      - CodeRosterUnsigned
+      - CodeRosterStale
+      - CodeRevoked
+      - CodeLicenceExpired
+      - CodeKeyMismatch
+      - CodeRosterUnreachable
+      - CodeAmbiguousLicence
+      - CodeCIUnverifiable
+      - CodeCIUnknownKey
+      - CodeCINotEntitled
+      - CodeNoPossession
+      - CodeClockRegressed
+      - CodeUpdateRequired
+      - CodeProductInvalid
+      - ErrNoLicense
+      - Identity
+      - BoundProver
+      - Roster
+      - Subject
+      - CIEntitlement
+      - Grant
+      - Origin
+      - Product
+      - Service
+      - New
+      - NewWithAnchors
+      - Bundle
+      - Getter
+      - BearerFetch
+      - RoughtimeServer
+      - UpdateRequiredError
+      - NewWithGetter
+      - RequiresUpdate
+      - UpdateRefusal
+    name: entitlement.go
+functions:
+  - name: New
+    params: identity Identity, vendor []byte, product *Product
+    results: "*Service"
+  - name: NewWithAnchors
+    params: identity Identity, anchors [][]byte, product *Product
+    results: "*Service"
+  - name: NewWithGetter
+    params: client Getter, identity Identity, vendor []byte, product *Product
+    results: "*Service"
+  - name: RequiresUpdate
+    params: current, floor string
+    results: bool
+  - name: UpdateRefusal
+    params: current, floor string
+    results: error
+imports:
+  coreent: github.com/kitsunium/sdk/framework/internal/core/entitlement
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  svcent: github.com/kitsunium/sdk/framework/internal/service/entitlement
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/entitlement
+  name: entitlement
+  purpose: "Package entitlement verifies a machine's entitlement to run a product: local key material plus a vendor-signed roster, turned into a grant or a typed refusal."
+types:
+  - alias: true
+    doc: Identity is the machine's half of the proof. It aliases the core port.
+    kind: alias
+    name: Identity
+    underlying: coreent.Identity
+  - alias: true
+    doc: |-
+      BoundProver is Identity's sibling for the one claim the three methods cannot
+      make: possession of the key the ROSTER authorised, rather than of whatever
+      this machine holds when it is asked.
+
+      Implement it when your key custody can bind, and the verifier will prefer it:
+
+      	func (k *MyKeys) ProvePossessionFor(subject, authorised string) error
+
+      Without it the engine asks Fingerprint what you present, compares that answer
+      itself, and then asks ProvePossession — so material replaced between the two
+      calls is signed for, and the strongest thing an implementation can do unaided
+      is notice that something changed without learning what it should have been.
+
+      It is a SIBLING rather than a parameter on ProvePossession because Identity is
+      published through this alias and Go satisfies interfaces structurally: widening
+      it would break every implementation at compile time with no deprecation window,
+      and would not even guarantee the binding — an implementation can accept the
+      parameter and ignore it. ADR 0039, ADR 0040 §4, ADR 0092.
+
+      An Identity that does not implement this is fully supported and unchanged. The
+      window stays open for it, which is said here rather than left to be found.
+    kind: alias
+    name: BoundProver
+    underlying: coreent.BoundProver
+  - alias: true
+    doc: Roster is a published, vendor-signed entitlement roster.
+    kind: alias
+    name: Roster
+    underlying: coreent.RosterValue
+  - alias: true
+    doc: "Subject is one entry in a roster: an identity and what it is entitled to."
+    kind: alias
+    name: Subject
+    underlying: coreent.SubjectValue
+  - alias: true
+    doc: CIEntitlement is a roster's seat for a continuous-integration account.
+    kind: alias
+    name: CIEntitlement
+    underlying: coreent.CIEntitlementValue
+  - alias: true
+    doc: |-
+      Grant is a verified entitlement, with the deadline past which it must be
+      re-verified and whether it was decided offline.
+
+      Read Deadline() rather than the NotAfter field when you intend to ACT on the
+      deadline: NotAfter's zero value means "no deadline was computed" — the shape a
+      grant seeded from a bare timestamp carries — and the method resolves the
+      fallback the field cannot express. Expired(now) is the same question asked the
+      other way round, and the two are one rule by construction.
+
+      Honouring it is YOURS. See the package comment.
+    kind: alias
+    name: Grant
+    underlying: coreent.GrantValue
+  - alias: true
+    doc: Origin is one place a roster is published.
+    kind: alias
+    name: Origin
+    underlying: coreent.OriginValue
+  - alias: true
+    doc: |-
+      Product names the vendor whose roster this binary trusts. It aliases the
+      service type: these are one engine's construction parameters (ADR 0074).
+    kind: alias
+    name: Product
+    underlying: svcent.ProductValue
+  - alias: true
+    doc: Service verifies entitlement. It aliases the service handle (ADR 0074).
+    kind: alias
+    name: Service
+    underlying: svcent.Service
+  - alias: true
+    doc: |-
+      Bundle is the one-document roster form: the raw roster and its detached
+      signature in a single object, because two documents cannot be fetched
+      atomically. It aliases the service type (ADR 0074) — a caller BUILDS one to
+      serve or to cache, which is why it is public at all.
+    kind: alias
+    name: Bundle
+    underlying: svcent.BundleValue
+  - alias: true
+    doc: |-
+      Getter performs the roster HTTP GETs. A consumer substitutes it to exercise
+      the admission logic without a network, which is the only way to test a
+      refusal path that depends on what an origin answered.
+    kind: alias
+    name: Getter
+    underlying: svcent.Getter
+  - alias: true
+    doc: |-
+      BearerFetch performs the one request a [Service] makes with a credential:
+      the GitHub Actions ID-token mint on the CI path, which sends the runner's
+      bearer token. It is a function rather than a [Getter] method because the
+      roster fetch must never carry one.
+
+      [Service].WithBearerFetch replaces the default, and only a test should need
+      to: the default refuses every redirect, so the runner's credential cannot be
+      forwarded to a destination nobody vouched for, and a replacement takes that
+      duty on. It aliases the service type (ADR 0074).
+    kind: alias
+    name: BearerFetch
+    underlying: svcent.BearerFetch
+  - alias: true
+    doc: |-
+      RoughtimeServer is one Roughtime server a [Service] may ask for a signed
+      statement of the current time, and the ed25519 key its answer must be signed
+      with: the key, not the address, is the whole trust decision.
+
+      [Service].WithTimeServers takes the list. The check is off by default, and
+      ADVISORY: a server that does not answer, or whose answer does not verify, is
+      no signal and the verification carries on, while one that answers verifiably
+      and disagrees with the local clock by more than five minutes, widened by its
+      own stated uncertainty, refuses with [ErrClockRegressed]. No server ships with
+      the SDK: this client has been checked against its own test fixture and never
+      against a live server, so adding one is a decision for whoever can watch it
+      verify a real answer. It aliases the service type (ADR 0074).
+    kind: alias
+    name: RoughtimeServer
+    underlying: svcent.RoughtimeServerValue
+  - alias: true
+    doc: |-
+      UpdateRequiredError carries the two versions a version-floor refusal is
+      about. It exists as a TYPE rather than a message because a caller that cannot
+      read the required version out of the refusal re-runs the upgrade, gets the
+      same refusal, and loops forever.
+    kind: alias
+    name: UpdateRequiredError
+    underlying: svcent.UpdateRequiredError
+vars:
+  - doc: |-
+      The fourteen sentinels, re-exported so errors.Is answers on them. They are
+      the SAME values core declares, not copies, so a caller may compare across the
+      facade boundary; each also carries the matching Code above, so errs.HasCode
+      and errors.Is are two ways of asking one question.
+
+      None is annotated `error`, and that is deliberate. The annotation would erase
+      the concrete type, and with it Code, Reason, Public and ExitCode — every one
+      of which a consumer reads directly off the sentinel to render a message or
+      exit a process. Without it they are reachable only through a type assertion
+      to a type a consumer cannot name, since internal/kernel/errs is internal.
+      pkg/v1/app/lock, pkg/v1/data/cache and pkg/v1/security/authz all declare theirs this way;
+      this package shipped as the outlier, when it was pkg/v1/entitlement.
+      TestTheSentinelsKeepTheirConcreteType
+      fails the BUILD if the annotation comes back.
+
+      A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+      says "cannot decide", and treating it as "decided no" turns an outage into a
+      revocation.
+    grouped: true
+    items:
+      - doc: ErrNoLicense identifies a machine with no entitlement key at all.
+        name: ErrNoLicense
+        value: coreent.ErrNoLicense
+      - doc: ErrRosterUnsigned identifies a roster carrying no valid vendor signature.
+        name: ErrRosterUnsigned
+        value: coreent.ErrRosterUnsigned
+      - doc: |-
+          ErrRosterStale identifies a roster that verified but no longer authorises:
+          its own window has closed, or a newer signed decision has superseded it.
+        name: ErrRosterStale
+        value: coreent.ErrRosterStale
+      - doc: ErrRevoked identifies a subject absent from a roster that was itself valid.
+        name: ErrRevoked
+        value: coreent.ErrRevoked
+      - doc: ErrLicenseExpired identifies a subject whose own term has closed.
+        name: ErrLicenseExpired
+        value: coreent.ErrLicenseExpired
+      - doc: ErrKeyMismatch identifies a local key that does not match the published fingerprint.
+        name: ErrKeyMismatch
+        value: coreent.ErrKeyMismatch
+      - doc: ErrRosterUnreachable identifies a check that could not decide either way.
+        name: ErrRosterUnreachable
+        value: coreent.ErrRosterUnreachable
+      - doc: ErrAmbiguousLicense identifies more than one identity on one machine.
+        name: ErrAmbiguousLicense
+        value: coreent.ErrAmbiguousLicense
+      - doc: ErrCIUnverifiable identifies a CI run whose provenance could not be proven.
+        name: ErrCIUnverifiable
+        value: coreent.ErrCIUnverifiable
+      - doc: ErrCIUnknownKey identifies a CI token signed by a key the issuer does not publish.
+        name: ErrCIUnknownKey
+        value: coreent.ErrCIUnknownKey
+      - doc: ErrCINotEntitled identifies a CI account the roster does not cover.
+        name: ErrCINotEntitled
+        value: coreent.ErrCINotEntitled
+      - doc: ErrNoPossession identifies a holder who could not prove possession.
+        name: ErrNoPossession
+        value: coreent.ErrNoPossession
+      - doc: ErrClockRegressed identifies a clock behind the last signed document this machine verified.
+        name: ErrClockRegressed
+        value: coreent.ErrClockRegressed
+      - doc: ErrUpdateRequired identifies a build below the floor the roster mandates.
+        name: ErrUpdateRequired
+        value: coreent.ErrUpdateRequired
+    name: ErrNoLicense

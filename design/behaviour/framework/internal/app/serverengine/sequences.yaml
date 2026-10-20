@@ -1,0 +1,166 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: sampleProcess
+    participants:
+      - id: caller
+        kind: actor
+      - id: sampleProcess
+        kind: self
+      - id: process
+        kind: package
+    steps:
+      - bind: st
+        eval: process.Self()
+        to: process
+      - bind: p
+        eval: |-
+          &model.Process{
+          		PID:               st.PID,
+          		Go:                runtime.Version(),
+          		OS:                runtime.GOOS,
+          		Arch:              runtime.GOARCH,
+          		MaxProcs:          st.MaxProcs,
+          		CPUs:              st.CPUs,
+          		Goroutines:        st.Goroutines,
+          		HeapBytes:         st.HeapBytes,
+          		HeapObjects:       st.HeapObjects,
+          		HeapGoalBytes:     st.HeapGoalBytes,
+          		MemoryBytes:       st.MemoryBytes,
+          		TotalAllocBytes:   st.TotalAllocBytes,
+          		GCCycles:          st.GCCycles,
+          		GCPauseP99Ms:      millis(st.GCPauses.Quantile(0.99)),
+          		SchedLatencyP99Ms: millis(st.SchedLatencies.Quantile(0.99)),
+          		CPUSeconds:        round2(st.CPUTime.Seconds()),
+          		UptimeMs:          millis(st.Uptime),
+          		At:                st.At.UTC(),
+          	}
+      - opt:
+          do:
+            - set: p.LastGC
+              value: new(st.LastGC.UTC())
+          when: "!st.LastGC.IsZero()"
+      - return: p
+  - of: millis
+    participants:
+      - id: caller
+        kind: actor
+      - id: millis
+        kind: self
+      - id: round2
+        kind: internal
+    steps:
+      - return: round2(float64(d) / float64(time.Millisecond))
+        to: round2
+  - of: round2
+    steps:
+      - return: math.Round(f*100) / 100
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.NewHTTPServer.Store
+        kind: value
+      - id: plug.NewStaticFiles.Store
+        kind: value
+      - id: plug.SampleProcess.Store
+        kind: value
+    steps:
+      - bind: newServer, newFiles, sample
+        eval: newHTTPServer, newStaticFiles, sampleProcess
+      - eval: plug.NewHTTPServer.Store(&newServer)
+        to: plug.NewHTTPServer.Store
+      - eval: plug.NewStaticFiles.Store(&newFiles)
+        to: plug.NewStaticFiles.Store
+      - eval: plug.SampleProcess.Store(&sample)
+        to: plug.SampleProcess.Store
+  - of: newHTTPServer
+    participants:
+      - id: caller
+        kind: actor
+      - id: newHTTPServer
+        kind: self
+      - id: server
+        kind: package
+      - id: |-
+          srv.Group("http",
+          		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
+          		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
+          		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
+          		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+          	).HandleHTTP
+        kind: value
+    steps:
+      - bind: srv
+        eval: server.New()
+        to: server
+      - eval: |-
+          srv.Group("http",
+          		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
+          		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
+          		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
+          		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+          	).HandleHTTP(cfg.Handler)
+        to: |-
+          srv.Group("http",
+          		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
+          		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
+          		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
+          		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+          	).HandleHTTP
+      - return: "httpServer{srv: srv}"
+  - of: newStaticFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: newStaticFiles
+        kind: self
+      - id: static
+        kind: package
+    steps:
+      - return: "static.New(fsys, static.Config{ContentSecurityPolicy: csp, SinglePageApp: true})"
+        to: static
+  - of: httpServer.Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: httpServer.Start
+        kind: self
+      - id: h.srv.Start
+        kind: value
+    steps:
+      - return: h.srv.Start(ctx)
+        to: h.srv.Start
+  - of: httpServer.State
+    participants:
+      - id: caller
+        kind: actor
+      - id: httpServer.State
+        kind: self
+      - id: h.srv.State
+        kind: value
+    steps:
+      - bind: st
+        eval: h.srv.State()
+        to: h.srv.State
+      - bind: out
+        eval: "plug.HTTPState{Active: st.ActiveConns, Total: st.TotalConns, Rejected: st.RejectedConns, Listeners: len(st.Listeners)}"
+      - opt:
+          do:
+            - set: out.Addr
+              value: st.Listeners[0].Address
+          when: len(st.Listeners) > 0
+      - return: out
+  - of: httpServer.Shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: httpServer.Shutdown
+        kind: self
+      - id: h.srv.Shutdown
+        kind: value
+    steps:
+      - return: h.srv.Shutdown(ctx)
+        to: h.srv.Shutdown

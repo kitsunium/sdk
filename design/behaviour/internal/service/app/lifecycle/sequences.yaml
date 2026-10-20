@@ -1,0 +1,845 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Config.stopBudget
+    steps:
+      - opt:
+          do:
+            - return: DefaultStopTimeout
+          when: c.StopTimeout <= 0
+      - return: c.StopTimeout
+  - of: Config.resolvedClock
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: New
+    steps:
+      - return: |-
+          &lifecycle{
+          		clk:          cfg.resolvedClock(),
+          		budget:       cfg.stopBudget(),
+          		onTransition: cfg.OnTransition,
+          		names:        map[string]bool{},
+          	}
+  - of: (*lifecycle).Add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).Add
+        kind: self
+      - id: validateComponent
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateComponent(component)
+            to: validateComponent
+          when: err != nil
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelc.LifecycleRunning, kerrs.WrapParams{},
+                			kerrs.String("component", component.Name))
+              to: kerrs
+          when: l.running
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelc.DuplicateComponent, kerrs.WrapParams{},
+                			kerrs.String("component", component.Name))
+              to: kerrs
+          when: l.names[component.Name]
+      - set: l.names[component.Name]
+        value: "true"
+      - set: l.components
+        value: append(l.components, component)
+      - return: nil
+  - of: validateComponent
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateComponent
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelc.InvalidComponent, kerrs.WrapParams{},
+                			kerrs.String("missing", "Name"))
+              to: kerrs
+          when: component.Name == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelc.InvalidComponent, kerrs.WrapParams{},
+                			kerrs.String("missing", "Start"), kerrs.String("component", component.Name))
+              to: kerrs
+          when: component.Start == nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelc.InvalidComponent, kerrs.WrapParams{},
+                			kerrs.String("missing", "Stop"), kerrs.String("component", component.Name))
+              to: kerrs
+          when: component.Stop == nil
+      - return: nil
+  - of: (*lifecycle).beginStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).beginStart
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - return: nil, kerrs.Wrap(corelc.LifecycleRunning, kerrs.WrapParams{})
+          when: l.running
+      - set: l.running
+        value: "true"
+      - set: l.started
+        value: nil
+      - return: slices.Clone(l.components), nil
+        to: slices
+  - of: (*lifecycle).markStarted
+    steps:
+      - lock:
+          mutex: l.mu
+      - set: l.started
+        value: append(l.started, component)
+  - of: (*lifecycle).takeStarted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).takeStarted
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: l.mu
+      - bind: order
+        eval: slices.Clone(l.started)
+        to: slices
+      - set: l.started
+        value: nil
+      - eval: slices.Reverse(order)
+        to: slices
+      - return: order
+  - of: (*lifecycle).release
+    steps:
+      - lock:
+          mutex: l.mu
+      - set: l.running
+        value: "false"
+  - of: guard
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path.
+          		if value == nil {
+          			//: leave err as the component returned it.
+          			return
+          		}
+          		//: the recovered value travels as a FIELD, never as the wrap origin,
+          		//: so a panic carrying an *errs.Error cannot hijack COMPONENT_PANICKED.
+          		err = kerrs.Wrap(corelc.ComponentPanicked, kerrs.WrapParams{},
+          			kerrs.String("component", name), kerrs.String("phase", phase),
+          			kerrs.String("panic", fmt.Sprint(value)))
+          	}()
+      - return: fn(ctx)
+  - of: (*lifecycle).emit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).emit
+        kind: self
+      - id: l.clk.Now
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: l.onTransition == nil
+      - set: transition.Ended
+        to: l.clk.Now
+        value: l.clk.Now()
+      - lock:
+          mutex: l.hookMu
+      - eval: l.onTransition(transition)
+  - of: Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: Run
+        kind: self
+      - id: lc.Start
+        kind: value
+      - id: announce
+        kind: internal
+      - id: errors
+        kind: stdlib
+      - id: waitForStop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: lc.Start(ctx)
+            to: lc.Start
+          when: err != nil
+      - opt:
+          do:
+            - return: errors.Join(err, lc.Stop(ctx))
+              to: errors
+          init:
+            bind: err
+            eval: announce(cfg.Notify, notify.Ready, "READY")
+            to: announce
+          when: err != nil
+      - eval: waitForStop(ctx, cfg.Signals)
+        to: waitForStop
+      - bind: notifyErr
+        eval: announce(cfg.Notify, notify.Stopping, "STOPPING")
+        to: announce
+      - return: errors.Join(notifyErr, lc.Stop(ctx))
+        to: errors
+  - of: waitForStop
+    participants:
+      - id: caller
+        kind: actor
+      - id: waitForStop
+        kind: self
+      - id: signal
+        kind: package
+    steps:
+      - var:
+          name: received
+          type: <-chan coreproc.Signal
+      - opt:
+          do:
+            - bind: channel, unsubscribe
+              eval: signal.Notify(sigs...)
+              to: signal
+            - defer: unsubscribe()
+            - set: received
+              value: channel
+          when: len(sigs) > 0
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+            - comm: <-received
+  - of: announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: announce
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!enabled"
+      - bind: err
+        eval: send()
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          errors.Join(kerrs.Wrap(corelc.ReadinessFailed, kerrs.WrapParams{},
+          		kerrs.String("state", state)), err)
+        to: errors
+  - of: (*lifecycle).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).Start
+        kind: self
+      - id: l.beginStart
+        kind: internal
+      - id: l.callStart
+        kind: internal
+      - id: l.markStarted
+        kind: internal
+      - id: l.abort
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.opMu
+      - bind: order, err
+        eval: l.beginStart()
+        to: l.beginStart
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - loop:
+          do:
+            - bind: startErr
+              eval: l.callStart(ctx, component)
+              to: l.callStart
+            - opt:
+                do:
+                  - eval: l.markStarted(component)
+                    to: l.markStarted
+                  - continue: true
+                when: startErr == nil
+            - return: l.abort(ctx, component.Name, index, startErr)
+              to: l.abort
+          key: index
+          range: order
+          value: component
+      - return: nil
+  - of: (*lifecycle).callStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).callStart
+        kind: self
+      - id: l.clk.Now
+        kind: value
+      - id: guard
+        kind: internal
+      - id: l.emit
+        kind: internal
+    steps:
+      - bind: begun
+        eval: l.clk.Now()
+        to: l.clk.Now
+      - bind: err
+        eval: guard(ctx, component.Name, corelc.PhaseStart.String(), component.Start)
+        to: guard
+      - eval: |-
+          l.emit(corelc.TransitionValue{
+          		Name: component.Name, Phase: corelc.PhaseStart, Begun: begun, Err: err,
+          	})
+        to: l.emit
+      - return: err
+  - of: (*lifecycle).abort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).abort
+        kind: self
+      - id: l.takeStarted
+        kind: internal
+      - id: l.stopEach
+        kind: internal
+      - id: l.release
+        kind: internal
+      - id: joinStartFailure
+        kind: internal
+    steps:
+      - bind: unwound
+        eval: l.takeStarted()
+        to: l.takeStarted
+      - bind: failures
+        eval: l.stopEach(ctx, unwound)
+        to: l.stopEach
+      - eval: l.release()
+        to: l.release
+      - return: joinStartFailure(name, index, len(unwound), cause, failures)
+        to: joinStartFailure
+  - of: joinStartFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: joinStartFailure
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: make([]error, 0, len(failures)+fixedAggregateParts)
+      - set: parts
+        value: |-
+          append(parts, kerrs.Wrap(corelc.StartFailed, kerrs.WrapParams{},
+          		kerrs.String("component", name),
+          		kerrs.Int("index", index),
+          		kerrs.Int("unwound", unwound)), cause)
+      - opt:
+          do:
+            - set: parts
+              value: |-
+                append(parts, kerrs.Wrap(corelc.UnwindFailed, kerrs.WrapParams{},
+                			kerrs.String("component", name), kerrs.Int("failed", len(failures))))
+            - set: parts
+              value: append(parts, failures...)
+          when: len(failures) > 0
+      - return: errors.Join(parts...)
+        to: errors
+  - of: (*lifecycle).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).Stop
+        kind: self
+      - id: l.takeStarted
+        kind: internal
+      - id: l.release
+        kind: internal
+      - id: l.stopEach
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: l.opMu
+      - bind: order
+        eval: l.takeStarted()
+        to: l.takeStarted
+      - opt:
+          do:
+            - eval: l.release()
+              to: l.release
+            - return: nil
+          when: len(order) == 0
+      - bind: failures
+        eval: l.stopEach(ctx, order)
+        to: l.stopEach
+      - eval: l.release()
+        to: l.release
+      - return: errors.Join(failures...)
+        to: errors
+  - of: (*lifecycle).stopEach
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).stopEach
+        kind: self
+      - id: l.callStop
+        kind: internal
+    steps:
+      - bind: failures
+        eval: make([]error, 0, len(order))
+      - loop:
+          do:
+            - bind: err
+              eval: l.callStop(ctx, component)
+              to: l.callStop
+            - opt:
+                do:
+                  - continue: true
+                when: err == nil
+            - set: failures
+              value: append(failures, err)
+          key: _
+          range: order
+          value: component
+      - return: failures
+  - of: (*lifecycle).callStop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).callStop
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: l.clk.Now
+        kind: value
+      - id: l.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: l.stopped
+        kind: internal
+      - id: l.abandoned
+        kind: internal
+    steps:
+      - bind: ctx, cancel
+        eval: context.WithCancel(context.WithoutCancel(parent))
+        to: context
+      - defer: cancel()
+      - bind: begun
+        eval: l.clk.Now()
+        to: l.clk.Now
+      - bind: timer
+        eval: l.clk.NewTimer(l.budget)
+        to: l.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: done
+        eval: make(chan error, 1)
+      - go: |-
+          func() {
+          		done <- guard(ctx, component.Name, corelc.PhaseStop.String(), component.Stop)
+          	}()
+      - select:
+          cases:
+            - comm: err := <-done
+              do:
+                - return: l.stopped(component.Name, begun, err)
+                  to: l.stopped
+            - comm: <-timer.C()
+              do:
+                - return: l.abandoned(cancel, component.Name, begun)
+                  to: l.abandoned
+  - of: (*lifecycle).stopped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).stopped
+        kind: self
+      - id: l.emit
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - eval: |-
+          l.emit(corelc.TransitionValue{
+          		Name: name, Phase: corelc.PhaseStop, Begun: begun, Err: err,
+          	})
+        to: l.emit
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          errors.Join(kerrs.Wrap(corelc.StopFailed, kerrs.WrapParams{},
+          		kerrs.String("component", name)), err)
+        to: errors
+  - of: (*lifecycle).abandoned
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lifecycle).abandoned
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: l.emit
+        kind: internal
+    steps:
+      - eval: cancel()
+      - bind: err
+        eval: |-
+          kerrs.Wrap(corelc.StopTimeout, kerrs.WrapParams{},
+          		kerrs.String("component", name), kerrs.String("budget", l.budget.String()))
+        to: kerrs
+      - eval: |-
+          l.emit(corelc.TransitionValue{
+          		Name: name, Phase: corelc.PhaseStop, Begun: begun, TimedOut: true, Err: err,
+          	})
+        to: l.emit
+      - return: err
+  - of: NewSupervisor
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSupervisor
+        kind: self
+      - id: validateSupervisor
+        kind: internal
+      - id: cfg.resolved
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: validateSupervisor(name, run)
+            to: validateSupervisor
+          when: invalid != nil
+      - bind: clk, backoff, healthy
+        eval: cfg.resolved()
+        to: cfg.resolved
+      - return: "&Supervisor{run: run, clock: clk, observe: cfg.Observe, name: name, backoff: backoff, healthy: healthy}, nil"
+  - of: (*Supervisor).Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Supervisor).Start
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: kerrs
+        kind: package
+      - id: context
+        kind: stdlib
+      - id: s.supervise
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctxErr
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: kerrs.Wrap(corelc.SupervisorRunning, kerrs.WrapParams{}, kerrs.String("supervisor", s.name))
+              to: kerrs
+          when: s.running()
+      - bind: runCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - bind: done
+        eval: make(chan struct{})
+      - set: s.cancel, s.done
+        value: cancel, done
+      - go: s.supervise(runCtx, done)
+        to: s.supervise
+      - return: nil
+  - of: (*Supervisor).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Supervisor).Stop
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: kerrs
+        kind: package
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: cancel, done
+        eval: s.cancel, s.done
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: nil
+          when: done == nil
+      - eval: cancel()
+      - select:
+          cases:
+            - comm: <-done
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: kerrs.Wrap(corelc.StopTimeout, kerrs.WrapParams{}, kerrs.String("component", s.name))
+                  to: kerrs
+  - of: (*Supervisor).Component
+    steps:
+      - return: "corelc.ComponentValue{Name: s.name, Start: s.Start, Stop: s.Stop}"
+  - of: (*Supervisor).running
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s.done == nil
+      - select:
+          cases:
+            - comm: <-s.done
+              do:
+                - return: "false"
+            - default: true
+              do:
+                - return: "true"
+  - of: (*Supervisor).supervise
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Supervisor).supervise
+        kind: self
+      - id: s.clock.Now
+        kind: value
+      - id: s.emit
+        kind: internal
+      - id: s.once
+        kind: internal
+      - id: s.backoff.Delay
+        kind: value
+    steps:
+      - defer: close(done)
+      - bind: failures
+        eval: "0"
+      - loop:
+          do:
+            - bind: started
+              eval: s.clock.Now()
+              to: s.clock.Now
+            - eval: "s.emit(SupervisionEventValue{Phase: SupervisionRunStarted, At: started, Run: run})"
+              to: s.emit
+            - bind: runErr
+              eval: s.once(ctx)
+              to: s.once
+            - bind: ended
+              eval: s.clock.Now()
+              to: s.clock.Now
+            - opt:
+                do:
+                  - eval: |-
+                      s.emit(SupervisionEventValue{
+                      				Phase: SupervisionRunEnded, At: ended, Run: run,
+                      				Err: wayOut(runErr), Duration: ended.Sub(started), Stopping: true,
+                      			})
+                    to: s.emit
+                  - eval: "s.emit(SupervisionEventValue{Phase: SupervisionStopped, At: ended, Run: run})"
+                    to: s.emit
+                  - return: ""
+                when: ctx.Err() != nil
+            - eval: "s.emit(SupervisionEventValue{Phase: SupervisionRunEnded, At: ended, Run: run, Err: runErr, Duration: ended.Sub(started)})"
+              to: s.emit
+            - opt:
+                do:
+                  - set: failures
+                    value: "0"
+                when: ended.Sub(started) >= s.healthy
+            - op: ++
+              set: failures
+            - bind: delay
+              eval: s.backoff.Delay(failures)
+              to: s.backoff.Delay
+            - eval: "s.emit(SupervisionEventValue{Phase: SupervisionRestarting, At: ended, Run: run, Failures: failures, Delay: delay})"
+              to: s.emit
+            - opt:
+                do:
+                  - eval: "s.emit(SupervisionEventValue{Phase: SupervisionStopped, At: s.clock.Now(), Run: run})"
+                    to: s.emit
+                  - return: ""
+                when: "!s.wait(ctx, delay)"
+          init: run := 1
+          post: run++
+  - of: (*Supervisor).once
+    steps:
+      - defer: |-
+          func() {
+          		recovered := recover()
+          		//: the ordinary path.
+          		if recovered == nil {
+          			return
+          		}
+          		//: the value and the stack as fields, never the origin and never the
+          		//: Public text.
+          		err = kerrs.Wrap(corelc.RunPanicked, kerrs.WrapParams{},
+          			kerrs.String("supervisor", s.name), kerrs.String("panic", fmt.Sprint(recovered)),
+          			kerrs.String("stack", string(debug.Stack())))
+          	}()
+      - return: s.run(ctx)
+  - of: (*Supervisor).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Supervisor).wait
+        kind: self
+      - id: s.clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: timer
+        eval: s.clock.NewTimer(delay)
+        to: s.clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: "false"
+            - comm: <-timer.C()
+              do:
+                - return: "true"
+  - of: (*Supervisor).emit
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.observe == nil
+      - set: event.Name
+        value: s.name
+      - eval: s.observe(event)
+  - of: wayOut
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
+      - return: runErr
+  - of: validateSupervisor
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSupervisor
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(corelc.SupervisorMisconfigured, kerrs.WrapParams{}, kerrs.String("argument", "name"))
+              to: kerrs
+          when: name == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corelc.SupervisorMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("argument", "run"), kerrs.String("supervisor", name))
+              to: kerrs
+          when: run == nil
+      - return: nil
+  - of: (*SupervisorConfig).resolved
+    steps:
+      - set: clk, backoff, healthy
+        value: c.Clock, c.Backoff, c.HealthyAfter
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - opt:
+          do:
+            - set: backoff
+              value: "kbackoff.Value{BaseDelay: DefaultRestartBase, MaxDelay: DefaultRestartMax}"
+          when: backoff == (kbackoff.Value{})
+      - opt:
+          do:
+            - set: backoff.BaseDelay
+              value: DefaultRestartBase
+          when: backoff.BaseDelay <= 0
+      - opt:
+          do:
+            - set: healthy
+              value: DefaultHealthyRun
+          when: healthy <= 0
+      - return: clk, backoff, healthy
+  - of: SupervisionPhase.String
+    steps:
+      - switch:
+          cases:
+            - case: SupervisionRunStarted
+              do:
+                - return: "\"run started\""
+            - case: SupervisionRunEnded
+              do:
+                - return: "\"run ended\""
+            - case: SupervisionRestarting
+              do:
+                - return: "\"restarting\""
+            - case: SupervisionStopped
+              do:
+                - return: "\"stopped\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": p

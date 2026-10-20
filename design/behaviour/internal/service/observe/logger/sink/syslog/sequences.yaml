@@ -1,0 +1,201 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: severityFor
+    steps:
+      - switch:
+          cases:
+            - case: lv >= level.Error
+              do:
+                - return: severityError
+            - case: lv >= level.Warn
+              do:
+                - return: severityWarning
+            - case: lv >= level.Info
+              do:
+                - return: severityInfo
+            - default: true
+              do:
+                - return: severityDebug
+  - of: priorityFor
+    steps:
+      - return: facilityUser*facilityShift + severityFor(lv)
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: NewWithConfig
+        kind: internal
+    steps:
+      - return: NewWithConfig(network, addr, Config{})
+        to: NewWithConfig
+  - of: NewWithConfig
+    steps:
+      - opt:
+          do:
+            - return: nil, coresyslog.AddrEmpty
+          when: addr == ""
+      - opt:
+          do:
+            - return: nil, coresyslog.ProtoInvalid
+          when: network != netUDP && network != netTCP
+      - bind: dial
+        eval: cfg.Dialer
+      - opt:
+          do:
+            - set: dial
+              value: net.Dial
+          when: dial == nil
+      - bind: conn, derr
+        eval: dial(network, addr)
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(derr, errs.WrapParams{
+                			Code:    coresyslog.CodeSyslogDialFailed,
+                			Reason:  "SYSLOG_DIAL_FAILED",
+                			Public:  "Syslog sink could not dial the destination",
+                			Private: "service/observe/logger/sink/syslog.New: net.Dial returned an error",
+                		}, errs.String("network", network), errs.String("addr", addr))
+          when: derr != nil
+      - defer: |-
+          func() {
+          		//: skip the close on the success path — sink owns the connection.
+          		if err == nil {
+          			//: nothing to do; the constructor returned the sink to the caller.
+          			return
+          		}
+          		//: best-effort close; err already carries the meaningful failure cause.
+          		swallowDialClose(conn.Close())
+          	}()
+      - return: "&syslogSink{conn: conn}, nil"
+  - of: swallowDialClose
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: (*syslogSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*syslogSink).Write
+        kind: self
+      - id: makeFrame
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.conn.Write
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    coresyslog.CodeSyslogCtxCancelled,
+                			Reason:  "SYSLOG_CTX_CANCELLED",
+                			Public:  "Syslog sink write aborted due to cancellation",
+                			Private: "service/observe/logger/sink/syslog.Write saw a cancelled context",
+                		}, errs.Int("level", int(rec.Level)))
+          when: ctx != nil && ctx.Err() != nil
+      - bind: frame
+        eval: makeFrame(priorityFor(rec.Level), p)
+        to: makeFrame
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: written, werr
+        eval: s.conn.Write(frame)
+        to: s.conn.Write
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                written, errs.Wrap(werr, errs.WrapParams{
+                			Code:    coresyslog.CodeSyslogWriteFailed,
+                			Reason:  "SYSLOG_WRITE_FAILED",
+                			Public:  "Syslog write failed",
+                			Private: "service/observe/logger/sink/syslog.Write underlying net.Conn returned an error",
+                		}, errs.Int("bytes", len(frame)), errs.Int("level", int(rec.Level)))
+          when: werr != nil
+      - return: written, nil
+  - of: (*syslogSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*syslogSink).Flush
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    coresyslog.CodeSyslogCtxCancelled,
+                			Reason:  "SYSLOG_CTX_CANCELLED",
+                			Public:  "Syslog sink flush aborted due to cancellation",
+                			Private: "service/observe/logger/sink/syslog.Flush saw a cancelled context",
+                		})
+              to: errs
+          when: ctx != nil && ctx.Err() != nil
+      - return: nil
+  - of: (*syslogSink).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*syslogSink).Close
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.conn.Close
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: cerr
+        eval: s.conn.Close()
+        to: s.conn.Close
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(cerr, errs.WrapParams{
+                			Code:    coresyslog.CodeSyslogCloseFailed,
+                			Reason:  "SYSLOG_CLOSE_FAILED",
+                			Public:  "Syslog close failed",
+                			Private: "service/observe/logger/sink/syslog.Close underlying net.Conn.Close returned an error",
+                		})
+              to: errs
+          when: cerr != nil
+      - return: nil
+  - of: makeFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: makeFrame
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: frame
+        eval: make([]byte, 0, len(p)+frameHeaderHint)
+      - set: frame
+        value: append(frame, '<')
+      - set: frame
+        to: strconv
+        value: strconv.AppendInt(frame, int64(pri), decimalBase)
+      - set: frame
+        value: append(frame, '>')
+      - set: frame
+        value: append(frame, envelopeSuffix...)
+      - return: append(frame, p...)

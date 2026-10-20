@@ -1,0 +1,2499 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ValidateAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateAddress
+        kind: self
+      - id: ValidateHeaderValue
+        kind: internal
+      - id: errs
+        kind: package
+      - id: refuseUnsupportedAddress
+        kind: internal
+      - id: validateAddrSpec
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nameErr
+          init:
+            bind: nameErr
+            eval: ValidateHeaderValue(field, a.Name)
+            to: ValidateHeaderValue
+          when: nameErr != nil
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.InvalidAddress, errs.WrapParams{}, errs.String("field", field))
+              to: errs
+          when: a.Addr == ""
+      - opt:
+          do:
+            - return: addrErr
+          init:
+            bind: addrErr
+            eval: ValidateHeaderValue(field, a.Addr)
+            to: ValidateHeaderValue
+          when: addrErr != nil
+      - opt:
+          do:
+            - return: unsupportedErr
+          init:
+            bind: unsupportedErr
+            eval: refuseUnsupportedAddress(field, a.Addr)
+            to: refuseUnsupportedAddress
+          when: unsupportedErr != nil
+      - return: validateAddrSpec(field, a.Addr)
+        to: validateAddrSpec
+  - of: refuseUnsupportedAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseUnsupportedAddress
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(coremail.UnsupportedAddress, errs.WrapParams{},
+                      				errs.String("field", field), errs.String("form", "smtputf8"))
+                    to: errs
+                when: addr[index] > maxPrintableASCII
+          key: index
+          range: len(addr)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.UnsupportedAddress, errs.WrapParams{},
+                			errs.String("field", field), errs.String("form", "quoted-local-part"))
+              to: errs
+          when: strings.HasPrefix(addr, `"`)
+      - return: nil
+  - of: validateAddrSpec
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateAddrSpec
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: at
+        eval: strings.IndexByte(addr, '@')
+        to: strings
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.InvalidAddress, errs.WrapParams{}, errs.String("field", field))
+              to: errs
+          when: at <= 0 || at == len(addr)-1 || strings.IndexByte(addr[at+1:], '@') >= 0
+      - bind: local, domain
+        eval: addr[:at], addr[at+1:]
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAddress, errs.WrapParams{},
+                			errs.String("field", field), errs.Int("local_octets", len(local)),
+                			errs.Int("domain_octets", len(domain)))
+              to: errs
+          when: len(local) > maxLocalPartOctets || len(domain) > maxDomainOctets
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.InvalidAddress, errs.WrapParams{}, errs.String("field", field))
+              to: errs
+          when: "!IsDotAtom(local) || !IsDotAtom(domain)"
+      - return: nil
+  - of: IsDotAtom
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsDotAtom
+        kind: self
+      - id: isAtextRun
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == "" || strings.HasPrefix(s, ".") || strings.HasSuffix(s, ".") || strings.Contains(s, "..")
+      - return: isAtextRun(s)
+        to: isAtextRun
+  - of: NeedsQuotedDisplayName
+    participants:
+      - id: caller
+        kind: actor
+      - id: NeedsQuotedDisplayName
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: name == ""
+      - opt:
+          do:
+            - return: "true"
+          when: name != strings.TrimSpace(name)
+      - return: strings.ContainsAny(name, specials)
+        to: strings
+  - of: ValidateAttachment
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateAttachment
+        kind: self
+      - id: errs
+        kind: package
+      - id: ValidateHeaderValue
+        kind: internal
+      - id: validateMediaType
+        kind: internal
+      - id: validateContentID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
+                			errs.String("field", field), errs.String("problem", "empty filename"))
+              to: errs
+          when: a.Filename == ""
+      - opt:
+          do:
+            - return: nameErr
+          init:
+            bind: nameErr
+            eval: ValidateHeaderValue(field+".Filename", a.Filename)
+            to: ValidateHeaderValue
+          when: nameErr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
+                			errs.String("field", field), errs.String("problem", "path separator in filename"))
+              to: errs
+          when: strings.ContainsAny(a.Filename, pathSeparators)
+      - opt:
+          do:
+            - return: typeErr
+          init:
+            bind: typeErr
+            eval: validateMediaType(field, a.ContentType)
+            to: validateMediaType
+          when: typeErr != nil
+      - return: validateContentID(field, a.ContentID)
+        to: validateContentID
+  - of: validateMediaType
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateMediaType
+        kind: self
+      - id: ValidateHeaderValue
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: declared == ""
+      - opt:
+          do:
+            - return: valueErr
+          init:
+            bind: valueErr
+            eval: ValidateHeaderValue(field+".ContentType", declared)
+            to: ValidateHeaderValue
+          when: valueErr != nil
+      - bind: slash
+        eval: strings.IndexByte(declared, '/')
+        to: strings
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
+                			errs.String("field", field), errs.String("problem", "media type is not type/subtype"))
+              to: errs
+          when: slash <= 0 || slash == len(declared)-1
+      - return: nil
+  - of: validateContentID
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateContentID
+        kind: self
+      - id: errs
+        kind: package
+      - id: ValidateAddress
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: id == ""
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
+                			errs.String("field", field), errs.String("problem", "content id carries angle brackets"))
+              to: errs
+          when: strings.ContainsAny(id, "<>")
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
+                			errs.String("field", field), errs.String("problem", "content id is not an addr-spec"),
+                			errs.String("cause", idErr.Error()))
+              to: errs
+          init:
+            bind: idErr
+            eval: "ValidateAddress(field+\".ContentID\", coremail.AddressValue{Addr: id})"
+            to: ValidateAddress
+          when: idErr != nil
+      - return: nil
+  - of: bracket
+    steps:
+      - opt:
+          do:
+            - return: id
+          when: len(id) >= minBracketedLen && id[0] == '<' && id[len(id)-1] == '>'
+      - return: "\"<\" + id + \">\""
+  - of: textEntity
+    participants:
+      - id: caller
+        kind: actor
+      - id: textEntity
+        kind: self
+      - id: formatMediaType
+        kind: internal
+    steps:
+      - bind: rendered, formatErr
+        eval: "formatMediaType(mediaType, map[string]string{\"charset\": \"utf-8\"})"
+        to: formatMediaType
+      - opt:
+          do:
+            - set: rendered
+              value: mediaType + "; charset=utf-8"
+          when: formatErr != nil
+      - return: "entity{contentType: rendered, encoding: encodingQuotedPrintable, content: []byte(content), text: true}"
+  - of: attachmentEntity
+    participants:
+      - id: caller
+        kind: actor
+      - id: attachmentEntity
+        kind: self
+      - id: derivedType
+        kind: internal
+      - id: formatMediaType
+        kind: internal
+      - id: bracket
+        kind: internal
+    steps:
+      - bind: declared
+        eval: attachment.ContentType
+      - opt:
+          do:
+            - set: declared
+              to: derivedType
+              value: derivedType(attachment.Filename)
+          when: declared == ""
+      - bind: contentType, typeErr
+        eval: "formatMediaType(declared, map[string]string{\"name\": attachment.Filename})"
+        to: formatMediaType
+      - opt:
+          do:
+            - return: entity{}, errs.Wrap(coremail.ComposeFailed, errs.WrapParams{}, errs.Int("attachment", index))
+          when: typeErr != nil
+      - bind: disposition
+        eval: "\"attachment\""
+      - opt:
+          do:
+            - set: disposition
+              value: "\"inline\""
+          when: attachment.Inline()
+      - bind: rendered, dispErr
+        eval: "formatMediaType(disposition, map[string]string{\"filename\": attachment.Filename})"
+        to: formatMediaType
+      - opt:
+          do:
+            - return: entity{}, errs.Wrap(coremail.ComposeFailed, errs.WrapParams{}, errs.Int("attachment", index))
+          when: dispErr != nil
+      - bind: leaf
+        eval: "entity{contentType: contentType, encoding: encodingBase64, disposition: rendered, content: attachment.Content}"
+      - opt:
+          do:
+            - set: leaf.contentID
+              to: bracket
+              value: bracket(attachment.ContentID)
+          when: attachment.Inline()
+      - return: leaf, nil
+  - of: derivedType
+    participants:
+      - id: caller
+        kind: actor
+      - id: derivedType
+        kind: self
+      - id: mime
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: guessed
+          init:
+            bind: guessed
+            eval: mime.TypeByExtension(filepath.Ext(filename))
+            to: mime
+          when: guessed != ""
+      - return: coremail.DefaultAttachmentType
+  - of: formatMediaType
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatMediaType
+        kind: self
+      - id: mime
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: formatted, nil
+          init:
+            bind: formatted
+            eval: mime.FormatMediaType(mediaType, params)
+            to: mime
+          when: formatted != ""
+      - return: "\"\", errs.Wrap(coremail.ComposeFailed, errs.WrapParams{}, errs.String(\"media_type\", mediaType))"
+  - of: mediaTypeOnly
+    participants:
+      - id: caller
+        kind: actor
+      - id: mediaTypeOnly
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: bare, _, _
+        eval: strings.Cut(contentType, ";")
+        to: strings
+      - return: bare
+  - of: estimateSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: estimateSize
+        kind: self
+      - id: base64.StdEncoding.EncodedLen
+        kind: value
+    steps:
+      - bind: total
+        eval: headerBlockSlack + subjectExpansion*len(msg.Subject)
+      - op: +=
+        set: total
+        value: perAddressOctets * (len(msg.To) + len(msg.Cc) + len(msg.ReplyTo) + len(msg.Headers) + 1)
+      - op: +=
+        set: total
+        value: len(msg.Text) + len(msg.Text)/quotedPrintableSlack
+      - op: +=
+        set: total
+        value: len(msg.HTML) + len(msg.HTML)/quotedPrintableSlack
+      - loop:
+          do:
+            - bind: encoded
+              eval: base64.StdEncoding.EncodedLen(len(msg.Attachments[index].Content))
+              to: base64.StdEncoding.EncodedLen
+            - op: +=
+              set: total
+              value: encoded + crlfOctets*(encoded/base64LineOctets+1) + perAttachmentSlack
+          key: index
+          range: msg.Attachments
+      - return: total
+  - of: NewComposer
+    steps:
+      - bind: composer
+        eval: "&Composer{clock: cfg.Clock, random: cfg.Rand}"
+      - opt:
+          do:
+            - set: composer.clock
+              value: clock.System
+          when: composer.clock == nil
+      - opt:
+          do:
+            - set: composer.random
+              value: rand.Reader
+          when: composer.random == nil
+      - return: composer
+  - of: (*Composer).Compose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Composer).Compose
+        kind: self
+      - id: Validate
+        kind: internal
+      - id: c.newComposition
+        kind: internal
+      - id: builder.buildBody
+        kind: internal
+      - id: buf.Grow
+        kind: value
+      - id: c.writeMessageHeaders
+        kind: internal
+      - id: body.writeHeaders
+        kind: internal
+      - id: buf.WriteString
+        kind: value
+      - id: body.writeBody
+        kind: internal
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, validationErr
+          init:
+            bind: validationErr
+            eval: Validate(msg)
+            to: Validate
+          when: validationErr != nil
+      - bind: builder, builderErr
+        eval: c.newComposition()
+        to: c.newComposition
+      - opt:
+          do:
+            - return: nil, builderErr
+          when: builderErr != nil
+      - bind: body, structureErr
+        eval: builder.buildBody(msg)
+        to: builder.buildBody
+      - opt:
+          do:
+            - return: nil, structureErr
+          when: structureErr != nil
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - eval: buf.Grow(estimateSize(msg))
+        to: buf.Grow
+      - opt:
+          do:
+            - return: nil, headerErr
+          init:
+            bind: headerErr
+            eval: c.writeMessageHeaders(&buf, msg)
+            to: c.writeMessageHeaders
+          when: headerErr != nil
+      - opt:
+          do:
+            - return: nil, entityErr
+          init:
+            bind: entityErr
+            eval: body.writeHeaders(&buf)
+            to: body.writeHeaders
+          when: entityErr != nil
+      - eval: buf.WriteString(crlf)
+        to: buf.WriteString
+      - opt:
+          do:
+            - return: nil, wrapAs(coremail.ComposeFailed, bodyErr)
+          init:
+            bind: bodyErr
+            eval: body.writeBody(&buf)
+            to: body.writeBody
+          when: bodyErr != nil
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
+  - of: (*Composer).writeMessageHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Composer).writeMessageHeaders
+        kind: self
+      - id: appendAddressFields
+        kind: internal
+      - id: writeHeader
+        kind: internal
+    steps:
+      - bind: fields
+        eval: "[]coremail.HeaderFieldValue{{Name: coremail.HeaderFrom, Value: formatAddress(msg.From)}}"
+      - set: fields
+        to: appendAddressFields
+        value: appendAddressFields(fields, msg)
+      - opt:
+          do:
+            - set: fields
+              value: |-
+                append(fields, coremail.HeaderFieldValue{
+                			Name: coremail.HeaderSubject, Value: encodeUnstructured(msg.Subject),
+                		})
+          when: msg.Subject != ""
+      - set: fields
+        value: "append(fields, coremail.HeaderFieldValue{Name: coremail.HeaderDate, Value: c.dateValue(msg)})"
+      - opt:
+          do:
+            - set: fields
+              value: |-
+                append(fields, coremail.HeaderFieldValue{
+                			Name: coremail.HeaderMessageID, Value: bracket(msg.MessageID),
+                		})
+          when: msg.MessageID != ""
+      - set: fields
+        value: append(fields, msg.Headers...)
+      - set: fields
+        value: "append(fields, coremail.HeaderFieldValue{Name: coremail.HeaderMIMEVersion, Value: mimeVersion})"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: writeErr
+                init:
+                  bind: writeErr
+                  eval: writeHeader(dst, field.Name, field.Value)
+                  to: writeHeader
+                when: writeErr != nil
+          key: _
+          range: fields
+          value: field
+      - return: nil
+  - of: (*Composer).dateValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Composer).dateValue
+        kind: self
+      - id: c.clock.Now
+        kind: value
+      - id: stamp.Format
+        kind: value
+    steps:
+      - bind: stamp
+        eval: msg.Date
+      - opt:
+          do:
+            - set: stamp
+              to: c.clock.Now
+              value: c.clock.Now()
+          when: stamp.IsZero()
+      - return: stamp.Format(time.RFC1123Z)
+        to: stamp.Format
+  - of: (*Composer).newComposition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Composer).newComposition
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - var:
+          name: token
+          type: "[boundaryTokenOctets]byte"
+      - opt:
+          do:
+            - return: nil, wrapAs(coremail.ComposeFailed, readErr, errs.String("stage", "boundary"))
+          init:
+            bind: _, readErr
+            eval: io.ReadFull(c.random, token[:])
+            to: io
+          when: readErr != nil
+      - return: "&composition{Composer: c, token: hex.EncodeToString(token[:])}, nil"
+  - of: (*composition).newBoundary
+    steps:
+      - op: ++
+        set: c.counter
+      - return: "\"=_\" + c.token + \"_\" + strconv.Itoa(c.counter)"
+  - of: (*composition).buildBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*composition).buildBody
+        kind: self
+      - id: splitAttachments
+        kind: internal
+      - id: c.buildBodyRoot
+        kind: internal
+      - id: c.buildRelated
+        kind: internal
+      - id: c.buildMixed
+        kind: internal
+    steps:
+      - bind: inlines, files
+        eval: splitAttachments(msg.Attachments)
+        to: splitAttachments
+      - bind: body, bodyErr
+        eval: c.buildBodyRoot(msg)
+        to: c.buildBodyRoot
+      - opt:
+          do:
+            - return: entity{}, bodyErr
+          when: bodyErr != nil
+      - opt:
+          do:
+            - bind: related, relatedErr
+              eval: c.buildRelated(body, inlines)
+              to: c.buildRelated
+            - opt:
+                do:
+                  - return: entity{}, relatedErr
+                when: relatedErr != nil
+            - set: body
+              value: related
+          when: len(inlines) > 0
+      - opt:
+          do:
+            - return: c.buildMixed(body, files)
+              to: c.buildMixed
+          when: len(files) > 0
+      - return: body, nil
+  - of: (*composition).buildBodyRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*composition).buildBodyRoot
+        kind: self
+      - id: textEntity
+        kind: internal
+      - id: c.multipart
+        kind: internal
+    steps:
+      - bind: plain
+        eval: textEntity(typeTextPlain, msg.Text)
+        to: textEntity
+      - bind: html
+        eval: textEntity(typeTextHTML, msg.HTML)
+        to: textEntity
+      - switch:
+          cases:
+            - case: msg.Text != "" && msg.HTML != ""
+              do:
+                - return: c.multipart("multipart/alternative", nil, []entity{plain, html})
+                  to: c.multipart
+            - case: msg.HTML != ""
+              do:
+                - return: html, nil
+            - default: true
+              do:
+                - return: plain, nil
+  - of: (*composition).buildRelated
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*composition).buildRelated
+        kind: self
+      - id: attachmentEntity
+        kind: internal
+      - id: c.multipart
+        kind: internal
+    steps:
+      - bind: children
+        eval: make([]entity, 0, len(inlines)+1)
+      - set: children
+        value: append(children, body)
+      - loop:
+          do:
+            - bind: part, partErr
+              eval: attachmentEntity(&inlines[index], index)
+              to: attachmentEntity
+            - opt:
+                do:
+                  - return: entity{}, partErr
+                when: partErr != nil
+            - set: children
+              value: append(children, part)
+          key: index
+          range: inlines
+      - bind: params
+        eval: "map[string]string{\"type\": mediaTypeOnly(body.contentType)}"
+      - return: c.multipart("multipart/related", params, children)
+        to: c.multipart
+  - of: (*composition).buildMixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*composition).buildMixed
+        kind: self
+      - id: attachmentEntity
+        kind: internal
+      - id: c.multipart
+        kind: internal
+    steps:
+      - bind: children
+        eval: make([]entity, 0, len(files)+1)
+      - set: children
+        value: append(children, body)
+      - loop:
+          do:
+            - bind: part, partErr
+              eval: attachmentEntity(&files[index], index)
+              to: attachmentEntity
+            - opt:
+                do:
+                  - return: entity{}, partErr
+                when: partErr != nil
+            - set: children
+              value: append(children, part)
+          key: index
+          range: files
+      - return: c.multipart("multipart/mixed", nil, children)
+        to: c.multipart
+  - of: (*composition).multipart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*composition).multipart
+        kind: self
+      - id: maps
+        kind: stdlib
+      - id: formatMediaType
+        kind: internal
+    steps:
+      - bind: full
+        eval: "map[string]string{\"boundary\": c.newBoundary()}"
+      - eval: maps.Copy(full, params)
+        to: maps
+      - bind: rendered, formatErr
+        eval: formatMediaType(subtype, full)
+        to: formatMediaType
+      - opt:
+          do:
+            - return: entity{}, formatErr
+          when: formatErr != nil
+      - return: "entity{contentType: rendered, boundary: full[\"boundary\"], children: children}, nil"
+  - of: entity.writeHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: entity.writeHeaders
+        kind: self
+      - id: writeHeader
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: typeErr
+          init:
+            bind: typeErr
+            eval: writeHeader(dst, coremail.HeaderContentType, e.contentType)
+            to: writeHeader
+          when: typeErr != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: encErr
+                init:
+                  bind: encErr
+                  eval: writeHeader(dst, coremail.HeaderContentTransferEncoding, e.encoding)
+                  to: writeHeader
+                when: encErr != nil
+          when: e.encoding != ""
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: dispErr
+                init:
+                  bind: dispErr
+                  eval: writeHeader(dst, coremail.HeaderContentDisposition, e.disposition)
+                  to: writeHeader
+                when: dispErr != nil
+          when: e.disposition != ""
+      - opt:
+          do:
+            - return: writeHeader(dst, coremail.HeaderContentID, e.contentID)
+              to: writeHeader
+          when: e.contentID != ""
+      - return: nil
+  - of: entity.writeBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: entity.writeBody
+        kind: self
+      - id: e.writeMultipartBody
+        kind: internal
+      - id: quotedprintable
+        kind: stdlib
+      - id: writer.Write
+        kind: value
+      - id: writer.Close
+        kind: value
+      - id: writeBase64
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: e.writeMultipartBody(dst)
+              to: e.writeMultipartBody
+          when: e.boundary != ""
+      - opt:
+          do:
+            - bind: writer
+              eval: quotedprintable.NewWriter(dst)
+              to: quotedprintable
+            - opt:
+                do:
+                  - return: writeErr
+                init:
+                  bind: _, writeErr
+                  eval: writer.Write(e.content)
+                  to: writer.Write
+                when: writeErr != nil
+            - return: writer.Close()
+              to: writer.Close
+          when: e.text
+      - return: writeBase64(dst, e.content)
+        to: writeBase64
+  - of: entity.writeMultipartBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: entity.writeMultipartBody
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: child.writeHeaders
+        kind: internal
+      - id: child.writeBody
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: io.WriteString(dst, "--"+e.boundary+crlf)
+                  to: io
+                when: err != nil
+            - opt:
+                do:
+                  - return: headerErr
+                init:
+                  bind: headerErr
+                  eval: child.writeHeaders(dst)
+                  to: child.writeHeaders
+                when: headerErr != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: io.WriteString(dst, crlf)
+                  to: io
+                when: err != nil
+            - opt:
+                do:
+                  - return: bodyErr
+                init:
+                  bind: bodyErr
+                  eval: child.writeBody(dst)
+                  to: child.writeBody
+                when: bodyErr != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: io.WriteString(dst, crlf)
+                  to: io
+                when: err != nil
+          key: _
+          range: e.children
+          value: child
+      - bind: _, err
+        eval: io.WriteString(dst, "--"+e.boundary+"--"+crlf)
+        to: io
+      - return: err
+  - of: writeBase64
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeBase64
+        kind: self
+      - id: base64
+        kind: stdlib
+      - id: encoder.Write
+        kind: value
+      - id: encoder.Close
+        kind: value
+      - id: wrapper.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(content) == 0
+      - bind: wrapper
+        eval: "&lineWrapper{dst: dst, width: base64LineOctets}"
+      - bind: encoder
+        eval: base64.NewEncoder(base64.StdEncoding, wrapper)
+        to: base64
+      - opt:
+          do:
+            - return: writeErr
+          init:
+            bind: _, writeErr
+            eval: encoder.Write(content)
+            to: encoder.Write
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: closeErr
+          init:
+            bind: closeErr
+            eval: encoder.Close()
+            to: encoder.Close
+          when: closeErr != nil
+      - return: wrapper.finish()
+        to: wrapper.finish
+  - of: Envelope
+    participants:
+      - id: caller
+        kind: actor
+      - id: Envelope
+        kind: self
+      - id: Validate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coremail.EnvelopeValue{}, validationErr
+          init:
+            bind: validationErr
+            eval: Validate(m)
+            to: Validate
+          when: validationErr != nil
+      - bind: recipients
+        eval: make([]string, 0, len(m.To)+len(m.Cc)+len(m.Bcc))
+      - loop:
+          do:
+            - loop:
+                do:
+                  - set: recipients
+                    value: append(recipients, addr.Addr)
+                key: _
+                range: group
+                value: addr
+          key: _
+          range: "[][]coremail.AddressValue{m.To, m.Cc, m.Bcc}"
+          value: group
+      - return: "coremail.EnvelopeValue{From: m.From.Addr, To: recipients}, nil"
+  - of: wrapAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAs
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+              to: errs
+          when: cause == nil
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, append(fields, errs.String("cause", cause.Error()))...)
+        to: errs
+  - of: IsReservedHeader
+    steps:
+      - bind: _, reserved
+        eval: reservedHeaders[strings.ToLower(strings.TrimSpace(name))]
+      - return: reserved
+  - of: ValidateHeaderName
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateHeaderName
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.HeaderInjection, errs.WrapParams{}, errs.String("header", "(empty)"))
+              to: errs
+          when: name == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(coremail.HeaderInjection, errs.WrapParams{},
+                      				errs.String("header", name), errs.Int("offset", index))
+                    to: errs
+                when: name[index] < minPrintableASCII || name[index] > maxPrintableASCII || name[index] == ':'
+          key: index
+          range: len(name)
+      - return: nil
+  - of: ValidateHeaderValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateHeaderValue
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.HeaderInjection, errs.WrapParams{},
+                			errs.String("header", name), errs.Int("offset", index))
+              to: errs
+          init:
+            bind: index
+            eval: strings.IndexAny(value, forbiddenHeaderOctets)
+            to: strings
+          when: index >= 0
+      - return: nil
+  - of: ValidateHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: ValidateHeader
+        kind: self
+      - id: ValidateHeaderName
+        kind: internal
+      - id: errs
+        kind: package
+      - id: ValidateHeaderValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nameErr
+          init:
+            bind: nameErr
+            eval: ValidateHeaderName(field.Name)
+            to: ValidateHeaderName
+          when: nameErr != nil
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.ReservedHeader, errs.WrapParams{}, errs.String("header", field.Name))
+              to: errs
+          when: IsReservedHeader(field.Name)
+      - return: ValidateHeaderValue(field.Name, field.Value)
+        to: ValidateHeaderValue
+  - of: encodeUnstructured
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeUnstructured
+        kind: self
+      - id: mime.QEncoding.Encode
+        kind: value
+    steps:
+      - return: mime.QEncoding.Encode("utf-8", value)
+        to: mime.QEncoding.Encode
+  - of: formatAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatAddress
+        kind: self
+      - id: encodeUnstructured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"<\" + a.Addr + \">\""
+          when: a.Name == ""
+      - opt:
+          do:
+            - return: encoded + " <" + a.Addr + ">"
+          init:
+            bind: encoded
+            eval: encodeUnstructured(a.Name)
+            to: encodeUnstructured
+          when: encoded != a.Name
+      - opt:
+          do:
+            - return: "`\"` + quoteEscaper.Replace(a.Name) + `\" <` + a.Addr + \">\""
+          when: NeedsQuotedDisplayName(a.Name)
+      - return: a.Name + " <" + a.Addr + ">"
+  - of: formatAddressList
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatAddressList
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: rendered
+        eval: make([]string, 0, len(list))
+      - loop:
+          do:
+            - set: rendered
+              value: append(rendered, formatAddress(addr))
+          key: _
+          range: list
+          value: addr
+      - return: strings.Join(rendered, ", ")
+        to: strings
+  - of: writeHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeHeader
+        kind: self
+      - id: ValidateHeaderName
+        kind: internal
+      - id: ValidateHeaderValue
+        kind: internal
+      - id: foldHeaderLine
+        kind: internal
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nameErr
+          init:
+            bind: nameErr
+            eval: ValidateHeaderName(name)
+            to: ValidateHeaderName
+          when: nameErr != nil
+      - opt:
+          do:
+            - return: valueErr
+          init:
+            bind: valueErr
+            eval: ValidateHeaderValue(name, value)
+            to: ValidateHeaderValue
+          when: valueErr != nil
+      - bind: folded, foldErr
+        eval: foldHeaderLine(name, value)
+        to: foldHeaderLine
+      - opt:
+          do:
+            - return: foldErr
+          when: foldErr != nil
+      - bind: _, writeErr
+        eval: io.WriteString(dst, folded+crlf)
+        to: io
+      - return: writeErr
+  - of: foldHeaderLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: foldHeaderLine
+        kind: self
+      - id: foldAtWhitespace
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: line
+        eval: "name + \": \" + value"
+      - opt:
+          do:
+            - return: line, nil
+          when: len(line) <= softLineOctets
+      - bind: lines
+        eval: foldAtWhitespace(line)
+        to: foldAtWhitespace
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      "", errs.Wrap(coremail.HeaderTooLong, errs.WrapParams{},
+                      				errs.String("header", name), errs.Int("octets", len(candidate)))
+                when: len(candidate) > hardLineOctets
+          key: _
+          range: lines
+          value: candidate
+      - return: strings.Join(lines, crlf), nil
+        to: strings
+  - of: foldAtWhitespace
+    participants:
+      - id: caller
+        kind: actor
+      - id: foldAtWhitespace
+        kind: self
+      - id: foldPoint
+        kind: internal
+    steps:
+      - var:
+          name: lines
+          type: "[]string"
+      - bind: rest
+        eval: line
+      - loop:
+          cond: len(rest) > softLineOctets
+          do:
+            - bind: cut
+              eval: foldPoint(rest)
+              to: foldPoint
+            - opt:
+                do:
+                  - break: true
+                when: cut < 0
+            - set: lines
+              value: append(lines, rest[:cut])
+            - set: rest
+              value: rest[cut:]
+      - return: append(lines, rest)
+  - of: (*lineWrapper).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lineWrapper).Write
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: w.dst.Write
+        kind: value
+    steps:
+      - loop:
+          cond: len(p) > 0
+          do:
+            - bind: room
+              eval: w.width - w.used
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: n, crErr
+                      init:
+                        bind: _, crErr
+                        eval: io.WriteString(w.dst, crlf)
+                        to: io
+                      when: crErr != nil
+                  - set: w.used
+                    value: "0"
+                  - continue: true
+                when: room == 0
+            - bind: chunk
+              eval: min(room, len(p))
+            - bind: written, writeErr
+              eval: w.dst.Write(p[:chunk])
+              to: w.dst.Write
+            - op: +=
+              set: "n"
+              value: written
+            - op: +=
+              set: w.used
+              value: written
+            - opt:
+                do:
+                  - return: n, writeErr
+                when: writeErr != nil
+            - set: p
+              value: p[chunk:]
+      - return: n, nil
+  - of: (*lineWrapper).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*lineWrapper).finish
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: w.used == 0
+      - bind: _, err
+        eval: io.WriteString(w.dst, crlf)
+        to: io
+      - set: w.used
+        value: "0"
+      - return: err
+  - of: NewMemory
+    steps:
+      - return: "&memoryTransport{composer: NewComposer(ComposerConfig{})}"
+  - of: NewCapture
+    steps:
+      - opt:
+          do:
+            - set: keep
+              value: DefaultCaptureKeep
+          when: keep <= 0
+      - return: "&memoryTransport{composer: NewComposer(ComposerConfig{}), keep: keep}"
+  - of: (*memoryTransport).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryTransport).Send
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: Envelope
+        kind: internal
+      - id: t.composer.Compose
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coremail.DialFailed, ctxErr)
+              to: wrapAs
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - bind: envelope, envelopeErr
+        eval: Envelope(msg)
+        to: Envelope
+      - opt:
+          do:
+            - return: envelopeErr
+          when: envelopeErr != nil
+      - bind: raw, composeErr
+        eval: t.composer.Compose(msg)
+        to: t.composer.Compose
+      - opt:
+          do:
+            - return: composeErr
+          when: composeErr != nil
+      - lock:
+          mutex: t.mutex
+      - set: t.sent
+        value: "append(t.sent, coremail.DeliveryValue{Envelope: envelope, Raw: raw})"
+      - opt:
+          do:
+            - set: t.sent
+              to: slices
+              value: slices.Delete(t.sent, 0, len(t.sent)-t.keep)
+          when: t.keep > 0 && len(t.sent) > t.keep
+      - return: nil
+  - of: (*memoryTransport).SendBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryTransport).SendBatch
+        kind: self
+      - id: t.Send
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: failures
+        eval: make([]error, 0, len(msgs))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, sendErr)
+                init:
+                  bind: sendErr
+                  eval: t.Send(ctx, msg)
+                  to: t.Send
+                when: sendErr != nil
+          key: _
+          range: msgs
+          value: msg
+      - return: errors.Join(failures...)
+        to: errors
+  - of: (*memoryTransport).Sent
+    steps:
+      - lock:
+          mutex: t.mutex
+          read: true
+      - bind: out
+        eval: make([]coremail.DeliveryValue, 0, len(t.sent))
+      - loop:
+          do:
+            - set: out
+              value: |-
+                append(out, coremail.DeliveryValue{
+                			Envelope: coremail.EnvelopeValue{From: delivery.Envelope.From, To: slices.Clone(delivery.Envelope.To)},
+                			Raw:      slices.Clone(delivery.Raw),
+                		})
+          key: _
+          range: t.sent
+          value: delivery
+      - return: out
+  - of: (*memoryTransport).Reset
+    steps:
+      - lock:
+          mutex: t.mutex
+      - set: t.sent
+        value: nil
+  - of: NewSMTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSMTP
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: net
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, cfgErr
+          init:
+            bind: cfgErr
+            eval: cfg.validate()
+            to: cfg.validate
+          when: cfgErr != nil
+      - bind: address
+        eval: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+        to: net
+      - return: "&smtpTransport{cfg: cfg, composer: NewComposer(ComposerConfig{}), address: address}, nil"
+  - of: (*smtpTransport).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*smtpTransport).Send
+        kind: self
+      - id: t.prepare
+        kind: internal
+      - id: t.deliver
+        kind: internal
+    steps:
+      - bind: deliveries, failures
+        eval: t.prepare([]coremail.MessageValue{msg})
+        to: t.prepare
+      - opt:
+          do:
+            - return: failures[0]
+          when: len(failures) > 0
+      - return: t.deliver(ctx, deliveries)
+        to: t.deliver
+  - of: (*smtpTransport).prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*smtpTransport).prepare
+        kind: self
+      - id: Envelope
+        kind: internal
+      - id: t.composer.Compose
+        kind: internal
+    steps:
+      - set: deliveries
+        value: make([]coremail.DeliveryValue, 0, len(msgs))
+      - set: failures
+        value: make([]error, 0, len(msgs))
+      - loop:
+          do:
+            - bind: envelope, envelopeErr
+              eval: Envelope(msg)
+              to: Envelope
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, envelopeErr)
+                  - continue: true
+                when: envelopeErr != nil
+            - bind: raw, composeErr
+              eval: t.composer.Compose(msg)
+              to: t.composer.Compose
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, composeErr)
+                  - continue: true
+                when: composeErr != nil
+            - set: deliveries
+              value: "append(deliveries, coremail.DeliveryValue{Envelope: envelope, Raw: raw})"
+          key: _
+          range: msgs
+          value: msg
+      - return: deliveries, failures
+  - of: (*smtpTransport).SendBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*smtpTransport).SendBatch
+        kind: self
+      - id: t.prepare
+        kind: internal
+      - id: t.deliver
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: deliveries, failures
+        eval: t.prepare(msgs)
+        to: t.prepare
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, deliverErr)
+                init:
+                  bind: deliverErr
+                  eval: t.deliver(ctx, deliveries)
+                  to: t.deliver
+                when: deliverErr != nil
+          when: len(deliveries) > 0
+      - return: errors.Join(failures...)
+        to: errors
+  - of: (*smtpTransport).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*smtpTransport).deliver
+        kind: self
+      - id: t.dial
+        kind: internal
+      - id: watchContext
+        kind: internal
+      - id: smtp
+        kind: stdlib
+      - id: current.run
+        kind: internal
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: conn, dialErr
+        eval: t.dial(ctx)
+        to: t.dial
+      - opt:
+          do:
+            - return: dialErr
+          when: dialErr != nil
+      - bind: release
+        eval: watchContext(ctx, conn)
+        to: watchContext
+      - defer: release()
+      - bind: client, clientErr
+        eval: smtp.NewClient(conn, t.cfg.Host)
+        to: smtp
+      - opt:
+          do:
+            - return: cmp.Or[error](wrapAs(coremail.GreetingFailed, clientErr, errs.String("stage", "greeting")), conn.Close())
+          when: clientErr != nil
+      - bind: current
+        eval: "&session{transport: t, cfg: t.cfg, client: client}"
+      - bind: runErr
+        eval: current.run(deliveries)
+        to: current.run
+      - opt:
+          do:
+            - return: nil
+          when: runErr == nil
+      - return: cmp.Or(runErr, client.Close())
+        to: cmp
+  - of: (*session).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*session).run
+        kind: self
+      - id: s.negotiate
+        kind: internal
+      - id: s.sendOne
+        kind: internal
+      - id: s.client.Quit
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sessionErr
+          init:
+            bind: sessionErr
+            eval: s.negotiate()
+            to: s.negotiate
+          when: sessionErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: sendErr
+                init:
+                  bind: sendErr
+                  eval: s.sendOne(delivery)
+                  to: s.sendOne
+                when: sendErr != nil
+          key: _
+          range: deliveries
+          value: delivery
+      - opt:
+          do:
+            - return: wrapAs(coremail.GreetingFailed, quitErr, errs.String("stage", "quit"))
+              to: wrapAs
+          init:
+            bind: quitErr
+            eval: s.client.Quit()
+            to: s.client.Quit
+          when: quitErr != nil
+      - return: nil
+  - of: (*session).negotiate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*session).negotiate
+        kind: self
+      - id: s.client.Hello
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: s.startTLS
+        kind: internal
+      - id: s.authenticate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coremail.GreetingFailed, helloErr, errs.String("stage", "ehlo"))
+              to: wrapAs
+          init:
+            bind: helloErr
+            eval: s.client.Hello(s.cfg.resolvedLocalName())
+            to: s.client.Hello
+          when: helloErr != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: tlsErr
+                init:
+                  bind: tlsErr
+                  eval: s.startTLS()
+                  to: s.startTLS
+                when: tlsErr != nil
+          when: s.cfg.TLS == TLSStartTLS
+      - return: s.authenticate()
+        to: s.authenticate
+  - of: (*session).startTLS
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*session).startTLS
+        kind: self
+      - id: s.client.Extension
+        kind: value
+      - id: errs
+        kind: package
+      - id: s.client.StartTLS
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.TLSRequired, errs.WrapParams{}, errs.String("host", s.cfg.Host))
+              to: errs
+          init:
+            bind: offered, _
+            eval: s.client.Extension(extensionStartTLS)
+            to: s.client.Extension
+          when: "!offered"
+      - opt:
+          do:
+            - return: wrapAs(coremail.TLSFailed, tlsErr, errs.String("host", s.cfg.Host))
+              to: wrapAs
+          init:
+            bind: tlsErr
+            eval: s.client.StartTLS(s.transport.tlsConfig())
+            to: s.client.StartTLS
+          when: tlsErr != nil
+      - return: nil
+  - of: (*session).authenticate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*session).authenticate
+        kind: self
+      - id: s.client.TLSConnectionState
+        kind: value
+      - id: errs
+        kind: package
+      - id: s.client.Extension
+        kind: value
+      - id: s.client.Auth
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.cfg.Username == ""
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.AuthInsecure, errs.WrapParams{},
+                			errs.String("host", s.cfg.Host), errs.String("tls_mode", s.cfg.TLS.String()))
+              to: errs
+          init:
+            bind: _, encrypted
+            eval: s.client.TLSConnectionState()
+            to: s.client.TLSConnectionState
+          when: "!encrypted"
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.AuthFailed, errs.WrapParams{},
+                			errs.String("host", s.cfg.Host), errs.String("problem", "server advertised no AUTH extension"))
+              to: errs
+          init:
+            bind: offered, _
+            eval: s.client.Extension(extensionAuth)
+            to: s.client.Extension
+          when: "!offered"
+      - opt:
+          do:
+            - return: wrapAs(coremail.AuthFailed, authErr, errs.String("host", s.cfg.Host))
+              to: wrapAs
+          init:
+            bind: authErr
+            eval: s.client.Auth(smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host))
+            to: s.client.Auth
+          when: authErr != nil
+      - return: nil
+  - of: (*session).sendOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*session).sendOne
+        kind: self
+      - id: s.client.Mail
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: s.client.Rcpt
+        kind: value
+      - id: s.client.Data
+        kind: value
+      - id: writer.Write
+        kind: value
+      - id: writer.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coremail.SendRefused, mailErr, errs.String("command", "MAIL"))
+              to: wrapAs
+          init:
+            bind: mailErr
+            eval: s.client.Mail(delivery.Envelope.From)
+            to: s.client.Mail
+          when: mailErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: wrapAs(coremail.SendRefused, rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
+                    to: wrapAs
+                init:
+                  bind: rcptErr
+                  eval: s.client.Rcpt(recipient)
+                  to: s.client.Rcpt
+                when: rcptErr != nil
+          key: index
+          range: delivery.Envelope.To
+          value: recipient
+      - bind: writer, dataErr
+        eval: s.client.Data()
+        to: s.client.Data
+      - opt:
+          do:
+            - return: wrapAs(coremail.SendRefused, dataErr, errs.String("command", "DATA"))
+              to: wrapAs
+          when: dataErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coremail.SendRefused, writeErr, errs.String("command", "DATA"))
+              to: wrapAs
+          init:
+            bind: _, writeErr
+            eval: writer.Write(delivery.Raw)
+            to: writer.Write
+          when: writeErr != nil
+      - opt:
+          do:
+            - return: wrapAs(coremail.SendRefused, closeErr, errs.String("command", "DATA-END"))
+              to: wrapAs
+          init:
+            bind: closeErr
+            eval: writer.Close()
+            to: writer.Close
+          when: closeErr != nil
+      - return: nil
+  - of: (*smtpTransport).dial
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*smtpTransport).dial
+        kind: self
+      - id: dialer.DialContext
+        kind: value
+      - id: tls
+        kind: stdlib
+      - id: secure.HandshakeContext
+        kind: value
+    steps:
+      - bind: dialer
+        eval: "net.Dialer{Timeout: t.cfg.resolvedDialTimeout()}"
+      - bind: raw, dialErr
+        eval: dialer.DialContext(ctx, "tcp", t.address)
+        to: dialer.DialContext
+      - opt:
+          do:
+            - return: nil, wrapAs(coremail.DialFailed, dialErr, errs.String("address", t.address))
+          when: dialErr != nil
+      - opt:
+          do:
+            - return: raw, nil
+          when: t.cfg.TLS != TLSImplicit
+      - bind: secure
+        eval: tls.Client(raw, t.tlsConfig())
+        to: tls
+      - opt:
+          do:
+            - bind: closed
+              eval: cmp.Or[error](wrapAs(coremail.TLSFailed, handshakeErr, errs.String("address", t.address)), raw.Close())
+            - return: nil, closed
+          init:
+            bind: handshakeErr
+            eval: secure.HandshakeContext(ctx)
+            to: secure.HandshakeContext
+          when: handshakeErr != nil
+      - return: secure, nil
+  - of: (*smtpTransport).tlsConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*smtpTransport).tlsConfig
+        kind: self
+      - id: t.cfg.Identity.ClientConfig
+        kind: value
+    steps:
+      - bind: cfg
+        eval: t.cfg.Identity.ClientConfig()
+        to: t.cfg.Identity.ClientConfig
+      - opt:
+          do:
+            - set: cfg.ServerName
+              value: t.cfg.Host
+          when: cfg.ServerName == ""
+      - return: cfg
+  - of: watchContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchContext
+        kind: self
+      - id: ctx.Deadline
+        kind: value
+      - id: setDeadlineBestEffort
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return:
+                closure:
+                  steps: null
+          when: ctx.Done() == nil
+      - opt:
+          do:
+            - eval: setDeadlineBestEffort(conn, deadline)
+              to: setDeadlineBestEffort
+          init:
+            bind: deadline, ok
+            eval: ctx.Deadline()
+            to: ctx.Deadline
+          when: ok
+      - bind: done
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		select {
+          		case <-ctx.Done():
+          			//: net.Conn is safe to close from another goroutine, and closing is
+          			//: what unblocks the read net/smtp is sitting in. The error has no
+          			//: caller: the send is already failing with the context's own.
+          			closeBestEffort(conn)
+          		case <-done:
+          			//: the session finished first.
+          		}
+          	}()
+      - return:
+          closure:
+            steps:
+              - eval: close(done)
+  - of: setDeadlineBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: setDeadlineBestEffort
+        kind: self
+      - id: conn.SetDeadline
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: deadlineErr
+            eval: conn.SetDeadline(deadline)
+            to: conn.SetDeadline
+          when: deadlineErr != nil
+  - of: closeBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeBestEffort
+        kind: self
+      - id: conn.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: closeErr
+            eval: conn.Close()
+            to: conn.Close
+          when: closeErr != nil
+  - of: TLSMode.String
+    steps:
+      - switch:
+          cases:
+            - case: TLSStartTLS
+              do:
+                - return: "\"starttls\""
+            - case: TLSImplicit
+              do:
+                - return: "\"implicit\""
+            - case: TLSDisabled
+              do:
+                - return: "\"disabled\""
+            - case: TLSUnset
+              do:
+                - return: "\"unset\""
+            - default: true
+              do:
+                - return: "\"invalid\""
+          "on": m
+  - of: SMTPConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.validate
+        kind: self
+      - id: c.validateEndpoint
+        kind: internal
+      - id: c.validateSecurity
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: endpointErr
+          init:
+            bind: endpointErr
+            eval: c.validateEndpoint()
+            to: c.validateEndpoint
+          when: endpointErr != nil
+      - return: c.validateSecurity()
+        to: c.validateSecurity
+  - of: SMTPConfig.validateEndpoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.validateEndpoint
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.InvalidConfig, errs.WrapParams{}, errs.String("problem", "empty host"))
+              to: errs
+          when: c.Host == ""
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
+                			errs.String("problem", "port out of range"), errs.Int("port", c.Port))
+              to: errs
+          when: c.Port <= 0 || c.Port > maxPort
+      - return: nil
+  - of: SMTPConfig.validateSecurity
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.validateSecurity
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
+                			errs.String("problem", "TLS mode is unset; choose TLSStartTLS, TLSImplicit or TLSDisabled explicitly"))
+              to: errs
+          when: c.TLS == TLSUnset
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
+                			errs.String("problem", "unknown TLS mode"), errs.Int("tls_mode", int(c.TLS)))
+              to: errs
+          when: c.TLS > TLSDisabled
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.AuthInsecure, errs.WrapParams{},
+                			errs.String("problem", "Username is set and TLS is disabled"))
+              to: errs
+          when: c.Username != "" && c.TLS == TLSDisabled
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
+                			errs.String("problem", "Password is set without a Username"))
+              to: errs
+          when: c.Username == "" && c.Password != ""
+      - return: nil
+  - of: SMTPConfig.resolvedDialTimeout
+    steps:
+      - opt:
+          do:
+            - return: defaultDialTimeout
+          when: c.DialTimeout <= 0
+      - return: c.DialTimeout
+  - of: SMTPConfig.resolvedLocalName
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.resolvedLocalName
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - return: cmp.Or(c.LocalName, defaultLocalName)
+        to: cmp
+  - of: SMTPConfig.redacted
+    steps:
+      - bind: view
+        eval: smtpConfigView(c)
+      - opt:
+          do:
+            - set: view.Password
+              value: coresecret.Redacted
+          when: view.Password != ""
+      - return: view
+  - of: SMTPConfig.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.String
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - return: fmt.Sprintf("%+v", c.redacted())
+        to: fmt
+  - of: SMTPConfig.GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.GoString
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: rendered
+        eval: fmt.Sprintf("%#v", c.redacted())
+        to: fmt
+      - return: configTypeName + strings.TrimPrefix(rendered, viewTypeName)
+  - of: SMTPConfig.Format
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.Format
+        kind: self
+      - id: writeRendering
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: writeRendering(state, c.GoString())
+              to: writeRendering
+            - return: ""
+          when: verb == 'v' && state.Flag('#')
+      - eval: writeRendering(state, fmt.Sprintf(fmt.FormatString(state, verb), c.redacted()))
+        to: writeRendering
+  - of: SMTPConfig.MarshalJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: SMTPConfig.MarshalJSON
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - return: json.Marshal(c.redacted())
+        to: json
+  - of: writeRendering
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeRendering
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: io.WriteString(state, text)
+            to: io
+          when: err != nil
+  - of: ParseURL
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseURL
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: modeOf
+        kind: internal
+      - id: portOf
+        kind: internal
+      - id: parsed.User.Username
+        kind: value
+      - id: parsed.User.Password
+        kind: value
+      - id: cfg.validate
+        kind: internal
+    steps:
+      - bind: parsed, parseErr
+        eval: url.Parse(raw)
+        to: url
+      - opt:
+          do:
+            - return: SMTPConfig{}, invalidURL("not a URL of the form smtp://user:password@host:port")
+          when: parseErr != nil || parsed.Opaque != ""
+      - bind: mode, modeErr
+        eval: modeOf(parsed)
+        to: modeOf
+      - opt:
+          do:
+            - return: SMTPConfig{}, modeErr
+          when: modeErr != nil
+      - opt:
+          do:
+            - return: SMTPConfig{}, invalidURL("has a path or a fragment")
+          when: (parsed.Path != "" && parsed.Path != "/") || parsed.Fragment != "" || parsed.RawFragment != ""
+      - bind: port, portErr
+        eval: portOf(parsed.Hostname(), parsed.Port(), mode)
+        to: portOf
+      - opt:
+          do:
+            - return: SMTPConfig{}, portErr
+          when: portErr != nil
+      - set: cfg
+        value: "SMTPConfig{Host: parsed.Hostname(), Port: port, TLS: mode}"
+      - opt:
+          do:
+            - set: cfg.Username
+              to: parsed.User.Username
+              value: parsed.User.Username()
+            - set: cfg.Password, _
+              to: parsed.User.Password
+              value: parsed.User.Password()
+          when: parsed.User != nil
+      - opt:
+          do:
+            - return: SMTPConfig{}, validateErr
+          init:
+            bind: validateErr
+            eval: cfg.validate()
+            to: cfg.validate
+          when: validateErr != nil
+      - return: cfg, nil
+  - of: modeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: modeOf
+        kind: self
+      - id: url
+        kind: stdlib
+    steps:
+      - bind: query, queryErr
+        eval: url.ParseQuery(parsed.RawQuery)
+        to: url
+      - opt:
+          do:
+            - return: TLSUnset, invalidURL("has a malformed query")
+          when: queryErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: TLSUnset, invalidURL("has a query parameter other than tls")
+                when: name != tlsParameter
+          key: name
+          range: query
+      - switch:
+          cases:
+            - case: schemeSMTP
+              do:
+                - set: mode
+                  value: TLSStartTLS
+            - case: schemeSMTPS
+              do:
+                - set: mode
+                  value: TLSImplicit
+            - default: true
+              do:
+                - return: TLSUnset, invalidURL("scheme is not smtp or smtps")
+          "on": strings.ToLower(parsed.Scheme)
+      - bind: values
+        eval: query[tlsParameter]
+      - opt:
+          do:
+            - return: mode, nil
+          when: len(values) == 0
+      - opt:
+          do:
+            - return: TLSUnset, invalidURL("names the tls parameter more than once")
+          when: len(values) > 1
+      - bind: named, known
+        eval: tlsModesByName[strings.ToLower(values[0])]
+      - opt:
+          do:
+            - return: TLSUnset, invalidURL("has a tls parameter that is not starttls, implicit or none")
+          when: "!known"
+      - opt:
+          do:
+            - return: TLSUnset, invalidURL("uses smtps with a tls parameter other than implicit")
+          when: mode == TLSImplicit && named != TLSImplicit
+      - return: named, nil
+  - of: portOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: portOf
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, invalidURL("names no host")
+          when: host == ""
+      - opt:
+          do:
+            - return: defaultPorts[mode], nil
+          when: written == ""
+      - bind: port, convErr
+        eval: strconv.Atoi(written)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, invalidURL("has a port that is not a number from 1 to 65535")
+          when: convErr != nil || port < 1 || port > maxPort
+      - return: port, nil
+  - of: invalidURL
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidURL
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coremail.InvalidURL, errs.WrapParams{}, errs.String("problem", problem))
+        to: errs
+  - of: Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: Validate
+        kind: self
+      - id: errs
+        kind: package
+      - id: validateAllAddresses
+        kind: internal
+      - id: ValidateHeaderValue
+        kind: internal
+      - id: ValidateHeader
+        kind: internal
+      - id: validateContent
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.MissingSender, errs.WrapParams{})
+              to: errs
+          when: m.From.IsZero()
+      - opt:
+          do:
+            - return: addrErr
+          init:
+            bind: addrErr
+            eval: validateAllAddresses(m)
+            to: validateAllAddresses
+          when: addrErr != nil
+      - opt:
+          do:
+            - return: subjectErr
+          init:
+            bind: subjectErr
+            eval: ValidateHeaderValue(coremail.HeaderSubject, m.Subject)
+            to: ValidateHeaderValue
+          when: subjectErr != nil
+      - opt:
+          do:
+            - return: idErr
+          init:
+            bind: idErr
+            eval: ValidateHeaderValue(coremail.HeaderMessageID, m.MessageID)
+            to: ValidateHeaderValue
+          when: idErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: fieldErr
+                init:
+                  bind: fieldErr
+                  eval: ValidateHeader(field)
+                  to: ValidateHeader
+                when: fieldErr != nil
+          key: _
+          range: m.Headers
+          value: field
+      - return: validateContent(m)
+        to: validateContent
+  - of: validateAllAddresses
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateAllAddresses
+        kind: self
+      - id: ValidateAddress
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: fromErr
+          init:
+            bind: fromErr
+            eval: ValidateAddress(coremail.HeaderFrom, m.From)
+            to: ValidateAddress
+          when: fromErr != nil
+      - bind: lists
+        eval: |-
+          []addressGroup{
+          		{coremail.HeaderTo, m.To},
+          		{coremail.HeaderCc, m.Cc},
+          		{coremail.HeaderBcc, m.Bcc},
+          		{coremail.HeaderReplyTo, m.ReplyTo},
+          	}
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: addrErr
+                      init:
+                        bind: addrErr
+                        eval: ValidateAddress(list.field+"["+strconv.Itoa(index)+"]", addr)
+                        to: ValidateAddress
+                      when: addrErr != nil
+                key: index
+                range: list.addrs
+                value: addr
+          key: _
+          range: lists
+          value: list
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.NoRecipients, errs.WrapParams{})
+              to: errs
+          when: len(m.To)+len(m.Cc)+len(m.Bcc) == 0
+      - return: nil
+  - of: validateContent
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateContent
+        kind: self
+      - id: errs
+        kind: package
+      - id: validateOnePart
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coremail.EmptyBody, errs.WrapParams{})
+              to: errs
+          when: m.Text == "" && m.HTML == "" && len(m.Attachments) == 0
+      - bind: hasBody
+        eval: m.Text != "" || m.HTML != ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: partErr
+                init:
+                  bind: partErr
+                  eval: validateOnePart(&m.Attachments[index], index, hasBody)
+                  to: validateOnePart
+                when: partErr != nil
+          key: index
+          range: m.Attachments
+      - return: nil
+  - of: validateOnePart
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateOnePart
+        kind: self
+      - id: ValidateAttachment
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: field
+        eval: "\"Attachments[\" + strconv.Itoa(index) + \"]\""
+      - opt:
+          do:
+            - return: attachmentErr
+          init:
+            bind: attachmentErr
+            eval: ValidateAttachment(field, attachment)
+            to: ValidateAttachment
+          when: attachmentErr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
+                			errs.String("field", field),
+                			errs.String("problem", "inline part in a message with no body to reference it"))
+              to: errs
+          when: attachment.Inline() && !hasBody
+      - return: nil

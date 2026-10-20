@@ -1,0 +1,154 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Field names the refusals carry.
+    grouped: true
+    items:
+      - doc: fieldPointer carries where the document failed, as a JSON Pointer.
+        name: fieldPointer
+        type: string
+        value: "\"pointer\""
+      - doc: fieldOffset carries the byte offset at which the decoder stopped.
+        name: fieldOffset
+        type: string
+        value: "\"offset\""
+      - doc: fieldLimit carries the bound a too-large document exceeded.
+        name: fieldLimit
+        type: string
+        value: "\"limit\""
+      - doc: fieldArgument names the argument a misconfigured call got wrong.
+        name: fieldArgument
+        type: string
+        value: "\"argument\""
+      - doc: fieldCause carries the message of a reader that failed.
+        name: fieldCause
+        type: string
+        value: "\"cause\""
+    name: fieldPointer
+  - doc: |-
+      MaxPointerBytes bounds the JSON Pointer a refusal carries. A pointer is
+      built from the document's member names, so its length is the document's
+      to choose; past the bound it is cut back to the deepest ancestor that fits,
+      which still points at the right place, just less precisely.
+    items:
+      - name: MaxPointerBytes
+        type: int
+        value: "256"
+    name: MaxPointerBytes
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - boundedReader
+      - (*boundedReader).Read
+      - (*boundedReader).verdict
+      - Unreadable
+      - causeOf
+    name: reader.go
+  - decls:
+      - fieldPointer
+      - MaxPointerBytes
+      - Decode
+      - CheckArguments
+      - DecodeChecked
+      - PointerOf
+      - classify
+      - located
+      - boundPointer
+      - Misconfigured
+    name: strictjson.go
+functions:
+  - name: Unreadable
+    params: failure error
+    results: error
+  - doc: |-
+      causeOf names a read failure by its type — *net.OpError, *errors.errorString
+      — never by its message, which a reader may have built from the bytes it
+      read.
+    name: causeOf
+    params: failure error
+    results: string
+  - name: Decode
+    params: r io.Reader, v any, maxBytes int64
+    results: error
+  - name: CheckArguments
+    params: v any, maxBytes int64
+    results: error
+  - name: DecodeChecked
+    params: r io.Reader, v any, maxBytes int64, oversize func(error) bool
+    results: error
+  - name: PointerOf
+    params: err error
+    results: pointer string, ok bool
+  - doc: |-
+      classify turns a decoder error into this package's refusal. The decoder's
+      own error is NOT kept as the cause: its text quotes the offending member
+      name and, for a field's own unmarshaler, the offending value.
+    name: classify
+    params: decodeErr error
+    results: error
+  - doc: located builds a refusal carrying where the document failed.
+    name: located
+    params: sentinel *errs.Error, pointer jsontext.Pointer, offset int64
+    results: error
+  - doc: |-
+      boundPointer cuts a pointer longer than MaxPointerBytes back to the deepest
+      ancestor that fits, so what is kept still names a real location.
+    name: boundPointer
+    params: pointer string
+    results: string
+  - name: Misconfigured
+    params: argument string
+    results: error
+imports:
+  corestrictjson: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  io: io
+  jsontext: encoding/json/jsontext
+  jsonv2: encoding/json/v2
+  math: math
+  reflect: reflect
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
+  name: strictjson
+  purpose: Package strictjson — the reader that bounds a document and remembers why it stopped.
+types:
+  - doc: |-
+      boundedReader hands the decoder at most remaining bytes of source and
+      remembers what it saw: how many bytes it delivered, and the first error
+      that was not the end of the input.
+
+      It is given the bound plus ONE, so a document of exactly the bound decodes
+      and one byte more is seen — without ever buffering past it.
+    fields:
+      - name: source
+        type: io.Reader
+      - name: failure
+        type: error
+      - name: remaining
+        type: int64
+      - name: delivered
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          Read reads from source, never past the remaining budget. An exhausted
+          budget reads as the end of the input: the decoder stops, and verdict says
+          why.
+        name: Read
+        params: buffer []byte
+        recv: b *boundedReader
+        results: int, error
+      - doc: |-
+          verdict reports what the reading alone concludes, before the decoder's
+          conclusion is considered: a document longer than maxBytes, a reader that
+          failed, or a document with no byte at all. nil means the decoder's verdict
+          stands.
+        name: verdict
+        params: maxBytes int64, oversize func(error) bool
+        recv: b *boundedReader
+        results: error
+    name: boundedReader

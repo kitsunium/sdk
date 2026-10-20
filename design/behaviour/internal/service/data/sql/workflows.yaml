@@ -1,0 +1,56 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: isIdentifier
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: name == "" || !identStart(name[0])
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                init:
+                  bind: c
+                  eval: name[i]
+                when: "!identStart(c) && (c < '0' || c > '9')"
+          key: i
+          range: len(name)
+      - return: "true"
+  - of: (*migrator).pending
+    steps:
+      - set: queued
+        value: make([]coresql.MigrationValue, 0, len(m.plan.migrations))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: applied[migration.Version]
+            - opt:
+                do:
+                  - return: |-
+                      nil, kerrs.Wrap(coresql.MigrationOutOfOrder, kerrs.WrapParams{},
+                      				kerrs.String("version", strconv.FormatUint(migration.Version, decimalBase)),
+                      				kerrs.String("applied", strconv.FormatUint(highest, decimalBase)))
+                when: migration.Version < highest
+            - set: queued
+              value: append(queued, migration)
+          key: _
+          range: m.plan.migrations
+          value: migration
+      - return: queued, nil
+  - of: scopeFor
+    steps:
+      - loop:
+          cond: scope != nil
+          do:
+            - opt:
+                do:
+                  - return: scope
+                when: scope.owner == owner
+          init: scope := scopeOf(ctx)
+          post: scope = scope.parent
+      - return: nil

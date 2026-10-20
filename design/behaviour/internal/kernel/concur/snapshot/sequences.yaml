@@ -1,0 +1,70 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewValue
+        kind: self
+      - id: v.p.Store
+        kind: value
+    steps:
+      - bind: v
+        eval: "&Value[T]{}"
+      - opt:
+          do:
+            - eval: v.p.Store(initial)
+              to: v.p.Store
+          when: initial != nil
+      - return: v
+  - of: (*Value).Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Value).Load
+        kind: self
+      - id: v.p.Load
+        kind: value
+    steps:
+      - return: v.p.Load()
+        to: v.p.Load
+  - of: (*Value).Store
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Value).Store
+        kind: self
+      - id: v.p.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: v.mu
+      - eval: v.p.Store(next)
+        to: v.p.Store
+  - of: (*Value).Swap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Value).Swap
+        kind: self
+      - id: v.p.Swap
+        kind: value
+    steps:
+      - lock:
+          mutex: v.mu
+      - return: v.p.Swap(next)
+        to: v.p.Swap
+  - of: (*Value).Update
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Value).Update
+        kind: self
+      - id: v.p.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: v.mu
+      - eval: v.p.Store(fn(v.p.Load()))
+        to: v.p.Store

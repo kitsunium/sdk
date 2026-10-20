@@ -1,0 +1,70 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      lenPrefixBytes is the width of the big-endian length prefix that precedes
+      each path segment in the canonical HKDF info, making the encoding injective.
+    items:
+      - name: lenPrefixBytes
+        type: int
+        value: "4"
+    name: lenPrefixBytes
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - lenPrefixBytes
+      - KeyTree
+      - NewKeyTree
+      - KeyTree.Child
+      - KeyTree.DeriveKey
+      - KeyTree.withMasterBytes
+      - encodePath
+    name: keytree.go
+functions:
+  - name: NewKeyTree
+    params: algo corecrypto.Algorithm, master corecrypto.Key
+    results: KeyTree
+  - doc: |-
+      encodePath builds the injective canonical HKDF info: for each segment, a
+      4-byte big-endian length prefix followed by the segment bytes. The length
+      prefix makes the encoding prefix-free, so distinct paths never collide
+      regardless of where "/" appears inside a segment. The bytes are returned as
+      a string because Subkey takes a string info (Go strings hold arbitrary bytes).
+    name: encodePath
+    params: path []string
+    results: string
+imports:
+  binary: encoding/binary
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
+  name: keytree
+  purpose: Package keytree implements path-addressed hierarchical key derivation.
+types:
+  - fields:
+      - name: algo
+        type: corecrypto.Algorithm
+      - name: master
+        type: corecrypto.Key
+      - name: path
+        type: "[]string"
+    kind: struct
+    methods:
+      - name: Child
+        params: segment string
+        recv: t KeyTree
+        results: KeyTree
+      - name: DeriveKey
+        recv: t KeyTree
+        results: key corecrypto.Key, err error
+      - doc: |-
+          withMasterBytes hands fn a fresh clone of the master key material and wipes
+          that clone the instant fn returns. Key.Bytes mints a heap copy of the full
+          secret on every call; routing the copy through this seam guarantees it is
+          cleared before the GC can scatter it, instead of being abandoned live.
+        name: withMasterBytes
+        params: fn func(master []byte)
+        recv: t KeyTree
+    name: KeyTree

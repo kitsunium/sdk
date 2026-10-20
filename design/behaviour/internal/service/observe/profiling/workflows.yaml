@@ -1,0 +1,162 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*folder).namesOf
+    steps:
+      - set: f.names
+        value: f.names[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: frame.Function == ""
+            - set: f.names
+              value: append(f.names, frame.Function)
+            - opt:
+                do:
+                  - set: f.sources[frame.Function]
+                    value: frame
+                init:
+                  bind: _, known
+                  eval: f.sources[frame.Function]
+                when: "!known"
+          key: _
+          range: stack
+          value: frame
+      - return: f.names
+  - of: (*folder).cumulate
+    steps:
+      - eval: clear(f.seen)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: f.seen[name]
+                when: dup
+            - set: f.seen[name]
+              value: struct{}{}
+            - op: +=
+              set: f.all.cum[name]
+              value: v
+            - opt:
+                do:
+                  - op: +=
+                    set: mine.cum[name]
+                    value: v
+                when: mine != nil
+          key: _
+          range: names
+          value: name
+  - of: (*folder).climb
+    steps:
+      - bind: at
+        eval: f.flame
+      - op: +=
+        set: at.value
+        value: v
+      - loop:
+          cond: i >= 0 && len(names)-i <= depth
+          do:
+            - bind: child
+              eval: at.children[names[i]]
+            - opt:
+                do:
+                  - set: child
+                    value: "&flameFold{name: names[i], children: make(map[string]*flameFold)}"
+                  - set: at.children[names[i]]
+                    value: child
+                when: child == nil
+            - op: +=
+              set: child.value
+              value: v
+            - set: at
+              value: child
+          init: i := len(names) - 1
+          post: i--
+  - of: resolveSampleType
+    steps:
+      - set: name
+        value: typ
+      - opt:
+          do:
+            - set: name
+              value: p.DefaultSampleType
+          when: name == ""
+      - opt:
+          do:
+            - set: name
+              value: p.SampleTypes[len(p.SampleTypes)-1].Type
+          when: name == "" && len(p.SampleTypes) > 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: name, i
+                when: st.Type == name
+          key: i
+          range: p.SampleTypes
+          value: st
+      - return: name, -1
+  - of: pick
+    steps:
+      - bind: out
+        eval: make(map[string]string, len(keys))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[k]
+                    value: v
+                init:
+                  bind: v, has
+                  eval: labels[k]
+                when: has
+          key: _
+          range: keys
+          value: k
+      - return: out
+  - of: topFrame
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: f.Function
+                when: "!runtimeFrame(f.Function)"
+          key: _
+          range: stack
+          value: f
+      - opt:
+          do:
+            - return: stack[0].Function
+          when: len(stack) > 0
+      - return: "\"\""
+  - of: (*wire).varint
+    steps:
+      - var:
+          name: value
+          type: uint64
+      - loop:
+          do:
+            - bind: b
+              eval: w.buf[i]
+            - opt:
+                do:
+                  - return: 0, malformed("varint")
+                when: i == maxVarint-1 && b > maxTenthByte
+            - op: "|="
+              set: value
+              value: uint64(b&varintPayload) << (varintShift * uint(i))
+            - opt:
+                do:
+                  - set: w.buf
+                    value: w.buf[i+1:]
+                  - return: value, nil
+                when: b&varintMore == 0
+          key: i
+          range: min(len(w.buf), maxVarint)
+      - return: 0, malformed("varint")

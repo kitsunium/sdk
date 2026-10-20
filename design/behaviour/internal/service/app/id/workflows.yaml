@@ -1,0 +1,43 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: base62Decode
+    steps:
+      - opt:
+          do:
+            - return: |-
+                raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                			errs.String("rule", "length"), errs.Int("length", len(s)))
+          when: len(s) != ksuidChars
+      - loop:
+          do:
+            - bind: digit
+              eval: int(base62Reverse[s[i]])
+            - opt:
+                do:
+                  - return: |-
+                      raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                      				errs.String("rule", "alphabet"), errs.Int("offset", i))
+                when: digit < 0
+            - bind: carry
+              eval: digit
+            - loop:
+                cond: j >= 0
+                do:
+                  - bind: cur
+                    eval: int(raw[j])*base62Radix + carry
+                  - set: raw[j]
+                    value: byte(cur)
+                  - set: carry
+                    value: cur >> bitsPerByte
+                init: j := ksuidRawLen - 1
+                post: j--
+            - opt:
+                do:
+                  - return: |-
+                      raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                      				errs.String("rule", "overflow"))
+                when: carry != 0
+          key: i
+          range: ksuidChars
+      - return: raw, nil

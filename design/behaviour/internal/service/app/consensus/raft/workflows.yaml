@@ -1,0 +1,159 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Raft).quorumActive
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                  - continue: true
+                when: id == r.id
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                init:
+                  bind: pr
+                  eval: r.prs[id]
+                when: pr != nil && now.Sub(pr.lastHeard) < window
+          key: _
+          range: r.voters()
+          value: id
+      - return: n >= r.quorum()
+  - of: (*Raft).peers
+    steps:
+      - bind: out
+        eval: make([]core.NodeID, 0, len(r.prs))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, m.ID)
+                when: m.ID != r.id && r.prs[m.ID] != nil
+          key: _
+          range: r.conf().Members
+          value: m
+      - return: out
+  - of: (*Raft).ackRounds
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: rd.acks[from]
+                    value: contract + 1
+                when: rd.id <= round
+          key: _
+          range: r.rounds
+          value: rd
+  - of: (*Raft).EngineAt
+    steps:
+      - bind: v
+        eval: r.engBase
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: e.index > i
+            - set: v
+              value: e.v
+          key: _
+          range: r.engines
+          value: e
+      - return: v
+  - of: (*Raft).confAt
+    steps:
+      - loop:
+          cond: k >= 0
+          do:
+            - opt:
+                do:
+                  - return: "&r.confs[k].m"
+                when: r.confs[k].index <= i
+          init: k := len(r.confs) - 1
+          post: k--
+      - return: "&r.base"
+  - of: (*Raft).applyCommitEffects
+    steps:
+      - loop:
+          cond: i <= hi && i <= r.log.lastIndex()
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: r.applyCommitEffect(i, r.log.at(i))
+          init: i := max(lo, r.log.snapIndex+1)
+          post: i++
+  - of: (*Raft).FailureTolerance
+    steps:
+      - opt:
+          do:
+            - return: "-1"
+          when: r.role != core.RoleLeader
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                  - continue: true
+                when: id == r.id
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                init:
+                  bind: pr
+                  eval: r.prs[id]
+                when: pr != nil && pr.facts&peerHeard != 0 && now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin
+          key: _
+          range: r.voters()
+          value: id
+      - return: max(n-r.quorum(), -1)
+  - of: (*Raft).countVotes
+    steps:
+      - loop:
+          do:
+            - bind: v, ok
+              eval: r.votes[id]
+            - switch:
+                cases:
+                  - case: "!ok"
+                  - case: v
+                    do:
+                      - op: ++
+                        set: granted
+                  - default: true
+                    do:
+                      - op: ++
+                        set: rejected
+          key: _
+          range: r.voters()
+          value: id
+      - return: granted, rejected
+  - of: (*Raft).dropUnknownKinds
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: r.rd.Unsupported
+                    value: "UnsupportedEntryValue{Index: e.Position.Index, Kind: e.Kind}"
+                  - set: m.Entries
+                    value: m.Entries[:k]
+                  - break: true
+                init:
+                  bind: e
+                  eval: "&m.Entries[k]"
+                when: "!e.Kind.Known()"
+          key: k
+          range: m.Entries

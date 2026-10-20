@@ -1,0 +1,79 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: "SHA256 is SHA-256: a 256-bit cryptographic digest for content addressing."
+    items:
+      - name: SHA256
+        type: Algorithm
+        value: "\"sha256\""
+    name: SHA256
+  - doc: "SHA512 is SHA-512: a 512-bit cryptographic digest."
+    items:
+      - name: SHA512
+        type: Algorithm
+        value: "\"sha512\""
+    name: SHA512
+  - doc: "SHA3256 is SHA3-256: the Keccak-family 256-bit cryptographic digest."
+    items:
+      - name: SHA3256
+        type: Algorithm
+        value: "\"sha3-256\""
+    name: SHA3256
+  - doc: "CRC32C is CRC-32C (Castagnoli): a fast NON-cryptographic checksum."
+    items:
+      - name: CRC32C
+        type: Algorithm
+        value: "\"crc32c\""
+    name: CRC32C
+  - doc: "FNV1a64 is FNV-1a 64-bit: a fast NON-cryptographic fingerprint."
+    items:
+      - name: FNV1a64
+        type: Algorithm
+        value: "\"fnv1a-64\""
+    name: FNV1a64
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - SHA256
+      - SHA512
+      - SHA3256
+      - CRC32C
+      - FNV1a64
+      - Algorithm
+      - Sum
+      - SumHex
+      - New
+      - NewDigestWriter
+      - NewVerifyingReader
+    name: hash.go
+functions:
+  - name: Sum
+    params: a Algorithm, data []byte
+    results: digest []byte, err error
+  - name: SumHex
+    params: a Algorithm, data []byte
+    results: digest string, err error
+  - name: New
+    params: a Algorithm
+    results: h hash.Hash, err error
+  - name: NewDigestWriter
+    params: a Algorithm, dst io.Writer
+    results: writer *DigestWriter, err error
+  - name: NewVerifyingReader
+    params: a Algorithm, src io.Reader, wantHex string
+    results: reader *VerifyingReader, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  hash: hash
+  io: io
+  stdhash: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto/hash
+  name: hash
+  purpose: Package hash is the fingerprint / content-addressing hashing facade.
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

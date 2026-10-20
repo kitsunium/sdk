@@ -1,0 +1,2152 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          defaultPerAddress is the pre-handshake budget of one address (ADR
+          0174): a handful of concurrent handshakes, small enough that one
+          address cannot occupy the listener with connections that never finish.
+        name: defaultPerAddress
+        type: int
+        value: "4"
+      - doc: |-
+          defaultReserved is twice the ordinary budget, so a declared address
+          keeps headroom while a flood from elsewhere spends its own.
+        name: defaultReserved
+        type: int
+        value: "8"
+    name: defaultPerAddress
+  - doc: |-
+      defaultHandshakeTimeout bounds the TLS negotiation when a group sets none.
+
+      It has a default where Read, Write and Idle deliberately do not, because the
+      handshake is the one phase a peer can stall before the application sees
+      anything at all: no handler has run, no request exists, and nothing else in
+      the stack has a reason to time it out. tls.NewListener does not handshake in
+      Accept — the negotiation happens on the connection's own goroutine, which is
+      the right design — so without a bound here a peer that opens a socket and
+      says nothing pins a goroutine, an in-flight token, a live-socket registry
+      entry and a slot under the group's connection ceiling, for free and forever.
+    items:
+      - name: defaultHandshakeTimeout
+        type: time.Duration
+        value: 10 * time.Second
+    name: defaultHandshakeTimeout
+  - doc: drainPollInterval is how often the drain re-checks the in-flight count.
+    items:
+      - name: drainPollInterval
+        type: time.Duration
+        value: 10 * time.Millisecond
+    name: drainPollInterval
+  - doc: |-
+      mmsghdrAlign is the alignment C gives struct mmsghdr, which it inherits from
+      struct msghdr — the widest member decides, and msghdr holds the pointers.
+    items:
+      - name: mmsghdrAlign
+        type: uintptr
+        value: unsafe.Alignof(syscall.Msghdr{})
+    name: mmsghdrAlign
+  - doc: |-
+      mmsghdrStride is the distance the kernel advances between array elements:
+      struct msghdr, then the uint32 length, rounded up to mmsghdrAlign.
+    items:
+      - name: mmsghdrStride
+        type: uintptr
+        value: |-
+          (unsafe.Sizeof(syscall.Msghdr{}) +
+          	unsafe.Sizeof(uint32(0)) + mmsghdrAlign - 1) / mmsghdrAlign * mmsghdrAlign
+    name: mmsghdrStride
+  - grouped: true
+    items:
+      - doc: |-
+          defaultMaxPacketSize is the largest datagram accepted when a group sets
+          no ceiling. It comfortably exceeds a typical MTU while staying far below
+          the 64 KiB theoretical maximum, so a misconfigured peer cannot make the
+          server allocate a large buffer per socket.
+        name: defaultMaxPacketSize
+        type: int
+        value: "8192"
+      - doc: defaultBatchSize is how many datagrams one read attempts to collect.
+        name: defaultBatchSize
+        type: int
+        value: "16"
+    name: defaultMaxPacketSize
+  - doc: |-
+      soReusePort is SO_REUSEPORT.
+
+      It is absent from the Go standard library's syscall package, so the value is
+      hand-defined and cited here — the discipline ADR 0018 established for ABI
+      constants, adopted because golang.org/x/sys is banned SDK-wide. Linux defines
+      it in include/asm-generic/socket.h as 15.
+    items:
+      - name: soReusePort
+        type: int
+        value: "0xf"
+    name: soReusePort
+  - grouped: true
+    items:
+      - doc: defaultDrainTimeout bounds Shutdown when the caller sets no budget.
+        name: defaultDrainTimeout
+        type: time.Duration
+        value: 15 * time.Second
+      - doc: |-
+          expectedGroups pre-sizes the group table. Servers declare a handful of
+          groups, not hundreds; the hint avoids a rehash on the common shapes.
+        name: expectedGroups
+        type: int
+        value: "8"
+      - doc: |-
+          expectedLiveConns pre-sizes the live-socket registry so a burst of
+          accepts does not rehash it on the accept path.
+        name: expectedLiveConns
+        type: int
+        value: "256"
+    name: defaultDrainTimeout
+  - grouped: true
+    items:
+      - doc: |-
+          portByteShift converts the network-byte-order port the kernel reports
+          into host order. sockaddr_in stores it big-endian regardless of platform.
+        name: portByteShift
+        type: uint16
+        value: "8"
+      - doc: portLowByteMask isolates the low octet during that conversion.
+        name: portLowByteMask
+        type: uint16
+        value: "0xFF"
+    name: portByteShift
+files:
+  - decls:
+      - defaultPerAddress
+      - AdmissionConfig
+      - Admission
+      - NewAdmission
+      - admissionKey
+      - admissionKeyOf
+      - (*Admission).Admit
+      - (*Admission).SetReserved
+      - (*Admission).Refused
+      - PreHandshake
+      - admissionReleaseKey
+      - releaseAdmission
+    name: admission.go
+  - decls:
+      - (*Server).adoptedSockets
+      - closeFiles
+      - (*Server).adoptStream
+      - listenersFromFiles
+      - closeListeners
+      - closePacketConns
+      - (*Server).adoptPacket
+      - packetConnsFromFiles
+    name: adopt.go
+  - decls:
+      - datagram
+      - (*datagram).payload
+      - datagramSource
+      - newSlots
+    name: batch.go
+  - decls:
+      - _
+    name: batch_compliance.go
+  - decls:
+      - portableReader
+      - (*portableReader).readBatch
+    name: batch_portable.go
+  - decls:
+      - conn
+      - (*conn).Read
+      - (*conn).Write
+      - (*conn).boundRead
+      - (*conn).boundWrite
+      - tighterBudget
+      - (*conn).ID
+      - (*conn).Group
+      - (*conn).Buffer
+      - (*conn).Close
+      - (*conn).reset
+    name: conn.go
+  - decls:
+      - _#2
+    name: conn_compliance.go
+  - decls:
+      - trackedConn
+      - (*trackedConn).Close
+      - (*trackedConn).holdSlot
+      - (*trackedConn).CloseWrite
+      - (*trackedConn).ReadFrom
+      - hijackedTracker
+    name: conn_tracked.go
+  - decls:
+      - connWaiter
+      - (*connWaiter).release
+    name: conn_waiter.go
+  - decls:
+      - newDatagramSource
+      - batchAvailable
+    name: datagram_source_linux.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - platformLacks
+    name: family_other.go
+  - decls:
+      - defaultHandshakeTimeout
+      - handshakeHandler
+      - handshakeHandler.ServeConn
+      - boundHandshake
+      - handshakeBudget
+    name: handshake.go
+  - decls:
+      - httpAdapter
+      - newHTTPAdapter
+      - (*httpAdapter).ServeConn
+      - markHijacked
+      - (*httpAdapter).register
+      - (*httpAdapter).unregister
+      - (*httpAdapter).onConnState
+      - (*httpAdapter).launch
+      - (*httpAdapter).shutdown
+      - (*httpAdapter).closeNow
+      - (*httpAdapter).stop
+      - (*httpAdapter).currentBridge
+      - rawSocket
+    name: http_adapter.go
+  - decls:
+      - httpBounds
+      - httpBounds.headerTimeout
+      - httpBounds.headerBytes
+    name: http_bounds.go
+  - decls:
+      - chanListener
+      - newChanListener
+      - (*chanListener).Accept
+      - (*chanListener).Close
+      - (*chanListener).Addr
+      - (*chanListener).offer
+    name: http_listener.go
+  - decls:
+      - setKernelLen
+    name: kernel_len_linux.go
+  - decls:
+      - drainPollInterval
+      - (*Server).Start
+      - (*Server).bindEverything
+      - (*Server).bindPacketAll
+      - (*Server).bindPacketGroup
+      - (*Server).adoptPacketSockets
+      - batchDegradation
+      - (*Server).bindAll
+      - (*Server).bindGroup
+      - (*Server).adoptStreamSockets
+      - (*Server).bindShards
+      - acceptDelay
+      - (*Server).acceptLoop
+      - (*Server).backOff
+      - (*Server).serve
+      - recoverHandler
+      - (*Server).Serve
+      - (*Server).Shutdown
+      - (*Server).shutdownHTTP
+      - (*Server).closeHTTP
+      - (*Server).waitIdle
+      - (*Server).Close
+      - (*Server).closeListeners
+    name: lifecycle.go
+  - decls:
+      - _#3
+    name: linux_compliance.go
+  - decls:
+      - streamNetworks
+      - shardable
+      - resolveShards
+      - shardsFor
+      - reusePortControl
+      - listen
+      - familyUnavailable
+      - layered
+      - boundListener
+      - (*boundListener).closedSignal
+      - (*boundListener).Close
+    name: listen.go
+  - decls:
+      - trackedListener
+      - (*trackedListener).Accept
+    name: listen_tracked.go
+  - decls:
+      - multiReader
+      - newMultiReader
+      - (*multiReader).wire
+      - (*multiReader).readBatch
+      - (*multiReader).fill
+    name: multireader_linux.go
+  - decls:
+      - mmsghdrAlign
+      - mmsghdrStride
+      - mmsghdr
+    name: multireader_mmsghdr_linux.go
+  - decls:
+      - Option
+      - GroupOption
+      - WithDrainTimeout
+      - Listen
+      - TLS
+      - ReadTimeout
+      - WriteTimeout
+      - IdleTimeout
+      - ReadHeaderTimeout
+      - MaxHeaderBytes
+      - HandshakeTimeout
+      - ReadBufferSize
+      - MaxPacketSize
+      - BatchSize
+      - Shards
+      - MaxConns
+      - Adopt
+    name: options.go
+  - decls:
+      - packet
+      - (*packet).Data
+      - (*packet).From
+      - (*packet).To
+      - (*packet).ID
+      - (*packet).Group
+      - (*packet).Reply
+      - (*packet).reset
+    name: packet.go
+  - decls:
+      - PacketGroup
+      - (*PacketGroup).Name
+      - (*PacketGroup).Handle
+      - (*PacketGroup).HandleFunc
+      - (*PacketGroup).Use
+      - (*PacketGroup).resolved
+    name: packet_group.go
+  - decls:
+      - defaultMaxPacketSize
+      - packetNetworks
+      - listenPacket
+      - boundPacketConn
+      - (*boundPacketConn).Close
+      - packetSize
+      - batchSize
+    name: packet_listen.go
+  - decls:
+      - (*Server).readLoop
+      - (*Server).dispatch
+      - (*Server).servePacket
+    name: packet_loop.go
+  - decls:
+      - (*Server).acquire
+      - (*Server).release
+      - (*Server).closeLive
+    name: pool.go
+  - decls:
+      - rawConnProvider
+    name: raw_conn_provider_linux.go
+  - decls:
+      - soReusePort
+      - reusePortSupported
+      - setReusePort
+    name: reuseport_linux.go
+  - decls:
+      - defaultDrainTimeout
+      - Server
+      - newPooledConn
+      - New
+      - (*Server).Group
+      - (*Server).PacketGroup
+      - (*Server).recordDeclError
+      - (*Server).State
+    name: server.go
+  - decls:
+      - portByteShift
+      - sockaddrToAddr
+      - inet4Addr
+      - inet6Addr
+      - unixAddr
+      - hostPort
+      - zoneOf
+    name: sockaddr_linux.go
+  - decls:
+      - StreamGroup
+      - (*StreamGroup).Name
+      - (*StreamGroup).Handle
+      - (*StreamGroup).HandleFunc
+      - (*StreamGroup).HandleHTTP
+      - (*StreamGroup).tracksCloses
+      - (*StreamGroup).Use
+      - (*StreamGroup).resolved
+    name: stream_group.go
+  - decls:
+      - connLimiter
+      - newConnLimiter
+      - (*connLimiter).tryAcquire
+      - (*connLimiter).release
+      - (*connLimiter).releaseFor
+      - (*Server).admit
+    name: stream_group_limiter.go
+  - decls:
+      - swallowErr
+    name: swallow.go
+  - decls:
+      - datagramTruncated
+    name: truncation_other.go
+functions:
+  - name: NewAdmission
+    params: cfg AdmissionConfig
+    results: "*Admission"
+  - doc: |-
+      admissionKey is the budget a remote address counts against: the IPv4
+      address, or the IPv6 /64.
+    name: admissionKey
+    params: a stdnet.Addr
+    results: string
+  - doc: |-
+      admissionKeyOf folds an IP to its budget key: an IPv4 address stands for
+      itself, while an IPv6 address is widened to its /64 because one host is
+      routinely handed the whole prefix and could otherwise rotate past the
+      per-address budget.
+    name: admissionKeyOf
+    params: ip stdnet.IP
+    results: string
+  - name: PreHandshake
+    params: a *Admission
+    results: GroupOption
+  - doc: releaseAdmission gives a connection's admission slot back, if it has one.
+    name: releaseAdmission
+    params: ctx context.Context
+  - doc: |-
+      closeFiles releases descriptors an adoption did not turn into a socket.
+
+      A partial adoption used to abandon them — the failing descriptor, every one
+      after it, and every socket already built from the ones before. Nothing else
+      reclaims those: the listeners never reached the Server's registry, so the
+      Close on Start's error path had nothing to close.
+    name: closeFiles
+    params: files []*os.File
+  - doc: |-
+      listenersFromFiles turns adopted descriptors into stream listeners, releasing
+      every one of them if any fails.
+    name: listenersFromFiles
+    params: name string, files []*os.File
+    results: listeners []stdnet.Listener, err error
+  - doc: closeListeners releases stream listeners built before an adoption failed.
+    name: closeListeners
+    params: listeners []stdnet.Listener
+  - doc: closePacketConns releases datagram sockets built before an adoption failed.
+    name: closePacketConns
+    params: conns []stdnet.PacketConn
+  - doc: |-
+      packetConnsFromFiles turns adopted descriptors into datagram sockets,
+      releasing every one of them if any fails.
+    name: packetConnsFromFiles
+    params: name string, files []*os.File
+    results: conns []stdnet.PacketConn, err error
+  - doc: |-
+      newSlots allocates a read batch sized for the group.
+
+      Each buffer is ONE BYTE past the group's ceiling, and that probe byte is what
+      makes an oversized datagram detectable at all. The kernel copies as much as
+      the buffer holds and discards the remainder, so a buffer sized exactly at the
+      ceiling cannot tell a datagram that just fits from one that was cut down to
+      fit — both report the same length. Reading one byte further makes the two
+      distinguishable, which is the same reason the outbound body ceiling reads one
+      byte past its own limit.
+    name: newSlots
+    params: count, size int
+    results: "[]datagram"
+  - doc: tighterBudget returns the smaller of two budgets, treating zero as unbounded.
+    name: tighterBudget
+    params: a, b time.Duration
+    results: time.Duration
+  - doc: |-
+      hijackedTracker returns the tracker under c's socket when a handler has
+      taken that socket over, or nil — when nothing was hijacked, or the group
+      does not track closes.
+    name: hijackedTracker
+    params: c corenet.Conn
+    results: "*trackedConn"
+  - doc: |-
+      newDatagramSource returns the batched reader when the socket exposes a raw
+      descriptor, and the portable one otherwise.
+
+      The type assertion is the honest guard: recvmmsg needs a real file
+      descriptor, and a caller can legitimately hand us a PacketConn that has none
+      — a test double, or a wrapper. Falling back keeps such a socket working
+      instead of failing at the first read.
+    name: newDatagramSource
+    params: pc stdnet.PacketConn
+    results: datagramSource
+  - doc: |-
+      batchAvailable reports whether the platform can read several datagrams per
+      syscall. It feeds the degradation reported by State.
+    name: batchAvailable
+    results: bool
+  - doc: |-
+      platformLacks reports whether this platform has no socket for a family the
+      engine serves everywhere else. Off Windows the answer is left to the kernel:
+      a family it refuses fails the bind and says why, as it always has.
+    name: platformLacks
+    params: _ string
+    results: bool
+  - doc: boundHandshake negotiates TLS under a deadline and then clears it.
+    name: boundHandshake
+    params: ctx context.Context, c corenet.Conn, timeouts corenet.TimeoutsValue
+    results: error
+  - doc: handshakeBudget returns how long the negotiation may take.
+    name: handshakeBudget
+    params: timeouts corenet.TimeoutsValue
+    results: time.Duration
+  - doc: newHTTPAdapter wraps an http.Handler as a ConnHandler.
+    name: newHTTPAdapter
+    params: h http.Handler
+    results: "*httpAdapter"
+  - doc: |-
+      markHijacked records that a pooled connection is no longer the engine's to
+      close.
+
+      A hijacked socket has left the HTTP lifecycle entirely: net/http stops
+      tracking it, and the handler that took it over speaks its own protocol on it
+      for as long as it likes. The engine must therefore stop closing it on the way
+      out, exactly as net/http stops closing and waiting for it — see
+      http.Server.Shutdown's own documented carve-out for WebSockets.
+
+      It stops being the engine's to close, not the ceiling's to count: under
+      MaxConns the flag set here is what makes admit hand the connection's slot to
+      the socket, which returns it when it closes (see trackedConn).
+    name: markHijacked
+    params: c corenet.Conn
+  - doc: |-
+      rawSocket returns the underlying socket behind a pooled connection.
+
+      net/http must receive the concrete connection — a *tls.Conn on an HTTPS
+      listener — because it type-asserts on it to populate Request.TLS. Handing it
+      our pooled wrapper would make every HTTPS request look like plaintext.
+    name: rawSocket
+    params: c corenet.Conn
+    results: stdnet.Conn
+  - doc: newChanListener builds a bridge listener for the given address.
+    name: newChanListener
+    params: addr stdnet.Addr
+    results: "*chanListener"
+  - doc: |-
+      setKernelLen assigns n to a kernel length field.
+
+      The length fields of syscall.Iovec and syscall.Msghdr are sized after the
+      C `size_t`, so their Go type follows the word size: uint64 on 64-bit Linux
+      (amd64, arm64, riscv64, …) and uint32 on 32-bit (386, arm, mips, …). A
+      literal conversion therefore compiles on one class of architecture and fails
+      on the other — the cross-build for linux/386 and linux/arm caught exactly
+      that.
+
+      The type parameter is inferred from the field being written, so one call
+      site is correct on every architecture without a build tag per word size and
+      without golang.org/x/sys, which ADR 0016 and ADR 0018 ban.
+
+      The caller passes an int that the kernel will treat as a size. Values here
+      are buffer lengths and small counts, both far below the 32-bit ceiling, so
+      the conversion cannot truncate in practice; the ceiling is asserted in the
+      tests rather than left to trust.
+    name: setKernelLen
+    params: dst *T, n int
+    typeParams: T ~uint32 | ~uint64
+  - doc: |-
+      batchDegradation reports whether batched reading was asked for and is
+      unavailable, and why. A silent fallback is indistinguishable from a working
+      one, so it is surfaced through State rather than logged once at startup.
+    name: batchDegradation
+    params: limits corenet.LimitsValue
+    results: degraded bool, reason string
+  - doc: |-
+      acceptDelay returns the wait after the failures-th consecutive failed Accept:
+      5 ms, doubling, held at 1 s — the curve net/http's Serve uses, drawn from the
+      SDK's one published backoff (ADR 0103).
+    name: acceptDelay
+    params: failures int
+    results: time.Duration
+  - doc: |-
+      recoverHandler swallows a handler panic so it cannot unwind past the
+      connection that caused it.
+    name: recoverHandler
+  - doc: |-
+      shardable reports whether an address can carry several listeners.
+
+      A Unix socket cannot: SO_REUSEPORT is an IP-socket option, and a second bind
+      on the same path fails outright. Sharding a Unix listener is therefore not a
+      degradation to report but a request that never made sense.
+    name: shardable
+    params: network string
+    results: bool
+  - doc: |-
+      resolveShards returns how many listeners to open on one address, and why it
+      may differ from what the caller asked for.
+
+      Zero means "auto": one listener per core where the platform can shard, which
+      is the point at which accept contention stops being the bottleneck. A count
+      above one on a platform or family that cannot shard degrades to a single
+      listener — reported, never silent.
+    name: resolveShards
+    params: requested int, network string
+    results: count int, degraded bool, reason string
+  - doc: |-
+      shardsFor is resolveShards with the platform's SO_REUSEPORT answer passed
+      in, so the branch only Windows takes in production is exercised by the
+      suite on every OS — it is where the self-contradicting report lived, and a
+      branch one platform alone reaches is a branch one lane alone can check.
+    name: shardsFor
+    params: requested int, network string, reusePort bool
+    results: count int, degraded bool, reason string
+  - doc: |-
+      reusePortControl enables SO_REUSEPORT before the socket is bound.
+
+      The option MUST be set before bind, which is precisely what net.ListenConfig's
+      Control hook exists for; setting it afterwards has no effect.
+      The network and address parameters are part of net.ListenConfig.Control's
+      signature. They are read only to keep the intent explicit: the option applies
+      identically whatever address is about to be bound, so neither is consulted.
+    name: reusePortControl
+    params: network, address string, rawConn syscall.RawConn
+    results: error
+  - doc: |-
+      listen binds one address, wrapping it in TLS when the group carries an
+      identity. TLS is applied here rather than inside the accept loop so the
+      handshake is driven by the connection's own goroutine, which is what keeps a
+      slow or hostile peer from stalling the accept path for everyone else.
+
+      trackCloses hands out sockets that report their own Close (see trackedConn),
+      for a group whose ceiling must keep counting a connection a handler took
+      over.
+    name: listen
+    params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool
+    results: ln stdnet.Listener, err error
+  - doc: |-
+      familyUnavailable refuses a family the engine serves but this platform has
+      no socket for, before the OS is asked — or returns nil.
+
+      The refusal is the SDK's uniform UNSUPPORTED_PLATFORM (ADR 0018 §(a)), not
+      LISTEN_FAILED: a failed bind is something an operator can fix — a port in
+      use, a permission, a path — and no address would ever make this one bind.
+      The family and the platform travel as fields, so the log line says which.
+    name: familyUnavailable
+    params: addr corenet.AddressValue
+    results: error
+  - doc: |-
+      layered puts a group's layers over a raw stream listener: the close tracker
+      when the group has a ceiling to keep counting, then TLS when it carries an
+      identity. It is the ONE place that decides them, for a socket this process
+      bound and for one a supervisor handed over alike.
+
+      The adopted path used to add the tracker and never TLS, so a group with an
+      identity served an inherited socket in plaintext and reported no error —
+      the supervisor passes a raw socket, and TLS is this process's layer to add.
+    name: layered
+    params: raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool
+    results: stdnet.Listener
+  - doc: newMultiReader builds a batched reader over pc.
+    name: newMultiReader
+    params: pc stdnet.PacketConn, sc rawConnProvider
+    results: reader *multiReader, err error
+  - name: WithDrainTimeout
+    params: d time.Duration
+    results: Option
+  - name: Listen
+    params: network, addr string
+    results: GroupOption
+  - name: TLS
+    params: id corenet.IdentityValue
+    results: GroupOption
+  - name: ReadTimeout
+    params: d time.Duration
+    results: GroupOption
+  - name: WriteTimeout
+    params: d time.Duration
+    results: GroupOption
+  - name: IdleTimeout
+    params: d time.Duration
+    results: GroupOption
+  - name: ReadHeaderTimeout
+    params: d time.Duration
+    results: GroupOption
+  - name: MaxHeaderBytes
+    params: n int
+    results: GroupOption
+  - name: HandshakeTimeout
+    params: d time.Duration
+    results: GroupOption
+  - name: ReadBufferSize
+    params: n int
+    results: GroupOption
+  - name: MaxPacketSize
+    params: n int
+    results: GroupOption
+  - name: BatchSize
+    params: n int
+    results: GroupOption
+  - name: Shards
+    params: n int
+    results: GroupOption
+  - name: MaxConns
+    params: n int
+    results: GroupOption
+  - name: Adopt
+    params: names ...string
+    results: GroupOption
+  - doc: listenPacket binds one datagram socket.
+    name: listenPacket
+    params: ctx context.Context, addr corenet.AddressValue
+    results: pc stdnet.PacketConn, err error
+  - doc: packetSize returns the group's datagram ceiling.
+    name: packetSize
+    params: limits corenet.LimitsValue
+    results: int
+  - doc: batchSize returns how many datagrams one read should attempt to collect.
+    name: batchSize
+    params: limits corenet.LimitsValue
+    results: int
+  - doc: |-
+      reusePortSupported reports whether this platform can bind several listeners
+      to one address.
+    name: reusePortSupported
+    results: bool
+  - doc: setReusePort enables SO_REUSEPORT on a socket about to be bound.
+    name: setReusePort
+    params: fd uintptr
+    results: error
+  - doc: newPooledConn mints an empty connection wrapper for the recycler.
+    name: newPooledConn
+    results: "*conn"
+  - name: New
+    params: opts ...Option
+    results: "*Server"
+  - doc: |-
+      sockaddrToAddr converts a kernel sockaddr into a net.Addr.
+
+      recvmmsg reports the sender as a raw sockaddr, so the batched path has to do
+      what ReadFrom does internally. Only the families the datagram engine binds are
+      decoded; anything else yields nil rather than a wrong address, because a
+      handler replying to a misdecoded address is worse than one that sees none.
+    name: sockaddrToAddr
+    params: raw *syscall.RawSockaddrAny
+    results: stdnet.Addr
+  - doc: inet4Addr decodes an IPv4 sockaddr.
+    name: inet4Addr
+    params: raw *syscall.RawSockaddrAny
+    results: stdnet.Addr
+  - doc: inet6Addr decodes an IPv6 sockaddr.
+    name: inet6Addr
+    params: raw *syscall.RawSockaddrAny
+    results: stdnet.Addr
+  - doc: unixAddr decodes a Unix-domain sockaddr.
+    name: unixAddr
+    params: raw *syscall.RawSockaddrAny
+    results: stdnet.Addr
+  - doc: hostPort converts a network-byte-order port to host order.
+    name: hostPort
+    params: port uint16
+    results: int
+  - doc: |-
+      zoneOf resolves an IPv6 scope identifier to an interface name.
+
+      It reports whether a zone was found rather than leaning on the empty string,
+      because "no zone" and "an index we could not resolve" are different facts even
+      though both end up as an empty net.UDPAddr.Zone.
+    name: zoneOf
+    params: scope uint32
+    results: zone string, ok bool
+  - doc: newConnLimiter returns the group's ceiling, or nil when it has none.
+    name: newConnLimiter
+    params: limits corenet.LimitsValue
+    results: "*connLimiter"
+  - doc: |-
+      swallowErr intentionally discards a non-actionable error, recording the
+      discard so the error audit treats it as deliberate rather than dropped.
+
+      It is used on three paths where there is genuinely nothing to report:
+      closing a socket whose handler has already finished, closing a listener
+      during shutdown that a concurrent Close may already have closed, and setting
+      a deadline on a connection that is already gone — in which case the handler's
+      first read reports the real problem far more usefully.
+    name: swallowErr
+    params: err error
+  - doc: |-
+      datagramTruncated reports whether a read failed because the datagram did not
+      fit the buffer it was read into. Off Windows no read fails for that reason:
+      recvfrom truncates and returns the length it copied, and the probe byte past
+      the ceiling is what tells dispatch the datagram was oversized.
+    name: datagramTruncated
+    params: _ error
+    results: bool
+imports:
+  atomic: sync/atomic
+  buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  io: io
+  kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  maps: maps
+  os: os
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  runtime: runtime
+  sdlisten: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
+  slices: slices
+  stdnet: net
+  strings: strings
+  sync: sync
+  syscall: syscall
+  time: time
+  tls: crypto/tls
+  unsafe: unsafe
+  worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/server
+  name: server
+  purpose: Package server — adoption of listeners inherited from a supervisor.
+types:
+  - fields:
+      - doc: |-
+          PerAddress caps the connections one IPv4 address, or one IPv6 /64, may
+          hold before their handshake completes. Default 4.
+        name: PerAddress
+        type: int
+      - doc: |-
+          Reserved is the budget of the addresses declared with SetReserved.
+          Default 8.
+        name: Reserved
+        type: int
+    kind: struct
+    name: AdmissionConfig
+  - fields:
+      - name: cfg
+        type: AdmissionConfig
+      - name: mu
+        type: sync.Mutex
+      - name: pending
+        type: map[string]int
+      - name: reserved
+        type: map[string]bool
+      - name: refused
+        type: atomic.Int64
+    kind: struct
+    methods:
+      - name: Admit
+        params: remote stdnet.Addr
+        recv: a *Admission
+        results: release func(), ok bool
+      - name: SetReserved
+        params: addrs []string
+        recv: a *Admission
+      - name: Refused
+        recv: a *Admission
+        results: int64
+    name: Admission
+  - doc: |-
+      admissionReleaseKey carries a connection's admission release to the
+      handshake handler, which gives the slot back once the peer authenticated.
+    kind: struct
+    name: admissionReleaseKey
+  - doc: |-
+      datagram is one slot in a read batch: a reusable buffer plus what the last
+      read put in it. Slots are allocated once per read loop and reused for the
+      life of the socket, which is what keeps datagram serving allocation-free.
+    fields:
+      - doc: buf is the slot's reusable payload buffer.
+        name: buf
+        type: "[]byte"
+      - doc: n is how many bytes the last read placed in buf.
+        name: "n"
+        type: int
+      - doc: addr is the sender of the last read.
+        name: addr
+        type: stdnet.Addr
+    kind: struct
+    methods:
+      - doc: payload returns the bytes of the last read.
+        name: payload
+        recv: d *datagram
+        results: "[]byte"
+    name: datagram
+  - doc: |-
+      datagramSource collects one or more datagrams per call.
+
+      The interface exists so the read loop is written once against "give me up to
+      N datagrams", and the platform decides how many syscalls that costs. On Linux
+      it is one recvmmsg; elsewhere it is a ReadFrom per datagram. The loop above it
+      does not change either way — which is why the type is named for the role it
+      plays rather than for its single method.
+
+      IFACE-PLUGIN: implementations are selected by build tag and stay unexported.
+    kind: named
+    name: datagramSource
+    underlying: |-
+      interface {
+      	// readBatch fills slots and returns how many were filled. It returns at
+      	// least one datagram or an error.
+      	readBatch(slots []datagram) (n int, err error)
+      }
+  - doc: |-
+      portableReader reads one datagram per syscall using the standard library.
+
+      It is the floor every platform has, and the fallback whenever the batched
+      path is unavailable. Correctness is identical; only the syscall count differs,
+      which is exactly what the benchmarks measure.
+    fields:
+      - doc: pc is the socket being read.
+        name: pc
+        type: stdnet.PacketConn
+    kind: struct
+    methods:
+      - doc: |-
+          readBatch implements datagramSource by reading a single datagram.
+
+          It deliberately does not loop to fill the batch: a second ReadFrom would block
+          until another datagram arrived, turning a low-traffic socket into a stalled
+          one. Batching is only a win when the kernel already has the datagrams queued,
+          which is precisely what recvmmsg reports and ReadFrom cannot.
+        name: readBatch
+        params: slots []datagram
+        recv: r *portableReader
+        results: n int, err error
+    name: portableReader
+  - doc: |-
+      conn is the domain's view of one accepted connection.
+
+      It embeds stdnet.Conn so every call the domain does not bound reaches the
+      socket directly. Read and Write are overridden because the group's deadlines
+      are documented as per-OPERATION bounds: installed once at accept time they
+      would be a budget for the connection's whole life, which is a different and
+      much weaker promise — a peer that sends one byte per second stays inside a
+      lifetime budget for as long as the budget lasts, and outside a per-read one
+      immediately.
+    fields:
+      - name: ""
+        role: embedded
+        type: stdnet.Conn
+      - doc: id is the monotonic identifier assigned at accept time.
+        name: id
+        type: uint64
+      - doc: group names the listener group that accepted this connection.
+        name: group
+        type: string
+      - doc: scratch is the pooled read buffer handed out by Buffer.
+        name: scratch
+        type: "*[]byte"
+      - doc: timeouts are the group's per-phase bounds, refreshed per operation.
+        name: timeouts
+        type: corenet.TimeoutsValue
+      - doc: |-
+          hijacked records that the socket's ownership has left the engine — a
+          handler took the response over and now speaks its own protocol on it
+          (WebSocket, or any other upgrade).
+
+          It is deliberately NOT called "adopted": in this package that word
+          already means a listener inherited from a supervisor (adopt.go), and the
+          two would be impossible to tell apart in a stack trace.
+
+          It exists because the engine closes every connection it serves on the way
+          out, which is exactly right until the moment a handler takes the socket
+          over: net/http reports StateHijacked immediately, the engine's ServeConn
+          returns, and the deferred close then severed a connection the handler was
+          still using. Written and read on the connection's own serve goroutine, so
+          it needs no synchronisation of its own.
+        name: hijacked
+        type: bool
+    kind: struct
+    methods:
+      - doc: Read implements net.Conn, bounding this read before it starts.
+        name: Read
+        params: p []byte
+        recv: c *conn
+        results: n int, err error
+      - doc: Write implements net.Conn, bounding this write before it starts.
+        name: Write
+        params: p []byte
+        recv: c *conn
+        results: n int, err error
+      - doc: boundRead installs the deadline for the read about to start.
+        name: boundRead
+        recv: c *conn
+      - doc: boundWrite installs the deadline for the write about to start.
+        name: boundWrite
+        recv: c *conn
+      - doc: ID implements corenet.Conn.
+        name: ID
+        recv: c *conn
+        results: uint64
+      - doc: Group implements corenet.Conn.
+        name: Group
+        recv: c *conn
+        results: string
+      - doc: Buffer implements corenet.Conn.
+        name: Buffer
+        recv: c *conn
+        results: "[]byte"
+      - doc: |-
+          Close closes the underlying socket, tolerating a wrapper the pool has already
+          reset.
+
+          net/http can close a connection after the engine has reclaimed its wrapper —
+          on a drain, where the adapter releases the waiter without waiting for
+          net/http to finish. Embedding net.Conn would make that a nil dereference, so
+          the guard is what keeps a late close from panicking a serving goroutine.
+        name: Close
+        recv: c *conn
+        results: error
+      - doc: |-
+          reset clears the connection so the pool can hand it out again. It is the
+          recycler's reset hook, and it must drop every reference or a pooled entry
+          would pin a closed socket for as long as the pool lives.
+        name: reset
+        recv: c *conn
+    name: conn
+  - doc: |-
+      trackedConn is an accepted socket that reports its own Close, so a ceilinged
+      group keeps counting a connection a handler has taken over.
+
+      Once a handler hijacks a response the engine neither closes the socket nor
+      waits for it (ADR 0047 §D9), and ServeConn returns at the hijack — so the
+      slot a ceiling holds for the length of ServeConn was given back while the
+      connection stayed open. The one event left that says such a connection is
+      over is somebody closing it, and this type is where that event is heard.
+
+      It sits BELOW TLS — tls.NewListener wraps it — so net/http still receives
+      the concrete *tls.Conn it type-asserts on, and Request.TLS is populated as
+      before. On a plaintext listener net/http receives this type itself, which
+      is why it forwards the two optional interfaces net/http looks for on a raw
+      connection instead of hiding them: CloseWrite, for the graceful half-close
+      before a server-side close, and ReadFrom, for the sendfile/splice path. A
+      hijacking handler on such a group is handed this type too, never the
+      *net.TCPConn underneath it.
+
+      Only a group that serves HTTP under a ceiling builds one — nothing else can
+      hijack, and nothing without a ceiling has a slot to hold — so every other
+      group's sockets reach the engine unwrapped and cost nothing extra.
+    fields:
+      - name: ""
+        role: embedded
+        type: stdnet.Conn
+      - doc: |-
+          mu guards closed and slot: a hijacking handler closes the socket on its
+          own goroutine while the engine hands the slot over on the serve one.
+        name: mu
+        type: sync.Mutex
+      - doc: closed records that Close has run.
+        name: closed
+        type: bool
+      - doc: |-
+          slot is the ceiling whose slot this socket holds, nil while it holds
+          none — which is always, except after a hijack.
+        name: slot
+        type: "*connLimiter"
+    kind: struct
+    methods:
+      - doc: |-
+          Close closes the socket, then returns the slot it holds, if any.
+
+          The socket closes FIRST, so for an instant the ceiling can count one socket
+          that is already gone, but never admit a new one while this one is still
+          open.
+        name: Close
+        recv: t *trackedConn
+        results: error
+      - doc: |-
+          holdSlot hands a ceiling's slot to this socket, to be returned by its Close.
+
+          A socket that is already closed returns it at once: a handler can hijack
+          and close before the engine has finished with the connection, and nothing
+          would ever close it again to return the slot.
+        name: holdSlot
+        params: slot *connLimiter
+        recv: t *trackedConn
+      - doc: |-
+          CloseWrite shuts the socket's write half, forwarded so net/http's graceful
+          half-close before a server-side close still reaches a plaintext socket.
+        name: CloseWrite
+        recv: t *trackedConn
+        results: error
+      - doc: |-
+          ReadFrom copies r to the socket through the socket's own ReadFrom when it
+          has one, which is what keeps sendfile and splice on net/http's file-serving
+          path for a plaintext socket.
+        name: ReadFrom
+        params: r io.Reader
+        recv: t *trackedConn
+        results: n int64, err error
+    name: trackedConn
+  - doc: |-
+      connWaiter is what a ServeConn blocks on while net/http drives a connection.
+
+      It carries the hijack flag alongside the completion channel because the two
+      answer one question together: net/http reports a finished connection and a
+      hijacked one through the same terminal hook, and the engine must treat them
+      oppositely — close the first, let go of the second.
+    fields:
+      - doc: |-
+          done is closed once net/http is finished with the connection, whether it
+          closed it or a handler took it over.
+        name: done
+        type: chan struct{}
+      - doc: |-
+          hijacked records that a handler took the socket over. It is atomic
+          because ServeConn can wake on the drain instead of on done, and would
+          then read this while net/http's goroutine is still writing it.
+        name: hijacked
+        type: atomic.Bool
+      - doc: |-
+          doneOnce guards close(done). The waiter is deleted from the map under the
+          adapter's lock before it is released, which already makes the close
+          single; the guard is explicit so the invariant is local to the close
+          rather than inferred from a delete three lines away.
+        name: doneOnce
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: release wakes the ServeConn waiting on this connection, exactly once.
+        name: release
+        recv: w *connWaiter
+    name: connWaiter
+  - doc: |-
+      handshakeHandler completes the TLS negotiation under its own bound before
+      handing the connection to the group's handler.
+
+      It is applied once per group rather than per connection, and only to groups
+      that actually carry a TLS identity, so a plaintext group pays nothing at all.
+      It sits INSIDE the connection ceiling on purpose: negotiating first would let
+      a flood of connections each pay for a full handshake before the ceiling had a
+      chance to refuse them, which is the opposite of what the ceiling is for.
+    fields:
+      - doc: next is the group's own handler chain.
+        name: next
+        type: corenet.ConnHandler
+      - doc: timeouts carries the group's handshake bound.
+        name: timeouts
+        type: corenet.TimeoutsValue
+    kind: struct
+    methods:
+      - doc: ServeConn implements corenet.ConnHandler.
+        name: ServeConn
+        params: ctx context.Context, c corenet.Conn
+        recv: h handshakeHandler
+        results: error
+    name: handshakeHandler
+  - doc: |-
+      httpAdapter serves connections through an http.Server mounted on our listener.
+
+      This is the shape ADR 0029 D3 commits to: our unified listener, our limits,
+      our TLS identity and our drain, with net/http doing the protocol. net/http
+      handles HTTP/1.1 and HTTP/2 and has a decade of hardening behind it; replacing
+      it would be a regression in correctness and security for no gain in
+      throughput.
+
+      Completion is tracked through http.Server's ConnState hook rather than by
+      wrapping the connection. Wrapping was the obvious design and it is wrong twice
+      over: it puts the pooled wrapper in two goroutines at once, and it hides the
+      concrete *tls.Conn that net/http type-asserts on to populate Request.TLS — so
+      every request on an HTTPS listener would arrive looking like plaintext.
+    fields:
+      - doc: handler is the application's http.Handler.
+        name: handler
+        type: http.Handler
+      - doc: |-
+          timeouts are the group's per-phase bounds, set at Start and handed to
+          http.Server so net/http refreshes them per REQUEST. The engine's own
+          per-operation deadlines cannot do it here: net/http is given the concrete
+          socket, not the pooled wrapper that carries them, because it type-asserts
+          on *tls.Conn to populate Request.TLS.
+        name: timeouts
+        type: corenet.TimeoutsValue
+      - doc: |-
+          bounds are the HTTP-only options — the header phase's own deadline and
+          the header size cap — set at Start with the timeouts above.
+        name: bounds
+        type: httpBounds
+      - doc: start guarantees the serving goroutine is launched at most once.
+        name: start
+        type: sync.Once
+      - doc: |-
+          mu guards waiters AND the lifecycle fields below. They are written by the
+          first connection's goroutine and read by whichever goroutine shuts the
+          server down, so an unguarded read is a genuine race, not a formality.
+        name: mu
+        type: sync.RWMutex
+      - doc: waiters maps a handed-over connection to the ServeConn blocked on it.
+        name: waiters
+        type: map[stdnet.Conn]*connWaiter
+      - doc: bridge feeds accepted connections to http.Server.
+        name: bridge
+        type: "*chanListener"
+      - doc: server is the net/http instance driving the protocol.
+        name: server
+        type: "*http.Server"
+      - doc: |-
+          daemon owns the goroutine running http.Server.Serve. Using the kernel's
+          own loop primitive rather than a bare "go" keeps the goroutine's owner
+          and its termination explicit, and gives shutdown a channel to wait on.
+        name: daemon
+        type: "*worker.LoopDaemon"
+      - doc: |-
+          stopped records that the adapter has been shut down. A connection that
+          reaches launch afterwards must not start a server: the engine does not
+          track this goroutine in its WaitGroup, so nothing else would ever end it.
+        name: stopped
+        type: bool
+      - doc: |-
+          draining is closed the moment shutdown begins, and reaches every handler
+          through the request context (corenet.DrainSignal).
+
+          It exists because http.Server.Shutdown waits for in-flight requests and a
+          request that never ends never becomes idle: an event stream or a long
+          poll held the drain open for its entire budget, every time, and was then
+          killed by having its socket severed — the least graceful ending available.
+          Cancelling the request context instead would tell EVERY handler to
+          abandon its half-written response, which is the opposite of draining;
+          this signal is additive, and a handler that ignores it behaves as before.
+        name: draining
+        type: chan struct{}
+      - doc: |-
+          drainOnce guards close(draining). The stopped flag above already makes
+          the close single, but the guard is explicit so the invariant is local to
+          the close rather than inferred from a flag three lines away.
+        name: drainOnce
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: |-
+          ServeConn implements corenet.ConnHandler.
+
+          Goroutine lifecycle: the first connection starts one goroutine running
+          http.Server.Serve over the bridge listener. It lives for the group's lifetime
+          and exits when the bridge closes, which Accept reports as net.ErrClosed — the
+          termination http.Server expects.
+        name: ServeConn
+        params: ctx context.Context, c corenet.Conn
+        recv: a *httpAdapter
+        results: error
+      - doc: register creates the completion state for a handed-over connection.
+        name: register
+        params: raw stdnet.Conn
+        recv: a *httpAdapter
+        results: "*connWaiter"
+      - doc: unregister drops the completion channel once ServeConn is done with it.
+        name: unregister
+        params: raw stdnet.Conn
+        recv: a *httpAdapter
+      - doc: onConnState releases the ServeConn waiting on a finished connection.
+        name: onConnState
+        params: raw stdnet.Conn, state http.ConnState
+        recv: a *httpAdapter
+      - doc: |-
+          launch starts the net/http serving goroutine for this adapter.
+
+          Goroutine lifecycle: exactly one is started, on the first connection, and it
+          is owned by the adapter. It terminates when shutdown closes the bridge, which
+          makes Accept report net.ErrClosed — the termination http.Server expects. It
+          is not tracked by the engine's WaitGroup on purpose: it must outlive the
+          individual ServeConn calls it serves, and shutdown is what ends it.
+        name: launch
+        params: raw stdnet.Conn
+        recv: a *httpAdapter
+      - doc: |-
+          shutdown stops the embedded http.Server gracefully, releasing its keep-alive
+          goroutines, and waits for the serving goroutine within the caller's budget.
+        name: shutdown
+        params: ctx context.Context
+        recv: a *httpAdapter
+      - doc: |-
+          closeNow stops the embedded http.Server immediately, without a drain.
+
+          It is Close's counterpart to shutdown: Close severs live sockets rather than
+          waiting for them, so the embedded server is closed the same way instead of
+          being left to finish. Without this, Close ended every listener the engine
+          knew about and left the http.Server running on its bridge — a goroutine, an
+          http.Server and its keep-alive machinery outliving the server that owned
+          them, on every Close of an HTTP group.
+        name: closeNow
+        recv: a *httpAdapter
+      - doc: |-
+          stop marks the adapter shut down and snapshots what has to be stopped.
+
+          Marking and reading happen together under the lock so a launch racing this
+          call either happens entirely before it — and is therefore in the snapshot —
+          or sees stopped and refuses. The lock is released before anything is closed
+          or waited on, because onConnState takes it too and http.Server fires that
+          hook from inside Shutdown.
+        name: stop
+        recv: a *httpAdapter
+        results: bridge *chanListener, srv *http.Server, daemon *worker.LoopDaemon
+      - doc: currentBridge reports the bridge listener the adapter launched, if any.
+        name: currentBridge
+        recv: a *httpAdapter
+        results: "*chanListener"
+    name: httpAdapter
+  - doc: |-
+      httpBounds are the options that mean something only to the net/http
+      adapter: the header phase's own deadline and the header size cap. Their zero
+      value is "not set", and each keeps the behaviour the group had before the
+      option existed.
+    fields:
+      - doc: |-
+          readHeaderTimeout bounds the request line and the header fields; zero or
+          negative falls back to the group's read timeout.
+        name: readHeaderTimeout
+        type: time.Duration
+      - doc: |-
+          maxHeaderBytes caps the request line and the header fields; zero or
+          negative leaves net/http's default.
+        name: maxHeaderBytes
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          headerTimeout resolves the header phase's deadline: the option when it was
+          set, the read timeout otherwise — which is what the adapter applied before
+          the option existed.
+        name: headerTimeout
+        params: read time.Duration
+        recv: b httpBounds
+        results: time.Duration
+      - doc: |-
+          headerBytes resolves the header cap handed to http.Server, where zero means
+          net/http's own default.
+        name: headerBytes
+        recv: b httpBounds
+        results: int
+    name: httpBounds
+  - doc: |-
+      chanListener is a net.Listener fed by our accept path.
+
+      net/http can only be driven through Serve(net.Listener); there is no public
+      per-connection entry point. Rather than reimplement HTTP — which would mean
+      owning request smuggling, HTTP/2 flow control, HPACK and the whole CVE stream
+      to lose, not gain, throughput — the adapter hands http.Server a listener whose
+      Accept pops from a channel our own accept loop fills. The cost is one channel
+      hand-off per CONNECTION, not per request, which is noise next to a TCP
+      handshake, and the benchmarks measure it rather than assuming it.
+    fields:
+      - doc: conns carries accepted connections to http.Server.
+        name: conns
+        type: chan stdnet.Conn
+      - doc: addr is reported to http.Server as the listen address.
+        name: addr
+        type: stdnet.Addr
+      - doc: closed is shut to unblock Accept when the group drains.
+        name: closed
+        type: chan struct{}
+      - doc: once makes Close idempotent, since http.Server also closes its listener.
+        name: once
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: Accept implements net.Listener.
+        name: Accept
+        recv: l *chanListener
+        results: conn stdnet.Conn, err error
+      - doc: Close implements net.Listener.
+        name: Close
+        recv: l *chanListener
+        results: error
+      - doc: Addr implements net.Listener.
+        name: Addr
+        recv: l *chanListener
+        results: stdnet.Addr
+      - doc: offer hands a connection to http.Server, or reports that the bridge is closed.
+        name: offer
+        params: c stdnet.Conn
+        recv: l *chanListener
+        results: bool
+    name: chanListener
+  - doc: boundListener pairs a live listener with the group that owns it.
+    fields:
+      - doc: group is the owning group's name.
+        name: group
+        type: string
+      - doc: addr is the address as requested.
+        name: addr
+        type: corenet.AddressValue
+      - doc: ln is the live listener.
+        name: ln
+        type: stdnet.Listener
+      - doc: made creates closed on first use, so a zero boundListener works.
+        name: made
+        type: sync.Once
+      - doc: shut closes closed exactly once, whoever closes the listener first.
+        name: shut
+        type: sync.Once
+      - doc: |-
+          closed is closed when the listener is: it ends an accept loop's backoff,
+          which is not blocked in Accept and so would not see the closure.
+        name: closed
+        type: chan struct{}
+    kind: struct
+    methods:
+      - doc: closedSignal returns the channel closed when the listener is.
+        name: closedSignal
+        recv: b *boundListener
+        results: <-chan struct{}
+      - doc: Close releases the listener, and tells an accept loop waiting out a backoff.
+        name: Close
+        recv: b *boundListener
+        results: error
+    name: boundListener
+  - doc: |-
+      trackedListener wraps every socket it accepts in a trackedConn.
+
+      It is the only place the wrapping can happen for a TLS group: by the time
+      the accept loop sees a connection, tls.NewListener has already wrapped it in
+      a *tls.Conn, so the tracker has to be handed out BELOW that layer — by the
+      listener TLS is built on. See trackedConn for why a group needs it at all.
+    fields:
+      - name: ""
+        role: embedded
+        type: stdnet.Listener
+    kind: struct
+    methods:
+      - doc: Accept implements net.Listener.
+        name: Accept
+        recv: l *trackedListener
+        results: conn stdnet.Conn, err error
+    name: trackedListener
+  - doc: |-
+      multiReader reads several datagrams per syscall using recvmmsg(2).
+
+      It reuses one message array for the life of the socket: the iovecs and name
+      buffers are wired to the slot buffers once, so a read costs no allocation at
+      all — which is the entire reason for the batched path.
+    fields:
+      - doc: pc is the socket, kept for the fallback path and for addresses.
+        name: pc
+        type: stdnet.PacketConn
+      - doc: raw exposes the descriptor under the runtime's netpoller.
+        name: raw
+        type: syscall.RawConn
+      - doc: headers is the reusable mmsghdr array handed to the kernel.
+        name: headers
+        type: "[]mmsghdr"
+      - doc: iovecs points each header at its slot's buffer.
+        name: iovecs
+        type: "[]syscall.Iovec"
+      - doc: names receives each datagram's sender address.
+        name: names
+        type: "[]syscall.RawSockaddrAny"
+      - doc: wired records the slot count the arrays were built for.
+        name: wired
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          wire points the message array at the caller's slots. It runs once per slot
+          count, not once per read.
+        name: wire
+        params: slots []datagram
+        recv: r *multiReader
+      - doc: readBatch implements datagramSource using one recvmmsg call.
+        name: readBatch
+        params: slots []datagram
+        recv: r *multiReader
+        results: n int, err error
+      - doc: fill copies the per-datagram results back into the caller's slots.
+        name: fill
+        params: slots []datagram, received int
+        recv: r *multiReader
+    name: multiReader
+  - doc: |-
+      mmsghdr mirrors struct mmsghdr from <sys/socket.h>:
+
+      	struct mmsghdr {
+      	    struct msghdr msg_hdr;
+      	    unsigned int  msg_len;
+      	};
+
+      golang.org/x/net would supply this type, but it transitively imports
+      golang.org/x/sys, banned SDK-wide (ADR 0016 / ADR 0018), so the layout is
+      declared and cited here — the same discipline the proc domain already uses
+      for its ABI constants.
+
+      There is deliberately no explicit padding field. C rounds the struct up to
+      the alignment of struct msghdr, which pads the trailing uint32 out on 64-bit
+      and leaves it flush on 32-bit, where the alignment is only as wide as the
+      field itself. Go applies that same trailing-padding rule to this declaration,
+      so writing the padding out by hand is right on one class of architecture and
+      four bytes too long on the other — and recvmmsg strides the array by the
+      KERNEL's stride, which would land every element past the first at the wrong
+      offset, inside a struct whose pointers the kernel also reads.
+    fields:
+      - name: hdr
+        type: syscall.Msghdr
+      - name: length
+        type: uint32
+    kind: struct
+    name: mmsghdr
+  - kind: named
+    name: Option
+    underlying: func(*Server)
+  - kind: named
+    name: GroupOption
+    underlying: func(*StreamGroup)
+  - doc: |-
+      packet is the domain's view of one received datagram.
+
+      Its payload points into the read buffer that produced it, which is what makes
+      batched reading allocation-free — and is why the port documents that Data is
+      valid only until ServePacket returns.
+    fields:
+      - doc: data is the payload, a subslice of the owning read buffer.
+        name: data
+        type: "[]byte"
+      - doc: from is the sender's address.
+        name: from
+        type: stdnet.Addr
+      - doc: conn is the socket the datagram arrived on, used by Reply.
+        name: conn
+        type: stdnet.PacketConn
+      - doc: id is the monotonic identifier assigned at read time.
+        name: id
+        type: uint64
+      - doc: group names the listener group that received it.
+        name: group
+        type: string
+    kind: struct
+    methods:
+      - doc: Data implements corenet.Packet.
+        name: Data
+        recv: p *packet
+        results: "[]byte"
+      - doc: From implements corenet.Packet.
+        name: From
+        recv: p *packet
+        results: stdnet.Addr
+      - doc: |-
+          To implements corenet.Packet. A packet whose read loop has ended has no
+          socket left to ask, and answers nil.
+        name: To
+        recv: p *packet
+        results: stdnet.Addr
+      - doc: ID implements corenet.Packet.
+        name: ID
+        recv: p *packet
+        results: uint64
+      - doc: Group implements corenet.Packet.
+        name: Group
+        recv: p *packet
+        results: string
+      - doc: |-
+          Reply implements corenet.Packet.
+
+          It exists so the overwhelmingly common case — answer the sender — needs no
+          reference to the underlying socket, which the handler has no other way to
+          reach and should not have to thread through itself.
+
+          The port bounds only Data to the handler's call, so a handler may keep the
+          Packet and reply later. Once the read loop has ended and reset it, the reply
+          is net.ErrClosed — what writing to the closed socket would have answered —
+          rather than a nil dereference.
+        name: Reply
+        params: b []byte
+        recv: p *packet
+        results: n int, err error
+      - doc: |-
+          reset clears the datagram when its read loop ends. It must drop every
+          reference: a handler that kept the Packet past its call would otherwise pin
+          the closed socket and the last read buffer for as long as it holds it.
+        name: reset
+        recv: p *packet
+    name: packet
+  - fields:
+      - doc: name identifies the group in logs, metrics and State.
+        name: name
+        type: string
+      - doc: addrs are the addresses to bind.
+        name: addrs
+        type: "[]corenet.AddressValue"
+      - doc: handler serves each received datagram.
+        name: handler
+        type: corenet.PacketHandler
+      - doc: middlewares decorate the handler, outermost first.
+        name: middlewares
+        type: "[]corenet.Middleware[corenet.PacketHandler]"
+      - doc: limits bounds what the group may consume.
+        name: limits
+        type: corenet.LimitsValue
+      - doc: adopt names inherited sockets to take over instead of binding.
+        name: adopt
+        type: "[]string"
+    kind: struct
+    methods:
+      - name: Name
+        recv: g *PacketGroup
+        results: string
+      - name: Handle
+        params: h corenet.PacketHandler
+        recv: g *PacketGroup
+        results: "*PacketGroup"
+      - name: HandleFunc
+        params: f corenet.PacketHandlerFunc
+        recv: g *PacketGroup
+        results: "*PacketGroup"
+      - name: Use
+        params: middlewares ...corenet.Middleware[corenet.PacketHandler]
+        recv: g *PacketGroup
+        results: "*PacketGroup"
+      - doc: resolved returns the handler with the group's middlewares applied.
+        name: resolved
+        recv: g *PacketGroup
+        results: corenet.PacketHandler
+    name: PacketGroup
+  - doc: boundPacketConn pairs a live datagram socket with the group that owns it.
+    fields:
+      - doc: group is the owning group's name.
+        name: group
+        type: string
+      - doc: addr is the address as requested.
+        name: addr
+        type: corenet.AddressValue
+      - doc: pc is the live socket.
+        name: pc
+        type: stdnet.PacketConn
+    kind: struct
+    methods:
+      - doc: Close releases the socket, which is what ends its read loop.
+        name: Close
+        recv: b *boundPacketConn
+        results: error
+    name: boundPacketConn
+  - doc: |-
+      rawConnProvider is the part of *net.UDPConn the batched reader needs: access
+      to the raw descriptor under the runtime's netpoller.
+
+      Declaring the contract rather than asserting the concrete *net.UDPConn keeps
+      a wrapper or a test double able to opt in, and keeps the fallback honest for
+      anything that cannot.
+    kind: named
+    name: rawConnProvider
+    underlying: |-
+      interface {
+      	SyscallConn() (syscall.RawConn, error)
+      }
+  - fields:
+      - doc: mu guards the declaration-time fields below.
+        name: mu
+        type: sync.RWMutex
+      - doc: groups preserves declaration order so listeners bind predictably.
+        name: groups
+        type: "[]*StreamGroup"
+      - doc: packetGroups preserves declaration order for the datagram side.
+        name: packetGroups
+        type: "[]*PacketGroup"
+      - doc: packetByName rejects a duplicate datagram group name.
+        name: packetByName
+        type: map[string]*PacketGroup
+      - doc: packetConns are the live bound datagram sockets.
+        name: packetConns
+        type: "[]*boundPacketConn"
+      - doc: byName rejects a duplicate group name at declaration time.
+        name: byName
+        type: map[string]*StreamGroup
+      - doc: declErr is the first declaration error, surfaced by Start.
+        name: declErr
+        type: error
+      - doc: listeners are the live bound listeners.
+        name: listeners
+        type: "[]*boundListener"
+      - doc: states mirrors listeners for reporting, including any degradation.
+        name: states
+        type: "[]corenet.ListenerStateValue"
+      - doc: drainTimeout bounds Shutdown.
+        name: drainTimeout
+        type: time.Duration
+      - doc: phase is the lifecycle phase, read without the mutex by State.
+        name: phase
+        type: atomic.Uint32
+      - doc: inFlight tracks connections being served, for the drain.
+        name: inFlight
+        type: sync.WaitGroup
+      - doc: active, total, rejected and oversized feed State.
+        name: active
+        type: atomic.Int64
+      - name: total
+        type: atomic.Uint64
+      - name: rejected
+        type: atomic.Uint64
+      - doc: |-
+          oversized counts datagrams dropped for passing their group's ceiling. A
+          read loop has nobody to hand an error to, so this counter is how the drop
+          is reported instead of hidden.
+        name: oversized
+        type: atomic.Uint64
+      - doc: |-
+          acceptBackoffs counts the waits accept loops took after a failed Accept —
+          descriptor exhaustion, typically — so a server that is failing to accept
+          says so in State instead of spinning a core per listener.
+        name: acceptBackoffs
+        type: atomic.Uint64
+      - doc: "clk is the engine's clock: what an accept loop's backoff waits on."
+        name: clk
+        type: clock.Timed
+      - doc: |-
+          connPool recycles the per-connection struct so a steady-state accept
+          loop allocates nothing per connection.
+        name: connPool
+        type: "*recycler.Pool[*conn]"
+      - doc: nextID assigns each connection its correlation identifier.
+        name: nextID
+        type: atomic.Uint64
+      - doc: liveMu guards live.
+        name: liveMu
+        type: sync.RWMutex
+      - doc: |-
+          live tracks the sockets currently being served, so an expired drain
+          budget can sever them. Without this registry a stuck handler would make
+          Shutdown block forever, which is precisely what a budget exists to
+          prevent.
+        name: live
+        type: map[uint64]stdnet.Conn
+      - doc: inheritOnce reads the supervisor's socket table at most once per server.
+        name: inheritOnce
+        type: sync.Once
+      - doc: |-
+          inherited is that table, held for the server's lifetime so no wrapper is
+          ever collected and no finaliser closes a descriptor still to be adopted.
+        name: inherited
+        type: map[string][]*os.File
+      - doc: inheritErr is the failure to read it, reported to every adoption.
+        name: inheritErr
+        type: error
+      - doc: stop cancels every in-flight handler when the server shuts down.
+        name: stop
+        type: context.CancelFunc
+      - doc: |-
+          runCtx is handed to every handler. It deliberately outlives the caller's
+          start context so cancelling that context does not tear handlers down
+          before the drain has had its budget.
+        name: runCtx
+        type: context.Context
+    kind: struct
+    methods:
+      - doc: |-
+          adoptedSockets recovers the inherited sockets published under one name.
+
+          Socket activation is what makes a zero-downtime restart possible: the
+          supervisor keeps the bound socket across the exec, so no connection is lost
+          and no bind races. The engine therefore adopts rather than binds when a group
+          names an inherited socket.
+
+          unsetEnv is false: the group may name several sockets, and clearing the
+          environment on the first lookup would make every later one come back empty.
+          The caller clears it once, after startup, if it spawns children of its own.
+        name: adoptedSockets
+        params: name string
+        recv: s *Server
+        results: files []*os.File, err error
+      - doc: adoptStream turns inherited descriptors into stream listeners.
+        name: adoptStream
+        params: name string
+        recv: s *Server
+        results: listeners []stdnet.Listener, err error
+      - doc: |-
+          adoptPacket turns inherited descriptors into datagram sockets.
+
+          sdlisten.Listeners only wraps stream sockets, so the datagram side goes
+          through the raw descriptors — the consequence this domain recorded when ADR
+          0029 was written, and the reason adoption is implemented here rather than by
+          widening another domain's surface.
+        name: adoptPacket
+        params: name string
+        recv: s *Server
+        results: conns []stdnet.PacketConn, err error
+      - name: Start
+        params: ctx context.Context
+        recv: s *Server
+        results: error
+      - doc: |-
+          bindEverything binds both natures, streams first so a mixed server's ports
+          come up in declaration order.
+        name: bindEverything
+        params: ctx context.Context, groups []*StreamGroup, packetGroups []*PacketGroup
+        recv: s *Server
+        results: error
+      - doc: bindPacketAll binds every datagram group, starting a read loop per socket.
+        name: bindPacketAll
+        params: ctx context.Context, groups []*PacketGroup
+        recv: s *Server
+        results: error
+      - doc: |-
+          bindPacketGroup binds one datagram group and starts its read loops.
+
+          Goroutine lifecycle: it starts exactly one readLoop per address. Each is
+          owned by the Server, holds an inFlight token released on exit, and terminates
+          when Close or Shutdown closes its socket.
+        name: bindPacketGroup
+        params: ctx context.Context, group *PacketGroup
+        recv: s *Server
+        results: error
+      - doc: |-
+          adoptPacketSockets takes over the group's inherited datagram sockets.
+
+          Goroutine lifecycle: one readLoop per adopted socket, owned by the Server
+          exactly as a bound one is.
+        name: adoptPacketSockets
+        params: group *PacketGroup, handler corenet.PacketHandler
+        recv: s *Server
+        results: error
+      - doc: bindAll binds every group, starting an accept loop per listener.
+        name: bindAll
+        params: ctx context.Context, groups []*StreamGroup
+        recv: s *Server
+        results: error
+      - doc: bindGroup binds one group's addresses and starts their accept loops.
+        name: bindGroup
+        params: ctx context.Context, group *StreamGroup
+        recv: s *Server
+        results: error
+      - doc: |-
+          adoptStreamSockets takes over the group's inherited stream listeners.
+
+          Goroutine lifecycle: one acceptLoop per adopted listener, owned by the Server
+          exactly as a bound one is — adoption changes where the socket came from, not
+          how it is served.
+        name: adoptStreamSockets
+        params: group *StreamGroup, handler corenet.ConnHandler
+        recv: s *Server
+        results: error
+      - doc: |-
+          bindShards opens one address's listeners and starts an accept loop per shard.
+
+          Several listeners on one address is the whole point of SO_REUSEPORT: the
+          kernel load-balances incoming connections across them, so N accept loops
+          never contend on a single accept queue. Where the option is unavailable the
+          count collapses to one and State reports why.
+
+          Goroutine lifecycle: it starts exactly one acceptLoop per shard. Each is
+          owned by the Server, holds an inFlight token released on exit, and terminates
+          when Close or Shutdown closes its listener — the only signal that reliably
+          interrupts a blocking Accept.
+        name: bindShards
+        params: ctx context.Context, group *StreamGroup, addr corenet.AddressValue, handler corenet.ConnHandler
+        recv: s *Server
+        results: error
+      - doc: |-
+          acceptLoop accepts connections until its listener is closed.
+
+          An Accept that fails for any reason but the listener closing — the process
+          out of descriptors, typically, with a connection still queued — is retried
+          after a backoff on the engine's clock, never at once: retrying at once spins
+          a core for as long as the condition lasts, one per listener. The backoff
+          starts over at the next accepted connection, and a listener closed during
+          one ends the loop without waiting it out (ADR 0130).
+
+          Goroutine lifecycle: one per listener, started by bindGroup and owned by the
+          Server. It exits when Close or Shutdown closes the listener; its inFlight
+          token is released on exit. It starts one serve goroutine per accepted
+          connection, each of which takes its own token.
+        name: acceptLoop
+        params: bound *boundListener, group *StreamGroup, handler corenet.ConnHandler
+        recv: s *Server
+      - doc: |-
+          backOff waits delay on the engine's clock, or until the listener closes; it
+          reports whether the loop should accept again.
+        name: backOff
+        params: bound *boundListener, delay time.Duration
+        recv: s *Server
+        results: bool
+      - doc: |-
+          serve runs the handler for one connection.
+
+          Goroutine lifecycle: one per accepted connection, started by acceptLoop and
+          owned by the Server. It always closes the connection, releases its pooled
+          state and its inFlight token, so a handler that returns early or panics
+          cannot leak either.
+        name: serve
+        params: raw stdnet.Conn, group *StreamGroup, handler corenet.ConnHandler, release func()
+        recv: s *Server
+      - name: Serve
+        params: ctx context.Context
+        recv: s *Server
+        results: error
+      - name: Shutdown
+        params: ctx context.Context
+        recv: s *Server
+        results: error
+      - doc: shutdownHTTP stops every group's embedded http.Server, if it has one.
+        name: shutdownHTTP
+        params: ctx context.Context
+        recv: s *Server
+      - doc: |-
+          closeHTTP stops every group's embedded http.Server immediately, matching
+          Close's contract rather than Shutdown's.
+        name: closeHTTP
+        recv: s *Server
+      - doc: waitIdle blocks until no connection is in flight or ctx expires.
+        name: waitIdle
+        params: ctx context.Context
+        recv: s *Server
+        results: error
+      - name: Close
+        recv: s *Server
+        results: error
+      - doc: |-
+          closeListeners closes and forgets every bound listener.
+
+          A close error is not surfaced: during shutdown the only realistic cause is a
+          listener already closed by a concurrent Close, and reporting that would turn
+          a benign race into a spurious failure.
+        name: closeListeners
+        recv: s *Server
+      - doc: |-
+          readLoop serves datagrams until its socket is closed.
+
+          Goroutine lifecycle: one per datagram socket, started by bindPacketGroup and
+          owned by the Server. It exits when Close or Shutdown closes the socket — the
+          only signal that reliably interrupts a blocking read — and releases its
+          inFlight token on exit.
+
+          Handlers run inline on this goroutine rather than being dispatched to a pool.
+          A datagram handler is expected to be short, and a hand-off would cost a
+          channel send plus an allocation per packet, undoing the very batching this
+          path exists for. A handler that must block should copy the payload and hand
+          it to its own worker.
+        name: readLoop
+        params: bound *boundPacketConn, group *PacketGroup, handler corenet.PacketHandler
+        recv: s *Server
+      - doc: |-
+          dispatch serves every datagram in a filled batch, dropping any past the
+          group's ceiling.
+
+          An oversized datagram is NOT handed on. The kernel has already discarded its
+          tail, so what remains is a prefix that reads exactly like a complete message:
+          the handler has no way to tell it was cut, and a partial payload accepted as
+          whole is a correctness bug rather than a capacity one. It is dropped and
+          counted in State instead — the same answer the accept path gives a connection
+          past its ceiling, because there is nobody above a read loop to return an
+          error to and the counter is therefore the report.
+        name: dispatch
+        params: slots []datagram, held *packet, handler corenet.PacketHandler, ceiling int
+        recv: s *Server
+      - doc: servePacket runs the handler for one datagram, containing any panic.
+        name: servePacket
+        params: p *packet, handler corenet.PacketHandler
+        recv: s *Server
+        results: error
+      - doc: |-
+          acquire takes a pooled connection wrapper and fills it for this socket.
+
+          Pooling the wrapper — and the scratch buffer with it — is what keeps a
+          steady-state accept loop from allocating per connection. The cost of getting
+          it wrong is a wrapper that outlives its socket, which is why release drops
+          every reference it holds.
+        name: acquire
+        params: raw stdnet.Conn, group *StreamGroup
+        recv: s *Server
+        results: "*conn"
+      - doc: |-
+          release returns the wrapper to the pool, closing the socket unless a handler
+          has taken it over.
+
+          The close error is not surfaced: this runs on a deferred path with no caller
+          to report to, and by this point the handler has already finished, so a
+          failing close cannot change the outcome it produced.
+        name: release
+        params: c *conn
+        recv: s *Server
+      - doc: |-
+          closeLive severs every socket still being served.
+
+          It is the teeth behind the drain budget: cancelling the context asks a
+          handler to stop, but a handler blocked in Read will not notice until its
+          socket closes underneath it. Close errors are ignored because a socket the
+          handler already closed is the expected case, not a fault.
+        name: closeLive
+        recv: s *Server
+      - name: Group
+        params: name string, opts ...GroupOption
+        recv: s *Server
+        results: "*StreamGroup"
+      - name: PacketGroup
+        params: name string, opts ...GroupOption
+        recv: s *Server
+        results: "*PacketGroup"
+      - doc: recordDeclError keeps the first declaration error. The caller holds s.mu.
+        name: recordDeclError
+        params: err error
+        recv: s *Server
+      - name: State
+        recv: s *Server
+        results: corenet.StateValue
+      - doc: |-
+          admit runs the handler under the group's ceiling, translating a rejection
+          into the domain's own sentinel.
+
+          A connection turned away here has already been accepted by the kernel, so it
+          is answered by closing it immediately rather than by letting the accept queue
+          overflow silently — a refusal the peer can observe beats a timeout it cannot
+          distinguish from a hang.
+        name: admit
+        params: ctx context.Context, limiter *connLimiter, c corenet.Conn, handler corenet.ConnHandler
+        recv: s *Server
+        results: error
+    name: Server
+  - fields:
+      - doc: name identifies the group in logs, metrics and State.
+        name: name
+        type: string
+      - doc: addrs are the addresses to bind.
+        name: addrs
+        type: "[]corenet.AddressValue"
+      - doc: handler serves each accepted connection.
+        name: handler
+        type: corenet.ConnHandler
+      - doc: middlewares decorate the handler, outermost first.
+        name: middlewares
+        type: "[]corenet.Middleware[corenet.ConnHandler]"
+      - doc: identity turns the group's listeners into TLS or mTLS listeners.
+        name: identity
+        type: corenet.IdentityValue
+      - doc: limits bounds what the group may consume.
+        name: limits
+        type: corenet.LimitsValue
+      - doc: timeouts bounds each phase of a connection.
+        name: timeouts
+        type: corenet.TimeoutsValue
+      - doc: |-
+          httpAdapter is set when the group serves an http.Handler, so the engine
+          can shut the embedded http.Server down with the rest of the group.
+        name: httpAdapter
+        type: "*httpAdapter"
+      - doc: |-
+          http holds the bounds only an HTTP group has: the header phase's own
+          deadline and the header size cap. They live here rather than in
+          core/net's Timeouts and Limits, which describe every protocol a group
+          can serve, and "a request header" is not a word in most of them.
+        name: http
+        type: httpBounds
+      - doc: limiter caps concurrent connections; nil when the group has no ceiling.
+        name: limiter
+        type: "*connLimiter"
+      - doc: adopt names inherited sockets to take over instead of binding.
+        name: adopt
+        type: "[]string"
+      - doc: |-
+          admission counts connections against their address before their
+          handshake; nil when the group has none (ADR 0174).
+        name: admission
+        type: "*Admission"
+    kind: struct
+    methods:
+      - name: Name
+        recv: g *StreamGroup
+        results: string
+      - name: Handle
+        params: h corenet.ConnHandler
+        recv: g *StreamGroup
+        results: "*StreamGroup"
+      - name: HandleFunc
+        params: f corenet.ConnHandlerFunc
+        recv: g *StreamGroup
+        results: "*StreamGroup"
+      - name: HandleHTTP
+        params: h http.Handler
+        recv: g *StreamGroup
+        results: "*StreamGroup"
+      - doc: |-
+          tracksCloses reports whether the group's sockets must report their own
+          Close: a handler can take one over — the group serves HTTP — while a ceiling
+          still has to count it. It is read at bind time, after the limiter is built.
+        name: tracksCloses
+        recv: g *StreamGroup
+        results: bool
+      - name: Use
+        params: middlewares ...corenet.Middleware[corenet.ConnHandler]
+        recv: g *StreamGroup
+        results: "*StreamGroup"
+      - doc: resolved returns the handler with the group's middlewares applied.
+        name: resolved
+        recv: g *StreamGroup
+        results: corenet.ConnHandler
+    name: StreamGroup
+  - doc: |-
+      connLimiter caps how many connections a group holds at once.
+
+      It is a reject-mode channel semaphore: a free slot admits, a full one
+      refuses at once, nothing queues. That is exactly the resilience bulkhead's
+      shape, and the ceiling used to BE a bulkhead — until hijacking showed what a
+      Runner cannot express. A Runner holds its slot for exactly one call, and a
+      connection a handler takes over outlives the call that admitted it: every
+      upgraded WebSocket gave its slot back the moment it upgraded, so MaxConns
+      bounded nothing an upgrade reached. The slot is therefore held explicitly
+      here — returned when the handler returns, or handed to the socket itself
+      when the handler took the socket over, and returned by its Close.
+    fields:
+      - doc: slots is the semaphore; its capacity is the ceiling.
+        name: slots
+        type: chan struct{}
+      - doc: ceiling is the configured maximum, reported in the refusal.
+        name: ceiling
+        type: int
+    kind: struct
+    methods:
+      - doc: tryAcquire claims a slot without waiting, reporting whether one was free.
+        name: tryAcquire
+        recv: l *connLimiter
+        results: bool
+      - doc: release returns one claimed slot.
+        name: release
+        recv: l *connLimiter
+      - doc: |-
+          releaseFor settles the slot c was admitted with once its handler is done:
+          returned now, or — when a handler took c's socket over — handed to the
+          socket, whose Close returns it.
+
+          A hijacked connection stops being the engine's to close or to wait for (ADR
+          0047 §D9), but it is still a connection, and MaxConns counts connections.
+          Its Close is the only event left that says it is over.
+        name: releaseFor
+        params: c corenet.Conn
+        recv: l *connLimiter
+    name: connLimiter
+vars:
+  - doc: |-
+      The portable reader is the floor every platform falls back to, so it must
+      satisfy the seam on every platform, not only where the batched path exists.
+    items:
+      - name: _
+        type: datagramSource
+        value: (*portableReader)(nil)
+    name: _
+  - doc: |-
+      The pooled connection wrapper must still satisfy the port it is handed to
+      handlers as; a drift here is silent until a handler calls the missing method.
+    items:
+      - name: _
+        type: corenet.Conn
+        value: (*conn)(nil)
+    name: _#2
+  - doc: |-
+      The batched reader must satisfy the seam the read loop is written against; a
+      drift here would be silent until the first datagram arrived.
+    items:
+      - name: _
+        type: datagramSource
+        value: (*multiReader)(nil)
+    name: _#3
+  - doc: streamNetworks are the socket families the stream engine serves.
+    items:
+      - name: streamNetworks
+        value: |-
+          map[string]struct{}{
+          	"tcp": {}, "tcp4": {}, "tcp6": {}, "unix": {}, "unixpacket": {},
+          }
+    name: streamNetworks
+  - doc: packetNetworks are the datagram families the engine serves.
+    items:
+      - name: packetNetworks
+        value: |-
+          map[string]struct{}{
+          	"udp": {}, "udp4": {}, "udp6": {}, "unixgram": {},
+          }
+    name: packetNetworks

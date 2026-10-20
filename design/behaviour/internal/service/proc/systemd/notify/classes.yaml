@@ -1,0 +1,297 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      payloadBufSize bounds a received datagram body; sd_notify payloads are short
+      text blocks, so 4 KiB comfortably holds any realistic field set.
+    items:
+      - name: payloadBufSize
+        type: int
+        value: "4096"
+    name: payloadBufSize
+  - doc: |-
+      oobBufSize bounds the out-of-band control buffer that carries the single
+      SCM_CREDENTIALS message; 1 KiB is far larger than one ucred cmsg.
+    items:
+      - name: oobBufSize
+        type: int
+        value: "1024"
+    name: oobBufSize
+  - doc: envNotifySocket is the environment variable naming the notify datagram socket.
+    items:
+      - name: envNotifySocket
+        value: "\"NOTIFY_SOCKET\""
+    name: envNotifySocket
+  - doc: |-
+      envWatchdogUsec is the environment variable carrying the watchdog timeout, in
+      microseconds, that a supervisor sets for its child.
+    items:
+      - name: envWatchdogUsec
+        value: "\"WATCHDOG_USEC\""
+    name: envWatchdogUsec
+  - doc: |-
+      exitDataErr mirrors EX_DATAERR (sysexits.h): a received datagram was malformed.
+      It matches the InvalidNotification sentinel's exit code in core/proc.
+    items:
+      - name: exitDataErr
+        type: int
+        value: "65"
+    name: exitDataErr
+  - doc: |-
+      exitOSErr mirrors EX_OSERR (sysexits.h): an OS-level send/socket op failed. It
+      matches the NotifyFailed / ListenFailed sentinels' exit code in core/proc.
+    items:
+      - name: exitOSErr
+        type: int
+        value: "71"
+    name: exitOSErr
+  - doc: |-
+      exitNoPerm mirrors EX_NOPERM (sysexits.h): a credential check failed. It
+      matches the CredentialMismatch sentinel's exit code in core/proc.
+    items:
+      - name: exitNoPerm
+        type: int
+        value: "77"
+    name: exitNoPerm
+  - doc: |-
+      decimalBase is the radix for parsing protocol integer fields (MAINPID,
+      WATCHDOG_USEC), all base-10 per the sd_notify spec.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+  - doc: int64Bits sizes strconv.ParseInt for the 64-bit WATCHDOG_USEC microsecond count.
+    items:
+      - name: int64Bits
+        type: int
+        value: "64"
+    name: int64Bits
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - payloadBufSize
+      - oobBufSize
+      - listener
+      - Listen
+      - enablePasscred
+      - (*listener).Recv
+      - wrapCredMismatch
+      - senderPID
+      - (*listener).Close
+      - wrapListen
+    name: listen_linux.go
+  - decls:
+      - Notify
+      - NotifyContext
+      - writeDatagram
+      - writeDeadliner
+      - boundWrite
+      - wrapNotify
+      - Ready
+      - ReadyContext
+      - StatusContext
+      - Reloading
+      - Stopping
+      - Status
+      - Watchdog
+      - MainPID
+    name: notify.go
+  - decls:
+      - envNotifySocket
+      - envWatchdogUsec
+      - exitDataErr
+      - exitOSErr
+      - exitNoPerm
+      - decimalBase
+      - int64Bits
+      - wrapInvalid
+      - resolveAddr
+      - encodePayload
+      - parsePayload
+      - mainPIDFromState
+      - watchdogInterval
+      - WatchdogInterval
+    name: sdnotify.go
+functions:
+  - doc: |-
+      Listen creates a supervisor-side sd_notify datagram socket, enables SO_PASSCRED
+      on it, and returns the Listener together with the $NOTIFY_SOCKET value a child
+      should be given. The socket is bound under a private temp directory so its path
+      is unguessable; the caller sets NOTIFY_SOCKET=socketPath for the child.
+    name: Listen
+    results: l coreproc.Listener, socketPath string, err error
+  - doc: |-
+      enablePasscred flips SO_PASSCRED on the listener's underlying fd so each
+      received datagram carries an SCM_CREDENTIALS control message.
+    name: enablePasscred
+    params: conn *net.UnixConn
+    results: error
+  - doc: |-
+      wrapCredMismatch restates the central CredentialMismatch sentinel fields for a
+      datagram that arrived without parseable SO_PASSCRED credentials.
+    name: wrapCredMismatch
+    results: error
+  - doc: |-
+      senderPID extracts the SO_PASSCRED sender PID from a datagram's OOB control
+      data. ok is false when no parseable SCM_CREDENTIALS message is present, so the
+      caller can reject an unattributable datagram rather than trust a zero PID.
+    name: senderPID
+    params: oob []byte
+    results: pid int, ok bool
+  - doc: |-
+      wrapListen restates the ListenFailed sentinel fields around a stdlib/syscall
+      cause, attaching the socket path for diagnostics.
+    name: wrapListen
+    params: cause error, path string
+    results: error
+  - name: Notify
+    params: state map[string]string
+    results: error
+  - name: NotifyContext
+    params: ctx context.Context, state map[string]string
+    results: err error
+  - doc: |-
+      writeDatagram sends payload over conn under ctx's bound, and names a failure
+      after the socket it could not reach.
+    name: writeDatagram
+    params: ctx context.Context, conn writeDeadliner, payload, socket string
+    results: error
+  - doc: |-
+      boundWrite makes conn's write observe ctx, and returns the watcher's stop
+      func — nil when ctx can never be done, which is the plain [Notify] case and
+      arms nothing at all.
+
+      A deadline already known is set directly because it is exact and costs no
+      goroutine; the AfterFunc is what covers a cancellation with no deadline, and
+      it is the only mechanism that reaches a write already in progress — a
+      net.Conn has no other way to be interrupted.
+    name: boundWrite
+    params: ctx context.Context, conn writeDeadliner
+    results: stop func() bool, err error
+  - doc: |-
+      wrapNotify restates the NotifyFailed sentinel fields around a stdlib/syscall
+      cause, attaching the socket value for diagnostics.
+    name: wrapNotify
+    params: cause error, socket string
+    results: error
+  - name: Ready
+    results: error
+  - name: ReadyContext
+    params: ctx context.Context
+    results: error
+  - name: StatusContext
+    params: ctx context.Context, msg string
+    results: error
+  - name: Reloading
+    results: error
+  - name: Stopping
+    results: error
+  - name: Status
+    params: msg string
+    results: error
+  - name: Watchdog
+    results: error
+  - name: MainPID
+    params: pid int
+    results: error
+  - doc: |-
+      wrapInvalid restates the InvalidNotification sentinel fields around a cause,
+      attaching the offending field for diagnostics.
+    name: wrapInvalid
+    params: cause error, field errs.FieldValue
+    results: error
+  - doc: |-
+      resolveAddr turns a $NOTIFY_SOCKET value into the AF_UNIX name to bind/connect:
+      a leading '@' marks the abstract namespace and is replaced by a NUL byte so the
+      kernel treats sun_path[0]==0 as abstract.
+    name: resolveAddr
+    params: raw string
+    results: string
+  - doc: |-
+      encodePayload joins a NAME=value state map into the newline-separated datagram
+      body sd_notify expects. Order is not significant to the protocol. A name or
+      value carrying the '\n' field delimiter (or a name carrying '=', the
+      name/value delimiter) would forge extra fields in the datagram, so such a
+      state is rejected with InvalidNotification rather than encoded.
+    name: encodePayload
+    params: state map[string]string
+    results: body string, err error
+  - doc: |-
+      parsePayload splits a received datagram body into a NotificationValue, lifting
+      STATUS / MAINPID into their typed fields. It returns InvalidNotification when a
+      non-empty line carries no '=' or MAINPID is not a base-10 integer.
+    name: parsePayload
+    params: body string
+    results: value coreproc.NotificationValue, err error
+  - doc: |-
+      mainPIDFromState extracts MAINPID as an int, returning 0 when absent and a
+      typed InvalidNotification when present but not a base-10 integer.
+    name: mainPIDFromState
+    params: state map[string]string
+    results: pid int, err error
+  - doc: |-
+      watchdogInterval parses a $WATCHDOG_USEC value (microseconds) into a duration.
+      ok is false when raw is empty or not a positive base-10 integer, mirroring
+      sd_watchdog_enabled's "watchdog disabled" result.
+    name: watchdogInterval
+    params: raw string
+    results: d time.Duration, ok bool
+  - name: WatchdogInterval
+    results: d time.Duration, ok bool
+imports:
+  context: context
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  net: net
+  os: os
+  strconv: strconv
+  strings: strings
+  syscall: syscall
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/systemd/notify
+  name: notify
+  purpose: "Package notify — the supervisor (listener) side on Linux: SO_PASSCRED."
+types:
+  - doc: |-
+      listener is the Linux Listener implementation: it owns a unixgram socket with
+      SO_PASSCRED enabled so every datagram arrives with the kernel-stamped sender
+      credentials, and removes its backing path (if any) on Close.
+    fields:
+      - name: conn
+        type: "*net.UnixConn"
+      - name: path
+        type: string
+      - name: tempDir
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          Recv blocks for the next datagram, parses its payload into a NotificationValue,
+          and fills SenderPID from the kernel-verified SO_PASSCRED credentials.
+        name: Recv
+        recv: l *listener
+        results: value coreproc.NotificationValue, err error
+      - doc: |-
+          Close releases the socket, unblocks any in-flight Recv, and removes the backing
+          temp directory (pathname sockets only; abstract sockets vanish on close).
+        name: Close
+        recv: l *listener
+        results: error
+    name: listener
+  - doc: |-
+      writeDeadliner is everything the send needs of a connection: a bound and the
+      write it bounds. Taking it rather than *net.UnixConn is also what makes the
+      two testable without a socket.
+    kind: named
+    name: writeDeadliner
+    underlying: |-
+      interface {
+      	SetWriteDeadline(t time.Time) error
+      	Write(b []byte) (n int, err error)
+      }

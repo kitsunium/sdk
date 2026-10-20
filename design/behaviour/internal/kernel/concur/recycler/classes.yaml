@@ -1,0 +1,73 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - CappedPool
+      - NewCappedPool
+      - (*CappedPool).Get
+      - (*CappedPool).Put
+    name: capped.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Pool
+      - NewPool
+      - (*Pool).Get
+      - (*Pool).Put
+    name: recycler.go
+functions:
+  - name: NewCappedPool
+    params: newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int
+    results: "*CappedPool[T]"
+    typeParams: T any
+  - name: NewPool
+    params: newFn func() T
+    results: "*Pool[T]"
+    typeParams: T any
+imports:
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  name: recycler
+  purpose: Package recycler — CappedPool[T] layers a reset-on-Put + cap-discard policy on top of the plain Pool[T] declared in recycler.go.
+types:
+  - fields:
+      - doc: |-
+          inner is the composed plain recycler. Concrete (not an interface) so
+          Get/Put stay inlinable on the hot path.
+        name: inner
+        type: "*Pool[T]"
+      - doc: reset returns a value to its reusable zero state before it is repooled.
+        name: reset
+        type: func(T)
+      - doc: capOf reports the value's current capacity, compared against maxCap.
+        name: capOf
+        type: func(T) int
+      - doc: maxCap is the cap-discard threshold; values above it are orphaned.
+        name: maxCap
+        type: int
+    kind: struct
+    methods:
+      - name: Get
+        recv: c *CappedPool[T]
+        results: T
+      - name: Put
+        params: v T
+        recv: c *CappedPool[T]
+    name: CappedPool
+    typeParams: T any
+  - fields:
+      - doc: pool is the underlying sync.Pool holding the recycled values.
+        name: pool
+        type: sync.Pool
+    kind: struct
+    methods:
+      - name: Get
+        recv: r *Pool[T]
+        results: T
+      - name: Put
+        params: v T
+        recv: r *Pool[T]
+    name: Pool
+    typeParams: T any

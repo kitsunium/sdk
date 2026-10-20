@@ -1,0 +1,36 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: HMACSHA256 is HMAC (RFC 2104) over SHA-256 — the detached-MAC default.
+    items:
+      - name: HMACSHA256
+        type: Algorithm
+        value: "\"hmac-sha256\""
+    name: HMACSHA256
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - HMACSHA256
+      - Algorithm
+      - Tag
+      - Verify
+    name: mac.go
+functions:
+  - name: Tag
+    params: a Algorithm, key Key, message []byte
+    results: tag []byte, err error
+  - name: Verify
+    params: a Algorithm, key Key, message, tag []byte
+    results: ok bool, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto/mac
+  name: mac
+  purpose: Package mac is the detached message-authentication facade.
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

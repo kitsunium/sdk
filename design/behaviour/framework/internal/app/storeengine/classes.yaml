@@ -1,0 +1,1295 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      derivedMark separates a document store's table from the tables the SDK
+      derives from it — <table>___ix, <table>___vs —: three underscores no
+      table name the framework gives holds.
+    items:
+      - name: derivedMark
+        value: "\"___\""
+    name: derivedMark
+  - doc: The phases a refusal of the move names.
+    grouped: true
+    items:
+      - name: phaseCatalogue
+        value: "\"catalogue\""
+      - name: phaseHistory
+        value: "\"history\""
+      - name: phaseRename
+        value: "\"rename\""
+      - name: phaseIndexes
+        value: "\"indexes\""
+      - name: phaseLabels
+        value: "\"labels\""
+      - name: phaseDrop
+        value: "\"drop\""
+    name: phaseCatalogue
+  - doc: |-
+      sqlKeysChunk is how many keys one call of a database's engine lists, each
+      under its own <name>-timeout: a long listing is many short calls, never one
+      call the timeout ends halfway.
+    items:
+      - name: sqlKeysChunk
+        type: int
+        value: "256"
+    name: sqlKeysChunk
+files:
+  - decls:
+      - database
+      - openDatabase
+      - dialectOf
+      - (*database).Transact
+      - (*database).InTransaction
+      - (*database).Defer
+      - (*database).OnAbort
+      - (*database).Check
+      - (*database).Migrator
+      - SQLOf
+      - migrator
+      - migrator.Plan
+      - migrator.Up
+      - migrator.Down
+      - sqlMigrations
+      - sqlStep
+      - pluggedMigrations
+      - pluggedMigration
+      - pluggedStep
+      - tableMigration
+    name: database.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - docRecord
+      - openedDoc
+      - docRecord.MarshalJSON
+      - (*docRecord).UnmarshalJSON
+      - recordFor
+      - rawRecord
+      - docRecord.value
+      - docLoad
+      - (*docLoad).failed
+      - (*docLoad).loaded
+      - documents
+      - (*documents).decoded
+      - (*documents).keyOf
+      - (*documents).writtenKey
+      - (*documents).specs
+      - values
+      - filtered
+      - raws
+      - pluggedEntries
+      - (*documents).stamp
+      - pluggedVersions
+      - sdkVersions
+      - rewritingSDK
+      - pluggedTombstones
+      - clockFunc
+      - clockOf
+      - clockFunc.Now
+      - clockFunc.Since
+      - pluggedWeight
+    name: document.go
+  - decls:
+      - fileEngine
+      - openFile
+      - (*fileEngine).keep
+      - (*fileEngine).Get
+      - (*fileEngine).List
+      - (*fileEngine).Filter
+      - (*fileEngine).Lookup
+      - (*fileEngine).Find
+      - (*fileEngine).Count
+      - (*fileEngine).KeyedEntries
+      - (*fileEngine).Entries
+      - (*fileEngine).Write
+      - (*fileEngine).Update
+      - (*fileEngine).Delete
+      - (*fileEngine).Watch
+      - (*fileEngine).local
+      - (*fileEngine).before
+      - (*fileEngine).uncreate
+      - (*fileEngine).after
+      - (*fileEngine).tell
+      - (*fileEngine).Close
+      - (*fileEngine).Fold
+      - (*fileEngine).Keys
+      - (*fileEngine).StoredVersions
+      - (*fileEngine).RewriteVersions
+      - (*fileEngine).head
+      - (*fileEngine).forget
+      - (*fileEngine).VersionWeight
+      - (*fileEngine).Trash
+      - (*fileEngine).Untrash
+      - (*fileEngine).Purge
+      - (*fileEngine).Tombstones
+      - (*fileEngine).unconfirmed
+      - (*fileEngine).trashedNow
+      - (*fileEngine).Documents
+      - (*fileEngine).KeyList
+      - (*fileEngine).TombstoneList
+      - (*fileEngine).VersionList
+      - (*fileEngine).Current
+      - (*fileEngine).KeepsVersions
+      - (*fileEngine).PutDocument
+      - (*fileEngine).InsertRaw
+      - saidKeys
+    name: file.go
+  - decls:
+      - sentinels
+      - said
+    name: refusal.go
+  - decls:
+      - derivedMark
+      - phaseCatalogue
+      - formerTables
+      - renameTables
+      - (*database).runMove
+      - renaming
+      - catalogueQueries
+      - catalogue
+      - names
+      - failedAt
+      - stillFormer
+      - pairs
+      - move
+      - refuseTaken
+      - relabel
+      - copyHistory
+      - renameAll
+      - renameIndexes
+      - indexAfter
+    name: rename.go
+  - decls:
+      - sqlKeysChunk
+      - sqlEngine
+      - openSQL
+      - (*sqlEngine).call
+      - (*sqlEngine).keep
+      - (*sqlEngine).Get
+      - (*sqlEngine).List
+      - (*sqlEngine).Filter
+      - (*sqlEngine).Lookup
+      - (*sqlEngine).Find
+      - (*sqlEngine).Count
+      - (*sqlEngine).Entries
+      - (*sqlEngine).KeyedEntries
+      - (*sqlEngine).Write
+      - (*sqlEngine).Update
+      - (*sqlEngine).Delete
+      - (*sqlEngine).retold
+      - (*sqlEngine).Watch
+      - (*sqlEngine).Close
+      - (*sqlEngine).Reindex
+      - (*sqlEngine).Keys
+      - (*sqlEngine).keysChunk
+      - yieldKeys
+      - (*sqlEngine).StoredVersions
+      - (*sqlEngine).RewriteVersions
+      - (*sqlEngine).VersionWeight
+      - (*sqlEngine).Trash
+      - (*sqlEngine).Untrash
+      - (*sqlEngine).Purge
+      - (*sqlEngine).Tombstones
+      - (*sqlEngine).Documents
+      - (*sqlEngine).KeyList
+      - (*sqlEngine).TombstoneList
+      - (*sqlEngine).VersionList
+      - (*sqlEngine).Current
+      - (*sqlEngine).KeepsVersions
+      - (*sqlEngine).PutDocument
+      - (*sqlEngine).InsertRaw
+    name: sql.go
+  - decls:
+      - Enable
+      - open
+    name: storeengine.go
+  - decls:
+      - _
+    name: storeengine_compliance.go
+functions:
+  - doc: |-
+      openDatabase opens kit's scope on the pool cfg names: its tuning applied
+      — the SDK refuses a pool policy it cannot honour —, its transaction
+      manager and its check built.
+    name: openDatabase
+    params: cfg plug.DatabaseConfig
+    results: plug.Database, error
+  - doc: dialectOf is the SDK's dialect the engine's name says.
+    name: dialectOf
+    params: name string
+    results: sql.Dialect, error
+  - name: SQLOf
+    params: db plug.Database
+    results: tm sql.Transactor, dialect sql.Dialect, ok bool
+  - doc: sqlMigrations are kit's migrations as the SDK's migrator runs them.
+    name: sqlMigrations
+    params: ms []plug.MigrationValue
+    results: "[]sql.Migration"
+  - doc: |-
+      sqlStep is s as the SDK's migrator runs it, nil for none: the SDK's
+      executor is the standard library's, which s takes as it is.
+    name: sqlStep
+    params: s plug.Step
+    results: sql.Step
+  - doc: pluggedMigrations are the SDK's migrations as kit's core reads them.
+    name: pluggedMigrations
+    params: ms []sql.Migration
+    results: "[]plug.MigrationValue"
+  - doc: pluggedMigration is the SDK's migration m as kit's core reads it.
+    name: pluggedMigration
+    params: m sql.Migration
+    results: plug.MigrationValue
+  - doc: |-
+      pluggedStep is the SDK's step s on the standard library's executor, nil
+      for none.
+    name: pluggedStep
+    params: s sql.Step
+    results: plug.Step
+  - doc: |-
+      tableMigration is the migration of one of kit's tables: the SDK's
+      document store's two tables; for a store's versions, the table of
+      versions beside the store's, which the SDK names from it. A consumer's
+      queue's table is the queue subsystem's (framework/internal/app/queueengine).
+    name: tableMigration
+    params: dialect string, t plug.TableSpec, version uint64
+    results: plug.MigrationValue, error
+  - doc: recordFor is the record the document store keeps of d.
+    name: recordFor
+    params: d plug.DocumentValue
+    results: docRecord
+  - doc: rawRecord is a record as it rests, not decoded yet.
+    name: rawRecord
+    params: raw json.RawMessage
+    results: docRecord
+  - doc: values are the documents rs hold, as they rest.
+    name: values
+    params: rs []docRecord
+    results: "[]plug.DocumentValue"
+  - doc: filtered are the documents of all keep accepts.
+    name: filtered
+    params: all []plug.DocumentValue, keep func(d plug.DocumentValue) bool
+    results: "[]plug.DocumentValue"
+  - doc: raws are the records of entries as they rest.
+    name: raws
+    params: entries []plug.EntryValue
+    results: "[]json.RawMessage"
+  - doc: pluggedEntries are the SDK's entries as an engine hands them on.
+    name: pluggedEntries
+    params: entries []docstore.Entry
+    results: "[]plug.EntryValue"
+  - doc: pluggedVersions are the SDK's versions as the store's engine hands them on.
+    name: pluggedVersions
+    params: vs []docstore.Version
+    results: "[]plug.VersionValue"
+  - doc: sdkVersions are the store engine's versions as the SDK takes them back.
+    name: sdkVersions
+    params: vs []plug.VersionValue
+    results: "[]docstore.Version"
+  - doc: |-
+      rewritingSDK is fn, a rewrite of the store engine's versions, as the
+      SDK's document store applies it.
+    name: rewritingSDK
+    params: fn func(vs []plug.VersionValue) ([]plug.VersionValue, error)
+    results: func([]docstore.Version) ([]docstore.Version, error)
+  - doc: |-
+      pluggedTombstones are the SDK's tombstones as the store's engine hands
+      them on.
+    name: pluggedTombstones
+    params: stones []docstore.Tombstone
+    results: "[]plug.TombstoneValue"
+  - doc: |-
+      clockOf is now as the SDK's document store reads it, nil — the store's
+      own — for none.
+    name: clockOf
+    params: now func() time.Time
+    results: clock.Clock
+  - doc: |-
+      pluggedWeight is the SDK's weight of a store's versions as its engine
+      hands it on.
+    name: pluggedWeight
+    params: w docstore.VersionWeight, err error
+    results: plug.VersionWeightValue, error
+  - doc: |-
+      openFile opens the document store of a store: loaded from where cfg says
+      — the snapshot, what was written since replayed on it, the indexes
+      rebuilt — or empty in memory; keeping each record's versions as cfg says.
+      A record the load could not decode refuses it, whatever the document
+      store made of it.
+    name: openFile
+    params: cfg *plug.StoreConfig
+    results: "*fileEngine, error"
+  - doc: saidKeys is keys, its failure said in kit's terms.
+    name: saidKeys
+    params: keys iter.Seq2[string, error]
+    results: iter.Seq2[string, error]
+  - doc: |-
+      said is err as kit's core reads it: a refusal of the SDK's, as the kind
+      kit words it by — a key too long for a database's columns with how long
+      they hold —; any other error, and nil, as they are.
+    name: said
+    params: err error
+    results: error
+  - doc: |-
+      formerTables are the tables of plan still under a former name on db, its
+      former version table among them, sorted.
+    name: formerTables
+    params: ctx context.Context, db plug.Database, plan plug.RenameSpec
+    results: "[]string, error"
+  - doc: |-
+      renameTables moves the tables of plan to their present names on db, and
+      returns those it moved.
+    name: renameTables
+    params: ctx context.Context, db plug.Database, plan plug.RenameSpec
+    results: "[]string, error"
+  - doc: renaming is db as this package opened it.
+    name: renaming
+    params: db plug.Database
+    results: "*database, error"
+  - doc: catalogue is every table of the schema q works in.
+    name: catalogue
+    params: ctx context.Context, q sql.Executor, dialect sql.Dialect
+    results: map[string]bool, error
+  - doc: names is the one column query lists, as a set.
+    name: names
+    params: ctx context.Context, q sql.Executor, query, phase string, args ...any
+    results: _ map[string]bool, err error
+  - doc: failedAt is a statement of the move the database did not complete.
+    name: failedAt
+    params: phase string, cause error
+    results: error
+  - doc: |-
+      stillFormer are the tables of plan cat still holds under a former name —
+      each table, the tables derived from it, the former version table —,
+      sorted.
+    name: stillFormer
+    params: cat map[string]bool, plan plug.RenameSpec
+    results: "[]string"
+  - doc: |-
+      pairs are the renamings tables make in cat: each table cat holds under
+      its former name, and every table derived from it, each to its present
+      name.
+    name: pairs
+    params: cat map[string]bool, tables []plug.RenameValue
+    results: "[]plug.RenameValue"
+  - doc: |-
+      move is the step of the move's migration, on its transaction: what is
+      refused first, then the history, the tables, their indexes and the
+      history's names. It returns the tables it renamed.
+    name: move
+    params: ctx context.Context, ex sql.Executor, dialect sql.Dialect, plan plug.RenameSpec
+    results: "[]string, error"
+  - doc: |-
+      refuseTaken is the refusal of renames whose present names cat holds
+      too, every one named; nil when none is.
+    name: refuseTaken
+    params: cat map[string]bool, renames []plug.RenameValue
+    results: error
+  - doc: |-
+      relabel gives the tables' migrations in the history the names this
+      release says.
+    name: relabel
+    params: ctx context.Context, ex sql.Executor, dialect sql.Dialect, plan plug.RenameSpec
+    results: error
+  - doc: |-
+      copyHistory copies into the present version table every version the
+      former one records and it does not — the move's own excepted, which the
+      former table records last —; nothing when found says the former table is
+      gone.
+    name: copyHistory
+    params: ctx context.Context, ex sql.Executor, dialect sql.Dialect, plan plug.RenameSpec, found bool
+    results: error
+  - doc: |-
+      renameAll renames every table of renames: on MySQL in one statement,
+      which MySQL runs whole or not at all; one statement per table elsewhere,
+      in the move's transaction.
+    name: renameAll
+    params: ctx context.Context, ex sql.Executor, dialect sql.Dialect, renames []plug.RenameValue
+    results: error
+  - doc: |-
+      renameIndexes renames, on PostgreSQL, the indexes named after a renamed
+      table — a primary key's, a unique constraint's, which PostgreSQL names
+      <table>_… and keeps when the table is renamed — so that they are named
+      after its present name; renaming an index renames its constraint.
+      SQLite renames its own with the table, and MySQL names them after their
+      columns.
+    name: renameIndexes
+    params: ctx context.Context, ex sql.Executor, dialect sql.Dialect, renames []plug.RenameValue
+    results: error
+  - doc: |-
+      indexAfter is the name of the index idx once its table p is renamed: its
+      former table's name, as much of it as PostgreSQL kept, replaced by as
+      much of the present one; false when idx is not named after it, or the
+      two names differ in length — the framework's never do.
+    name: indexAfter
+    params: idx string, p plug.RenameValue
+    results: string, bool
+  - doc: |-
+      openSQL opens the SDK's document store over the table cfg names, on the
+      database cfg's scope is, of records as cfg keys and indexes them: a
+      store's entities, the records a sealing store keeps of them, a store's
+      history, a workflow's journal, kit's registry of its tables.
+    name: openSQL
+    params: cfg *plug.StoreConfig
+    results: "*sqlEngine, error"
+  - doc: |-
+      yieldKeys yields keys in order, then failure when there is one, and reports
+      whether the caller wants more: false once it stopped, and after a failure,
+      which is a listing's last yield, whatever the caller answered to it.
+    name: yieldKeys
+    params: yield func(string, error) bool, keys []string, failure error
+    results: bool
+  - name: Enable
+  - doc: |-
+      open opens the engine of one store where cfg places it: on its database,
+      else the SDK's document store in the data directory or in memory.
+
+      IFACE-PLUGIN: kit reaches a store's engine through plug.StoreEngine; these
+      are its implementations.
+    name: open
+    params: cfg plug.StoreConfig
+    results: plug.StoreEngine, error
+imports:
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  docstore: github.com/kitsunium/sdk/pkg/v1/data/docstore
+  errors: errors
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  iter: iter
+  json: encoding/json
+  maps: maps
+  model: github.com/kitsunium/sdk/framework/model
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  slices: slices
+  sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  vfs: github.com/kitsunium/sdk/pkg/v1/data/vfs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/storeengine
+  name: storeengine
+  purpose: "Package storeengine is what framework/app/store plugs into kit: the engines the framework's stores run on — the SDK's document store in memory, in the data directory and over SQL —, the framework's scope on a database — the SDK's transaction manager, its check and its migrator — and the migrations of the framework's tables (ADR 0179 §1)."
+types:
+  - doc: database is one database as the store subsystem runs it.
+    fields:
+      - name: cfg
+        type: sql.Config
+      - name: tm
+        type: sql.Transactor
+      - name: checker
+        type: sql.Checker
+      - name: dialect
+        type: sql.Dialect
+    kind: struct
+    methods:
+      - doc: |-
+          Transact runs fn in a transaction of the database, or in a savepoint of
+          the one ctx carries for it.
+        name: Transact
+        params: ctx context.Context, fn func(ctx context.Context) error
+        recv: d *database
+        results: error
+      - doc: InTransaction reports whether ctx carries a transaction of the database.
+        name: InTransaction
+        params: ctx context.Context
+        recv: d *database
+        results: bool
+      - doc: |-
+          Defer holds fn until the transaction ctx carries for the database
+          commits.
+        name: Defer
+        params: ctx context.Context, fn func()
+        recv: d *database
+        results: bool
+      - doc: |-
+          OnAbort holds fn until the work of the scope ctx carries for the database
+          is undone.
+        name: OnAbort
+        params: ctx context.Context, fn func(ctx context.Context)
+        recv: d *database
+        results: bool
+      - doc: Check asks the database whether it answers.
+        name: Check
+        params: ctx context.Context
+        recv: d *database
+        results: error
+      - doc: Migrator is the set ms on the database, under the version table table.
+        name: Migrator
+        params: table string, ms []plug.MigrationValue
+        recv: d *database
+        results: plug.Migrator, error
+      - doc: |-
+          runMove makes the present version table, as the SDK's migrator makes it —
+          the history is copied into the table its runs read —, then runs the move
+          as a migration of the former one, and returns the tables it moved.
+        name: runMove
+        params: ctx context.Context, plan plug.RenameSpec
+        recv: d *database
+        results: "[]string, error"
+    name: database
+  - doc: migrator is one set of migrations under the SDK's Migrator.
+    fields:
+      - name: m
+        type: sql.Migrator
+    kind: struct
+    methods:
+      - doc: Plan is the set's pending migrations.
+        name: Plan
+        params: ctx context.Context
+        recv: m migrator
+        results: "[]plug.MigrationValue, error"
+      - doc: Up applies every pending migration.
+        name: Up
+        params: ctx context.Context
+        recv: m migrator
+        results: error
+      - doc: Down reverses the applied migrations above version.
+        name: Down
+        params: ctx context.Context, version uint64
+        recv: m migrator
+        results: error
+    name: migrator
+  - doc: |-
+      docRecord is a document as the SDK's document store holds it: its JSON as
+      it rests, and — once something decoded it — the entity, shared by the
+      copies the document store makes of one decoded record, so that its key
+      function and its index functions decode it once.
+    fields:
+      - name: raw
+        type: json.RawMessage
+      - name: open
+        type: "*openedDoc"
+    kind: struct
+    methods:
+      - doc: MarshalJSON is the record as it rests.
+        name: MarshalJSON
+        recv: d docRecord
+        results: "[]byte, error"
+      - doc: UnmarshalJSON keeps the record as it rests; decoding it is the engine's.
+        name: UnmarshalJSON
+        params: b []byte
+        recv: d *docRecord
+        results: error
+      - doc: value is the document r holds, its entity when it was decoded.
+        name: value
+        recv: d docRecord
+        results: plug.DocumentValue
+    name: docRecord
+  - doc: "openedDoc is what kit learnt of one record: its entity, and its key."
+    fields:
+      - name: v
+        type: any
+      - doc: ok says v is decoded; keyed that key is known.
+        name: ok
+        type: bool
+      - doc: ok says v is decoded; keyed that key is known.
+        name: keyed
+        type: bool
+      - name: key
+        type: string
+    kind: struct
+    name: openedDoc
+  - doc: |-
+      docLoad keeps the first record an engine could not decode while it keyed
+      or indexed it: that refuses the engine's opening, or its refiling.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: failed keeps err, when it is the first.
+        name: failed
+        params: err error
+        recv: l *docLoad
+      - doc: loaded is the first record that did not decode, nil when none.
+        name: loaded
+        recv: l *docLoad
+        results: error
+    name: docLoad
+  - doc: |-
+      documents is what an engine knows of its documents: their key, the
+      entity their JSON holds, and the indexes over them — the product's
+      functions on its type, wrapped once at the declaration — and the first
+      record it could not decode.
+    fields:
+      - name: cfg
+        type: "*plug.StoreConfig"
+      - name: load
+        type: docLoad
+    kind: struct
+    methods:
+      - doc: |-
+          decoded is r with its entity decoded, as the configuration decodes it; a
+          record that does not decode keeps none, and the load keeps why.
+        name: decoded
+        params: r docRecord
+        recv: c *documents
+        results: plug.DocumentValue
+      - doc: |-
+          keyOf is the document store's key function: r's key, read as it rests
+          when the configuration's KeyAtRest can, else from its entity, decoded
+          once.
+        name: keyOf
+        params: r docRecord
+        recv: c *documents
+        results: string
+      - doc: |-
+          writtenKey is r's key, "" when the key function panics: the document
+          store says why the write failed.
+        name: writtenKey
+        params: r docRecord
+        recv: c *documents
+        results: key string
+      - doc: |-
+          specs are the configuration's indexes as the document store takes them,
+          over records.
+        name: specs
+        recv: c *documents
+        results: "[]docstore.IndexSpec[docRecord]"
+      - doc: |-
+          stamp is what a write under ctx says about the version it makes, as the
+          configuration stamps it; nothing on a store that keeps no versions.
+        name: stamp
+        params: ctx context.Context
+        recv: c *documents
+        results: docstore.Stamp
+    name: documents
+  - doc: clockFunc is the app's clock as the SDK's document store reads it.
+    kind: named
+    methods:
+      - doc: Now is the clock's instant.
+        name: Now
+        recv: f clockFunc
+        results: time.Time
+      - doc: Since is how long ago t was, on the clock.
+        name: Since
+        params: t time.Time
+        recv: f clockFunc
+        results: time.Duration
+    name: clockFunc
+    underlying: func() time.Time
+  - doc: |-
+      fileEngine is a store on the SDK's document store: in memory, or one
+      snapshot and the small files written since in the data directory. The
+      document store keeps every record in memory, persists each write before
+      returning, and keeps the indexes in step with the records.
+
+      The data directory and memory have no transactions: in one of kit's, a
+      write records the value it replaces, which a rollback writes back, and its
+      hooks wait for the commit (plug.Transaction).
+    fields:
+      - name: ds
+        type: "*docstore.Store[docRecord]"
+      - name: docs
+        type: "*documents"
+      - doc: |-
+          undoing are the keys a rollback writes back, whose versions no write
+          prunes meanwhile (before).
+        name: undoing
+        type: sync.Map
+      - doc: onWrite and onDelete are what Watch registered.
+        name: onWrite
+        type: func(key string)
+      - doc: onWrite and onDelete are what Watch registered.
+        name: onDelete
+        type: func(key string)
+    kind: struct
+    methods:
+      - doc: |-
+          keep is how many former versions the document store keeps of each record
+          (ADR 0007 §3): none when zero.
+        name: keep
+        recv: e *fileEngine
+        results: int
+      - doc: Get reads the document key.
+        name: Get
+        params: _ context.Context, key string
+        recv: e *fileEngine
+        results: plug.DocumentValue, error
+      - doc: List reads every document.
+        name: List
+        params: _ context.Context
+        recv: e *fileEngine
+        results: "[]plug.DocumentValue, error"
+      - doc: Filter reads the documents keep accepts.
+        name: Filter
+        params: ctx context.Context, keep func(d plug.DocumentValue) bool
+        recv: e *fileEngine
+        results: "[]plug.DocumentValue, error"
+      - doc: Lookup reads the document a unique index names by key.
+        name: Lookup
+        params: _ context.Context, index, key string
+        recv: e *fileEngine
+        results: plug.DocumentValue, error
+      - doc: Find reads every document an index names by key.
+        name: Find
+        params: _ context.Context, index, key string
+        recv: e *fileEngine
+        results: "[]plug.DocumentValue, error"
+      - doc: Count is how many documents the store holds.
+        name: Count
+        params: _ context.Context
+        recv: e *fileEngine
+        results: int, error
+      - doc: |-
+          KeyedEntries are up to limit records as the store keeps them, with
+          their keys: what a sealing store reads its records by.
+        name: KeyedEntries
+        params: _ context.Context, limit int
+        recv: e *fileEngine
+        results: "[]plug.EntryValue, error"
+      - doc: Entries are the latest limit documents, raw.
+        name: Entries
+        params: ctx context.Context, limit int
+        recv: e *fileEngine
+        results: "[]json.RawMessage, error"
+      - doc: Write writes d in mode.
+        name: Write
+        params: ctx context.Context, d plug.DocumentValue, mode plug.WriteMode
+        recv: e *fileEngine
+        results: error
+      - doc: Update changes the document key with fn, under the store's lock.
+        name: Update
+        params: ctx context.Context, key string, fn func(d *plug.DocumentValue) error
+        recv: e *fileEngine
+        results: plug.DocumentValue, error
+      - doc: Delete removes the document key.
+        name: Delete
+        params: ctx context.Context, key string
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          Watch registers the store's hooks: the engine tells them each write it
+          made, once it stands — at the commit, in a transaction.
+        name: Watch
+        params: onWrite, onDelete func(key string)
+        recv: e *fileEngine
+      - doc: local reports whether ctx runs in a transaction of the data's.
+        name: local
+        params: ctx context.Context
+        recv: e *fileEngine
+        results: bool
+      - doc: |-
+          before is what writes back the value under key, when ctx runs in a
+          transaction of the data's: the record it holds now, or its absence; nil
+          outside one. Nothing else writes the data meanwhile: the transaction holds
+          the writer turn.
+
+          On a store that keeps versions (ADR 0007 §3) the write back is a version
+          of its own — the document store numbers every write, and never gives a
+          number twice —, kit's, by nobody, and it prunes nothing; the versions the
+          rolled back writes made are then taken out of the history, and the one
+          they found holds what it held again — a write in place changed it
+          (forget) —, so that what never committed never shows. The versions those
+          writes pruned stay pruned, and a record whose deletion is rolled back comes
+          back without its versions, which the deletion took (kitsunium/sdk ADR
+          0143, deferred: a key's document and versions restored together).
+        name: before
+        params: ctx context.Context, key string
+        recv: e *fileEngine
+        results: func(context.Context) error
+      - doc: |-
+          uncreate is what takes back a write that finds no document under key: its
+          deletion — or, over a record in the trash, which the write takes out
+          (ADR 0178 C4), the record put back in, where an earlier trash's own
+          rollback finds it to restore. The version the write made stays: a number
+          is never given twice.
+        name: uncreate
+        params: key string
+        recv: e *fileEngine
+        results: func(context.Context) error
+      - doc: |-
+          after keeps, once a write stands, what writes back what it replaced, and
+          tells the store's hooks — at the commit, in a transaction.
+        name: after
+        params: ctx context.Context, err error, key string, deleted bool, undo func(context.Context) error
+        recv: e *fileEngine
+      - doc: |-
+          tell tells the store's hooks that a rollback wrote key back: what the
+          write woke reads it anew.
+        name: tell
+        params: key string, deleted bool, err error
+        recv: e *fileEngine
+      - doc: Close closes the document store.
+        name: Close
+        recv: e *fileEngine
+        results: error
+      - doc: Fold rewrites the store's log with only what it holds now.
+        name: Fold
+        params: _ context.Context
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          Keys lists the document store's keys above after: in memory, without a
+          document copied.
+        name: Keys
+        params: _ context.Context, after string
+        recv: e *fileEngine
+        results: iter.Seq2[string, error]
+      - doc: StoredVersions are the versions of the record under key as they rest.
+        name: StoredVersions
+        params: _ context.Context, key string
+        recv: e *fileEngine
+        results: "[]plug.VersionValue, error"
+      - doc: |-
+          RewriteVersions rewrites the former versions of the record under key
+          with fn, under the writers' lock.
+        name: RewriteVersions
+        params: _ context.Context, key string, fn func(vs []plug.VersionValue) ([]plug.VersionValue, error)
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          head is the number of the current version of the record under key,
+          before a write of a transaction replaces it: a rollback takes every
+          version above it out of the history. Zero on a store that keeps no
+          versions.
+        name: head
+        params: key string
+        recv: e *fileEngine
+        results: uint64
+      - doc: |-
+          forget takes out of the history of the record under key the versions a
+          rolled back write made — every former version numbered above head, the
+          version the write found — and gives head back the document it held, prev:
+          a write in place, a workflow's transition of the state alone, changed it
+          without a new number. What never committed never shows. The version the
+          rollback made stays: a number is never given twice.
+        name: forget
+        params: key string, head uint64, prev docRecord
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          VersionWeight is what the document store's versions weigh, from the
+          counter its writes move.
+        name: VersionWeight
+        params: _ context.Context
+        recv: e *fileEngine
+        results: plug.VersionWeightValue, error
+      - doc: |-
+          Trash moves the document key to the trash. In a transaction of the data's,
+          a rollback brings it back, its versions with it.
+        name: Trash
+        params: ctx context.Context, key string
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          Untrash brings the document key back from the trash. In a transaction of
+          the data's, a rollback trashes it again.
+        name: Untrash
+        params: ctx context.Context, key string
+        recv: e *fileEngine
+        results: error
+      - doc: "Purge empties the trash of the document key: no rollback brings it back."
+        name: Purge
+        params: _ context.Context, key string
+        recv: e *fileEngine
+        results: error
+      - doc: Tombstones are the documents in the trash.
+        name: Tombstones
+        params: _ context.Context
+        recv: e *fileEngine
+        results: "[]plug.TombstoneValue, error"
+      - doc: |-
+          unconfirmed tells the store's hooks of a rollback's write back of key, and
+          returns its error but an unconfirmed write, which stands.
+        name: unconfirmed
+        params: err error, key string, deleted bool
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          trashedNow reports whether a document is in the trash under key: its
+          versions read while no document is stored.
+        name: trashedNow
+        params: key string
+        recv: e *fileEngine
+        results: bool
+      - doc: Documents is the file store itself.
+        name: Documents
+        recv: e *fileEngine
+        results: plug.Documents, bool
+      - doc: KeyList yields the keys of the file store.
+        name: KeyList
+        params: ctx context.Context
+        recv: e *fileEngine
+        results: iter.Seq2[string, error]
+      - doc: TombstoneList is the file store's trash.
+        name: TombstoneList
+        params: ctx context.Context
+        recv: e *fileEngine
+        results: "[]plug.TombstoneValue, error"
+      - doc: VersionList is the versions of the document key in the file store.
+        name: VersionList
+        params: ctx context.Context, key string
+        recv: e *fileEngine
+        results: "[]plug.VersionValue, error"
+      - doc: Current is the document key as the file store keeps it.
+        name: Current
+        params: _ context.Context, key string
+        recv: e *fileEngine
+        results: json.RawMessage, error
+      - doc: KeepsVersions reports whether the file store keeps versions.
+        name: KeepsVersions
+        recv: e *fileEngine
+        results: bool
+      - doc: |-
+          PutDocument writes the document key into the file store with its
+          versions and its trash as they are given.
+        name: PutDocument
+        params: _ context.Context, key string, versions []plug.VersionValue, trashedAt time.Time
+        recv: e *fileEngine
+        results: error
+      - doc: |-
+          InsertRaw writes a document, as it rests, into a file store that keeps no
+          versions, keyed and indexed as the store keys and indexes it.
+        name: InsertRaw
+        params: _ context.Context, raw json.RawMessage
+        recv: e *fileEngine
+        results: error
+    name: fileEngine
+  - doc: |-
+      sqlEngine is a store on a database: the SDK's document store over SQL,
+      of records as they rest.
+    fields:
+      - name: ds
+        type: "*docstore.SQLStore[docRecord]"
+      - name: docs
+        type: "*documents"
+      - doc: |-
+          onWrite is what the store's Watch registered: the SDK tells it each
+          write once its transaction commits, and a rollback of kit's
+          transaction tells it again, so that what reads the store reads it
+          anew.
+        name: onWrite
+        type: func(key string)
+    kind: struct
+    methods:
+      - doc: |-
+          call is ctx for a call of the engine: on the transaction it carries for
+          the store's database, else on the pool, within the database's timeout, as
+          kit's core says; done ends it.
+        name: call
+        params: ctx context.Context, write bool
+        recv: e *sqlEngine
+        results: context.Context, func(), error
+      - doc: |-
+          keep is how many former versions the table keeps of each record (ADR
+          0007 §3), in <table>___vs: none when zero.
+        name: keep
+        recv: e *sqlEngine
+        results: int
+      - doc: Get reads the record key.
+        name: Get
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: plug.DocumentValue, error
+      - doc: List reads every record.
+        name: List
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: "[]plug.DocumentValue, error"
+      - doc: Filter reads the records keep keeps.
+        name: Filter
+        params: ctx context.Context, keep func(d plug.DocumentValue) bool
+        recv: e *sqlEngine
+        results: "[]plug.DocumentValue, error"
+      - doc: Lookup reads the record whose unique index holds key.
+        name: Lookup
+        params: ctx context.Context, index, key string
+        recv: e *sqlEngine
+        results: plug.DocumentValue, error
+      - doc: Find reads the records an index files under key.
+        name: Find
+        params: ctx context.Context, index, key string
+        recv: e *sqlEngine
+        results: "[]plug.DocumentValue, error"
+      - doc: Count is how many records the table holds.
+        name: Count
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: int, error
+      - doc: Entries are up to limit records as the table keeps them.
+        name: Entries
+        params: ctx context.Context, limit int
+        recv: e *sqlEngine
+        results: "[]json.RawMessage, error"
+      - doc: |-
+          KeyedEntries are up to limit records as the table keeps them, with their
+          keys: what a sealing store reads its records by.
+        name: KeyedEntries
+        params: ctx context.Context, limit int
+        recv: e *sqlEngine
+        results: "[]plug.EntryValue, error"
+      - doc: Write writes d in mode, stamped as the caller's context says.
+        name: Write
+        params: ctx context.Context, d plug.DocumentValue, mode plug.WriteMode
+        recv: e *sqlEngine
+        results: error
+      - doc: Update changes the record key with fn, in one write.
+        name: Update
+        params: ctx context.Context, key string, fn func(d *plug.DocumentValue) error
+        recv: e *sqlEngine
+        results: plug.DocumentValue, error
+      - doc: Delete removes the record key.
+        name: Delete
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: error
+      - doc: |-
+          retold keeps key for the store's hooks to hear again if kit's transaction
+          rolls its write back: the SDK drops a rolled back write's hooks, and what
+          the write woke — a workflow, a retention — must read the store anew.
+        name: retold
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+      - doc: |-
+          Watch registers the store's hooks with the SDK, which calls them once a
+          write's transaction commits.
+        name: Watch
+        params: onWrite, onDelete func(key string)
+        recv: e *sqlEngine
+      - doc: "Close closes nothing: the pool is the database's."
+        name: Close
+        recv: e *sqlEngine
+        results: error
+      - doc: |-
+          Reindex files the table's index rows again: a record the refiling could
+          not decode — or open — refuses it, whatever the SDK made of it.
+        name: Reindex
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: error
+      - doc: |-
+          Keys lists the table's keys above after, sqlKeysChunk at a time, each
+          chunk one call on the transaction ctx carries for the database, else on
+          the pool, within the database's timeout.
+        name: Keys
+        params: ctx context.Context, after string
+        recv: e *sqlEngine
+        results: iter.Seq2[string, error]
+      - doc: keysChunk is at most sqlKeysChunk keys above after, read in one call.
+        name: keysChunk
+        params: ctx context.Context, after string
+        recv: e *sqlEngine
+        results: "[]string, error"
+      - doc: |-
+          StoredVersions are the versions of the record under key as the table
+          keeps them.
+        name: StoredVersions
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: "[]plug.VersionValue, error"
+      - doc: |-
+          RewriteVersions rewrites the former versions of the record under key
+          with fn, in one write.
+        name: RewriteVersions
+        params: ctx context.Context, key string, fn func(vs []plug.VersionValue) ([]plug.VersionValue, error)
+        recv: e *sqlEngine
+        results: error
+      - doc: |-
+          VersionWeight is what the table's versions weigh, in one statement on the
+          transaction ctx carries for the database, else on the pool, within the
+          database's timeout.
+        name: VersionWeight
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: plug.VersionWeightValue, error
+      - doc: Trash moves the record key to the trash, in the transaction ctx carries.
+        name: Trash
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: error
+      - doc: |-
+          Untrash brings the record key back from the trash, in the transaction ctx
+          carries.
+        name: Untrash
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: error
+      - doc: Purge empties the trash of the record key, in the transaction ctx carries.
+        name: Purge
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: error
+      - doc: Tombstones are the records in the trash.
+        name: Tombstones
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: "[]plug.TombstoneValue, error"
+      - doc: Documents is the table itself.
+        name: Documents
+        recv: e *sqlEngine
+        results: plug.Documents, bool
+      - doc: KeyList yields the keys of the table, a page at a time.
+        name: KeyList
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: iter.Seq2[string, error]
+      - doc: TombstoneList is the table's trash.
+        name: TombstoneList
+        params: ctx context.Context
+        recv: e *sqlEngine
+        results: "[]plug.TombstoneValue, error"
+      - doc: VersionList is the versions of the document key in the table.
+        name: VersionList
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: "[]plug.VersionValue, error"
+      - doc: Current is the document key as the table keeps it.
+        name: Current
+        params: ctx context.Context, key string
+        recv: e *sqlEngine
+        results: json.RawMessage, error
+      - doc: KeepsVersions reports whether the table keeps versions.
+        name: KeepsVersions
+        recv: e *sqlEngine
+        results: bool
+      - doc: |-
+          PutDocument writes the document key into the table with its versions and
+          its trash as they are given.
+        name: PutDocument
+        params: ctx context.Context, key string, versions []plug.VersionValue, trashedAt time.Time
+        recv: e *sqlEngine
+        results: error
+      - doc: |-
+          InsertRaw writes a document, as it rests, into a table that keeps no
+          versions: the record as it rests — sealed members boxes for a store that
+          seals —, keyed and indexed as the table's engine keys and indexes it.
+        name: InsertRaw
+        params: ctx context.Context, raw json.RawMessage
+        recv: e *sqlEngine
+        results: error
+    name: sqlEngine
+vars:
+  - doc: |-
+      sentinels are the SDK's refusals by the kind kit words each by, in the
+      order a refusal is told: the first that matches.
+    items:
+      - name: sentinels
+        value: |-
+          []struct {
+          	sentinel error
+          	kind     plug.Refusal
+          }{
+          	{docstore.KeyTooLong, plug.RefusalKeyTooLong},
+          	{docstore.WriteUnconfirmed, plug.RefusalUnconfirmed},
+          	{docstore.DocumentNotFound, plug.RefusalNotFound},
+          	{docstore.DocumentExists, plug.RefusalExists},
+          	{docstore.UniqueKeyTaken, plug.RefusalUniqueTaken},
+          	{docstore.DocumentKeyEmpty, plug.RefusalKeyEmpty},
+          	{docstore.DocumentKeyChanged, plug.RefusalKeyChanged},
+          	{docstore.IndexUnknown, plug.RefusalIndexUnknown},
+          	{docstore.IndexNotUnique, plug.RefusalIndexNotUnique},
+          	{docstore.IndexBroken, plug.RefusalIndexBroken},
+          	{docstore.DocumentUndecodable, plug.RefusalUndecodable},
+          	{docstore.DocumentUnencodable, plug.RefusalUnencodable},
+          	{docstore.PersistFailed, plug.RefusalPersist},
+          	{docstore.LoadFailed, plug.RefusalLoad},
+          	{docstore.StoreClosed, plug.RefusalClosed},
+          	{docstore.VersionsNotKept, plug.RefusalVersionsNotKept},
+          	{docstore.VersionsRewriteRefused, plug.RefusalVersionsRewrite},
+          	{docstore.DocumentNotTrashed, plug.RefusalNotTrashed},
+          	{docstore.StatementFailed, plug.RefusalStatement},
+          	{sql.TxClosed, plug.RefusalTxClosed},
+          	{sql.BeginFailed, plug.RefusalTxFailed},
+          	{sql.CommitFailed, plug.RefusalTxFailed},
+          	{sql.RollbackFailed, plug.RefusalTxFailed},
+          	{sql.SavepointFailed, plug.RefusalTxFailed},
+          	{sql.TxPoisoned, plug.RefusalTxFailed},
+          	{sql.MigrationOutOfOrder, plug.RefusalOutOfOrder},
+          }
+    name: sentinels
+  - doc: catalogueQueries list the tables of the schema a connection works in.
+    items:
+      - name: catalogueQueries
+        value: |-
+          map[sql.Dialect]string{
+          	sql.DialectPostgres: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema()",
+          	sql.DialectMySQL:    "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'",
+          	sql.DialectSQLite:   "SELECT name FROM sqlite_master WHERE type = 'table'",
+          }
+    name: catalogueQueries
+  - doc: |-
+      : Asserts at compile time that the engines, the scope on a database and
+      its migrator are what plug describes, with every sibling kit's core asks
+      for.
+    grouped: true
+    items:
+      - name: _
+        type: plug.StoreEngine
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.Folder
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.Keyser
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.EntrySource
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.VersionKeeper
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.VersionWeighter
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.Trasher
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.DocumentSource
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.Documents
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.DocumentSink
+        value: (*fileEngine)(nil)
+      - name: _
+        type: plug.StoreEngine
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.Keyser
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.EntrySource
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.Reindexer
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.VersionKeeper
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.VersionWeighter
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.Trasher
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.DocumentSource
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.Documents
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.DocumentSink
+        value: (*sqlEngine)(nil)
+      - name: _
+        type: plug.Database
+        value: (*database)(nil)
+      - name: _
+        type: plug.Checker
+        value: (*database)(nil)
+      - name: _
+        type: plug.MigratorProvider
+        value: (*database)(nil)
+      - name: _
+        type: plug.Migrator
+        value: migrator{}
+    name: _

@@ -1,0 +1,81 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: isAtextRun
+    steps:
+      - loop:
+          do:
+            - bind: char
+              eval: s[index]
+            - opt:
+                do:
+                  - continue: true
+                when: char == '.'
+            - opt:
+                do:
+                  - return: "false"
+                when: char <= spaceOctet || char >= delOctet || strings.IndexByte(specials, char) >= 0
+          key: index
+          range: len(s)
+      - return: "true"
+  - of: splitAttachments
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: inlines
+                    value: append(inlines, all[index])
+                  - continue: true
+                when: all[index].Inline()
+            - set: files
+              value: append(files, all[index])
+          key: index
+          range: all
+      - return: inlines, files
+  - of: appendAddressFields
+    steps:
+      - bind: lists
+        eval: |-
+          []addressField{
+          		{coremail.HeaderTo, msg.To},
+          		{coremail.HeaderCc, msg.Cc},
+          		{coremail.HeaderReplyTo, msg.ReplyTo},
+          	}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: fields
+                    value: |-
+                      append(fields, coremail.HeaderFieldValue{
+                      				Name: list.name, Value: formatAddressList(list.addrs),
+                      			})
+                when: len(list.addrs) > 0
+          key: _
+          range: lists
+          value: list
+      - return: fields
+  - of: foldPoint
+    steps:
+      - bind: limit
+        eval: min(softLineOctets, len(line)-minFoldTail)
+      - loop:
+          cond: index >= 1
+          do:
+            - opt:
+                do:
+                  - return: index
+                when: line[index] == ' ' && line[index+1] != ' '
+          init: index := limit
+          post: index--
+      - loop:
+          cond: index < len(line)-1
+          do:
+            - opt:
+                do:
+                  - return: index
+                when: line[index] == ' ' && line[index+1] != ' '
+          init: index := softLineOctets + 1
+          post: index++
+      - return: "-1"

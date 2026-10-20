@@ -1,0 +1,153 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*consoleFactory).Name
+    steps:
+      - return: "\"console\""
+  - of: (*consoleFactory).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consoleFactory).Open
+        kind: self
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: c, ok
+        eval: cfg.(writer.ConsoleConfig)
+      - opt:
+          do:
+            - return: nil, writer.WriterConfigInvalid
+          when: "!ok || (c.Stream != writer.ConsoleStdout && c.Stream != writer.ConsoleStderr)"
+      - return: levelgate.New(pickStream(c.Stream), c.MinLevel), nil
+        to: levelgate
+  - of: (*consoleFactory).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consoleFactory).Decode
+        kind: self
+      - id: decodeStream
+        kind: internal
+      - id: decodeMinLevel
+        kind: internal
+    steps:
+      - bind: c
+        eval: writer.ConsoleConfig{}
+      - opt:
+          do:
+            - return: nil, serr
+          init:
+            bind: serr
+            eval: decodeStream(raw, &c.Stream)
+            to: decodeStream
+          when: serr != nil
+      - opt:
+          do:
+            - return: nil, lerr
+          init:
+            bind: lerr
+            eval: decodeMinLevel(raw, &c.MinLevel)
+            to: decodeMinLevel
+          when: lerr != nil
+      - return: c, nil
+  - of: decodeStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStream
+        kind: self
+      - id: configInvalid
+        kind: internal
+    steps:
+      - bind: v, present
+        eval: raw["target"]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: "!ok"
+      - switch:
+          cases:
+            - case: "\"stderr\", \"\""
+              do:
+                - set: "*dst"
+                  value: writer.ConsoleStderr
+            - case: "\"stdout\""
+              do:
+                - set: "*dst"
+                  value: writer.ConsoleStdout
+            - default: true
+              do:
+                - return: configInvalid()
+                  to: configInvalid
+          "on": s
+      - return: nil
+  - of: decodeMinLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeMinLevel
+        kind: self
+      - id: configInvalid
+        kind: internal
+      - id: level
+        kind: package
+    steps:
+      - bind: v, present
+        eval: raw["min_level"]
+      - opt:
+          do:
+            - return: nil
+          when: "!present"
+      - bind: s, ok
+        eval: v.(string)
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: "!ok"
+      - bind: lvl, perr
+        eval: level.ParseLevel(s)
+        to: level
+      - opt:
+          do:
+            - return: configInvalid()
+              to: configInvalid
+          when: perr != nil
+      - set: "*dst"
+        value: lvl
+      - return: nil
+  - of: configInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: configInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(writer.WriterConfigInvalid, errs.WrapParams{}, errs.String("writer", "console"))
+        to: errs
+  - of: pickStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: pickStream
+        kind: self
+      - id: consolesink
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: consolesink.NewStdout()
+              to: consolesink
+          when: s == writer.ConsoleStdout
+      - return: consolesink.NewStderr()
+        to: consolesink

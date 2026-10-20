@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: resolveEvery
+    steps:
+      - var:
+          name: cfg
+          type: everyConfig
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: opt == nil
+            - set: cfg
+              value: opt(cfg)
+          key: _
+          range: opts
+          value: opt
+      - opt:
+          do:
+            - set: cfg.waiter
+              value: clock.System
+          when: cfg.waiter == nil
+      - return: cfg

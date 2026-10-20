@@ -1,0 +1,86 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewCappedPool
+    steps:
+      - opt:
+          do:
+            - panic: "\"recycler: nil reset function\""
+          when: resetFn == nil
+      - opt:
+          do:
+            - panic: "\"recycler: nil cap function\""
+          when: capOfFn == nil
+      - opt:
+          do:
+            - panic: "\"recycler: max capacity must be positive\""
+          when: maxCap <= 0
+      - return: |-
+          &CappedPool[T]{
+          		inner:  NewPool(newFn),
+          		reset:  resetFn,
+          		capOf:  capOfFn,
+          		maxCap: maxCap,
+          	}
+  - of: (*CappedPool).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CappedPool).Get
+        kind: self
+      - id: c.inner.Get
+        kind: internal
+    steps:
+      - return: c.inner.Get()
+        to: c.inner.Get
+  - of: (*CappedPool).Put
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CappedPool).Put
+        kind: self
+      - id: c.inner.Put
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.capOf(v) > c.maxCap
+      - eval: c.reset(v)
+      - eval: c.inner.Put(v)
+        to: c.inner.Put
+  - of: NewPool
+    steps:
+      - opt:
+          do:
+            - panic: "\"recycler: nil factory\""
+          when: newFn == nil
+      - bind: r
+        eval: "&Pool[T]{}"
+      - set: r.pool.New
+        value:
+          closure:
+            results: any
+            steps:
+              - return: newFn()
+      - return: r
+  - of: (*Pool).Get
+    steps:
+      - bind: v, ok
+        eval: r.pool.Get().(T)
+      - opt:
+          do:
+            - panic: "\"recycler: pool yielded unexpected type\""
+          when: "!ok"
+      - return: v
+  - of: (*Pool).Put
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).Put
+        kind: self
+      - id: r.pool.Put
+        kind: value
+    steps:
+      - eval: r.pool.Put(v)
+        to: r.pool.Put

@@ -1,0 +1,652 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      initialSeenCapacity sizes the cycle-detection map on the rare occasion it is
+      allocated at all. A scan that has descended past the threshold is already in
+      a shape nobody writes, so the hint is small on purpose.
+    items:
+      - name: initialSeenCapacity
+        type: int
+        value: "16"
+    name: initialSeenCapacity
+  - doc: |-
+      rootName is the name of the set's anchor template, which is never parsed and
+      never executed.
+
+      The empty string is chosen because fs.WalkDir cannot produce it: fs.ValidPath
+      rejects "" and the walk root arrives as ".", so no file can ever collide with
+      the anchor. Render refuses the empty name explicitly all the same, so the
+      anchor is unreachable by two independent mechanisms rather than by one
+      argument about walk semantics.
+    items:
+      - name: rootName
+        type: string
+        value: "\"\""
+    name: rootName
+  - doc: |-
+      initialBufferBytes is the scratch buffer a fresh pool entry starts at: 32 KiB,
+      which holds a typical server-rendered page without a single regrowth.
+    items:
+      - name: initialBufferBytes
+        type: int
+        value: 32 << 10
+    name: initialBufferBytes
+  - doc: |-
+      rootPathSegment names the render model in a reported path, so a violation
+      reads data.Items[3].Body rather than starting mid-sentence at .Items.
+    items:
+      - name: rootPathSegment
+        type: string
+        value: "\"data\""
+    name: rootPathSegment
+  - doc: |-
+      startDetectingCyclesAfter is the descent depth past which the scan starts
+      recording the pointers it has followed.
+
+      The threshold and the technique are encoding/json's, deliberately: a model
+      that is genuinely 1000 levels deep is not a model, and paying for a map on
+      every render to catch a shape nobody writes would tax every render for the
+      benefit of none. Below the threshold a cycle simply recurses, exactly as
+      json.Marshal does.
+    items:
+      - name: startDetectingCyclesAfter
+        type: int
+        value: "1000"
+    name: startDetectingCyclesAfter
+  - doc: decimalBase is strconv's base for an integer map key rendered into a path.
+    items:
+      - name: decimalBase
+        type: int
+        value: "10"
+    name: decimalBase
+files:
+  - decls:
+      - initialSeenCapacity
+      - visitedKey
+      - (*scanner).repeat
+    name: cycles.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - raise
+    name: errors.go
+  - decls:
+      - HTML
+      - htmlFactory
+      - htmlFactory.Engine
+      - htmlFactory.New
+      - NewHTML
+      - newHTMLRenderer
+      - (*renderer).ContentType
+    name: html.go
+  - decls:
+      - limitWriter
+      - (*limitWriter).Write
+    name: limit.go
+  - decls:
+      - rootName
+      - newRenderer
+      - clampMaxBytes
+      - parser
+      - (*parser).parseTree
+      - (*parser).parseEntry
+      - selected
+      - (*parser).refuseEndlessRecursion
+      - unconditionalCalls
+      - reachesItself
+      - (*parser).probeEscaping
+    name: parse.go
+  - decls:
+      - initialBufferBytes
+      - buffers
+      - renderer
+      - (*renderer).Render
+      - (*renderer).execute
+      - renderFailure
+    name: render.go
+  - decls:
+      - rootPathSegment
+      - startDetectingCyclesAfter
+      - decimalBase
+      - unsafeTypeNames
+      - canReachUnsafe
+      - reachable
+      - reachableKind
+      - reachableStruct
+      - scanner
+      - scanUnsafe
+      - (*scanner).walk
+      - composite
+      - (*scanner).walkKind
+      - (*scanner).walkIndirect
+      - (*scanner).walkIndexed
+      - (*scanner).walkStruct
+      - (*scanner).walkMap
+      - mapKeyLabel
+    name: scan.go
+functions:
+  - doc: |-
+      raise wraps a port or package sentinel, attaching fields without relabelling
+      it — errs.Wrap is origin-wins (rule 6), so the sentinel's Code, Reason,
+      Public and Private survive and only the Fields grow.
+
+      It is the single place the engine's own diagnostic is attached, and it
+      attaches it as a FIELD because that is the only dynamic channel the error
+      model offers: Public is a compile-time literal by design, and origin-wins
+      forbids a wrapper from supplying a new Private. Fields are log-side — they
+      are absent from err.Error() (ADR 0005 §Semantics) — so a framework that
+      serialises FieldsOf into a response has re-opened the split this domain
+      depends on.
+    name: raise
+    params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
+    results: error
+  - name: NewHTML
+    params: cfg coreview.Config
+    results: renderer coreview.Renderer, err error
+  - doc: |-
+      newHTMLRenderer adapts the concrete constructor to the port's interface
+      return, and it is not a rename: returning newRenderer's (*renderer, error)
+      pair directly would hand back a NON-NIL coreview.Renderer holding a nil
+      *renderer on every construction failure. A caller checking `if r != nil`
+      would then call Render on nothing.
+
+      This is Go's typed-nil trap, and a domain whose whole contract is "a broken
+      template tree is a deploy that does not come up" is the last place it may
+      happen: the deploy would come up, holding a renderer that panics on its
+      first request.
+    name: newHTMLRenderer
+    params: cfg coreview.Config
+    results: renderer coreview.Renderer, err error
+  - doc: newRenderer parses cfg.FS in full and returns a ready renderer.
+    name: newRenderer
+    params: cfg coreview.Config
+    results: built *renderer, err error
+  - doc: |-
+      clampMaxBytes applies the ADR 0031 clamp half: a non-positive ceiling becomes
+      the default rather than an error, because unlike a lease TTL there is a
+      defensible universal answer for "an HTML document should not exceed N".
+    name: clampMaxBytes
+    params: configured int
+    results: int
+  - doc: |-
+      selected reports whether entry is one of the files to parse. An empty ext
+      list means every regular file: the caller already chose the tree, and
+      second-guessing its contents is the SDK inventing a naming convention.
+    name: selected
+    params: entry string, ext []string
+    results: bool
+  - doc: |-
+      unconditionalCalls lists the templates list calls at its own top level —
+      the calls that happen whatever the data is.
+    name: unconditionalCalls
+    params: list *parse.ListNode
+    results: "[]string"
+  - doc: |-
+      reachesItself reports whether following calls from current leads back to
+      origin. seen stops a walk from re-entering a template it already expanded.
+    name: reachesItself
+    params: origin, current string, calls map[string][]string, seen map[string]bool
+    results: bool
+  - doc: |-
+      renderFailure turns html/template's execution error into the right sentinel.
+
+      [coreview.RenderTooLarge] is recognised by identity rather than by message:
+      text/template strips its own writeError wrapper and returns the writer's
+      error verbatim, so the sentinel [limitWriter] returned arrives here
+      unchanged. Matching on a message would break the first time the stdlib
+      rephrased one.
+    name: renderFailure
+    params: execErr error, name string, limit int
+    results: error
+  - doc: |-
+      canReachUnsafe reports whether a value of typ could TRANSITIVELY hold one of
+      the six refused trust types.
+
+      This is the gate that decides whether the scan costs anything at all. A
+      render model made of strings, numbers, times and structs of those cannot
+      hold a template.URL no matter what its fields contain, so the answer is a
+      property of the TYPE and is computed once per type for the life of the
+      process. Only an interface-typed field (including any and map[string]any)
+      forces a value-level walk, because only there is the dynamic type unknown
+      until the render.
+    name: canReachUnsafe
+    params: typ reflect.Type
+    results: bool
+  - doc: |-
+      reachable is canReachUnsafe's recursion. visiting breaks type-level cycles.
+
+      An in-progress type answers false rather than true, and that is sound rather
+      than optimistic: re-entering a type already on the stack introduces no
+      member the outer frame is not already examining, so the cycle contributes
+      nothing the outer answer will not already carry.
+    name: reachable
+    params: typ reflect.Type, visiting map[reflect.Type]bool
+    results: bool
+  - doc: reachableKind answers reachable for the composite kinds.
+    name: reachableKind
+    params: typ reflect.Type, visiting map[reflect.Type]bool
+    results: bool
+  - doc: reachableStruct reports whether any field of typ can reach a refused type.
+    name: reachableStruct
+    params: typ reflect.Type, visiting map[reflect.Type]bool
+    results: bool
+  - doc: |-
+      scanUnsafe reports the first refused trust type reachable in data, with the
+      path that leads to it.
+
+      The path is built out of GO field names — data.User.Avatar, not a json tag —
+      because the vocabulary a template author reads is {{.User.Avatar}} and the
+      vocabulary a developer greps for is the struct field. That is the opposite
+      choice from validation (ADR 0046), whose paths name json members because its
+      input arrived as a decoded document.
+    name: scanUnsafe
+    params: data any
+    results: path, typeName string, found bool
+  - doc: composite reports whether kind can hold another value inside it.
+    name: composite
+    params: kind reflect.Kind
+    results: bool
+  - doc: |-
+      mapKeyLabel renders a map key for a path segment.
+
+      It never renders a key it cannot spell exactly. A path is a Field on a typed
+      error, Fields are log-side, and a map key is frequently caller data — so an
+      unrenderable key becomes "?" rather than a reflected dump of whatever it was.
+    name: mapKeyLabel
+    params: key reflect.Value
+    results: string
+imports:
+  bytes: bytes
+  context: context
+  coreview: github.com/kitsunium/sdk/internal/core/app/view
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+  io: io
+  parse: text/template/parse
+  path: path
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
+  slices: slices
+  strconv: strconv
+  sync: sync
+  template: html/template
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/view
+  name: view
+  purpose: Package view — the cycle detection the trust-type scan needs, kept in its own file so scan.go holds the walk and nothing else.
+types:
+  - doc: |-
+      visitedKey identifies a pointer already followed during one scan. The length
+      is carried for slices, mirroring encoding/json, so two slices sharing a
+      backing array are not mistaken for one.
+    fields:
+      - doc: typ is the static type at the visit site.
+        name: typ
+        type: reflect.Type
+      - doc: addr is the value's pointer.
+        name: addr
+        type: uintptr
+      - doc: extra is the slice length, or zero for every other kind.
+        name: extra
+        type: int
+    kind: struct
+    name: visitedKey
+  - doc: |-
+      htmlFactory builds html/template renderers. Empty struct: every parameter
+      lives in the [coreview.Config] handed to New, so the factory itself is a
+      singleton with no state to race over.
+    kind: struct
+    methods:
+      - doc: Engine returns [coreview.HTML], the registry key this factory claims.
+        name: Engine
+        recv: htmlFactory
+        results: coreview.Engine
+      - doc: |-
+          New parses cfg.FS in full and returns a ready [coreview.Renderer].
+
+          Everything permanent is decided here. A nil FS, a file that does not parse
+          and a template html/template cannot build an escaping plan for are all
+          refused now, so a broken template tree is a deploy that does not come up
+          rather than a 500 on the one page nobody smoke-tested.
+
+          An EMPTY tree is not an error. It produces a Renderer that refuses every name
+          with [coreview.TemplateNotFound] — a loud, typed behaviour rather than an
+          inert one, which is the half of ADR 0031 that applies to a configuration
+          nobody filled in.
+        name: New
+        params: cfg coreview.Config
+        recv: htmlFactory
+        results: renderer coreview.Renderer, err error
+    name: htmlFactory
+  - doc: |-
+      limitWriter is the io.Writer html/template executes into. It accumulates
+      into a buffer the engine owns and refuses the write that would take the
+      document past its ceiling.
+
+      The refusal is the whole point of the type. text/template's Execute takes no
+      context and cannot be cancelled, and the stdlib's only built-in guard is a
+      recursion DEPTH limit — a {{range}} over an attacker-influenced collection
+      has no depth at all and will write until the machine stops. The byte ceiling
+      is the only bound that exists, so it is enforced at the one place every byte
+      passes through.
+
+      It stops AT the ceiling rather than after it: the over-long write is never
+      copied into the buffer, so the process does not have to survive the
+      allocation in order to reject it.
+    fields:
+      - doc: |-
+          buf accumulates the document. Owned by the engine, borrowed from the
+          pool, and never handed to the caller — Render copies out.
+        name: buf
+        type: "*bytes.Buffer"
+      - doc: limit is the already-clamped [coreview.Config.MaxBytes] ceiling.
+        name: limit
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          Write appends p, or refuses it whole when it would breach the ceiling.
+
+          The error returned is the [coreview.RenderTooLarge] sentinel VALUE, not a
+          wrap of it: text/template strips its own writeError wrapper and hands the
+          writer's error back from Execute verbatim, so returning the sentinel is what
+          lets Render tell a ceiling breach from a genuine execution failure with
+          errors.Is rather than by matching a message.
+        name: Write
+        params: p []byte
+        recv: w *limitWriter
+        results: n int, err error
+    name: limitWriter
+  - doc: |-
+      parser is the construction-time state: the template set being filled and the
+      configuration filling it.
+
+      It exists so the walk and the probe are METHODS rather than functions taking
+      a *template.Template. That is not cosmetic: a parameter of that type invites
+      the suggestion to narrow it to an interface, and text/template.Template
+      satisfies every such interface exactly — which is the substitution ADR 0058
+      §D2 exists to make impossible.
+    fields:
+      - doc: set is the tree under construction, anchored at the unnamed root.
+        name: set
+        type: "*template.Template"
+      - doc: cfg is the configuration being honoured.
+        name: cfg
+        type: coreview.Config
+      - doc: count is how many templates have been parsed so far.
+        name: count
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          parseTree walks cfg.FS and parses every selected file into the set, naming
+          each template by its SLASH PATH relative to the root.
+
+          The naming is the load-bearing part. html/template's own ParseFS names each
+          template by filepath.Base, so a tree holding admin/page.html and
+          user/page.html ends up with ONE template called "page.html" — measured, the
+          second parse silently wins, and every request for the admin page renders the
+          user page with the admin page's model. There is no error, no warning and no
+          way to ask which one you got.
+        name: parseTree
+        recv: p *parser
+        results: error
+      - doc: "parseEntry is fs.WalkDir's callback: one file, parsed under its full path."
+        name: parseEntry
+        params: entry string, dirEntry fs.DirEntry, walkErr error
+        recv: p *parser
+        results: error
+      - doc: |-
+          refuseEndlessRecursion refuses a template that reaches itself again through
+          {{template}} calls with no condition on the path.
+
+          Such a template recurses on every render until text/template stops it at
+          its depth limit, 100 000 calls down, and the render fails — so it is a
+          defect of the TREE, and it is refused with the tree's other defects. Only a
+          call at a template's top level counts: one inside an {{if}}, a {{range}} or a
+          {{with}} may never run, which is how a legitimate recursion over a nested
+          model ends. The graph is read from the parse trees before anything
+          executes, rather than recognised by the stdlib's error text afterwards.
+        name: refuseEndlessRecursion
+        recv: p *parser
+        results: error
+      - doc: |-
+          probeEscaping forces html/template to build each template's contextual
+          escaping plan at CONSTRUCTION, and turns a failure into a refused Renderer.
+
+          This is not belt-and-braces. html/template resolves escaping lazily, at a
+          template's first Execute, and three failure classes only exist at that
+          moment — measured, with their ErrorCode:
+
+            - ErrEndContext (4) — a template that ends inside an unterminated tag or
+              attribute, e.g. `<a href="{{.}}`.
+            - ErrBranchEnd (3) — an {{if}} whose branches end in different contexts,
+              e.g. `<script>{{if .}}var x = "{{end}}</script>`.
+            - ErrNoSuchTemplate (5) — a {{template "x"}} naming something absent from
+              the set, which is what a renamed partial looks like.
+
+          Left alone, all three are a 500 on whichever request first reaches that page,
+          and the third is the everyday one: a partial gets renamed, every test that
+          exercises another page passes, and the failure ships.
+
+          Executing against nil data is deliberately harmless. No custom functions are
+          registered (helpers are out of scope for the domain), so nothing user-written
+          runs; a nil model calls no methods, {{range}} yields zero iterations, and the
+          output goes to io.Discard. Escaping is idempotent and cached, so the probe
+          leaves every template ready for its first real render.
+        name: probeEscaping
+        recv: p *parser
+        results: error
+    name: parser
+  - doc: |-
+      renderer is one parsed template set plus the ceiling its renders are bounded
+      by. Immutable after construction: there is no Add, no Reload and no lazy
+      parse, so no lock is needed and no request can observe a half-built set.
+    fields:
+      - doc: set is the parsed tree. Every template in it is named by its slash path.
+        name: set
+        type: "*template.Template"
+      - doc: maxBytes is the per-render output ceiling, already clamped.
+        name: maxBytes
+        type: int
+      - doc: |-
+          count is how many templates the set holds, reported in TemplateNotFound
+          so "the renderer is empty" and "that one name is wrong" are one log line
+          apart.
+        name: count
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          ContentType reports [coreview.ContentTypeHTML].
+
+          The charset is part of the security property, not formatting: a response
+          whose Content-Type carries no charset is sniffed, and a document sniffed as
+          UTF-7 can smuggle markup past an escaper that judged the bytes as UTF-8.
+        name: ContentType
+        recv: "*renderer"
+        results: string
+      - doc: |-
+          Render executes the template registered under name against data and returns
+          the complete document, or nothing at all.
+
+          The order of the four steps is the security property, not an implementation
+          detail:
+
+           1. the context is checked, so a request already abandoned does no work;
+           2. the name is resolved, so an unknown page is a typed refusal and not an
+              empty document;
+           3. the model is scanned for the six refused trust types, BEFORE the
+              template runs, so a violation has no partial page to reason about;
+           4. the template executes into a bounded buffer the engine owns.
+
+          On any failure the returned slice is nil. The bytes produced before a
+          mid-execution failure are discarded inside the engine and never reach the
+          caller — which is the entire reason this method returns a slice rather than
+          taking an io.Writer.
+        name: Render
+        params: ctx context.Context, name string, data any
+        recv: r *renderer
+        results: document []byte, err error
+      - doc: execute runs tmpl into a pooled, bounded buffer and copies the result out.
+        name: execute
+        params: tmpl *template.Template, name string, data any
+        recv: r *renderer
+        results: document []byte, err error
+    name: renderer
+  - doc: |-
+      scanner carries the per-render walk state. It lives on the stack and its map
+      is allocated lazily, so a scan that never passes
+      [startDetectingCyclesAfter] allocates nothing.
+    fields:
+      - doc: seen records the pointers followed past the cycle-detection threshold.
+        name: seen
+        type: map[visitedKey]struct{}
+    kind: struct
+    methods:
+      - doc: |-
+          repeat reports whether value's pointer has already been followed in this
+          scan, and records it when it has not.
+
+          Nothing is recorded below [startDetectingCyclesAfter]: a model shallower
+          than that cannot loop without recursing through it first, so the map is
+          never allocated on a normal render.
+        name: repeat
+        params: value reflect.Value, depth, extra int
+        recv: s *scanner
+        results: bool
+      - doc: |-
+          walk descends value, returning the path SUFFIX of the first refused type.
+
+          The suffix is assembled on the way back up rather than threaded down, so a
+          scan that finds nothing — every scan on a healthy request — builds no string
+          at all.
+
+          The order of the four checks is measured rather than stylistic. Type lookups
+          were 45 % of this walk's CPU before the two short-circuits below existed: an
+          interface's own type is never one of the six and can always hold one, so
+          BOTH lookups are known answers; and the six refused types are all defined
+          STRING types, so no other kind can ever be in the table.
+        name: walk
+        params: value reflect.Value, depth int
+        recv: s *scanner
+        results: suffix, typeName string, found bool
+      - doc: |-
+          walkKind dispatches walk over the composite kinds. The interface case is
+          handled in walk itself, before either type lookup.
+        name: walkKind
+        params: value reflect.Value, kind reflect.Kind, depth int
+        recv: s *scanner
+        results: suffix, typeName string, found bool
+      - doc: |-
+          walkIndirect follows an interface or a pointer to the value beneath it.
+          cycles is true for the pointer case, which is the only one that can close a
+          loop back onto a value already scanned.
+        name: walkIndirect
+        params: value reflect.Value, depth int, cycles bool
+        recv: s *scanner
+        results: suffix, typeName string, found bool
+      - doc: walkIndexed scans a slice or array, reporting [i] path segments.
+        name: walkIndexed
+        params: value reflect.Value, depth int
+        recv: s *scanner
+        results: suffix, typeName string, found bool
+      - doc: |-
+          walkStruct scans every field, reporting .Name path segments.
+
+          Unexported fields are scanned. They cannot be read by a template — text
+          /template refuses them — but scanning them costs nothing the gate has not
+          already priced in, and a scan narrower than its own gate would be a hole
+          that is hard to see.
+        name: walkStruct
+        params: value reflect.Value, depth int
+        recv: s *scanner
+        results: suffix, typeName string, found bool
+      - doc: |-
+          walkMap scans every key and every value, reporting [key] path segments.
+
+          The iteration reuses ONE addressable key and ONE addressable value through
+          Value.SetIterKey/SetIterValue rather than taking iter.Key()/iter.Value().
+          Measured: the convenient spelling allocates twice PER ENTRY — reflect boxes
+          each key and each element into a fresh reflect.Value — and it was 97 % of
+          every allocation this scan made.
+        name: walkMap
+        params: value reflect.Value, depth int
+        recv: s *scanner
+        results: suffix, typeName string, found bool
+    name: scanner
+vars:
+  - doc: |-
+      HTML is the registered html/template [coreview.Factory].
+
+      It registers through a package-level var initialiser rather than an init(),
+      mirroring core/data/codec and core/observe/logger/writer: importing this package is what wires
+      the engine, and the binding is a value a caller can hold.
+
+      Registration arms nothing. Unlike ADR 0048's OTLP/HTTP emitter — which is
+      deliberately NOT registered, because an import that arms a network client is
+      worse than the stdout hazard ADR 0030 refuses — a Factory holds no file, no
+      socket and no stream. It cannot act until someone calls New.
+    items:
+      - name: HTML
+        value: coreview.Register(htmlFactory{})
+    name: HTML
+  - doc: |-
+      buffers recycles the scratch a render executes into.
+
+      It is a CappedPool (ADR 0010) rather than a bare sync.Pool because the
+      ceiling and the pool disagree by three orders of magnitude: a render is
+      allowed 8 MiB by default, and one 8 MiB page must not leave 8 MiB pinned for
+      the life of the process. Anything over [coreview.MaxPooledBytes] is orphaned
+      on Put instead of being repooled.
+    items:
+      - name: buffers
+        value: |-
+          recycler.NewCappedPool(
+          	func() *bytes.Buffer { return bytes.NewBuffer(make([]byte, 0, initialBufferBytes)) },
+          	func(b *bytes.Buffer) { b.Reset() },
+          	func(b *bytes.Buffer) int { return b.Cap() },
+          	coreview.MaxPooledBytes,
+          )
+    name: buffers
+  - doc: |-
+      unsafeTypeNames maps each REFUSED html/template trust type to the name the
+      error reports.
+
+      html/template has seven trust types and this is six of them. The seventh,
+      template.HTML, is the one the domain admits — through core/app/view.TrustHTML,
+      which is its only SDK spelling.
+
+      The six are refused because each disables contextual escaping for a context
+      where a plain string could not have done any harm, and each has a working
+      exploit that the same string unconverted does not: measured,
+      template.URL("javascript:alert(1)") reaches the browser as
+      href="javascript:alert%281%29" and executes, while the identical string
+      typed as a string is rewritten by html/template to the inert "#ZgotmplZ".
+    grouped: true
+    items:
+      - doc: unsafeTypeNames is the refused-type table described above.
+        name: unsafeTypeNames
+        value: |-
+          map[reflect.Type]string{
+          		reflect.TypeFor[template.CSS]():      "html/template.CSS",
+          		reflect.TypeFor[template.HTMLAttr](): "html/template.HTMLAttr",
+          		reflect.TypeFor[template.JS]():       "html/template.JS",
+          		reflect.TypeFor[template.JSStr]():    "html/template.JSStr",
+          		reflect.TypeFor[template.Srcset]():   "html/template.Srcset",
+          		reflect.TypeFor[template.URL]():      "html/template.URL",
+          	}
+      - doc: |-
+          reachCache memoises canReachUnsafe per reflect.Type.
+
+          sync.Map is the right shape for the same reason validation's plan cache
+          uses it: the key set is bounded by the program's own types, it stops
+          growing within the first requests, and every access after that is a
+          read. A copy-on-write snapshot would clone the whole map per newly-seen
+          type.
+        name: reachCache
+        type: sync.Map
+    name: unsafeTypeNames

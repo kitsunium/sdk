@@ -1,0 +1,1381 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Checksum verification constants.
+    grouped: true
+    items:
+      - doc: checksumsAssetName is the release asset holding the sha256sum manifest.
+        name: checksumsAssetName
+        type: string
+        value: "\"checksums.txt\""
+      - doc: |-
+          maxArchiveBytes caps the in-memory archive buffer. Release archives are
+          ~10-30MB today; 256MB leaves ample headroom while bounding memory use
+          against a hostile or corrupted download stream.
+        name: maxArchiveBytes
+        type: int64
+        value: 256 << 20
+      - doc: |-
+          maxChecksumsBytes caps the checksums.txt manifest read. The real
+          manifest is a few hundred bytes; 1MB is defence-in-depth.
+        name: maxChecksumsBytes
+        type: int64
+        value: 1 << 20
+      - doc: |-
+          sha256HexLen is the hex-encoded length of a SHA-256 digest: 32 bytes,
+          two hex characters each, so 64 characters total.
+        name: sha256HexLen
+        type: int
+        value: "64"
+    name: checksumsAssetName
+  - doc: |-
+      nullDevicePath is the well-known sink whose reads return EOF forever. It is a
+      CHARACTER DEVICE, which is exactly why the mode test alone cannot exclude it.
+    items:
+      - name: nullDevicePath
+        type: string
+        value: "\"/dev/null\""
+    name: nullDevicePath
+  - doc: |-
+      maxForeignCauses bounds how many foreign messages one error may contribute.
+
+      The tree is this package's own and is two deep, so the bound is not reached
+      in practice; it is here because diagnose runs on the failure path, where a
+      cycle somebody else introduced must not become an unbounded string.
+    items:
+      - name: maxForeignCauses
+        type: int
+        value: "8"
+    name: maxForeignCauses
+  - doc: |-
+      maxVendorKeys bounds the key list, as ADR 0091 bounds the entitlement
+      anchors: two for a rotation, three for an interrupted one, four with
+      headroom. Past it the tail is dropped and logged — a build mistake answered
+      by refusing every update would strand every installation.
+    items:
+      - name: maxVendorKeys
+        type: int
+        value: "4"
+    name: maxVendorKeys
+  - doc: The signed statement's header lines, when a signature domain is set.
+    grouped: true
+    items:
+      - name: statementTag
+        type: string
+        value: "\"# tag \""
+      - name: statementExpires
+        type: string
+        value: "\"# expires \""
+    name: statementTag
+  - doc: prevSuffix names the previous binary kept beside the new one.
+    items:
+      - name: prevSuffix
+        type: string
+        value: "\".prev\""
+    name: prevSuffix
+  - doc: defaultProbeTimeout bounds a probe that declared none.
+    items:
+      - name: defaultProbeTimeout
+        type: time.Duration
+        value: 5 * time.Second
+    name: defaultProbeTimeout
+  - doc: Signature verification constants.
+    grouped: true
+    items:
+      - doc: |-
+          signatureAssetName is the release asset carrying the detached ed25519
+          signature over checksums.txt. Detached rather than embedded so the
+          manifest stays byte-identical to what `sha256sum` emits and the
+          existing installers keep parsing it unchanged.
+        name: signatureAssetName
+        type: string
+        value: checksumsAssetName + ".sig"
+      - doc: |-
+          maxSignatureBytes caps the signature asset read. A base64 ed25519
+          signature is 88 characters and the raw form is 64 bytes; 4KB is
+          defence-in-depth against an endpoint that answers with a page instead.
+        name: maxSignatureBytes
+        type: int64
+        value: 4 << 10
+    name: signatureAssetName
+  - doc: |-
+      defaultProductEnvPrefix is the environment-variable prefix used when a
+      SourceValue names none. It is deliberately generic: a build that forgets to
+      set Product still gets a working, if unbranded, opt-in variable rather than
+      silently sharing one with every other SDK consumer on the machine.
+    items:
+      - name: defaultProductEnvPrefix
+        type: string
+        value: "\"SELFUPDATE\""
+    name: defaultProductEnvPrefix
+  - doc: |-
+      envSuffixAutoUpgrade is appended to the product prefix for the unattended
+      upgrade opt-in.
+    items:
+      - name: envSuffixAutoUpgrade
+        type: string
+        value: "\"_AUTO_UPGRADE\""
+    name: envSuffixAutoUpgrade
+  - doc: |-
+      envSuffixAllowSudo is appended to the product prefix for the privilege
+      escalation opt-in.
+    items:
+      - name: envSuffixAllowSudo
+        type: string
+        value: "\"_ALLOW_SUDO\""
+    name: envSuffixAllowSudo
+  - doc: Transport bounds.
+    grouped: true
+    items:
+      - doc: |-
+          maxRedirects caps the redirect chain. GitHub answers a release asset
+          download with one redirect to objects.githubusercontent.com, so a
+          handful of hops is generous; Go's default of 10 is not a bound anyone
+          chose for this.
+        name: maxRedirects
+        type: int
+        value: "5"
+      - doc: |-
+          maxAPIBodyBytes caps a GitHub REST response. The archive path was
+          already capped (maxArchiveBytes) while the JSON path was not, so a
+          hostile or broken endpoint could stream unbounded bytes into
+          json.Decoder. A /releases page is a few hundred kilobytes.
+        name: maxAPIBodyBytes
+        type: int64
+        value: 8 << 20
+    name: maxRedirects
+  - doc: Service constants for GitHub API, versioning, and file operations.
+    grouped: true
+    items:
+      - doc: apiURL is the GitHub releases API endpoint for latest stable release.
+        name: apiURL
+        type: string
+        value: "\"https://api.github.com/repos/%s/%s/releases/latest\""
+      - doc: releasesURL is the GitHub releases API endpoint for all releases.
+        name: releasesURL
+        type: string
+        value: "\"https://api.github.com/repos/%s/%s/releases\""
+      - doc: releaseByTagURL is the GitHub API endpoint for a specific release tag.
+        name: releaseByTagURL
+        type: string
+        value: "\"https://api.github.com/repos/%s/%s/releases/tags/%s\""
+      - doc: downloadURL is the release asset download URL pattern.
+        name: downloadURL
+        type: string
+        value: "\"https://github.com/%s/%s/releases/download/%s/%s\""
+      - doc: httpTimeout is the timeout for HTTP requests.
+        name: httpTimeout
+        type: time.Duration
+        value: 30 * time.Second
+      - doc: executablePerm is the permission for executable files.
+        name: executablePerm
+        type: os.FileMode
+        value: "0o755"
+      - doc: CandidateListSentinel is the sentinel value for --candidate without a tag.
+        name: CandidateListSentinel
+        type: string
+        value: "\"__list__\""
+    name: apiURL
+files:
+  - decls:
+      - tagPattern
+      - CandidateValue
+      - (*Service).ListCandidates
+      - (*Service).DownloadCandidate
+      - (*Service).getReleases
+      - (*Service).getReleaseByTag
+    name: candidate.go
+  - decls:
+      - checksumsAssetName
+      - bufferArchive
+      - (*Service).matchArchiveDigest
+      - (*Service).fetchChecksums
+      - findChecksumEntry
+      - isHexDigest
+    name: checksum.go
+  - decls:
+      - companionTarget
+      - stagedFile
+      - (*Service).WithCompanions
+      - (*Service).installedCompanions
+      - (*Service).memberName
+      - (*Service).replaceSet
+      - (*Service).stageSet
+      - (*Service).renameSet
+      - (*Service).stageMember
+      - (*Service).keepSet
+      - (*Service).restore
+      - (*Service).probeSet
+      - (*Service).abandon
+      - (*Service).dropKept
+    name: companions.go
+  - decls:
+      - nullDevicePath
+      - SourceValue.AuthoriseUnattendedUpgrade
+      - SourceValue.ExplainUpgradeRefusal
+      - SourceValue.ExplainUpgradeFailure
+      - consentFromEnv
+      - askUpgradeConsent
+      - StdinIsTerminal
+      - isNullDevice
+      - terminalLike
+      - SourceValue.consentFromEnvironment
+    name: consent.go
+  - decls:
+      - (*Service).WithAutomaticConsent
+      - (*Service).WithoutElevation
+      - (*Service).AuthoriseUnattendedUpgrade
+    name: consent_product.go
+  - decls:
+      - maxForeignCauses
+      - diagnose
+      - foreignCauses
+      - collectForeign
+    name: diagnose.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - truthyEnv
+      - SourceValue.guardedSudoMove
+      - sudoMove
+      - SourceValue.refusedElevation
+    name: elevation.go
+  - decls:
+      - Getter
+      - FileSystem
+      - Copier
+    name: interfaces.go
+  - decls:
+      - maxVendorKeys
+      - statementTag
+      - (*Service).WithVendorKeys
+      - (*Service).WithSignatureDomain
+      - (*Service).verifiedByAnyKey
+      - (*Service).keys
+      - (*Service).signedMessage
+      - (*Service).checkStatement
+    name: keys.go
+  - decls:
+      - osFileSystem
+      - osFileSystem.Executable
+      - osFileSystem.EvalSymlinks
+      - osFileSystem.CreateTemp
+      - osFileSystem.Chmod
+      - osFileSystem.Rename
+      - osFileSystem.Remove
+      - osFileSystem.Link
+    name: osfilesystem.go
+  - decls:
+      - _
+    name: osfilesystem_compliance.go
+  - decls:
+      - prevSuffix
+      - defaultProbeTimeout
+      - probeSpec
+      - linker
+      - (*Service).WithProbe
+      - (*Service).keepPrevious
+      - (*Service).probeReplacement
+      - (*Service).probeOnce
+      - runProbe
+    name: probe.go
+  - decls:
+      - releaseInfo
+      - releaseAsset
+    name: release_info.go
+  - decls:
+      - (*Service).canReplace
+    name: replace_platform.go
+  - decls:
+      - signatureAssetName
+      - (*Service).WithVendorKey
+      - (*Service).verifyArchive
+      - (*Service).canAuthenticate
+      - (*Service).fetchSignature
+      - decodeSignature
+    name: signature.go
+  - decls:
+      - defaultProductEnvPrefix
+      - envSuffixAutoUpgrade
+      - envSuffixAllowSudo
+      - SourceValue
+      - SourceValue.candidateRepo
+      - SourceValue.envPrefix
+      - SourceValue.AutoUpgradeEnv
+      - SourceValue.SudoOptInEnv
+    name: source.go
+  - decls:
+      - stdIOCopier
+      - stdIOCopier.Copy
+    name: stdiocopier.go
+  - decls:
+      - _#2
+    name: stdiocopier_compliance.go
+  - decls:
+      - maxRedirects
+      - newReleaseHTTPClient
+      - releaseTransport
+      - checkReleaseRedirect
+      - decodeJSONBody
+    name: transport.go
+  - decls:
+      - UpdateValue
+    name: update_info.go
+  - decls:
+      - apiURL
+      - stringFunc
+      - runtimeGOOS
+      - Service
+      - NewService
+      - NewUpdaterWithDeps
+      - (*Service).CheckForUpdate
+      - (*Service).Upgrade
+      - (*Service).repoForTag
+      - (*Service).getLatestVersion
+      - (*Service).isNewer
+      - normalizeVersion
+      - (*Service).downloadAndReplace
+      - (*Service).openInnerBinary
+      - (*Service).openMember
+      - openFromTarGz
+      - openFromZip
+      - closeBestEffort
+      - (*Service).downloadBinary
+      - (*Service).resolveExecutablePath
+      - (*Service).writeAndReplaceBinary
+      - (*Service).writeTempFileContent
+      - (*Service).finalizeReplacement
+      - (*Service).getBinaryName
+      - (*Service).getArchiveSuffix
+      - (*Service).innerBinaryName
+    name: updater.go
+  - decls:
+      - refuse
+      - classify
+    name: wrap.go
+functions:
+  - doc: |-
+      bufferArchive reads the whole release archive into memory, refusing
+      anything larger than capBytes. Buffering (instead of streaming) is what
+      lets the SHA-256 be verified BEFORE any extraction code touches the bytes;
+      the zip path already required full buffering (ReaderAt), so this unifies
+      both archive shapes at a bounded memory cost.
+    name: bufferArchive
+    params: body io.Reader, capBytes int64
+    results: archive []byte, bufErr error
+  - doc: |-
+      findChecksumEntry scans a sha256sum-format manifest ("<hex>  <name>" per
+      line) and returns the hex digest recorded for asset. Tolerates one or two
+      separator spaces and the binary-mode "*" name marker; lines that do not
+      parse as a digest entry are ignored.
+    name: findChecksumEntry
+    params: manifest, asset string
+    results: digest string, found bool
+  - doc: |-
+      isHexDigest reports whether s is a well-formed hex-encoded SHA-256 digest
+      (exactly 64 hex characters, any case).
+    name: isHexDigest
+    params: s string
+    results: bool
+  - doc: |-
+      consentFromEnv reads the standing authorisation.
+
+      The second result distinguishes "no answer recorded" from "the answer is
+      no", which the caller needs: only the first falls through to a prompt.
+      Unset and empty are the same thing — an exported variable set to nothing
+      is not a decision.
+    name: consentFromEnv
+    params: value string
+    results: granted, decided bool
+  - doc: |-
+      askUpgradeConsent puts the question to the human at the keyboard.
+
+      Default-no: a bare Enter, EOF, a closed stdin and an unreadable one all
+      decline. The only accepted answers are an explicit yes.
+    name: askUpgradeConsent
+    params: out io.Writer, in io.Reader
+    results: bool
+  - name: StdinIsTerminal
+    results: bool
+  - doc: |-
+      isNullDevice reports whether info describes the null device.
+
+      os.SameFile compares what the filesystem says, so it holds through a symlink
+      or a bind mount — a path comparison against the string "/dev/null" would not.
+    name: isNullDevice
+    params: info os.FileInfo
+    results: bool
+  - doc: |-
+      terminalLike reports whether a file mode is that of a character device.
+
+      It excludes a pipe, a regular file and a closed descriptor. It does NOT
+      exclude the null device, which is a character device too — StdinIsTerminal
+      handles that separately, and this comment used to claim otherwise.
+    name: terminalLike
+    params: mode os.FileMode
+    results: bool
+  - doc: |-
+      diagnose renders what err carries beyond its public sentence: every field,
+      then the words of the first cause this SDK did not write.
+
+      It returns the empty string for an error with neither, which is the signal a
+      caller uses to print nothing rather than an empty line.
+    name: diagnose
+    params: err error
+    results: string
+  - doc: |-
+      foreignCauses returns the messages in err's tree that this SDK did not
+      write — the operating system's, the decoder's, the transport's — in the
+      order they appear.
+
+      It returns nothing when the whole tree is ours. A refusal this package
+      DECIDED has no foreign cause, and rendering its sentinel back would repeat,
+      word for word, the sentence the reader has just been shown.
+
+      It walks errors.Join as well as the single-unwrap chain. Stopping at the
+      join was the first shape of this and it was wrong in the one case that
+      composes: finalizeReplacement joins the rename's os.ErrPermission with the
+      elevation's own error, so a reader got "permission denied" followed by our
+      own ELEVATION_FAILED sentence — the sentence they had just read — and never
+      the process result underneath it. When `sudo -n mv` fails silently, that
+      result is the only thing there is.
+    name: foreignCauses
+    params: err error
+    results: "[]string"
+  - doc: collectForeign appends err's foreign messages to found, depth first.
+    name: collectForeign
+    params: err error, found *[]string
+  - doc: |-
+      truthyEnv reports whether an environment variable's value means "yes".
+
+      The accepted set is closed and case-insensitive. Anything else — including
+      a typo, and including "0"/"false" — is NOT consent: an opt-in that treats
+      an unrecognised value as permission is not an opt-in.
+    name: truthyEnv
+    params: value string
+    results: bool
+  - doc: |-
+      sudoMove replaces execPath with tmpPath via a non-interactive `sudo -n
+      mv` — the escalation finalizeReplacement falls back to when the plain
+      rename is refused for permissions, and the same one the devcontainer
+      installer's conditional (`ktn.md`) uses for a root-owned target
+      directory. `-n` disables the password prompt entirely: without a cached
+      credential or a NOPASSWD sudoers rule it fails immediately instead of
+      hanging an unattended upgrade.
+
+      It is unexported and reached only through guardedSudoMove, so there is no
+      call path that escalates without the opt-in.
+    name: sudoMove
+    params: tmpPath, execPath string
+    results: error
+  - doc: runProbe runs the binary at path with args, output discarded, within ctx.
+    name: runProbe
+    params: ctx context.Context, path string, args []string
+    results: error
+  - doc: |-
+      decodeSignature turns the .sig asset's bytes into a raw ed25519 signature.
+
+      The canonical published form is base64 (scripts/release/sign-checksums.sh
+      emits one line, no wrapping), which is what survives every release tool
+      that treats assets as text. A body that is EXACTLY ed25519.SignatureSize
+      bytes is taken as the raw binary form instead — that check comes first and
+      runs on the untrimmed bytes, because a raw signature can legitimately
+      contain a byte that looks like whitespace and trimming it first would
+      corrupt one signature in every few hundred.
+    name: decodeSignature
+    params: raw []byte
+    results: signature []byte, decodeErr error
+  - doc: |-
+      newReleaseHTTPClient builds the client every real (non-injected) Service
+      uses.
+
+      Go's DEFAULT redirect policy allows ten hops AND allows https→http: the
+      standard library only strips sensitive headers on a cross-host redirect,
+      it never refuses a scheme downgrade. On this path that would put a release
+      archive — code about to be given 0755 and moved over the running binary —
+      on a plaintext connection chosen by the redirect target.
+
+      pkg/license/ci.go solves the same problem by refusing redirects OUTRIGHT,
+      and that is right for the endpoint it talks to: the Actions token minter
+      has no legitimate redirect, so the safe answer and the correct one
+      coincide. Here they do not — `github.com/.../releases/download/...` always
+      redirects to the asset CDN — so the policy is the closest equivalent that
+      still works: follow, but only ever to https, and only a bounded number of
+      times.
+
+      It stays a net/http client over http.DefaultTransport rather than
+      pkg/v1/net/client, which ADR 0158 §2 names for HTTP: the guarded transport sets
+      no Proxy, so it ignores HTTP(S)_PROXY and NO_PROXY — measured, it dialled
+      the host directly where this client went through the proxy — and an update
+      that cannot leave a network through its proxy never arrives on any machine
+      behind one. The guarded client's policy would have to re-state this one's
+      https-only hops as a request policy besides.
+
+      The transport is a CLONE of http.DefaultTransport, never the value itself
+      (issue #304). Clone keeps everything the default does, the environment's
+      proxy first; what it does not keep is the connection pool, which is
+      process-wide and which any code may empty — httptest.Server.Close does on
+      every close, and so does CloseIdleConnections on any client with a nil
+      Transport. net/http returns a connection to the idle pool before it hands a
+      body-less response to the request waiting on it, so an outside close in
+      that window broke this client's request in flight: the caller got "HTTP/1.x
+      transport connection broken: http: CloseIdleConnections called" instead of
+      the InsecureRedirect refusal the redirect would have produced. A pool of
+      its own is a pool only this client closes.
+    name: newReleaseHTTPClient
+    results: "*http.Client"
+  - doc: |-
+      releaseTransport returns a transport configured as http.DefaultTransport
+      is, with a connection pool nothing else in the process shares.
+    name: releaseTransport
+    results: "*http.Transport"
+  - doc: |-
+      checkReleaseRedirect is newReleaseHTTPClient's policy, kept as a named
+      function so the decision is testable without standing up a redirect chain.
+    name: checkReleaseRedirect
+    params: req *http.Request, via []*http.Request
+    results: error
+  - doc: |-
+      decodeJSONBody reads at most capBytes from body and unmarshals it into
+      `into`, refusing anything larger rather than letting an untrusted endpoint
+      choose how much memory this process spends.
+
+      json.Decoder over a raw response body — what every call site used before —
+      has no such bound: it streams until EOF. The cap is a parameter rather
+      than a constant read inside so the refusal branch is reachable in a test
+      without producing an 8MB fixture.
+
+      fields are what the CALLER knows and this function cannot: which query the
+      body answers, and the tag if the query named one. They are taken here
+      rather than wrapped on afterwards so each of the three failures is
+      classified exactly once, at the only frame that can tell a read failure
+      from an over-cap body from a body that simply is not release metadata.
+    name: decodeJSONBody
+    params: body io.Reader, capBytes int64, into any, fields ...errs.FieldValue
+    results: error
+  - name: NewService
+    params: version string, src SourceValue
+    results: "*Service"
+  - name: NewUpdaterWithDeps
+    params: version string, src SourceValue, client Getter, fs FileSystem, copier Copier
+    results: "*Service"
+  - doc: normalizeVersion ensures a version string has the required "v" prefix.
+    name: normalizeVersion
+    params: v string
+    results: string
+  - doc: |-
+      openFromTarGz walks a gzip-compressed tar stream and returns a reader over
+      the first regular file whose basename matches want. The tar Reader is bound
+      to the current entry; reading past EntrySize returns io.EOF.
+    name: openFromTarGz
+    params: body io.Reader, want string
+    results: binary io.Reader, cleanup func(), openErr error
+  - doc: |-
+      openFromZip buffers the response body (zip requires ReaderAt) and returns
+      a reader over the first file whose basename matches want. Closes the inner
+      file reader via the cleanup callback.
+    name: openFromZip
+    params: body io.Reader, want string
+    results: binary io.Reader, cleanup func(), openErr error
+  - doc: |-
+      closeBestEffort releases an io.Closer without failing the caller, logging
+      the error with the supplied context label so an operator can correlate it
+      with the failed cleanup site (zip entry, gzip reader, etc.).
+    name: closeBestEffort
+    params: c io.Closer, what string
+  - doc: |-
+      refuse reports a refusal this package reached on its own.
+
+      The sentinel is passed as the CAUSE rather than as parameters, so
+      errors.Is finds it by unwrapping as well as by (Code, Reason), and the
+      fields carry every particular the public sentence deliberately leaves out.
+    name: refuse
+    params: sentinel *errs.Error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      classify reports a failure that arrived from OUTSIDE — a transport, a
+      filesystem, a decoder — under the sentinel that says what it means here.
+
+      The sentinel's Code, Reason, Public, Private and exit status are READ from
+      it rather than restated at the call site. A restatement is four strings
+      copied by hand with nothing checking the copy, and this package reaches
+      DownloadFailed from twelve sites in five files, eight of them through here:
+      the first copy to drift would give one failure two different sentences
+      depending on which call path produced it.
+      TestClassifyCarriesTheSentinelVerbatim is what makes that impossible rather
+      than unlikely.
+
+      When cause ALREADY carries an *errs.Error, errs.Wrap's origin-wins rule
+      (ADR 0002 / SDK rule 6) keeps the cause's identity and the sentinel
+      contributes only a trail entry. That is the right outcome, and it is why
+      every call here can name its most specific classification without first
+      checking whether the cause has one of its own.
+
+      A nil sentinel is refused rather than dereferenced. Only a bug in this
+      package can produce one, and the worst place to take a process down is the
+      path that is already reporting a failure — so it degrades to what
+      refuse(nil) would do, a typed INVALID_WRAP_PARAMS still carrying the cause.
+      Neither sentinel.Code() nor errs.CodeOf(sentinel) is total here: a typed-nil
+      *errs.Error is a non-nil error interface, so the accessor finds it in the
+      chain and dereferences it exactly as the method would.
+    name: classify
+    params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
+    results: error
+imports:
+  base64: encoding/base64
+  bufio: bufio
+  bytes: bytes
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  coreupd: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+  ed25519: crypto/ed25519
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  exec: os/exec
+  filepath: path/filepath
+  fmt: fmt
+  fs: io/fs
+  gzip: compress/gzip
+  hash: github.com/kitsunium/sdk/pkg/v1/crypto/hash
+  hex: encoding/hex
+  http: net/http
+  io: io
+  json: encoding/json
+  log: log
+  os: os
+  proc: github.com/kitsunium/sdk/pkg/v1/proc
+  regexp: regexp
+  runtime: runtime
+  semver: github.com/kitsunium/sdk/pkg/v1/data/semver
+  sign: github.com/kitsunium/sdk/pkg/v1/crypto/sign
+  slices: slices
+  strings: strings
+  tar: archive/tar
+  time: time
+  zip: archive/zip
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/service/selfupdate
+  name: selfupdate
+  purpose: Package selfupdate replaces the running binary with a newer signed release.
+types:
+  - alias: true
+    doc: |-
+      CandidateValue is one release candidate. It ALIASES the core value rather
+      than redeclaring it, for the same reason UpdateValue does.
+    kind: alias
+    name: CandidateValue
+    underlying: coreupd.CandidateValue
+  - doc: companionTarget is one archive member and the installed file it replaces.
+    fields:
+      - name: member
+        type: string
+      - name: path
+        type: string
+    kind: struct
+    name: companionTarget
+  - doc: |-
+      stagedFile is one file of a set on its way in: the staged bytes beside the
+      installed file, and what has been done to that file so far.
+    fields:
+      - name: target
+        type: string
+      - name: tmp
+        type: string
+      - name: kept
+        type: bool
+      - name: replaced
+        type: bool
+    kind: struct
+    name: stagedFile
+  - alias: true
+    doc: Getter performs the HTTP GETs a self-update needs. It aliases the core port.
+    kind: alias
+    name: Getter
+    underlying: coreupd.Getter
+  - alias: true
+    doc: |-
+      FileSystem is the disk half of replacing a running binary. It aliases the
+      core port.
+    kind: alias
+    name: FileSystem
+    underlying: coreupd.FileSystem
+  - alias: true
+    doc: |-
+      Copier streams the verified archive to its destination. It aliases the core
+      port.
+    kind: alias
+    name: Copier
+    underlying: coreupd.Copier
+  - doc: osFileSystem implements FileSystem using standard os package.
+    kind: struct
+    methods:
+      - doc: Executable returns the path of the current executable.
+        name: Executable
+        recv: osFileSystem
+        results: path string, execErr error
+      - doc: EvalSymlinks resolves symlinks in the given path.
+        name: EvalSymlinks
+        params: path string
+        recv: osFileSystem
+        results: resolved string, evalErr error
+      - doc: CreateTemp creates a temporary file.
+        name: CreateTemp
+        params: dir, pattern string
+        recv: osFileSystem
+        results: tmpFile *os.File, createErr error
+      - doc: Chmod changes file permissions.
+        name: Chmod
+        params: name string, mode os.FileMode
+        recv: osFileSystem
+        results: error
+      - doc: Rename renames a file.
+        name: Rename
+        params: oldpath, newpath string
+        recv: osFileSystem
+        results: error
+      - doc: Remove removes a file.
+        name: Remove
+        params: name string
+        recv: osFileSystem
+        results: error
+      - doc: |-
+          Link makes newpath a hard link to oldpath: how the previous binary is kept as
+          <binary>.prev without a moment where the binary's own name is absent
+          (probe.go). It is a sibling of the FileSystem port, found by type assertion,
+          so a FileSystem a caller wrote without it still satisfies the port.
+        name: Link
+        params: oldpath, newpath string
+        recv: osFileSystem
+        results: error
+    name: osFileSystem
+  - doc: probeSpec is what a replacement must answer before it stands.
+    fields:
+      - name: args
+        type: "[]string"
+      - name: timeout
+        type: time.Duration
+      - name: run
+        type: func(ctx context.Context, path string, args []string) error
+    kind: struct
+    name: probeSpec
+  - doc: |-
+      linker is the FileSystem sibling that keeps the previous binary under a
+      second name while the first still points at it.
+    kind: named
+    name: linker
+    underlying: |-
+      interface {
+      	Link(oldpath, newpath string) error
+      }
+  - doc: |-
+      releaseInfo represents the GitHub release API response structure.
+      It contains the tag name, metadata, and assets for a release.
+    fields:
+      - name: TagName
+        type: string
+      - name: Name
+        type: string
+      - name: Prerelease
+        type: bool
+      - name: Draft
+        type: bool
+      - name: CreatedAt
+        type: string
+      - name: Assets
+        type: "[]releaseAsset"
+    kind: struct
+    name: releaseInfo
+  - doc: releaseAsset represents a downloadable binary attached to a release.
+    fields:
+      - name: Name
+        type: string
+      - name: BrowserDownloadURL
+        type: string
+    kind: struct
+    name: releaseAsset
+  - fields:
+      - doc: Owner is the release host account, e.g. "kodflow".
+        name: Owner
+        type: string
+      - doc: StableRepo is the repository serving stable releases.
+        name: StableRepo
+        type: string
+      - doc: |-
+          DevRepo is the repository serving release candidates. Empty means
+          candidates come from StableRepo too.
+        name: DevRepo
+        type: string
+      - doc: |-
+          Product is the binary's name. It is both the archive-asset stem
+          ("<product>_<goos>_<goarch>.tar.gz") and, uppercased, the environment
+          variable prefix for the two opt-ins.
+        name: Product
+        type: string
+    kind: struct
+    methods:
+      - name: AuthoriseUnattendedUpgrade
+        params: out io.Writer, in io.Reader, interactive bool
+        recv: s SourceValue
+        results: bool
+      - name: ExplainUpgradeRefusal
+        params: out io.Writer
+        recv: s SourceValue
+      - name: ExplainUpgradeFailure
+        params: out io.Writer, action string, err error
+        recv: s SourceValue
+      - doc: consentFromEnvironment is the operator's explicit answer, when there is one.
+        name: consentFromEnvironment
+        recv: s SourceValue
+        results: granted, decided bool
+      - doc: |-
+          guardedSudoMove is the Service.elevate default: it escalates only when
+          SudoOptInEnv authorises it, and otherwise refuses without running anything.
+
+          The environment is read here rather than captured at construction so an
+          unattended caller can set the variable for exactly the invocation that
+          needs it, and so a long-lived process cannot carry an authorisation from a
+          moment when the operator meant something else.
+        name: guardedSudoMove
+        params: tmpPath, execPath string
+        recv: s SourceValue
+        results: error
+      - doc: |-
+          refusedElevation is the escalation of a Service built WithoutElevation: it
+          refuses whatever the opt-in says (ADR 0150).
+        name: refusedElevation
+        params: _, execPath string
+        recv: s SourceValue
+        results: error
+      - doc: |-
+          candidateRepo returns the repository that serves release candidates: DevRepo
+          when set, StableRepo otherwise.
+        name: candidateRepo
+        recv: s SourceValue
+        results: string
+      - doc: |-
+          envPrefix returns the environment-variable prefix for this product, uppercased
+          with non-alphanumerics folded to underscore so a product name like
+          "my-tool" yields MY_TOOL_AUTO_UPGRADE rather than an unreachable variable.
+        name: envPrefix
+        recv: s SourceValue
+        results: string
+      - name: AutoUpgradeEnv
+        recv: s SourceValue
+        results: string
+      - name: SudoOptInEnv
+        recv: s SourceValue
+        results: string
+    name: SourceValue
+  - doc: stdIOCopier implements Copier using standard io package.
+    kind: struct
+    methods:
+      - doc: Copy copies from src to dst.
+        name: Copy
+        params: dst io.Writer, src io.Reader
+        recv: stdIOCopier
+        results: written int64, copyErr error
+    name: stdIOCopier
+  - alias: true
+    doc: |-
+      UpdateValue is the outcome of a version check or an install. It ALIASES the
+      core value rather than redeclaring it: a service-local copy of a value core
+      owns compiles fine and drifts silently.
+    kind: alias
+    name: UpdateValue
+    underlying: coreupd.UpdateValue
+  - alias: true
+    doc: stringFunc is a type for functions returning a string.
+    kind: alias
+    name: stringFunc
+    underlying: func() string
+  - fields:
+      - name: version
+        type: string
+      - name: goos
+        type: string
+      - name: goarch
+        type: string
+      - name: client
+        type: Getter
+      - name: fs
+        type: FileSystem
+      - name: copier
+        type: Copier
+      - doc: |-
+          elevate replaces execPath with tmpPath when the plain rename in
+          finalizeReplacement fails with a permission error — the same
+          non-interactive sudo escalation the devcontainer installer scripts
+          use for a root-owned install directory. Swappable so tests can
+          exercise both outcomes without shelling out to a real sudo.
+
+          The default is guardedSudoMove, NOT sudoMove: escalation requires an
+          explicit opt-in (see elevation.go).
+        name: elevate
+        type: func(tmpPath, execPath string) error
+      - doc: |-
+          src says which project's releases this binary updates itself from. It
+          carries what the source implementation kept as package constants, which
+          is precisely what made that implementation serve exactly one product.
+        name: src
+        type: SourceValue
+      - doc: |-
+          vendorKey is the ed25519 public half every release must be signed
+          with, set via WithVendorKey. Empty by default, and an empty key
+          refuses every install rather than skipping verification — see
+          signature.go for why that direction is the only safe one.
+        name: vendorKey
+        type: ed25519.PublicKey
+      - doc: |-
+          vendorKeys are the keys a release may be signed with, in order, the
+          first of them vendorKey (keys.go, ADR 0150); domain is the signature
+          domain; clock is what the signed expiry is read against — pkg/v1/clock's
+          system clock when nil, a manual one in a suite (ADR 0158 §2).
+        name: vendorKeys
+        type: "[]ed25519.PublicKey"
+      - name: domain
+        type: string
+      - name: clock
+        type: clock.Clock
+      - doc: probe is what a replacement must answer before it stands (probe.go).
+        name: probe
+        type: probeSpec
+      - doc: |-
+          companions are the archive members replaced with the binary when they
+          are installed beside it (companions.go).
+        name: companions
+        type: "[]string"
+      - doc: automatic is WithAutomaticConsent's (consent_product.go).
+        name: automatic
+        type: bool
+    kind: struct
+    methods:
+      - name: ListCandidates
+        recv: u *Service
+        results: candidates []CandidateValue, listErr error
+      - name: DownloadCandidate
+        params: tag string
+        recv: u *Service
+        results: info UpdateValue, downloadErr error
+      - doc: getReleases fetches all releases from the GitHub API.
+        name: getReleases
+        recv: u *Service
+        results: releases []releaseInfo, getErr error
+      - doc: getReleaseByTag fetches a specific release by its tag name.
+        name: getReleaseByTag
+        params: tag string
+        recv: u *Service
+        results: release releaseInfo, getErr error
+      - doc: |-
+          matchArchiveDigest compares the SHA-256 of the buffered archive bytes
+          against the entry manifest records for this platform's asset. Returns
+          coreupd.ChecksumMissing when the asset entry is absent, coreupd.ChecksumMismatch when
+          the digest diverges. The error message always names the asset and the tag.
+
+          It takes the manifest rather than fetching it, and that separation is the
+          point: the manifest must already have been AUTHENTICATED by
+          Service.verifyArchive before a single one of its claims is acted on. A
+          version of this function that fetched its own manifest is exactly what
+          shipped the defect — the digest it compared against came from the same
+          origin, the same release and the same write credentials as the archive.
+        name: matchArchiveDigest
+        params: tag, manifest string, archive []byte
+        recv: u *Service
+        results: error
+      - doc: |-
+          fetchChecksums downloads the checksums.txt manifest from the same release
+          download URL pattern as the archive itself. A 404 maps to
+          coreupd.ChecksumMissing (release published without a manifest); any other
+          non-200 maps to coreupd.DownloadFailed.
+        name: fetchChecksums
+        params: tag string
+        recv: u *Service
+        results: manifest string, fetchErr error
+      - name: WithCompanions
+        params: names ...string
+        recv: u *Service
+        results: "*Service"
+      - doc: |-
+          installedCompanions returns the declared companions that are installed
+          beside execPath, each at its real path. A companion that is not installed
+          is skipped: an upgrade replaces what is there and never creates a file.
+        name: installedCompanions
+        params: execPath string
+        recv: u *Service
+        results: installed []companionTarget, resolveErr error
+      - doc: |-
+          memberName is the archive member a companion name stands for on this
+          platform: the name itself, with `.exe` on windows like the product binary.
+        name: memberName
+        params: name string
+        recv: u *Service
+        results: string
+      - doc: |-
+          replaceSet replaces the binary at execPath and every installed companion
+          from the verified archive, as one set: all staged, all kept, then renamed
+          in order, and every renamed file put back when a later one, or the probe,
+          fails.
+        name: replaceSet
+        params: archive []byte, execPath string, companions []companionTarget
+        recv: u *Service
+        results: error
+      - doc: |-
+          stageSet stages every member of the set before any is renamed. A failure
+          removes what was already staged.
+        name: stageSet
+        params: archive []byte, targets []companionTarget
+        recv: u *Service
+        results: "[]stagedFile, error"
+      - doc: |-
+          renameSet renames every staged file over the one it replaces, in order. A
+          rename that fails puts back every file already renamed.
+        name: renameSet
+        params: set []stagedFile
+        recv: u *Service
+        results: error
+      - doc: |-
+          stageMember writes one archive member to a temporary file in the directory
+          of the file it replaces, closed and executable. The set is never elevated,
+          so there is no fallback to another directory.
+        name: stageMember
+        params: archive []byte, target companionTarget
+        recv: u *Service
+        results: tmpPath string, stageErr error
+      - doc: |-
+          keepSet links every installed file of the set to <file>.prev. A set whose
+          files cannot all be kept is not replaced at all: without them a failure
+          half-way could not be undone.
+        name: keepSet
+        params: set []stagedFile
+        recv: u *Service
+        results: error
+      - doc: |-
+          restore puts back every file of the set already replaced, from its kept
+          link, and reports whether all of them are back.
+        name: restore
+        params: set []stagedFile
+        recv: u *Service
+        results: bool
+      - doc: |-
+          probeSet runs the probe WithProbe declared against the new binary and puts
+          the whole set back when it fails. Nothing happens without a probe.
+        name: probeSet
+        params: execPath string, set []stagedFile
+        recv: u *Service
+        results: error
+      - doc: |-
+          abandon removes whatever a set that did not stand left behind: every staged
+          file not renamed, and every kept link no longer needed.
+        name: abandon
+        params: set []stagedFile
+        recv: u *Service
+      - doc: dropKept removes the links kept for a set that stands.
+        name: dropKept
+        params: set []stagedFile
+        recv: u *Service
+      - name: WithAutomaticConsent
+        recv: u *Service
+        results: "*Service"
+      - name: WithoutElevation
+        recv: u *Service
+        results: "*Service"
+      - name: AuthoriseUnattendedUpgrade
+        params: out io.Writer, in io.Reader, interactive bool
+        recv: u *Service
+        results: bool
+      - name: WithVendorKeys
+        params: keys ...[]byte
+        recv: u *Service
+        results: "*Service"
+      - name: WithSignatureDomain
+        params: domain string
+        recv: u *Service
+        results: "*Service"
+      - doc: |-
+          verifiedByAnyKey reports whether one of the linked keys verifies signature
+          over message.
+
+          Each key is asked through the crypto domain's signing facade (ADR 0158 §2),
+          the verifier the rest of the SDK uses. The facade answers a key or a
+          signature of the wrong length with false, and an error only for an algorithm
+          it does not register — which Ed25519 always is, since importing the facade
+          registers it — so an error counts as "this key did not verify".
+        name: verifiedByAnyKey
+        params: message, signature []byte
+        recv: u *Service
+        results: bool
+      - doc: |-
+          keys is the linked list, or the single key a Service was given before the
+          list existed.
+        name: keys
+        recv: u *Service
+        results: "[]ed25519.PublicKey"
+      - doc: |-
+          signedMessage is what a signature covers: the manifest, or — with a
+          domain — the domain, a NUL byte and the manifest.
+        name: signedMessage
+        params: manifest string
+        recv: u *Service
+        results: string
+      - doc: |-
+          checkStatement reads, from a manifest the signature already vouched for, the
+          tag and the expiry a domain requires, and refuses a manifest that lacks
+          either, names another tag, or has expired.
+        name: checkStatement
+        params: tag, manifest string
+        recv: u *Service
+        results: error
+      - name: WithProbe
+        params: args []string, timeout time.Duration
+        recv: u *Service
+        results: "*Service"
+      - doc: |-
+          keepPrevious links the running binary as <binary>.prev before it is
+          replaced; false when the file system cannot link, and nothing is kept.
+        name: keepPrevious
+        params: execPath string
+        recv: u *Service
+        results: bool
+      - doc: |-
+          probeReplacement runs the declared probe against the binary now at
+          execPath, and puts the kept previous binary back when it fails.
+        name: probeReplacement
+        params: execPath string, kept bool
+        recv: u *Service
+        results: error
+      - doc: |-
+          probeOnce runs the declared probe against the binary at execPath, within
+          the declared timeout.
+        name: probeOnce
+        params: execPath string
+        recv: u *Service
+        results: error
+      - doc: |-
+          canReplace refuses the replacement step on a Service that targets Windows.
+
+          # Why Windows cannot complete it
+
+          The step is temp file → chmod → rename over the running executable, and
+          Windows will not let a file that is mapped as a running image be replaced:
+          MoveFileEx(MOVEFILE_REPLACE_EXISTING) answers ERROR_ACCESS_DENIED. That maps
+          to os.ErrPermission, which sent the old flow into the privilege fallback —
+          `sudo -n mv`, a command Windows does not have — and ended in
+          ReplacementFailed whose advice was to set the sudo opt-in: a Windows operator
+          was told to authorise an escalation that does not exist there. ADR 0077
+          documented the platform as unsupported for this step; nothing in the code
+          said so.
+
+          # Why before the download
+
+          A refusal nothing can change belongs before the work it would waste, which
+          is the rule canAuthenticate already follows for a build with no vendor key:
+          a Windows host would otherwise fetch and authenticate a 10-30 MB archive and
+          throw it away. It runs AFTER canAuthenticate, so a build that could never
+          authenticate anything is still told that first, on every platform.
+
+          # What it is
+
+          The SDK's uniform UNSUPPORTED_PLATFORM (ADR 0018 §(a)), carrying the target
+          platform and the tag, so errors.Is(err, proc.UnsupportedPlatform) answers on
+          the public side. The known closures — rename the running image aside and
+          write the new one in its place, or a post-exit installer — are recorded in
+          ADR 0077 §Deferred and are not written here.
+
+          It reads the Service's own goos rather than runtime.GOOS: the platform a
+          Service was built for is the one its asset names already follow, and a test
+          can construct one for Windows on any host.
+        name: canReplace
+        params: tag string
+        recv: u *Service
+        results: error
+      - name: WithVendorKey
+        params: key []byte
+        recv: u *Service
+        results: "*Service"
+      - doc: |-
+          verifyArchive proves the buffered archive is the one the vendor published,
+          in the ONLY sound order, and returns nil exactly when it is.
+
+           1. The detached signature over checksums.txt is verified against the
+              linked-in vendor key. Nothing the manifest says is believed before
+              this step succeeds.
+           2. The archive's SHA-256 is compared to the entry the now-trusted
+              manifest records for this platform's asset.
+
+          Only after both does the caller extract or write anything. Reversing the
+          two would let an unauthenticated manifest decide whether an archive is
+          acceptable, which is the whole defect; doing either after extraction would
+          mean hostile bytes had already been through the tar/zip readers.
+        name: verifyArchive
+        params: tag string, archive []byte
+        recv: u *Service
+        results: error
+      - doc: |-
+          canAuthenticate reports whether this build carries a usable vendor key.
+
+          It is called at the TOP of downloadAndReplace, before the archive is even
+          requested: an unanchored build refusing after a 30MB download would be a
+          confusing way to say "this binary cannot install releases". The length test
+          is what tells a build with no usable key from a release whose signature does
+          not verify.
+        name: canAuthenticate
+        params: tag string
+        recv: u *Service
+        results: error
+      - doc: |-
+          fetchSignature downloads checksums.txt.sig from the same release as the
+          archive and returns the raw 64-byte ed25519 signature.
+
+          A 404 maps to coreupd.SignatureMissing and is a refusal: see the package
+          comment for why an unsigned release is not installed.
+        name: fetchSignature
+        params: tag string
+        recv: u *Service
+        results: signature []byte, fetchErr error
+      - name: CheckForUpdate
+        recv: u *Service
+        results: info UpdateValue, checkErr error
+      - name: Upgrade
+        recv: u *Service
+        results: info UpdateValue, upgradeErr error
+      - doc: |-
+          repoForTag resolves which distribution repository serves a given tag.
+          Prereleases (what rc.yml produces) stay in the private source; everything
+          else is a stable release and lives in the public mirror.
+
+          The test is the SemVer prerelease component, not a bare hyphen: build
+          metadata may legitimately contain one, so `v1.45.2+mirror-build.1` is a
+          stable tag that a substring check would misroute to the private repo and
+          then 404 on.
+        name: repoForTag
+        params: tag string
+        recv: u *Service
+        results: string
+      - doc: getLatestVersion fetches the latest release version from GitHub.
+        name: getLatestVersion
+        recv: u *Service
+        results: latest string, getErr error
+      - doc: isNewer checks if the given version is newer than current.
+        name: isNewer
+        params: latest string
+        recv: u *Service
+        results: bool
+      - doc: |-
+          downloadAndReplace downloads the new release archive, AUTHENTICATES it
+          (vendor signature over checksums.txt, then the archive's SHA-256 against
+          that manifest), extracts the inner binary and atomically replaces the
+          current executable.
+
+          The update is refused — with nothing extracted and nothing written — when
+          authenticity cannot be proven (coreupd.NoVendorKey / coreupd.SignatureMissing /
+          coreupd.SignatureInvalid) or integrity cannot (coreupd.ChecksumMissing /
+          coreupd.ChecksumMismatch), and — with nothing downloaded either — on a
+          Windows target, whose running executable cannot be renamed over
+          (proc.UnsupportedPlatform, see canReplace).
+        name: downloadAndReplace
+        params: version string
+        recv: u *Service
+        results: error
+      - doc: |-
+          openInnerBinary returns a reader over the product executable contained
+          in the downloaded release archive. Returned cleanup must always be called
+          (uses no-op when there's nothing to close). The reader is single-use.
+        name: openInnerBinary
+        params: body io.Reader
+        recv: u *Service
+        results: binary io.Reader, cleanup func(), openErr error
+      - doc: |-
+          openMember returns a reader over the regular file named want inside the
+          release archive, in this platform's archive format: the product binary, or
+          a companion WithCompanions declared. Returned cleanup must always be called.
+        name: openMember
+        params: body io.Reader, want string
+        recv: u *Service
+        results: member io.Reader, cleanup func(), openErr error
+      - doc: downloadBinary downloads the binary from GitHub.
+        name: downloadBinary
+        params: version string
+        recv: u *Service
+        results: resp *http.Response, downloadErr error
+      - doc: resolveExecutablePath gets the current executable path with symlinks resolved.
+        name: resolveExecutablePath
+        recv: u *Service
+        results: execPath string, resolveErr error
+      - doc: writeAndReplaceBinary writes content to temp file and replaces executable.
+        name: writeAndReplaceBinary
+        params: content io.Reader, execPath string
+        recv: u *Service
+        results: err error
+      - doc: writeTempFileContent writes content to a file writer.
+        name: writeTempFileContent
+        params: writer io.Writer, content io.Reader
+        recv: u *Service
+        results: error
+      - doc: finalizeReplacement sets permissions and replaces the binary.
+        name: finalizeReplacement
+        params: tmpPath, execPath string
+        recv: u *Service
+        results: error
+      - doc: |-
+          getBinaryName returns the release asset name for the platform captured
+          at construction time. Releases use goreleaser-style packaging:
+          `<product>_<goos>_<goarch>.tar.gz` on linux/darwin and `.zip` on
+          windows. The same archive name is consumed by the devcontainer feature
+          install.sh so the project ships a single asset shape (snake_case +
+          archive) across all consumers.
+        name: getBinaryName
+        recv: u *Service
+        results: string
+      - doc: |-
+          getArchiveSuffix returns the archive format for the platform captured at
+          construction. Stored as a separate accessor so openInnerBinary can
+          pick the right reader (tar/gzip vs zip) from a single source of truth.
+        name: getArchiveSuffix
+        recv: u *Service
+        results: string
+      - doc: |-
+          innerBinaryName returns the file name expected INSIDE the release archive.
+          goreleaser packs the bare binary at the archive root, so this is just the
+          product name (with `.exe` on windows).
+        name: innerBinaryName
+        recv: u *Service
+        results: string
+    name: Service
+vars:
+  - doc: tagPattern validates that a tag contains only safe characters for URL construction.
+    items:
+      - name: tagPattern
+        type: "*regexp.Regexp"
+        value: regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*)?$`)
+    name: tagPattern
+  - grouped: true
+    items:
+      - doc: ": Asserts at compile time that *osFileSystem satisfies FileSystem."
+        name: _
+        type: FileSystem
+        value: (*osFileSystem)(nil)
+      - doc: |-
+          : Asserts at compile time that osFileSystem keeps the Link sibling
+          : probe.go reaches by type assertion (ADR 0150).
+        name: _
+        type: linker
+        value: osFileSystem{}
+    name: _
+  - doc: ": Asserts at compile time that *stdIOCopier satisfies Copier."
+    items:
+      - name: _
+        type: Copier
+        value: (*stdIOCopier)(nil)
+    name: _#2
+  - doc: Package-level variables for errors and platform detection.
+    grouped: true
+    items:
+      - doc: ": Enable platform-specific binary name selection at download time."
+        name: runtimeGOOS
+        type: stringFunc
+        value: func() string { return runtime.GOOS }
+      - doc: ": Enable platform-specific binary name selection at download time."
+        name: runtimeGOARCH
+        type: stringFunc
+        value: func() string { return runtime.GOARCH }
+    name: runtimeGOOS

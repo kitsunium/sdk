@@ -1,0 +1,124 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: WithClock
+    steps:
+      - return:
+          closure:
+            params: c everyConfig
+            results: everyConfig
+            steps:
+              - set: c.waiter
+                value: w
+              - return: c
+  - of: WithDone
+    steps:
+      - return:
+          closure:
+            params: c everyConfig
+            results: everyConfig
+            steps:
+              - set: c.done
+                value: done
+              - return: c
+  - of: Every
+    participants:
+      - id: caller
+        kind: actor
+      - id: Every
+        kind: self
+      - id: resolveEvery
+        kind: internal
+      - id: Start
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "\"worker: nil tick\""
+          when: tick == nil
+      - opt:
+          do:
+            - panic: "\"worker: non-positive interval\""
+          when: interval <= 0
+      - bind: cfg
+        eval: resolveEvery(opts)
+        to: resolveEvery
+      - return: |-
+          Start(func(stop <-chan struct{}) {
+          		//: the loop owns the ticker so it is stopped exactly when the loop exits.
+          		ticker := cfg.waiter.NewTicker(interval)
+          		//: release the ticker's resources once the loop returns.
+          		defer ticker.Stop()
+          		//: bound once: the channel belongs to the ticker this loop built and is
+          		//: never closed (clock.Ticker's contract).
+          		ticks := ticker.C()
+          		//: fire tick on each interval; exit promptly on Stop or on the owner's end.
+          		for {
+          			select {
+          			case <-stop:
+          				//: Stop signalled — return so the daemon's done channel closes.
+          				return
+          			case <-cfg.done:
+          				//: the owner's work is over; a nil done never selects.
+          				return
+          			case <-ticks:
+          				//: interval elapsed — run the caller's tick.
+          				tick()
+          			}
+          		}
+          	})
+        to: Start
+  - of: Start
+    steps:
+      - opt:
+          do:
+            - panic: "\"worker: nil loop\""
+          when: loop == nil
+      - bind: ld
+        eval: |-
+          &LoopDaemon{
+          		stop: make(chan struct{}),
+          		done: make(chan struct{}),
+          	}
+      - go: |-
+          func() {
+          		//: guarantee done closes even if the loop returns early or via
+          		//: runtime.Goexit; doneOnce keeps the close single + lint-clean.
+          		defer ld.doneOnce.Do(func() {
+          			//: the loop has returned — release every Stop waiter.
+          			close(ld.done)
+          		})
+          		//: run the caller's loop body, handing it the stop channel.
+          		loop(ld.stop)
+          	}()
+      - return: ld
+  - of: NewLoopDaemon
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewLoopDaemon
+        kind: self
+      - id: Start
+        kind: internal
+    steps:
+      - return: Start(loop)
+        to: Start
+  - of: (*LoopDaemon).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopDaemon).Stop
+        kind: self
+      - id: d.stopOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          d.stopOnce.Do(func() {
+          		//: signal the loop to exit; it MUST observe this and return promptly.
+          		close(d.stop)
+          	})
+        to: d.stopOnce.Do
+      - eval: <-d.done
+  - of: (*LoopDaemon).Done
+    steps:
+      - return: d.done

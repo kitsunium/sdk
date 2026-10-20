@@ -1,0 +1,13 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - forward: svcent.NewService
+    of: New
+  - forward: svcent.NewServiceWithAnchors
+    of: NewWithAnchors
+  - forward: svcent.NewServiceWithGetter
+    of: NewWithGetter
+  - forward: svcent.RequiresUpdate
+    of: RequiresUpdate
+  - forward: svcent.UpdateRefusal
+    of: UpdateRefusal

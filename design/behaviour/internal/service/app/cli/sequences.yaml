@@ -1,0 +1,718 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: cloneTree
+        kind: internal
+      - id: validate
+        kind: internal
+    steps:
+      - set: root
+        to: cloneTree
+        value: cloneTree(root)
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: validate(root, nil, true)
+            to: validate
+          when: refused != nil
+      - return: |-
+          &executor{
+          		root:   root,
+          		out:    cfg.resolveOutput(),
+          		errOut: cfg.resolveErrOutput(),
+          	}, nil
+  - of: cloneTree
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneTree
+        kind: self
+    steps:
+      - opt:
+          do:
+            - return: cmd
+          when: cmd.Commands == nil
+      - bind: children
+        eval: make([]corecli.CommandValue, len(cmd.Commands))
+      - loop:
+          do:
+            - set: children[index]
+              to: cloneTree
+              value: cloneTree(child)
+          key: index
+          range: cmd.Commands
+          value: child
+      - set: cmd.Commands
+        value: children
+      - return: cmd
+  - of: validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: validate
+        kind: self
+      - id: validateName
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: validateShape
+        kind: internal
+      - id: validateFlags
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateName(cmd, parents)
+            to: validateName
+          when: err != nil
+      - bind: path
+        eval: append(slices.Clone(parents), cmd.Name)
+      - bind: joined
+        eval: strings.Join(path, " ")
+        to: strings
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateShape(cmd, joined, isRoot)
+            to: validateShape
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateFlags(cmd, joined)
+            to: validateFlags
+          when: err != nil
+      - bind: seen
+        eval: make(map[string]struct{}, len(cmd.Commands))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      kerrs.Wrap(corecli.DuplicateCommand, kerrs.WrapParams{},
+                      				kerrs.String("path", joined), kerrs.String("name", child.Name))
+                    to: kerrs
+                init:
+                  bind: _, dup
+                  eval: seen[child.Name]
+                when: dup
+            - set: seen[child.Name]
+              value: struct{}{}
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: validate(child, path, false)
+                  to: validate
+                when: err != nil
+          key: _
+          range: cmd.Commands
+          value: child
+      - return: nil
+  - of: validateName
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateName
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: under
+        eval: strings.Join(parents, " ")
+        to: strings
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.InvalidCommand, kerrs.WrapParams{},
+                			kerrs.String("under", under), kerrs.String("clause", "name is empty"))
+              to: kerrs
+          when: cmd.Name == ""
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.InvalidCommand, kerrs.WrapParams{},
+                			kerrs.String("under", under), kerrs.String("name", cmd.Name),
+                			kerrs.String("clause", "name contains whitespace"))
+              to: kerrs
+          when: strings.ContainsAny(cmd.Name, " \t\n")
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.InvalidCommand, kerrs.WrapParams{},
+                			kerrs.String("under", under), kerrs.String("name", cmd.Name),
+                			kerrs.String("clause", "name begins with '-' and would be parsed as a flag"))
+              to: kerrs
+          when: strings.HasPrefix(cmd.Name, "-")
+      - return: nil
+  - of: validateShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateShape
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: hasRun, hasChildren
+        eval: cmd.Run != nil, len(cmd.Commands) > 0
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.AmbiguousCommand, kerrs.WrapParams{},
+                			kerrs.String("path", path), kerrs.Int("children", len(cmd.Commands)))
+              to: kerrs
+          when: hasRun && hasChildren
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.InvalidCommand, kerrs.WrapParams{},
+                			kerrs.String("path", path), kerrs.String("clause", "neither Run nor Commands"))
+              to: kerrs
+          when: "!hasRun && !hasChildren"
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.InvalidCommand, kerrs.WrapParams{},
+                			kerrs.String("path", path), kerrs.String("clause", "summary is empty"))
+              to: kerrs
+          when: "!isRoot && cmd.Summary == \"\""
+      - return: nil
+  - of: validateFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateFlags
+        kind: self
+      - id: newFlagSet
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cmd.Flags == nil
+      - bind: probe
+        eval: newFlagSet(path)
+        to: newFlagSet
+      - eval: cmd.Flags(probe)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: probe.Lookup(name) == nil
+            - return: |-
+                kerrs.Wrap(corecli.ReservedFlag, kerrs.WrapParams{},
+                			kerrs.String("path", path), kerrs.String("flag", name))
+              to: kerrs
+          key: _
+          range: reservedFlagNames
+          value: name
+      - return: nil
+  - of: newFlagSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: newFlagSet
+        kind: self
+      - id: flag
+        kind: stdlib
+      - id: set.SetOutput
+        kind: value
+    steps:
+      - bind: set
+        eval: flag.NewFlagSet(path, flag.ContinueOnError)
+        to: flag
+      - eval: set.SetOutput(io.Discard)
+        to: set.SetOutput
+      - set: set.Usage
+        value:
+          closure:
+            steps: null
+      - return: set
+  - of: hasFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: hasFlags
+        kind: self
+      - id: set.VisitAll
+        kind: value
+    steps:
+      - bind: bound
+        eval: "false"
+      - eval: set.VisitAll(func(*flag.Flag) { bound = true })
+        to: set.VisitAll
+      - return: bound
+  - of: Config.resolveOutput
+    steps:
+      - opt:
+          do:
+            - return: os.Stderr
+          when: c.Output == nil
+      - return: c.Output
+  - of: Config.resolveErrOutput
+    steps:
+      - opt:
+          do:
+            - return: os.Stderr
+          when: c.ErrOutput == nil
+      - return: c.ErrOutput
+  - of: (*executor).Execute
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*executor).Execute
+        kind: self
+      - id: newFlagSet
+        kind: internal
+      - id: set.Parse
+        kind: value
+      - id: e.reportParse
+        kind: internal
+      - id: set.Args
+        kind: value
+      - id: e.dispatch
+        kind: internal
+      - id: e.resolveChild
+        kind: internal
+    steps:
+      - bind: current
+        eval: e.root
+      - bind: path
+        eval: "[]string{current.Name}"
+      - bind: sets
+        eval: make([]*flag.FlagSet, 0, typicalDepth)
+      - bind: remaining
+        eval: args
+      - loop:
+          do:
+            - bind: set
+              eval: newFlagSet(strings.Join(path, " "))
+              to: newFlagSet
+            - opt:
+                do:
+                  - eval: current.Flags(set)
+                when: current.Flags != nil
+            - opt:
+                do:
+                  - return: e.reportParse(current, path, set, err)
+                    to: e.reportParse
+                init:
+                  bind: err
+                  eval: set.Parse(remaining)
+                  to: set.Parse
+                when: err != nil
+            - set: sets
+              value: append(sets, set)
+            - bind: rest
+              eval: set.Args()
+              to: set.Args
+            - opt:
+                do:
+                  - return: e.dispatch(ctx, current, path, sets, rest)
+                    to: e.dispatch
+                when: "!current.IsGroup()"
+            - bind: child, err
+              eval: e.resolveChild(current, path, set, rest)
+              to: e.resolveChild
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: current
+              value: child
+            - set: path
+              value: append(path, child.Name)
+            - set: remaining
+              value: rest[1:]
+          forever: true
+  - of: (*executor).reportParse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*executor).reportParse
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: e.writeHelp
+        kind: internal
+      - id: helpWriteFailure
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: joined
+        eval: strings.Join(path, " ")
+        to: strings
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: helpWriteFailure(werr, joined)
+                    to: helpWriteFailure
+                init:
+                  bind: werr
+                  eval: e.writeHelp(cmd, path, set)
+                  to: e.writeHelp
+                when: werr != nil
+            - return: nil
+          when: errors.Is(cause, flag.ErrHelp)
+      - bind: werr
+        eval: e.writeHelp(cmd, path, set)
+        to: e.writeHelp
+      - return: |-
+          kerrs.Wrap(corecli.InvalidFlags, kerrs.WrapParams{}, withHelpFailure(werr,
+          		kerrs.String("command", joined), kerrs.String("flag_error", cause.Error()))...)
+        to: kerrs
+  - of: helpWriteFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: helpWriteFailure
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecli.HelpWriteFailed, kerrs.WrapParams{},
+                			kerrs.String("command", command), kerrs.String("cause", werr.Error()),
+                			kerrs.String("cause_code", typedErr.Code().String()))
+              to: kerrs
+          init:
+            bind: typedErr, typed
+            eval: errors.AsType[*kerrs.Error](werr)
+          when: typed
+      - return: kerrs.Wrap(werr, helpWriteWrap, kerrs.String("command", command))
+        to: kerrs
+  - of: withHelpFailure
+    steps:
+      - opt:
+          do:
+            - return: fields
+          when: werr == nil
+      - return: append(fields, kerrs.String("help_write_error", werr.Error()))
+  - of: (*executor).resolveChild
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*executor).resolveChild
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: e.writeHelp
+        kind: internal
+    steps:
+      - bind: joined
+        eval: strings.Join(path, " ")
+        to: strings
+      - opt:
+          do:
+            - bind: werr
+              eval: e.writeHelp(cmd, path, set)
+              to: e.writeHelp
+            - return: |-
+                corecli.CommandValue{}, kerrs.Wrap(corecli.MissingCommand, kerrs.WrapParams{},
+                			withHelpFailure(werr, kerrs.String("command", joined))...)
+          when: len(rest) == 0
+      - bind: name
+        eval: rest[0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: candidate, nil
+                when: candidate.Name == name
+          key: _
+          range: cmd.Commands
+          value: candidate
+      - bind: werr
+        eval: e.writeHelp(cmd, path, set)
+        to: e.writeHelp
+      - return: |-
+          corecli.CommandValue{}, kerrs.Wrap(corecli.UnknownCommand, kerrs.WrapParams{},
+          		withHelpFailure(werr, kerrs.String("command", joined), kerrs.String("token", name))...)
+  - of: (*executor).dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*executor).dispatch
+        kind: self
+      - id: guard
+        kind: internal
+    steps:
+      - bind: invocation
+        eval: |-
+          corecli.InvocationValue{
+          		Path:   slices.Clone(path),
+          		Args:   slices.Clip(slices.Clone(rest)),
+          		Flags:  slices.Clone(sets),
+          		Output: e.out,
+          	}
+      - return: guard(ctx, cmd.Run, invocation)
+        to: guard
+  - of: guard
+    steps:
+      - defer: |-
+          func() {
+          		value := recover()
+          		//: the ordinary path — leave err exactly as the Action returned it.
+          		if value == nil {
+          			//: verbatim, so the caller's own errors.Is keeps working.
+          			return
+          		}
+          		//: the recovered value travels as a FIELD, never as the wrap origin,
+          		//: so a panic carrying an *errs.Error cannot hijack COMMAND_PANICKED.
+          		//: The stack is captured HERE, inside the deferred function, so it is
+          		//: the stack of the goroutine that actually failed.
+          		err = kerrs.Wrap(corecli.CommandPanicked, kerrs.WrapParams{},
+          			kerrs.String("command", strings.Join(invocation.Path, " ")),
+          			kerrs.String("panic", fmt.Sprint(value)),
+          			kerrs.String("stack", string(debug.Stack())))
+          	}()
+      - return: run(ctx, invocation)
+  - of: FlagSource
+    participants:
+      - id: caller
+        kind: actor
+      - id: FlagSource
+        kind: self
+      - id: set.Visit
+        kind: value
+    steps:
+      - bind: values
+        eval: make(map[string]any, len(invocation.Flags))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: set == nil
+            - eval: set.Visit(func(f *flag.Flag) { values[f.Name] = flagValue(f) })
+              to: set.Visit
+          key: _
+          range: invocation.Flags
+          value: set
+      - return: "&FlagSourceValue{values: values}"
+  - of: (*FlagSourceValue).Load
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FlagSourceValue).Load
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - return: maps.Clone(s.values), nil
+        to: maps
+  - of: flagValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: flagValue
+        kind: self
+      - id: getter.Get
+        kind: value
+      - id: f.Value.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: getter.Get()
+              to: getter.Get
+          init:
+            bind: getter, ok
+            eval: f.Value.(flag.Getter)
+          when: ok
+      - return: f.Value.String()
+        to: f.Value.String
+  - of: (*executor).writeHelp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*executor).writeHelp
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: out.WriteString
+        kind: value
+      - id: writeUsage
+        kind: internal
+      - id: writeCommands
+        kind: internal
+      - id: writeFlags
+        kind: internal
+      - id: e.errOut.Write
+        kind: value
+    steps:
+      - var:
+          name: out
+          type: strings.Builder
+      - bind: joined
+        eval: strings.Join(path, " ")
+        to: strings
+      - opt:
+          do:
+            - eval: out.WriteString(cmd.Summary)
+              to: out.WriteString
+            - eval: out.WriteString("\n\n")
+              to: out.WriteString
+          when: cmd.Summary != ""
+      - opt:
+          do:
+            - eval: out.WriteString(strings.TrimRight(cmd.Description, "\n"))
+              to: out.WriteString
+            - eval: out.WriteString("\n\n")
+              to: out.WriteString
+          when: cmd.Description != ""
+      - eval: writeUsage(&out, cmd, joined, set)
+        to: writeUsage
+      - eval: writeCommands(&out, cmd)
+        to: writeCommands
+      - eval: writeFlags(&out, set)
+        to: writeFlags
+      - opt:
+          do:
+            - eval: out.WriteString("Use \"")
+              to: out.WriteString
+            - eval: out.WriteString(joined)
+              to: out.WriteString
+            - eval: out.WriteString(" <command> -h\" for more information about a command.\n")
+              to: out.WriteString
+          when: cmd.IsGroup()
+      - bind: page
+        eval: "[]byte(out.String())"
+      - bind: written, err
+        eval: e.errOut.Write(page)
+        to: e.errOut.Write
+      - opt:
+          do:
+            - return: io.ErrShortWrite
+          when: err == nil && written < len(page)
+      - return: err
+  - of: writeUsage
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeUsage
+        kind: self
+      - id: out.WriteString
+        kind: value
+    steps:
+      - eval: out.WriteString("Usage:\n")
+        to: out.WriteString
+      - eval: out.WriteString(helpIndent)
+        to: out.WriteString
+      - eval: out.WriteString(joined)
+        to: out.WriteString
+      - opt:
+          do:
+            - eval: out.WriteString(" [flags]")
+              to: out.WriteString
+          when: hasFlags(set)
+      - alt:
+          - do:
+              - eval: out.WriteString(" <command>")
+                to: out.WriteString
+            when: cmd.IsGroup()
+          - do:
+              - eval: out.WriteString(" [arguments]")
+                to: out.WriteString
+            else: true
+      - eval: out.WriteString("\n\n")
+        to: out.WriteString
+  - of: writeCommands
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeCommands
+        kind: self
+      - id: out.WriteString
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!cmd.IsGroup()"
+      - eval: out.WriteString("Commands:\n")
+        to: out.WriteString
+      - bind: width
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: width
+                    value: len(child.Name)
+                when: len(child.Name) > width
+          key: _
+          range: cmd.Commands
+          value: child
+      - loop:
+          do:
+            - eval: out.WriteString(helpIndent)
+              to: out.WriteString
+            - eval: out.WriteString(child.Name)
+              to: out.WriteString
+            - eval: out.WriteString(strings.Repeat(" ", width-len(child.Name)+helpColumnGap))
+              to: out.WriteString
+            - eval: out.WriteString(child.Summary)
+              to: out.WriteString
+            - eval: out.WriteString("\n")
+              to: out.WriteString
+          key: _
+          range: cmd.Commands
+          value: child
+      - eval: out.WriteString("\n")
+        to: out.WriteString
+  - of: writeFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeFlags
+        kind: self
+      - id: out.WriteString
+        kind: value
+      - id: set.SetOutput
+        kind: value
+      - id: set.PrintDefaults
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!hasFlags(set)"
+      - eval: out.WriteString("Flags:\n")
+        to: out.WriteString
+      - eval: set.SetOutput(out)
+        to: set.SetOutput
+      - eval: set.PrintDefaults()
+        to: set.PrintDefaults
+      - eval: set.SetOutput(io.Discard)
+        to: set.SetOutput
+      - eval: out.WriteString("\n")
+        to: out.WriteString

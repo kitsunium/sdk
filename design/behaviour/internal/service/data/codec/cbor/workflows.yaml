@@ -1,0 +1,104 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: structMayHoldUnhashable
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: mayHoldUnhashable(f.Type)
+          key: f
+          range: t.Fields()
+      - return: "false"
+  - of: allHashable
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!hashable(part(i))"
+          key: i
+          range: "n"
+      - return: "true"
+  - of: (*decodeFields).indexNames
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(fs.list) <= linearLookupMax
+      - set: fs.byName
+        value: make(map[string]int, len(fs.list))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: fs.byName[fs.list[i].name]
+                    value: i
+                when: "!fs.list[i].keyAsInt"
+          key: i
+          range: fs.list
+  - of: (*decodeFields).exact
+    steps:
+      - opt:
+          do:
+            - bind: i, ok
+              eval: fs.byName[string(key)]
+            - return: i, ok
+          when: fs.byName != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i, true
+                when: "!fs.list[i].keyAsInt && bytes.Equal(fs.list[i].nameBytes, key)"
+          key: i
+          range: fs.list
+      - return: "-1, false"
+  - of: (*decodeFields).folded
+    steps:
+      - loop:
+          do:
+            - bind: f
+              eval: "&fs.list[i]"
+            - opt:
+                do:
+                  - return: i, true
+                when: "!f.keyAsInt && len(f.nameBytes) == len(key) && bytes.EqualFold(f.nameBytes, key)"
+          key: i
+          range: fs.list
+      - return: "-1, false"
+  - of: (*decodeFields).byInt
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i, true
+                when: fs.list[i].keyAsInt && fs.list[i].nameInt == n
+          key: i
+          range: fs.list
+      - return: "-1, false"
+  - of: (*validator).finishChild
+    steps:
+      - loop:
+          cond: v.depth > 0
+          do:
+            - bind: top
+              eval: "&v.stack[v.depth-1]"
+            - opt:
+                do:
+                  - return: ""
+                when: top.indefinite
+            - op: "--"
+              set: top.count
+            - opt:
+                do:
+                  - return: ""
+                when: top.count > 0
+            - op: "--"
+              set: v.depth
+      - set: v.complete
+        value: "true"

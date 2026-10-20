@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/net/tlsid
+  name: tlsid
+  purpose: Package tlsid builds TLS and mutual-TLS identities for the SDK's network domain (ADR 0029), from files on disk or from material already in memory.
+types: []

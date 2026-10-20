@@ -1,0 +1,830 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: checkChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkChain
+        kind: self
+      - id: pathchain
+        kind: package
+      - id: errs
+        kind: package
+      - id: os
+        kind: stdlib
+      - id: steerable
+        kind: internal
+      - id: pathUnsafe
+        kind: internal
+    steps:
+      - bind: steps, err
+        eval: pathchain.Resolve(filepath.Dir(dir))
+        to: pathchain
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the path to it cannot be resolved"),
+                			errs.String("path", dir), errs.String("cause", err.Error()))
+              to: errs
+          when: err != nil
+      - bind: self
+        eval: os.Geteuid()
+        to: os
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: pathUnsafe(dir, &steps[i], kind)
+                    to: pathUnsafe
+                init:
+                  bind: kind, steered
+                  eval: steerable(&steps[i], self)
+                  to: steerable
+                when: steered
+          key: i
+          range: steps
+      - return: nil
+  - of: checkHolder
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkHolder
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: holder.Mode
+        kind: value
+    steps:
+      - bind: holder, err
+        eval: os.Stat(filepath.Dir(dir))
+        to: os
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory holding it cannot be read"),
+                			errs.String("path", dir), errs.String("cause", err.Error()))
+              to: errs
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreipc.PathUnsafe, errs.WrapParams{}, errs.String("path", dir), errs.String("dir", dir),
+                			errs.String("kind", kindReplaceable), errs.String("container", mode.String()))
+              to: errs
+          init:
+            bind: mode
+            eval: holder.Mode()
+            to: holder.Mode
+          when: mode&worldWritable != 0 && mode&os.ModeSticky == 0
+      - return: nil
+  - of: steerable
+    steps:
+      - switch:
+          cases:
+            - case: step.Container&worldWritable == 0
+              do:
+                - return: "\"\", false"
+            - case: step.Indirect
+              do:
+                - return: kindIndirection, true
+            - case: "!ours(step.Info, self)"
+              do:
+                - return: kindForeign, true
+            - case: step.Container&os.ModeSticky == 0
+              do:
+                - return: kindReplaceable, true
+      - return: "\"\", false"
+  - of: ours
+    participants:
+      - id: caller
+        kind: actor
+      - id: ours
+        kind: self
+      - id: ownerOf
+        kind: internal
+    steps:
+      - bind: uid, known
+        eval: ownerOf(info)
+        to: ownerOf
+      - return: known && (uid == self || uid == rootUID)
+  - of: pathUnsafe
+    participants:
+      - id: caller
+        kind: actor
+      - id: pathUnsafe
+        kind: self
+      - id: ownerOf
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: |-
+          []errs.FieldValue{
+          		errs.String("path", step.Path),
+          		errs.String("dir", dir),
+          		errs.String("kind", kind),
+          		errs.String("container", step.Container.String()),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.String("target", step.Target))
+          when: step.Indirect
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.Int("uid", uid))
+          init:
+            bind: uid, known
+            eval: ownerOf(step.Info)
+            to: ownerOf
+          when: known
+      - return: errs.Wrap(coreipc.PathUnsafe, errs.WrapParams{}, fields...)
+        to: errs
+  - of: prepareDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareDir
+        kind: self
+      - id: checkChain
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: checkDir
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkChain(dir)
+            to: checkChain
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be created"),
+                			errs.String("path", dir), errs.String("cause", err.Error()))
+              to: errs
+          init:
+            bind: err
+            eval: os.Mkdir(dir, 0o700)
+            to: os
+          when: err != nil && !errors.Is(err, os.ErrExist)
+      - return: checkDir(dir)
+        to: checkDir
+  - of: checkDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDir
+        kind: self
+      - id: checkChain
+        kind: internal
+      - id: checkEntry
+        kind: internal
+      - id: checkHolder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkChain(dir)
+            to: checkChain
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkEntry(dir)
+            to: checkEntry
+          when: err != nil
+      - return: checkHolder(dir)
+        to: checkHolder
+  - of: checkEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkEntry
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: ownerOf
+        kind: internal
+    steps:
+      - bind: info, err
+        eval: os.Lstat(dir)
+        to: os
+      - switch:
+          cases:
+            - case: err != nil
+              do:
+                - return: |-
+                    errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be read"),
+                    			errs.String("path", dir), errs.String("cause", err.Error()))
+                  to: errs
+            - case: info.Mode()&os.ModeSymlink != 0
+              do:
+                - return: errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory is a link"), errs.String("path", dir))
+                  to: errs
+            - case: "!info.IsDir()"
+              do:
+                - return: errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "not a directory"), errs.String("path", dir))
+                  to: errs
+            - case: info.Mode().Perm()&groupOrWorldWritable != 0
+              do:
+                - return: |-
+                    errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "writable by its group or by anyone"),
+                    			errs.String("path", dir), errs.String("mode", info.Mode().Perm().String()))
+                  to: errs
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "owned by another account"),
+                			errs.String("path", dir), errs.Int("uid", uid))
+              to: errs
+          init:
+            bind: uid, known
+            eval: ownerOf(info)
+            to: ownerOf
+          when: known && uid != os.Geteuid()
+      - return: nil
+  - of: ownerOf
+    steps:
+      - opt:
+          do:
+            - return: "-1, false"
+          when: info == nil
+      - bind: st, ok
+        eval: info.Sys().(*syscall.Stat_t)
+      - opt:
+          do:
+            - return: "-1, false"
+          when: "!ok"
+      - return: int(st.Uid), true
+  - of: (*Config).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Config).validate
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: c.Path == "" || !filepath.IsAbs(c.Path)
+              do:
+                - return: errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "path must be absolute"))
+                  to: errs
+            - case: len(c.Path) > maxPath
+              do:
+                - return: |-
+                    errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "path longer than sun_path"),
+                    			errs.Int("length", len(c.Path)), errs.Int("max", maxPath))
+                  to: errs
+            - case: slices.ContainsFunc(c.AllowUIDs, negative), slices.ContainsFunc(c.AllowGIDs, negative)
+              do:
+                - return: errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "a UID or GID is negative"))
+                  to: errs
+      - return: nil
+  - of: negative
+    steps:
+      - return: n < 0
+  - of: NewListener
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewListener
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: listen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: cfg.validate()
+            to: cfg.validate
+          when: err != nil
+      - return: listen(cfg)
+        to: listen
+  - of: (*Listener).Accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Listener).Accept
+        kind: self
+      - id: l.ln.accept
+        kind: internal
+      - id: l.mu.Lock
+        kind: value
+      - id: l.mu.Unlock
+        kind: value
+      - id: l.admits
+        kind: internal
+      - id: closeBestEffort
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: c, p, err
+              eval: l.ln.accept()
+              to: l.ln.accept
+            - opt:
+                do:
+                  - eval: l.mu.Lock()
+                    to: l.mu.Lock
+                  - bind: closed
+                    eval: l.closed
+                  - eval: l.mu.Unlock()
+                    to: l.mu.Unlock
+                  - opt:
+                      do:
+                        - return: nil, errs.Wrap(coreipc.Closed, errs.WrapParams{}, errs.String("path", l.cfg.Path))
+                      when: closed
+                  - return: nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", l.cfg.Path), errs.String("cause", err.Error()))
+                when: err != nil
+            - opt:
+                do:
+                  - eval: closeBestEffort(c, l.cfg.Path)
+                    to: closeBestEffort
+                  - eval: l.mu.Lock()
+                    to: l.mu.Lock
+                  - op: ++
+                    set: l.refused
+                  - eval: l.mu.Unlock()
+                    to: l.mu.Unlock
+                  - continue: true
+                init:
+                  bind: err
+                  eval: l.admits(p)
+                  to: l.admits
+                when: err != nil
+            - return: "&coreipc.Conn{Conn: c, Peer: p}, nil"
+          forever: true
+  - of: (*Listener).Refused
+    steps:
+      - lock:
+          mutex: l.mu
+      - return: l.refused
+  - of: (*Listener).Addr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Listener).Addr
+        kind: self
+      - id: l.ln.Addr
+        kind: internal
+    steps:
+      - return: l.ln.Addr()
+        to: l.ln.Addr
+  - of: (*Listener).Path
+    steps:
+      - return: l.cfg.Path
+  - of: (*Listener).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Listener).Close
+        kind: self
+      - id: l.mu.Lock
+        kind: value
+      - id: l.mu.Unlock
+        kind: value
+      - id: l.ln.Close
+        kind: internal
+    steps:
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - set: l.closed
+        value: "true"
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+      - return: l.ln.Close()
+        to: l.ln.Close
+  - of: admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: admit
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!p.Verified || p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID)"
+      - return: errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))
+        to: errs
+  - of: NewDialer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDialer
+        kind: self
+      - id: cfg.validate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: cfg.validate()
+            to: cfg.validate
+          when: err != nil
+      - bind: own
+        eval: "Config{Path: cfg.Path, AllowUIDs: slices.Clone(cfg.AllowUIDs), AllowGIDs: slices.Clone(cfg.AllowGIDs)}"
+      - return: "&Dialer{cfg: own}, nil"
+  - of: (*Dialer).Dial
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Dialer).Dial
+        kind: self
+      - id: dial
+        kind: internal
+    steps:
+      - return: dial(ctx, &d.cfg)
+        to: dial
+  - of: Dial
+    participants:
+      - id: caller
+        kind: actor
+      - id: Dial
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: dial
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: cfg.validate()
+            to: cfg.validate
+          when: err != nil
+      - return: dial(ctx, cfg)
+        to: dial
+  - of: RuntimeDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: RuntimeDir
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: d
+          init:
+            bind: d
+            eval: os.Getenv("RUNTIME_DIRECTORY")
+            to: os
+          when: d != "" && filepath.IsAbs(d)
+      - opt:
+          do:
+            - return: filepath.Join(d, app)
+              to: filepath
+          init:
+            bind: d
+            eval: os.Getenv("XDG_RUNTIME_DIR")
+            to: os
+          when: d != "" && filepath.IsAbs(d)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: filepath.Join(d, app)
+                    to: filepath
+                init:
+                  bind: d
+                  eval: os.Getenv("LOCALAPPDATA")
+                  to: os
+                when: d != ""
+          when: runtime.GOOS == "windows"
+      - return: filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Geteuid()))
+        to: filepath
+  - of: closeBestEffort
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeBestEffort
+        kind: self
+      - id: c.Close
+        kind: value
+      - id: log
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: "log.Printf(\"ipc: closing a connection on %s: %v\", path, err)"
+              to: log
+          init:
+            bind: err
+            eval: c.Close()
+            to: c.Close
+          when: err != nil
+  - of: peerOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: peerOf
+        kind: self
+      - id: c.SyscallConn
+        kind: value
+      - id: raw.Control
+        kind: value
+    steps:
+      - bind: raw, err
+        eval: c.SyscallConn()
+        to: c.SyscallConn
+      - opt:
+          do:
+            - return: "coreipc.PeerValue{UID: -1, GID: -1}"
+          when: err != nil
+      - var:
+          name: cred
+          type: "*syscall.Ucred"
+      - var:
+          name: credErr
+          type: error
+      - opt:
+          do:
+            - return: "coreipc.PeerValue{UID: -1, GID: -1}"
+          init:
+            bind: err
+            eval: |-
+              raw.Control(func(fd uintptr) {
+              		cred, credErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+              	})
+            to: raw.Control
+          when: err != nil || credErr != nil || cred == nil
+      - return: "coreipc.PeerValue{UID: int(cred.Uid), GID: int(cred.Gid), PID: int(cred.Pid), Verified: true}"
+  - of: socketAcceptor.accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: socketAcceptor.accept
+        kind: self
+      - id: s.AcceptUnix
+        kind: value
+    steps:
+      - bind: c, err
+        eval: s.AcceptUnix()
+        to: s.AcceptUnix
+      - opt:
+          do:
+            - return: nil, coreipc.PeerValue{}, err
+          when: err != nil
+      - return: c, peerOf(c), nil
+  - of: listen
+    participants:
+      - id: caller
+        kind: actor
+      - id: listen
+        kind: self
+      - id: prepareDir
+        kind: internal
+      - id: clearStale
+        kind: internal
+      - id: net
+        kind: stdlib
+      - id: ln.SetUnlinkOnClose
+        kind: value
+      - id: os
+        kind: stdlib
+      - id: closeBestEffort
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: prepareDir(filepath.Dir(cfg.Path))
+            to: prepareDir
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: clearStale(cfg)
+            to: clearStale
+          when: err != nil
+      - bind: ln, err
+        eval: "net.ListenUnix(\"unix\", &net.UnixAddr{Name: cfg.Path, Net: \"unix\"})"
+        to: net
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
+          when: err != nil
+      - eval: ln.SetUnlinkOnClose(true)
+        to: ln.SetUnlinkOnClose
+      - opt:
+          do:
+            - eval: closeBestEffort(ln, cfg.Path)
+              to: closeBestEffort
+            - return: nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
+          init:
+            bind: err
+            eval: os.Chmod(cfg.Path, 0o600)
+            to: os
+          when: err != nil
+      - return: "&Listener{cfg: *cfg, ln: socketAcceptor{ln}, self: os.Geteuid()}, nil"
+  - of: clearStale
+    participants:
+      - id: caller
+        kind: actor
+      - id: clearStale
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: ownerOf
+        kind: internal
+      - id: net
+        kind: stdlib
+      - id: closeBestEffort
+        kind: internal
+    steps:
+      - bind: info, err
+        eval: os.Lstat(cfg.Path)
+        to: os
+      - switch:
+          cases:
+            - case: errors.Is(err, os.ErrNotExist)
+              do:
+                - return: nil
+            - case: err != nil
+              do:
+                - return: errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
+                  to: errs
+            - case: info.Mode()&os.ModeSocket == 0
+              do:
+                - return: |-
+                    errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the socket path holds something that is not a socket"),
+                    			errs.String("path", cfg.Path))
+                  to: errs
+      - opt:
+          do:
+            - return: errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.Int("uid", uid))
+              to: errs
+          init:
+            bind: uid, known
+            eval: ownerOf(info)
+            to: ownerOf
+          when: known && uid != os.Geteuid()
+      - bind: c, err
+        eval: net.DialTimeout("unix", cfg.Path, dialTimeout)
+        to: net
+      - opt:
+          do:
+            - eval: closeBestEffort(c, cfg.Path)
+              to: closeBestEffort
+            - return: errs.Wrap(coreipc.InUse, errs.WrapParams{}, errs.String("path", cfg.Path))
+              to: errs
+          when: err == nil
+      - opt:
+          do:
+            - return: errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
+              to: errs
+          init:
+            bind: err
+            eval: os.Remove(cfg.Path)
+            to: os
+          when: err != nil && !errors.Is(err, os.ErrNotExist)
+      - return: nil
+  - of: (*Listener).admits
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Listener).admits
+        kind: self
+      - id: admit
+        kind: internal
+    steps:
+      - return: admit(p, l.self, &l.cfg)
+        to: admit
+  - of: dial
+    participants:
+      - id: caller
+        kind: actor
+      - id: dial
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: checkDir
+        kind: internal
+      - id: ownerOf
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: d.DialContext
+        kind: value
+      - id: closeBestEffort
+        kind: internal
+      - id: peerOf
+        kind: internal
+      - id: admit
+        kind: internal
+    steps:
+      - bind: dir
+        eval: filepath.Dir(cfg.Path)
+        to: filepath
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
+                			errs.String("cause", "nobody listens: the directory does not exist"))
+          init:
+            bind: _, err
+            eval: os.Lstat(dir)
+            to: os
+          when: errors.Is(err, os.ErrNotExist)
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkDir(dir)
+            to: checkDir
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.Int("uid", uid))
+                init:
+                  bind: uid, known
+                  eval: ownerOf(info)
+                  to: ownerOf
+                when: known && uid != os.Geteuid() && !slices.Contains(cfg.AllowUIDs, uid)
+          init:
+            bind: info, err
+            eval: os.Lstat(cfg.Path)
+            to: os
+          when: err == nil
+      - bind: ctx, cancel
+        eval: context.WithTimeout(ctx, dialTimeout)
+        to: context
+      - defer: cancel()
+      - var:
+          name: d
+          type: net.Dialer
+      - bind: c, err
+        eval: d.DialContext(ctx, "unix", cfg.Path)
+        to: d.DialContext
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
+          when: err != nil
+      - bind: uc, ok
+        eval: c.(*net.UnixConn)
+      - opt:
+          do:
+            - eval: closeBestEffort(c, cfg.Path)
+              to: closeBestEffort
+            - return: nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", "not a unix connection"))
+          when: "!ok"
+      - bind: p
+        eval: peerOf(uc)
+        to: peerOf
+      - opt:
+          do:
+            - eval: closeBestEffort(c, cfg.Path)
+              to: closeBestEffort
+            - return: nil, err
+          init:
+            bind: err
+            eval: admit(p, os.Geteuid(), cfg)
+            to: admit
+          when: err != nil
+      - return: "&coreipc.Conn{Conn: c, Peer: p}, nil"

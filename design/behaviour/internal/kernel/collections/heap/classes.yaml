@@ -1,0 +1,72 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      branching is the heap's arity: every node has at most two children, which is
+      what puts the children of i at 2i+1 and 2i+2 and makes the tree implicit in a
+      flat array. It is named rather than written twice as a bare 2 because those
+      two occurrences are the SAME decision, not two coincidences.
+    items:
+      - name: branching
+        type: int
+        value: "2"
+    name: branching
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - branching
+      - Heap
+      - New
+      - (*Heap).Len
+      - (*Heap).Push
+      - (*Heap).Peek
+      - (*Heap).Pop
+      - (*Heap).up
+      - (*Heap).down
+    name: heap.go
+functions:
+  - name: New
+    params: cmp func(a, b T) int
+    results: "*Heap[T]"
+    typeParams: T any
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/collections/heap
+  name: heap
+  purpose: Package heap provides Heap[T], a binary heap ordered by a comparison function the caller supplies.
+types:
+  - fields:
+      - doc: |-
+          items is the heap array: the children of i live at 2i+1 and 2i+2, so the
+          tree needs no pointers and no per-element allocation.
+        name: items
+        type: "[]T"
+      - doc: cmp is the caller's order. Non-nil by construction; see New.
+        name: cmp
+        type: func(a, b T) int
+    kind: struct
+    methods:
+      - name: Len
+        recv: h *Heap[T]
+        results: int
+      - name: Push
+        params: v T
+        recv: h *Heap[T]
+      - name: Peek
+        recv: h *Heap[T]
+        results: T, bool
+      - name: Pop
+        recv: h *Heap[T]
+        results: T, bool
+      - doc: up restores the heap invariant along the path from child to the root.
+        name: up
+        params: child int
+        recv: h *Heap[T]
+      - doc: down restores the heap invariant along the path from parent to a leaf.
+        name: down
+        params: parent int
+        recv: h *Heap[T]
+    name: Heap
+    typeParams: T any

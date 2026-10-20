@@ -1,0 +1,895 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The entry kinds of protocol version 1. The range 0x80-0x8F is reserved for
+      ADR 0173 and refused until the cluster version enables it.
+    grouped: true
+    items:
+      - doc: EntryCommand is a caller's command, handed to StateMachine.Apply.
+        name: EntryCommand
+        type: EntryKind
+        value: iota + 1
+      - doc: |-
+          EntryNoOp is the empty entry a new leader commits in its term before it
+          serves a read or accepts a membership change.
+        name: EntryNoOp
+      - doc: |-
+          EntryMembership carries a whole new Membership and the change that
+          produced it. It takes effect when APPENDED.
+        name: EntryMembership
+      - doc: EntryTimingContract carries a new committed timing contract.
+        name: EntryTimingContract
+      - doc: EntryClusterVersion raises the protocol version every member must speak.
+        name: EntryClusterVersion
+      - doc: EntryNoSpaceRaise raises the replicated no-space alarm.
+        name: EntryNoSpaceRaise
+      - doc: EntryNoSpaceClear clears the no-space alarm it names.
+        name: EntryNoSpaceClear
+      - doc: EntryTransfer records a leadership transfer and its operator.
+        name: EntryTransfer
+    name: EntryCommand
+  - doc: |-
+      exitCantCreate matches sysexits EX_CANTCREAT (73): a storage failure whose
+      stop marker could not be written anywhere (ADR 0152 D4). StopReasonValue's
+      ExitCode returns it; the sentinels' own exit codes are the design's `exit:`
+      fields (ADR 0176), none of them 70, errs' default, so that a code without
+      one never looks like a consensus stop, and each final stop has its own so
+      that a supervisor can refuse to restart it
+      (RestartPreventExitStatus=74 65 69 76 73).
+    items:
+      - name: exitCantCreate
+        type: int
+        value: "73"
+    name: exitCantCreate
+  - doc: |-
+      The Operator format: printable ASCII without the space, so an operator
+      reads back from the audit file and the log exactly as it was typed, and a
+      length bound that keeps it out of the way of the entry it is recorded in.
+    grouped: true
+    items:
+      - doc: operatorFirstByte is '!', the first printable ASCII byte after space.
+        name: operatorFirstByte
+        type: byte
+        value: "0x21"
+      - doc: operatorLastByte is '~', the last printable ASCII byte.
+        name: operatorLastByte
+        type: byte
+        value: "0x7E"
+      - doc: maxOperatorBytes bounds an operator's length.
+        name: maxOperatorBytes
+        type: int
+        value: "128"
+    name: operatorFirstByte
+  - doc: The message kinds of protocol version 1.
+    grouped: true
+    items:
+      - doc: |-
+          MsgPreVote asks whether the sender COULD win at Term, without raising
+          anybody's term.
+        name: MsgPreVote
+        type: MessageKind
+        value: "0x01"
+      - doc: MsgPreVoteResp answers a MsgPreVote.
+        name: MsgPreVoteResp
+        type: MessageKind
+        value: "0x02"
+      - doc: MsgVote asks for a vote at Term.
+        name: MsgVote
+        type: MessageKind
+        value: "0x03"
+      - doc: MsgVoteResp answers a MsgVote.
+        name: MsgVoteResp
+        type: MessageKind
+        value: "0x04"
+      - doc: |-
+          MsgHeartbeat confirms the leader and carries a commit index clamped to
+          the follower's match.
+        name: MsgHeartbeat
+        type: MessageKind
+        value: "0x05"
+      - doc: |-
+          MsgHeartbeatResp answers a heartbeat and carries the applied contract
+          generation.
+        name: MsgHeartbeatResp
+        type: MessageKind
+        value: "0x06"
+      - doc: MsgTimeoutNow tells the transfer target to campaign at once.
+        name: MsgTimeoutNow
+        type: MessageKind
+        value: "0x07"
+      - doc: MsgReadIndex asks the leader for a confirmed read index.
+        name: MsgReadIndex
+        type: MessageKind
+        value: "0x08"
+      - doc: MsgReadIndexResp answers a MsgReadIndex.
+        name: MsgReadIndexResp
+        type: MessageKind
+        value: "0x09"
+      - doc: MsgForwardAdmin forwards an administrative operation to the leader.
+        name: MsgForwardAdmin
+        type: MessageKind
+        value: "0x0A"
+      - doc: MsgForwardAdminResp answers a MsgForwardAdmin.
+        name: MsgForwardAdminResp
+        type: MessageKind
+        value: "0x0B"
+      - doc: MsgApp appends entries after (LogTerm, Index).
+        name: MsgApp
+        type: MessageKind
+        value: "0x41"
+      - doc: MsgAppResp acknowledges, or refuses, a MsgApp.
+        name: MsgAppResp
+        type: MessageKind
+        value: "0x42"
+      - doc: MsgForward forwards a proposal to the leader under a submission id.
+        name: MsgForward
+        type: MessageKind
+        value: "0x43"
+      - doc: MsgForwardResp answers a MsgForward with the position it appended at.
+        name: MsgForwardResp
+        type: MessageKind
+        value: "0x44"
+    name: MsgPreVote
+  - doc: The flags.
+    grouped: true
+    items:
+      - doc: |-
+          FlagTransfer marks a vote request of a leadership transfer. It lifts the
+          live-leader refusal for ONE campaign, never the election restriction.
+        name: FlagTransfer
+        type: MessageFlags
+        value: 1 << iota
+      - doc: |-
+          FlagNeedSnapshot marks an append rejection from a node that holds no
+          usable snapshot and asks for one.
+        name: FlagNeedSnapshot
+      - doc: |-
+          FlagNoLease marks a read the follower wants confirmed by a round, never
+          by a lease.
+        name: FlagNoLease
+      - doc: |-
+          FlagTruncated marks an append rejection from a node that truncated
+          acknowledged entries through TruncateAndStaySilent: the leader lowers
+          its match to the node's log, the one exception to "match only grows".
+        name: FlagTruncated
+    name: FlagTransfer
+  - doc: The states of a stamp.
+    grouped: true
+    items:
+      - doc: |-
+          StampJoining is a directory Init prepared: it may join as an empty
+          learner, never vote or acknowledge until it is admitted.
+        name: StampJoining
+        type: StampState
+        value: iota + 1
+      - doc: |-
+          StampBootstrapPending is a founding in progress: Bootstrap wrote it
+          before it wrote the founding configuration.
+        name: StampBootstrapPending
+      - doc: StampMember is a directory that belongs to a cluster.
+        name: StampMember
+    name: StampJoining
+  - doc: The roles.
+    grouped: true
+    items:
+      - doc: RoleFollower follows a leader, or waits for one.
+        name: RoleFollower
+        type: Role
+        value: iota + 1
+      - doc: RolePreCandidate asks whether it COULD win, without raising its term.
+        name: RolePreCandidate
+      - doc: RoleCandidate campaigns at a raised term.
+        name: RoleCandidate
+      - doc: RoleLeader leads its term.
+        name: RoleLeader
+      - doc: RoleLearner receives the log and votes when asked, but never campaigns.
+        name: RoleLearner
+    name: RoleFollower
+  - doc: The lanes.
+    grouped: true
+    items:
+      - doc: LaneControl carries votes, heartbeats, their replies and TimeoutNow.
+        name: LaneControl
+        type: FrameLane
+        value: iota
+      - doc: LaneData carries entries, their acknowledgements and forwarded proposals.
+        name: LaneData
+      - doc: LaneSnapshot carries snapshot streams.
+        name: LaneSnapshot
+    name: LaneControl
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - EntryKind
+      - EntryCommand
+      - EntryKind.Known
+      - EntryValue
+      - HardState
+    name: entry.go
+  - decls:
+      - exitCantCreate
+    name: errors.go
+  - decls:
+      - operatorFirstByte
+      - NodeID
+      - NodeID.String
+      - Incarnation
+      - Incarnation.String
+      - Incarnation.IsZero
+      - ClusterID
+      - ClusterID.String
+      - ClusterID.IsZero
+      - LogIdentityValue
+      - LogIdentityValue.Same
+      - TokenValue
+      - TokenValue.Position
+      - Operator
+      - Operator.Valid
+      - AlarmID
+      - PreconditionSpec
+    name: identity.go
+  - decls:
+      - MemberValue
+      - MembershipValue
+      - MembershipValue.Member
+      - MembershipValue.IsRetired
+      - MembershipValue.Voters
+      - MembershipValue.Clone
+    name: membership.go
+  - decls:
+      - MessageKind
+      - MsgPreVote
+      - MessageFlags
+      - FlagTransfer
+      - MessageKind.Lane
+      - MessageKind.Known
+      - GroupID
+      - MessageValue
+    name: message.go
+  - decls:
+      - PositionValue
+    name: position.go
+  - decls:
+      - SnapshotMetaValue
+      - InstallOfferValue
+      - InstallAcceptValue
+      - InstallParams
+      - AuthenticatedPeerValue
+      - JoinRequestValue
+      - FencedAttestationValue
+    name: snapshot.go
+  - decls:
+      - StampState
+      - StampJoining
+      - StampValue
+      - JoinConfig
+    name: stamp.go
+  - decls:
+      - Role
+      - RoleFollower
+      - FrameLane
+      - LaneControl
+      - Role.String
+      - StatusValue
+      - VersionsValue
+      - (*StatusValue).Precondition
+      - StopReasonValue
+      - StopReasonValue.ExitCode
+    name: status.go
+  - decls:
+      - TimingContractSpec
+    name: timing_contract.go
+imports:
+  context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  io: io
+  slices: slices
+  strconv: strconv
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/consensus
+  name: consensus
+  purpose: Package consensus — ranges 0.2.57.* (ADR 0152, the domain's outcomes) and 0.3.92.* (ADR 0152, the shipped storage and transport's outcomes, declared here since ADR 0160).
+types:
+  - kind: named
+    methods:
+      - name: Known
+        recv: k EntryKind
+        results: bool
+    name: EntryKind
+    underlying: uint8
+  - fields:
+      - doc: Position is the entry's term and index.
+        name: Position
+        type: PositionValue
+      - doc: Kind says what Data carries.
+        name: Kind
+        type: EntryKind
+      - doc: |-
+          Version is the payload version the proposer set; it selects the frozen
+          code path that applies the entry.
+        name: Version
+        type: uint32
+      - doc: BodySum is the CRC-32C of Data, computed by the proposer.
+        name: BodySum
+        type: uint32
+      - doc: |-
+          ChainSum chains the previous entry's header: computed by the LEADER at
+          its serialized append point, verified at append and before Apply.
+        name: ChainSum
+        type: uint32
+      - doc: |-
+          Data is the payload: a command for EntryCommand, the engine's encoding
+          for the other kinds.
+        name: Data
+        type: "[]byte"
+      - doc: |-
+          Token is the entry's lineage-scoped command identity, set in memory by
+          the engine before Apply and never encoded in the log.
+        name: Token
+        type: TokenValue
+    kind: struct
+    name: EntryValue
+  - fields:
+      - doc: Term is the node's current term.
+        name: Term
+        type: uint64
+      - doc: Vote is the candidate voted for in Term, 0 for none.
+        name: Vote
+        type: NodeID
+      - doc: Commit is the highest index known committed.
+        name: Commit
+        type: uint64
+    kind: struct
+    name: HardState
+  - kind: named
+    methods:
+      - name: String
+        recv: id NodeID
+        results: string
+    name: NodeID
+    underlying: uint64
+  - kind: named
+    methods:
+      - name: String
+        recv: i Incarnation
+        results: string
+      - name: IsZero
+        recv: i Incarnation
+        results: bool
+    name: Incarnation
+    underlying: "[16]byte"
+  - kind: named
+    methods:
+      - name: String
+        recv: c ClusterID
+        results: string
+      - name: IsZero
+        recv: c ClusterID
+        results: bool
+    name: ClusterID
+    underlying: "[16]byte"
+  - fields:
+      - doc: Cluster is the cluster the log belongs to.
+        name: Cluster
+        type: ClusterID
+      - doc: "Epoch counts the histories of this cluster id: 1 at founding."
+        name: Epoch
+        type: uint64
+      - doc: |-
+          Predecessor is the cluster of the history this one was recovered from,
+          zero for a founding.
+        name: Predecessor
+        type: ClusterID
+      - doc: PredecessorEpoch is the predecessor's epoch.
+        name: PredecessorEpoch
+        type: uint64
+      - doc: |-
+          KeptIndex is the last index Recover kept from the predecessor. An
+          applied position of the predecessor at or below it is still trusted.
+        name: KeptIndex
+        type: uint64
+    kind: struct
+    methods:
+      - name: Same
+        params: o LogIdentityValue
+        recv: l LogIdentityValue
+        results: bool
+    name: LogIdentityValue
+  - fields:
+      - doc: Cluster is the cluster of the log that committed the entry.
+        name: Cluster
+        type: ClusterID
+      - doc: Epoch is that log's epoch.
+        name: Epoch
+        type: uint64
+      - doc: Term is the entry's term.
+        name: Term
+        type: uint64
+      - doc: Index is the entry's index.
+        name: Index
+        type: uint64
+    kind: struct
+    methods:
+      - name: Position
+        recv: t TokenValue
+        results: PositionValue
+    name: TokenValue
+  - kind: named
+    methods:
+      - name: Valid
+        recv: o Operator
+        results: bool
+    name: Operator
+    underlying: string
+  - kind: named
+    name: AlarmID
+    underlying: uint64
+  - fields:
+      - doc: Log is the identity the precondition was read in.
+        name: Log
+        type: LogIdentityValue
+      - doc: Alarm is the alarm a clearing operation names.
+        name: Alarm
+        type: AlarmID
+      - doc: |-
+          Generation is the contract or cluster-version generation an operation
+          expects to replace.
+        name: Generation
+        type: uint64
+    kind: struct
+    name: PreconditionSpec
+  - fields:
+      - doc: ID is the node.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is the node's data-directory incarnation.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the placement slot its certificate names.
+        name: Slot
+        type: string
+      - doc: |-
+          SPKI is the SHA-256 of its certificate's SubjectPublicKeyInfo. A zero
+          pin admits nobody: it is what DenyPin leaves.
+        name: SPKI
+        type: "[32]byte"
+      - doc: Address is where its transport listens.
+        name: Address
+        type: string
+      - doc: Voter is true for a voter, false for a learner.
+        name: Voter
+        type: bool
+      - doc: Joining marks an empty learner admitted before it holds any log.
+        name: Joining
+        type: bool
+      - doc: |-
+          PayloadMax is the highest payload version its state machine supports; 0
+          means only the lowest.
+        name: PayloadMax
+        type: uint32
+      - doc: MaxSnapshotBytes is the largest snapshot it accepts, 0 when unknown.
+        name: MaxSnapshotBytes
+        type: int64
+    kind: struct
+    name: MemberValue
+  - fields:
+      - doc: Index is the index of the entry that produced it, 0 at founding.
+        name: Index
+        type: uint64
+      - doc: Members lists every voter and learner.
+        name: Members
+        type: "[]MemberValue"
+      - doc: Retired lists every removed NodeID.
+        name: Retired
+        type: "[]NodeID"
+    kind: struct
+    methods:
+      - name: Member
+        params: id NodeID
+        recv: m MembershipValue
+        results: MemberValue, bool
+      - name: IsRetired
+        params: id NodeID
+        recv: m MembershipValue
+        results: bool
+      - name: Voters
+        recv: m MembershipValue
+        results: "[]NodeID"
+      - name: Clone
+        recv: m MembershipValue
+        results: MembershipValue
+    name: MembershipValue
+  - kind: named
+    methods:
+      - name: Lane
+        recv: k MessageKind
+        results: FrameLane
+      - name: Known
+        recv: k MessageKind
+        results: bool
+    name: MessageKind
+    underlying: uint8
+  - kind: named
+    name: MessageFlags
+    underlying: uint8
+  - kind: named
+    name: GroupID
+    underlying: uint64
+  - fields:
+      - doc: Version is the frame layout version, 1.
+        name: Version
+        type: uint8
+      - doc: Group is the consensus group, 1 in v1.
+        name: Group
+        type: GroupID
+      - doc: Kind says what the message is.
+        name: Kind
+        type: MessageKind
+      - doc: Flags qualify it.
+        name: Flags
+        type: MessageFlags
+      - doc: From is the sender, as the sender wrote it.
+        name: From
+        type: NodeID
+      - doc: To is the receiver.
+        name: To
+        type: NodeID
+      - doc: Term is the sender's term.
+        name: Term
+        type: uint64
+      - doc: |-
+          LogTerm is the term of the entry at Index: the previous entry of an
+          append, the last entry of a vote request.
+        name: LogTerm
+        type: uint64
+      - doc: |-
+          Index is the previous index of an append, the last index of a vote
+          request, the verified prefix of an acknowledgement, a read index.
+        name: Index
+        type: uint64
+      - doc: Commit is the commit index the sender lets the receiver advance to.
+        name: Commit
+        type: uint64
+      - doc: Reject marks a refusal.
+        name: Reject
+        type: bool
+      - doc: RejectHint is the receiver's last index, a hint where to probe from.
+        name: RejectHint
+        type: uint64
+      - doc: |-
+          Context correlates a reply with its request: a heartbeat round, a read
+          request, a submission sequence.
+        name: Context
+        type: uint64
+      - doc: TransferIssuer is the leader that issued a transfer flag.
+        name: TransferIssuer
+        type: NodeID
+      - doc: TransferTerm is the term the transfer flag was issued in.
+        name: TransferTerm
+        type: uint64
+      - doc: Contract is the committed contract generation the sender has applied.
+        name: Contract
+        type: uint64
+      - doc: Code is a refusal's error code, 0 for none.
+        name: Code
+        type: errs.Code
+      - doc: |-
+          Entries are the entries an append carries, or the proposal a forward
+          carries with a zero position.
+        name: Entries
+        type: "[]EntryValue"
+    kind: struct
+    name: MessageValue
+  - fields:
+      - doc: Term is the leader term the entry was appended in.
+        name: Term
+        type: uint64
+      - doc: Index is the entry's place in the log, from 1.
+        name: Index
+        type: uint64
+    kind: struct
+    name: PositionValue
+  - fields:
+      - doc: ID names the snapshot, the same in a spool, an offer and a handle.
+        name: ID
+        type: string
+      - doc: Version is the snapshot format version, 1.
+        name: Version
+        type: uint8
+      - doc: Position is the last entry the snapshot covers.
+        name: Position
+        type: PositionValue
+      - doc: Log is the identity of the log the snapshot was cut from.
+        name: Log
+        type: LogIdentityValue
+      - doc: Membership is the configuration valid at Position, never a later one.
+        name: Membership
+        type: MembershipValue
+      - doc: |-
+          ChainTip is the authenticated chain value at Position: the chain is
+          carried across the boundary, never reseeded.
+        name: ChainTip
+        type: uint32
+      - doc: "Codec names the compression of the chunks: \"flate\" or \"gzip\"."
+        name: Codec
+        type: string
+      - doc: EncodedSize is the size of the encoded stream, chunk headers included.
+        name: EncodedSize
+        type: int64
+      - doc: DecodedSize is the size of the decoded stream.
+        name: DecodedSize
+        type: int64
+      - doc: ChunkSize is the largest decoded chunk.
+        name: ChunkSize
+        type: int64
+      - doc: SHA256 is the digest of the DECODED stream, computed by the engine.
+        name: SHA256
+        type: "[32]byte"
+      - doc: Timing is the committed timing contract at Position.
+        name: Timing
+        type: TimingContractSpec
+      - doc: ClusterVersion is the committed cluster version at Position.
+        name: ClusterVersion
+        type: uint32
+      - doc: ClusterGeneration counts its raises.
+        name: ClusterGeneration
+        type: uint64
+      - doc: NoSpace is the no-space alarm raised at Position, 0 for none.
+        name: NoSpace
+        type: AlarmID
+      - doc: Reserved is carried uninterpreted for ADR 0173.
+        name: Reserved
+        type: "[]byte"
+    kind: struct
+    name: SnapshotMetaValue
+  - fields:
+      - doc: Term is the sender's term.
+        name: Term
+        type: uint64
+      - doc: SnapshotID equals Meta.ID.
+        name: SnapshotID
+        type: string
+      - doc: Meta describes the snapshot.
+        name: Meta
+        type: SnapshotMetaValue
+    kind: struct
+    name: InstallOfferValue
+  - fields:
+      - doc: SnapshotID is the snapshot answered.
+        name: SnapshotID
+        type: string
+      - doc: |-
+          Offset is the chunk-aligned ENCODED offset to resume from, 0 for a
+          fresh spool.
+        name: Offset
+        type: int64
+      - doc: Refused is zero, or why the offer is refused.
+        name: Refused
+        type: errs.Code
+      - doc: |-
+          Held reports that the receiver already holds the snapshot: an
+          idempotent success.
+        name: Held
+        type: bool
+    kind: struct
+    name: InstallAcceptValue
+  - fields:
+      - doc: Ctx ends with the connection.
+        name: Ctx
+        type: context.Context
+      - doc: From is the peer TLS authenticated.
+        name: From
+        type: AuthenticatedPeerValue
+      - doc: Offer is the accepted offer.
+        name: Offer
+        type: InstallOfferValue
+      - doc: Offset is the accepted offset.
+        name: Offset
+        type: int64
+      - doc: Body is the encoded stream from Offset, ending with the connection.
+        name: Body
+        type: io.Reader
+    kind: struct
+    name: InstallParams
+  - fields:
+      - doc: ID is the admitted member, 0 for a joiner.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is that member's incarnation.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the slot the certificate's URI SAN names.
+        name: Slot
+        type: string
+      - doc: SPKI is the SHA-256 of the certificate's SubjectPublicKeyInfo.
+        name: SPKI
+        type: "[32]byte"
+    kind: struct
+    name: AuthenticatedPeerValue
+  - fields:
+      - doc: Cluster is the cluster the joiner claims.
+        name: Cluster
+        type: ClusterID
+      - doc: ID is the joiner's new NodeID.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is the joiner's incarnation.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the slot its certificate names.
+        name: Slot
+        type: string
+      - doc: SPKI is its key, from the handshake.
+        name: SPKI
+        type: "[32]byte"
+      - doc: Address is where it listens.
+        name: Address
+        type: string
+    kind: struct
+    name: JoinRequestValue
+  - fields:
+      - doc: Voter is the old voter.
+        name: Voter
+        type: NodeID
+      - doc: "Method is how it was fenced: \"stopped\", \"powered-off\" or \"cut\"."
+        name: Method
+        type: string
+      - doc: |-
+          Receipts are Ed25519 signatures, one per witness key, over the old
+          cluster id, the new cluster id and the voter.
+        name: Receipts
+        type: "[][]byte"
+    kind: struct
+    name: FencedAttestationValue
+  - kind: named
+    name: StampState
+    underlying: uint8
+  - fields:
+      - doc: Log is the log identity the directory belongs to.
+        name: Log
+        type: LogIdentityValue
+      - doc: ID is the node.
+        name: ID
+        type: NodeID
+      - doc: Incarnation is drawn when the stamp is first written.
+        name: Incarnation
+        type: Incarnation
+      - doc: Slot is the placement slot the node's certificate names.
+        name: Slot
+        type: string
+      - doc: State is how far the directory has come.
+        name: State
+        type: StampState
+      - doc: |-
+          Founding is the digest of the founding member list while a bootstrap
+          is pending, so that a rerun with another list is refused.
+        name: Founding
+        type: "[32]byte"
+    kind: struct
+    name: StampValue
+  - fields:
+      - doc: Addresses are the members to try, in order.
+        name: Addresses
+        type: "[]string"
+      - doc: Stamp is the joiner's stamp, from Init.
+        name: Stamp
+        type: StampValue
+      - doc: Address is where the joiner listens.
+        name: Address
+        type: string
+      - doc: |-
+          Pins are the SPKIs of the members the joiner trusts, from the
+          operator. An answer counts only from a peer presenting one of them,
+          and only when the membership it returns lists that peer under that
+          key; an empty list refuses the JOIN.
+        name: Pins
+        type: "[][32]byte"
+    kind: struct
+    name: JoinConfig
+  - kind: named
+    methods:
+      - name: String
+        recv: r Role
+        results: string
+    name: Role
+    underlying: uint8
+  - kind: named
+    name: FrameLane
+    underlying: uint8
+  - fields:
+      - doc: ID is this node.
+        name: ID
+        type: NodeID
+      - doc: Role is its role.
+        name: Role
+        type: Role
+      - doc: Term is its current term.
+        name: Term
+        type: uint64
+      - doc: Leader is the leader it knows of in Term, 0 for none.
+        name: Leader
+        type: NodeID
+      - doc: Commit is the highest index it knows committed.
+        name: Commit
+        type: uint64
+      - doc: Applied is the highest index its state machine applied.
+        name: Applied
+        type: uint64
+      - doc: Log is the identity of its log.
+        name: Log
+        type: LogIdentityValue
+      - doc: Versions are its capabilities and the committed cluster version.
+        name: Versions
+        type: VersionsValue
+      - doc: Timing is the committed timing contract.
+        name: Timing
+        type: TimingContractSpec
+      - doc: NoSpace is the raised no-space alarm, 0 when none.
+        name: NoSpace
+        type: AlarmID
+    kind: struct
+    methods:
+      - name: Precondition
+        recv: s *StatusValue
+        results: PreconditionSpec
+    name: StatusValue
+  - fields:
+      - doc: ProtocolMin is the lowest protocol version it speaks.
+        name: ProtocolMin
+        type: uint32
+      - doc: ProtocolMax is the highest.
+        name: ProtocolMax
+        type: uint32
+      - doc: PayloadMax is the highest payload version it applies.
+        name: PayloadMax
+        type: uint32
+      - doc: Cluster is the committed cluster version.
+        name: Cluster
+        type: uint32
+      - doc: ClusterGeneration counts cluster-version raises.
+        name: ClusterGeneration
+        type: uint64
+    kind: struct
+    name: VersionsValue
+  - fields:
+      - doc: Err is the stop's error, built on its sentinel.
+        name: Err
+        type: error
+      - doc: |-
+          Unmarked is set when a STORAGE_FAILED stop could write its marker
+          nowhere: the exit code is then 73.
+        name: Unmarked
+        type: bool
+    kind: struct
+    methods:
+      - name: ExitCode
+        recv: s StopReasonValue
+        results: int
+    name: StopReasonValue
+  - fields:
+      - doc: Generation counts the committed contracts, 1 at founding.
+        name: Generation
+        type: uint64
+      - doc: HeartbeatInterval is how often the leader confirms itself.
+        name: HeartbeatInterval
+        type: time.Duration
+      - doc: |-
+          ElectionTimeoutMin is the lower bound of the randomized election
+          timeout, and the vote-refusal window.
+        name: ElectionTimeoutMin
+        type: time.Duration
+      - doc: ElectionTimeoutMax is its upper bound, exclusive.
+        name: ElectionTimeoutMax
+        type: time.Duration
+      - doc: |-
+          MaxClockDrift is the largest rate difference between two clocks, as a
+          fraction in (0, 1). Zero refuses lease reads.
+        name: MaxClockDrift
+        type: float64
+    kind: struct
+    name: TimingContractSpec

@@ -1,0 +1,56 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      rootName is the one path fs.ValidPath accepts that a writer must not act on:
+      the tree itself.
+    items:
+      - name: rootName
+        type: string
+        value: "\".\""
+    name: rootName
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - rootName
+      - ValidatePath
+      - ValidateWritePath
+    name: path.go
+  - decls:
+      - ValidatePerm
+    name: perm.go
+  - decls:
+      - FS
+    name: vfs.go
+functions:
+  - name: ValidatePath
+    params: name string
+    results: error
+  - name: ValidateWritePath
+    params: name string
+    results: error
+  - name: ValidatePerm
+    params: perm fs.FileMode
+    results: error
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/vfs
+  name: vfs
+  purpose: Package vfs — range 0.2.25.* (ADR 0056 core/data/vfs block), and the concrete filesystem's 0.3.55.* (ADR 0056 service/data/vfs block, declared here since ADR 0160).
+types:
+  - alias: true
+    doc: |-
+      FS is the read half of a filesystem, and it is io/fs.FS unchanged.
+
+      It is an ALIAS rather than a fresh interface, so a vfs.FS and an fs.FS are
+      the same type to the compiler and no conversion, adapter or assertion sits
+      between an SDK filesystem and the standard library's walkers. The name
+      exists to say, in one place, that the SDK's answer for reading is the
+      stdlib's answer for reading.
+    kind: alias
+    name: FS
+    underlying: fs.FS

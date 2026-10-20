@@ -1,0 +1,166 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Sink
+      - Batcher
+      - NewBatcher
+      - (*Batcher).Add
+      - (*Batcher).Flush
+      - (*Batcher).Close
+      - (*Batcher).flushOnce
+      - (*Batcher).deliverBatch
+      - (*Batcher).loop
+      - (*Batcher).weigh
+      - (*Batcher).full
+    name: batcher.go
+  - decls:
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: NewBatcher
+    params: deliver Sink[T], cfg Config[T]
+    results: "*Batcher[T]"
+    typeParams: T any
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/batcher
+  name: batcher
+  purpose: "Package batcher provides a generic coalescing buffer: items are appended via Add and handed to a deliver closure in batches — flushed eagerly when an item-count or weight cap is reached, on an optional background ticker, or on an explicit Flush / Close."
+types:
+  - kind: named
+    name: Sink
+    typeParams: T any
+    underlying: func(ctx context.Context, batch []T) error
+  - fields:
+      - doc: deliver is the batch delivery seam supplied at construction.
+        name: deliver
+        type: Sink[T]
+      - doc: cfg holds the caps, weight function, interval and error hook.
+        name: cfg
+        type: Config[T]
+      - doc: mu guards buf + weight + closed against Add, Flush, Close and the ticker.
+        name: mu
+        type: sync.Mutex
+      - name: buf
+        type: "[]T"
+      - name: weight
+        type: int64
+      - name: closed
+        type: bool
+      - doc: |-
+          deliverMu serializes Sink invocations (V6) so two flush paths never enter
+          the deliver closure concurrently. It is held only across the deliver call
+          and is deliberately separate from mu so a slow Sink never blocks a producer
+          appending into the next batch.
+        name: deliverMu
+        type: sync.Mutex
+      - doc: |-
+          stop/done drive the optional FlushEvery ticker goroutine; the Once
+          guards make the channel closes safe under concurrent Close calls.
+        name: stop
+        type: chan struct{}
+      - name: stopOnce
+        type: sync.Once
+      - name: done
+        type: chan struct{}
+      - name: doneOnce
+        type: sync.Once
+      - name: ticking
+        type: bool
+    kind: struct
+    methods:
+      - name: Add
+        params: ctx context.Context, item T
+        recv: b *Batcher[T]
+        results: error
+      - name: Flush
+        params: ctx context.Context
+        recv: b *Batcher[T]
+        results: error
+      - name: Close
+        params: ctx context.Context
+        recv: b *Batcher[T]
+        results: error
+      - doc: |-
+          flushOnce swaps out the pending batch under the lock and delivers it outside
+          the lock. An empty batch is a no-op; a deliver error is wrapped as
+          DeliverFailed with the cause reachable via errors.Is.
+        name: flushOnce
+        params: ctx context.Context
+        recv: b *Batcher[T]
+        results: error
+      - doc: |-
+          deliverBatch runs the Sink on batch outside b.mu and wraps a non-nil result
+          as the typed DeliverFailed sentinel (the cause stays reachable via
+          errors.Is). It is the shared delivery tail of flushOnce and Close. The Sink
+          is serialized under deliverMu (V6): concurrent flush paths queue here rather
+          than entering the closure together, so a non-reentrant Sink stays safe.
+        name: deliverBatch
+        params: ctx context.Context, batch []T
+        recv: b *Batcher[T]
+        results: error
+      - doc: loop runs the FlushEvery ticker until Close signals stop.
+        name: loop
+        params: every time.Duration
+        recv: b *Batcher[T]
+      - doc: |-
+          weigh reports item's contribution to the batch weight: WeightOf when set,
+          else 1 for count-only batching.
+        name: weigh
+        params: item T
+        recv: b *Batcher[T]
+        results: int64
+      - doc: |-
+          full reports whether the pending batch has reached an eager-flush cap: the
+          item-count cap (MaxItems>0) OR the weight cap (WeightOf set and MaxWeight>0).
+          The caller holds b.mu.
+        name: full
+        recv: b *Batcher[T]
+        results: bool
+    name: Batcher
+    typeParams: T any
+  - fields:
+      - doc: |-
+          MaxItems forces a flush once the pending batch reaches this many items;
+          a non-positive value disables the item-count trigger.
+        name: MaxItems
+        type: int
+      - doc: |-
+          MaxWeight forces a flush once the pending batch's summed WeightOf reaches
+          it; ignored when WeightOf is nil or MaxWeight is non-positive.
+        name: MaxWeight
+        type: int64
+      - doc: |-
+          WeightOf reports an item's weight (e.g. its byte size). A nil WeightOf
+          means count-only batching: every item weighs 1 and MaxWeight is ignored.
+        name: WeightOf
+        type: func(item T) int64
+      - doc: |-
+          FlushEvery, when positive, spawns a ticker goroutine that flushes the
+          pending batch on the interval; Close joins it.
+        name: FlushEvery
+        type: time.Duration
+      - doc: |-
+          Clock is what the FlushEvery ticker is built on. Nil means
+          clock.System; a clock.ManualClock lets a test flush by advancing time
+          past FlushEvery instead of sleeping through it. Ignored without a
+          FlushEvery.
+        name: Clock
+        type: clock.Waiter
+      - doc: |-
+          OnError observes deliver failures seen by the background ticker. A nil
+          hook degrades to a no-op so the flush paths stay branch-free.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: Config
+    typeParams: T any

@@ -1,0 +1,66 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Unusable
+    name: plugin.go
+  - decls:
+      - Registry
+      - (*Registry).Publish
+      - (*Registry).Claim
+      - (*Registry).Lookup
+      - (*Registry).Names
+      - cloneWith
+    name: registry.go
+functions:
+  - name: Unusable
+    params: v T
+    results: string
+    typeParams: T any
+  - doc: |-
+      cloneWith copies src and inserts (name -> value) into the copy. A publish runs
+      once per plug-in at import time, so the copy is one-shot init work and never
+      on a dispatch path.
+    name: cloneWith
+    params: src *map[K]V, name K, value V
+    results: map[K]V
+    typeParams: K cmp.Ordered, V comparable
+imports:
+  cmp: cmp
+  maps: maps
+  reflect: reflect
+  slices: slices
+  snapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/plugin
+  name: plugin
+  purpose: "Package plugin answers one question a process-wide registry must ask before it publishes anything: is this value usable as an entry at all? A registry stores values behind an interface and hands them back to every caller for the life of the process."
+types:
+  - fields:
+      - doc: |-
+          table is the copy-on-write snapshot; it loads nil before the first
+          Publish or Claim inserts.
+        name: table
+        type: snapshot.Value[map[K]V]
+    kind: struct
+    methods:
+      - name: Publish
+        params: name K, value V
+        recv: r *Registry[K, V]
+        results: bool
+      - name: Claim
+        params: name K, value V
+        recv: r *Registry[K, V]
+        results: holder V, taken bool
+      - name: Lookup
+        params: name K
+        recv: r *Registry[K, V]
+        results: value V, found bool
+      - name: Names
+        recv: r *Registry[K, V]
+        results: "[]K"
+    name: Registry
+    typeParams: K cmp.Ordered, V comparable

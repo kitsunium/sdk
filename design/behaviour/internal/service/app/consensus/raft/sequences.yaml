@@ -1,0 +1,4190 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*Raft).Debug
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Debug
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: s.String
+        kind: value
+    steps:
+      - var:
+          name: s
+          type: strings.Builder
+      - eval: |-
+          fmt.Fprintf(&s, "refusals=%d@%d snapTerm=%d role=%v term=%d lead=%d snap=%d last=%d commit=%d stable=%d applied=%d", r.refusals, r.refusedAt, r.log.snapTerm, r.role, r.term, r.lead,
+          		r.log.snapIndex, r.log.lastIndex(), r.log.committed, r.log.stable, r.log.applied)
+        to: fmt
+      - loop:
+          do:
+            - eval: fmt.Fprintf(&s, " pr[%d]={match=%d next=%d state=%d probeSent=%v pend=%d infl=%d}", id, pr.match, pr.next, pr.state, pr.facts&peerProbeSent != 0, pr.pendingSnapshot, len(pr.inflight))
+              to: fmt
+          key: id
+          range: r.prs
+          value: pr
+      - eval: fmt.Fprintf(&s, " silent=%d/%d", r.cfg.SilentTerm, r.cfg.SilentIndex)
+        to: fmt
+      - return: s.String()
+        to: s.String
+  - of: (*Raft).becomeLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).becomeLeader
+        kind: self
+      - id: r.appendAsLeader
+        kind: internal
+      - id: r.log.lastIndex
+        kind: internal
+      - id: r.broadcastAppend
+        kind: internal
+    steps:
+      - set: r.role
+        value: core.RoleLeader
+      - set: r.lead
+        value: r.id
+      - set: r.votes
+        value: map[core.NodeID]bool{}
+      - set: r.prs
+        value: map[core.NodeID]*progress{}
+      - loop:
+          do:
+            - set: r.prs[m.ID]
+              value: "&progress{next: r.log.lastIndex() + 1, lastHeard: r.now}"
+          key: _
+          range: r.conf().Members
+          value: m
+      - opt:
+          do:
+            - set: pr.match
+              value: r.log.stable
+            - op: "|="
+              set: pr.facts
+              value: peerHeard
+          init:
+            bind: pr
+            eval: r.prs[r.id]
+          when: pr != nil
+      - op: "&^="
+        set: r.facts
+        value: raftLeaseDropped
+      - set: r.leaseStart
+        value: time.Time{}
+      - set: r.rounds, r.pendingReads, r.waitingReads
+        value: nil, nil, nil
+      - set: r.transferTo
+        value: "0"
+      - bind: noop
+        eval: "core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}"
+      - eval: r.appendAsLeader([]core.EntryValue{noop})
+        to: r.appendAsLeader
+      - set: r.termStart
+        to: r.log.lastIndex
+        value: r.log.lastIndex()
+      - set: r.heartbeatDue
+        value: r.now
+      - eval: r.broadcastAppend(false)
+        to: r.broadcastAppend
+  - of: (*Raft).appendAsLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).appendAsLeader
+        kind: self
+      - id: r.log.chain
+        kind: internal
+      - id: r.log.lastIndex
+        kind: internal
+      - id: wire
+        kind: package
+      - id: r.appendEntries
+        kind: internal
+    steps:
+      - bind: pos
+        eval: make([]core.PositionValue, len(es))
+      - bind: chain
+        eval: r.log.chain(r.log.lastIndex())
+        to: r.log.chain
+      - bind: idx
+        eval: r.log.lastIndex()
+        to: r.log.lastIndex
+      - loop:
+          do:
+            - op: ++
+              set: idx
+            - set: es[i].Position
+              value: "core.PositionValue{Term: r.term, Index: idx}"
+            - set: es[i].ChainSum
+              to: wire
+              value: wire.ChainSum(chain, &es[i])
+            - set: chain
+              value: es[i].ChainSum
+            - set: pos[i]
+              value: es[i].Position
+          key: i
+          range: es
+      - eval: r.appendEntries(es)
+        to: r.appendEntries
+      - return: pos
+  - of: (*Raft).tickLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).tickLeader
+        kind: self
+      - id: r.becomeFollower
+        kind: internal
+      - id: now.Add
+        kind: value
+      - id: r.broadcastHeartbeat
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.becomeFollower(r.term, 0)
+              to: r.becomeFollower
+            - return: ""
+          when: "!r.quorumActive(now, r.timing.ElectionTimeoutMin)"
+      - opt:
+          do:
+            - set: r.rd.Transfers
+              value: "append(r.rd.Transfers, TransferResult{To: r.transferTo, Code: codeTransferFailed})"
+            - set: r.transferTo
+              value: "0"
+          when: r.transferTo != 0 && !now.Before(r.transferDeadline)
+      - opt:
+          do:
+            - set: r.heartbeatDue
+              to: now.Add
+              value: now.Add(r.timing.HeartbeatInterval)
+            - eval: r.broadcastHeartbeat(now)
+              to: r.broadcastHeartbeat
+          when: "!now.Before(r.heartbeatDue)"
+  - of: (*Raft).broadcastHeartbeat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).broadcastHeartbeat
+        kind: self
+      - id: r.send
+        kind: internal
+      - id: r.log.term
+        kind: internal
+      - id: r.confirmRounds
+        kind: internal
+    steps:
+      - op: ++
+        set: r.nextRound
+      - bind: rd
+        eval: "&round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]uint64{r.id: r.timing.Generation + 1}, conf: r.conf().Index}"
+      - set: r.rounds
+        value: append(r.rounds, rd)
+      - opt:
+          do:
+            - set: r.rounds
+              value: r.rounds[len(r.rounds)-64:]
+          when: len(r.rounds) > 64
+      - loop:
+          do:
+            - bind: pr
+              eval: r.prs[id]
+            - bind: commit
+              eval: min(pr.match, r.log.committed)
+            - opt:
+                do:
+                  - set: commit
+                    value: r.log.committed
+                when: r.mutated(mutHeartbeatUnclamped)
+            - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})"
+              to: r.send
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - eval: "r.send(core.MessageValue{Kind: core.MsgApp, To: id, Index: pr.next - 1, LogTerm: t, Commit: min(pr.match, r.log.committed)})"
+                          to: r.send
+                      init:
+                        bind: t, ok
+                        eval: r.log.term(pr.next - 1)
+                        to: r.log.term
+                      when: ok
+                when: pr.state == stateReplicate && pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes)
+          key: _
+          range: r.peers()
+          value: id
+      - eval: r.confirmRounds()
+        to: r.confirmRounds
+  - of: (*Raft).broadcastAppend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).broadcastAppend
+        kind: self
+      - id: r.sendAppend
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: r.sendAppend(id, sendIfEmpty)
+              to: r.sendAppend
+          key: _
+          range: r.peers()
+          value: id
+  - of: (*Raft).sendAppend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).sendAppend
+        kind: self
+      - id: r.log.term
+        kind: internal
+      - id: pr.becomeSnapshot
+        kind: internal
+      - id: r.log.slice
+        kind: internal
+      - id: r.sendEntries
+        kind: internal
+    steps:
+      - bind: pr
+        eval: r.prs[to]
+      - opt:
+          do:
+            - return: ""
+          when: pr == nil || pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes)
+      - bind: prev
+        eval: pr.next - 1
+      - bind: prevTerm, ok
+        eval: r.log.term(prev)
+        to: r.log.term
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: r.log.snapIndex == 0
+            - eval: pr.becomeSnapshot(r.log.snapIndex)
+              to: pr.becomeSnapshot
+            - set: r.rd.SendSnapshot
+              value: append(r.rd.SendSnapshot, to)
+            - return: ""
+          when: "!ok"
+      - opt:
+          do:
+            - op: "|="
+              set: pr.facts
+              value: peerFetching
+            - set: r.rd.Fetch
+              value: "append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})"
+            - return: ""
+          when: pr.next <= r.log.evicted && pr.next <= r.log.lastIndex()
+      - bind: ents
+        eval: r.log.slice(pr.next, r.log.lastIndex()+1, r.cfg.MaxBatchBytes)
+        to: r.log.slice
+      - opt:
+          do:
+            - return: ""
+          when: len(ents) == 0 && !sendIfEmpty
+      - eval: r.sendEntries(pr, to, prev, prevTerm, ents)
+        to: r.sendEntries
+  - of: (*Raft).Fetched
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Fetched
+        kind: self
+      - id: r.sendAppend
+        kind: internal
+      - id: pr.becomeSnapshot
+        kind: internal
+      - id: r.log.term
+        kind: internal
+      - id: r.sendEntries
+        kind: internal
+    steps:
+      - bind: pr
+        eval: r.prs[to]
+      - opt:
+          do:
+            - return: ""
+          when: pr == nil || pr.facts&peerFetching == 0
+      - op: "&^="
+        set: pr.facts
+        value: peerFetching
+      - opt:
+          do:
+            - eval: r.sendAppend(to, false)
+              to: r.sendAppend
+            - return: ""
+          when: r.role != core.RoleLeader || pr.next != lo || pr.state == stateSnapshot
+      - opt:
+          do:
+            - eval: pr.becomeSnapshot(r.log.snapIndex)
+              to: pr.becomeSnapshot
+            - set: r.rd.SendSnapshot
+              value: append(r.rd.SendSnapshot, to)
+            - return: ""
+          when: compacted
+      - opt:
+          do:
+            - eval: r.sendAppend(to, false)
+              to: r.sendAppend
+            - return: ""
+          when: "!r.fetchedMatch(lo, ents)"
+      - bind: prevTerm, ok
+        eval: r.log.term(lo - 1)
+        to: r.log.term
+      - opt:
+          do:
+            - eval: r.sendAppend(to, false)
+              to: r.sendAppend
+            - return: ""
+          when: "!ok || len(ents) == 0"
+      - eval: r.sendEntries(pr, to, lo-1, prevTerm, ents)
+        to: r.sendEntries
+  - of: (*Raft).fetchedMatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).fetchedMatch
+        kind: self
+      - id: r.log.term
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                init:
+                  bind: t, ok
+                  eval: r.log.term(ents[i].Position.Index)
+                  to: r.log.term
+                when: "!ok || t != ents[i].Position.Term || ents[i].Position.Index != lo+uint64(i)"
+          key: i
+          range: ents
+      - return: "true"
+  - of: (*Raft).sendEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).sendEntries
+        kind: self
+      - id: r.send
+        kind: internal
+      - id: pr.add
+        kind: internal
+    steps:
+      - bind: m
+        eval: "core.MessageValue{Kind: core.MsgApp, To: to, Index: prev, LogTerm: prevTerm, Entries: ents, Commit: r.log.committed}"
+      - eval: r.send(m)
+        to: r.send
+      - switch:
+          cases:
+            - case: stateReplicate
+              do:
+                - opt:
+                    do:
+                      - bind: last
+                        eval: ents[n-1].Position.Index
+                      - bind: size
+                        eval: "0"
+                      - loop:
+                          do:
+                            - op: +=
+                              set: size
+                              value: len(ents[i].Data) + 64
+                          key: i
+                          range: ents
+                      - set: pr.next
+                        value: last + 1
+                      - eval: pr.add(last, size)
+                        to: pr.add
+                    init:
+                      bind: "n"
+                      eval: len(ents)
+                    when: n > 0
+            - case: stateProbe
+              do:
+                - op: "|="
+                  set: pr.facts
+                  value: peerProbeSent
+            - default: true
+          "on": pr.state
+  - of: (*Raft).maybeCommit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).maybeCommit
+        kind: self
+      - id: r.voters
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: r.log.term
+        kind: internal
+      - id: r.commitTo
+        kind: internal
+      - id: r.maybeSendTimeoutNow
+        kind: internal
+    steps:
+      - bind: vs
+        eval: r.voters()
+        to: r.voters
+      - opt:
+          do:
+            - return: "false"
+          when: len(vs) == 0
+      - bind: ms
+        eval: make([]uint64, 0, len(vs))
+      - loop:
+          do:
+            - alt:
+                - do:
+                    - set: ms
+                      value: append(ms, pr.match)
+                  init:
+                    bind: pr
+                    eval: r.prs[id]
+                  when: pr != nil
+                - do:
+                    - set: ms
+                      value: append(ms, 0)
+                  else: true
+          key: _
+          range: vs
+          value: id
+      - eval: slices.Sort(ms)
+        to: slices
+      - bind: idx
+        eval: ms[len(ms)-r.quorum()]
+      - opt:
+          do:
+            - return: "false"
+          when: idx <= r.log.committed
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: t, _
+            eval: r.log.term(idx)
+            to: r.log.term
+          when: t != r.term && !r.mutated(mutCommitOldTermByCount)
+      - eval: r.commitTo(idx)
+        to: r.commitTo
+      - eval: r.maybeSendTimeoutNow()
+        to: r.maybeSendTimeoutNow
+      - return: "true"
+  - of: (*Raft).stepLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepLeader
+        kind: self
+      - id: r.serveLeaseRead
+        kind: internal
+      - id: r.handleAppResp
+        kind: internal
+      - id: r.handleHeartbeatResp
+        kind: internal
+    steps:
+      - bind: pr
+        eval: r.prs[m.From]
+      - switch:
+          cases:
+            - case: core.MsgReadIndex
+              do:
+                - set: r.pendingReads
+                  value: "append(r.pendingReads, readReq{ctx: m.Context, from: m.From})"
+                - eval: r.serveLeaseRead(m.Flags&core.FlagNoLease == 0)
+                  to: r.serveLeaseRead
+                - return: ""
+            - case: core.MsgVoteResp, core.MsgPreVoteResp
+              do:
+                - return: ""
+            - default: true
+          "on": m.Kind
+      - opt:
+          do:
+            - return: ""
+          when: pr == nil
+      - set: pr.lastHeard
+        value: now
+      - op: "|="
+        set: pr.facts
+        value: peerHeard
+      - switch:
+          cases:
+            - case: core.MsgAppResp
+              do:
+                - eval: r.handleAppResp(pr, m)
+                  to: r.handleAppResp
+            - case: core.MsgHeartbeatResp
+              do:
+                - eval: r.handleHeartbeatResp(pr, m)
+                  to: r.handleHeartbeatResp
+            - default: true
+          "on": m.Kind
+  - of: (*Raft).handleHeartbeatResp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handleHeartbeatResp
+        kind: self
+      - id: r.ackRounds
+        kind: internal
+      - id: r.confirmRounds
+        kind: internal
+      - id: pr.becomeProbe
+        kind: internal
+      - id: r.sendAppend
+        kind: internal
+    steps:
+      - eval: r.ackRounds(m.From, m.Context, m.Contract)
+        to: r.ackRounds
+      - eval: r.confirmRounds()
+        to: r.confirmRounds
+      - opt:
+          do:
+            - op: "&^="
+              set: pr.facts
+              value: peerProbeSent
+          when: pr.state == stateProbe
+      - opt:
+          do:
+            - eval: pr.becomeProbe()
+              to: pr.becomeProbe
+          when: pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch
+      - set: pr.hbMatch
+        value: pr.match
+      - opt:
+          do:
+            - eval: r.sendAppend(m.From, false)
+              to: r.sendAppend
+          when: pr.match < r.log.lastIndex()
+  - of: (*Raft).handleAppResp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handleAppResp
+        kind: self
+      - id: r.handleAppReject
+        kind: internal
+      - id: pr.becomeReplicate
+        kind: internal
+      - id: pr.becomeProbe
+        kind: internal
+      - id: pr.freeTo
+        kind: internal
+      - id: r.broadcastAppend
+        kind: internal
+      - id: r.maybeSendTimeoutNow
+        kind: internal
+      - id: r.sendAppend
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.handleAppReject(pr, m)
+              to: r.handleAppReject
+            - return: ""
+          when: m.Reject
+      - alt:
+          - do:
+              - switch:
+                  cases:
+                    - case: pr.state == stateProbe
+                      do:
+                        - eval: pr.becomeReplicate()
+                          to: pr.becomeReplicate
+                    - case: pr.state == stateSnapshot && pr.match >= pr.pendingSnapshot
+                      do:
+                        - eval: pr.becomeProbe()
+                          to: pr.becomeProbe
+                        - eval: pr.becomeReplicate()
+                          to: pr.becomeReplicate
+              - eval: pr.freeTo(m.Index)
+                to: pr.freeTo
+              - opt:
+                  do:
+                    - eval: r.broadcastAppend(true)
+                      to: r.broadcastAppend
+                  when: r.maybeCommit()
+              - eval: r.maybeSendTimeoutNow()
+                to: r.maybeSendTimeoutNow
+            when: pr.maybeUpdate(m.Index)
+          - do:
+              - eval: pr.freeTo(m.Index)
+                to: pr.freeTo
+            else: true
+      - opt:
+          do:
+            - eval: r.sendAppend(m.From, false)
+              to: r.sendAppend
+          when: pr.match < r.log.lastIndex()
+  - of: (*Raft).handleAppReject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handleAppReject
+        kind: self
+      - id: pr.becomeSnapshot
+        kind: internal
+      - id: pr.becomeProbe
+        kind: internal
+      - id: r.sendAppend
+        kind: internal
+      - id: pr.freeAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: pr.becomeSnapshot(r.log.snapIndex)
+              to: pr.becomeSnapshot
+            - set: r.rd.SendSnapshot
+              value: append(r.rd.SendSnapshot, m.From)
+            - return: ""
+          when: m.Flags&core.FlagNeedSnapshot != 0 && pr.state != stateSnapshot
+      - opt:
+          do:
+            - set: pr.match
+              value: m.RejectHint
+            - eval: pr.becomeProbe()
+              to: pr.becomeProbe
+            - set: pr.next
+              value: m.RejectHint + 1
+            - eval: r.sendAppend(m.From, true)
+              to: r.sendAppend
+            - return: ""
+          when: m.Flags&core.FlagTruncated != 0 && m.RejectHint < pr.match
+      - opt:
+          do:
+            - return: ""
+          when: "!pr.rejectCounts(m.Index)"
+      - set: pr.next
+        value: max(min(m.Index, m.RejectHint+1), pr.match+1)
+      - opt:
+          do:
+            - set: pr.state
+              value: stateProbe
+            - eval: pr.freeAll()
+              to: pr.freeAll
+          when: pr.state == stateReplicate
+      - op: "&^="
+        set: pr.facts
+        value: peerProbeSent
+      - eval: r.sendAppend(m.From, false)
+        to: r.sendAppend
+      - opt:
+          do:
+            - eval: r.sendAppend(m.From, true)
+              to: r.sendAppend
+          when: pr.facts&peerProbeSent == 0
+  - of: (*Raft).Propose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Propose
+        kind: self
+      - id: r.checkProposed
+        kind: internal
+      - id: r.appendAsLeader
+        kind: internal
+      - id: r.broadcastAppend
+        kind: internal
+      - id: r.startTransfer
+        kind: internal
+    steps:
+      - set: r.now
+        value: now
+      - opt:
+          do:
+            - return: nil, codeNotLeader
+          when: r.role != core.RoleLeader || r.transferTo != 0
+      - var:
+          name: transfer
+          type: core.NodeID
+      - loop:
+          do:
+            - bind: to, code
+              eval: r.checkProposed(&es[i], r.log.lastIndex()+uint64(i)+1)
+              to: r.checkProposed
+            - opt:
+                do:
+                  - return: nil, code
+                when: code != 0
+            - opt:
+                do:
+                  - set: transfer
+                    value: to
+                when: to != 0
+          key: i
+          range: es
+      - bind: pos
+        eval: r.appendAsLeader(es)
+        to: r.appendAsLeader
+      - eval: r.broadcastAppend(false)
+        to: r.broadcastAppend
+      - opt:
+          do:
+            - eval: r.startTransfer(transfer)
+              to: r.startTransfer
+          when: transfer != 0
+      - return: pos, 0
+  - of: (*Raft).checkProposed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).checkProposed
+        kind: self
+      - id: r.validateAdmin
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: e.Kind == core.EntryCommand
+              do:
+                - return: 0, 0
+            - case: e.Kind == core.EntryNoOp || !e.Kind.Known()
+              do:
+                - return: 0, codeVersion
+            - default: true
+              do:
+                - return: r.validateAdmin(e, index)
+                  to: r.validateAdmin
+  - of: (*Raft).validateAdmin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).validateAdmin
+        kind: self
+      - id: wire
+        kind: package
+      - id: r.checkAdmin
+        kind: internal
+    steps:
+      - bind: admin, err
+        eval: wire.ParseAdmin(e.Data)
+        to: wire
+      - opt:
+          do:
+            - return: 0, codeVersion
+          when: err != nil
+      - bind: transfer, code
+        eval: r.checkAdmin(e.Kind, &admin, index)
+        to: r.checkAdmin
+      - opt:
+          do:
+            - return: 0, code
+          when: code != 0
+      - set: e.Data
+        to: wire
+        value: wire.AppendAdmin(nil, &admin)
+      - set: e.BodySum
+        to: wire
+        value: wire.BodySum(e.Data)
+      - return: transfer, 0
+  - of: (*Raft).checkAdmin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).checkAdmin
+        kind: self
+      - id: r.checkTransfer
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.EntryMembership
+              do:
+                - return: 0, r.checkMembership(admin, index)
+            - case: core.EntryTimingContract
+              do:
+                - return: 0, r.checkTimingContract(admin)
+            - case: core.EntryClusterVersion
+              do:
+                - return: 0, r.checkClusterVersion(admin)
+            - case: core.EntryNoSpaceClear
+              do:
+                - return: 0, r.checkNoSpaceClear(admin)
+            - case: core.EntryTransfer
+              do:
+                - return: r.checkTransfer(admin)
+                  to: r.checkTransfer
+            - default: true
+              do:
+                - return: 0, 0
+          "on": kind
+  - of: (*Raft).checkMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).checkMembership
+        kind: self
+      - id: r.nextConf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: codeChangePending
+          when: (!r.mutated(mutMembershipBeforeNoOp) && r.log.committed < r.termStart) || r.conf().Index > r.log.committed
+      - bind: next, code
+        eval: r.nextConf(*admin)
+        to: r.nextConf
+      - opt:
+          do:
+            - return: code
+          when: code != 0
+      - set: next.Index
+        value: index
+      - set: admin.Membership
+        value: next
+      - return: "0"
+  - of: (*Raft).checkTimingContract
+    steps:
+      - opt:
+          do:
+            - return: codePrecondition
+          when: "!admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.timing.Generation"
+      - bind: c
+        eval: admin.Contract
+      - opt:
+          do:
+            - return: codeMisconfigured
+          when: |-
+            c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 || c.HeartbeatInterval*5 > c.ElectionTimeoutMin ||
+            		c.ElectionTimeoutMax <= c.ElectionTimeoutMin || c.MaxClockDrift < 0 || c.MaxClockDrift >= 1
+      - op: "|="
+        set: r.facts
+        value: raftLeaseDropped
+      - return: "0"
+  - of: (*Raft).checkClusterVersion
+    steps:
+      - opt:
+          do:
+            - return: codeVersion
+          when: admin.ClusterVersion > ProtocolMax
+      - opt:
+          do:
+            - return: codePrecondition
+          when: "!admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.clusterGen || admin.ClusterVersion <= r.clusterVer"
+      - return: "0"
+  - of: (*Raft).checkNoSpaceClear
+    steps:
+      - opt:
+          do:
+            - return: codePrecondition
+          when: "!admin.Pre.Log.Same(r.cfg.Log) || r.noSpace == 0 || admin.Pre.Alarm != r.noSpace"
+      - return: "0"
+  - of: (*Raft).checkTransfer
+    steps:
+      - opt:
+          do:
+            - return: 0, codeMembershipInvalid
+          when: admin.Target == r.id || !r.isVoter(admin.Target)
+      - return: admin.Target, 0
+  - of: (*Raft).nextConf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).nextConf
+        kind: self
+      - id: r.conf().Clone
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: r.addLearner
+        kind: internal
+      - id: r.promote
+        kind: internal
+      - id: r.removeMember
+        kind: internal
+      - id: r.updateAddress
+        kind: internal
+      - id: denyPin
+        kind: internal
+    steps:
+      - bind: cur
+        eval: r.conf().Clone()
+        to: r.conf().Clone
+      - bind: idx
+        eval: slices.IndexFunc(cur.Members, func(m core.MemberValue) bool { return m.ID == admin.Target })
+        to: slices
+      - var:
+          name: code
+          type: errs.Code
+      - switch:
+          cases:
+            - case: wire.ChangeAddLearner
+              do:
+                - set: code
+                  to: r.addLearner
+                  value: r.addLearner(&cur, &admin)
+            - case: wire.ChangePromote
+              do:
+                - set: code
+                  to: r.promote
+                  value: r.promote(&cur, admin.Target, idx)
+            - case: wire.ChangeRemove
+              do:
+                - set: code
+                  to: r.removeMember
+                  value: r.removeMember(&cur, admin.Target, idx)
+            - case: wire.ChangeUpdateAddress
+              do:
+                - set: code
+                  to: r.updateAddress
+                  value: r.updateAddress(&cur, &admin, idx)
+            - case: wire.ChangeDenyPin
+              do:
+                - set: code
+                  to: denyPin
+                  value: denyPin(&cur, idx)
+            - default: true
+              do:
+                - set: code
+                  value: codeMembershipInvalid
+          "on": admin.Change
+      - return: cur, code
+  - of: (*Raft).addLearner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).addLearner
+        kind: self
+      - id: cur.Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: len(admin.Membership.Members) != 1
+      - bind: nm
+        eval: admin.Membership.Members[0]
+      - opt:
+          do:
+            - return: codeRetired
+          when: cur.IsRetired(nm.ID)
+      - var:
+          name: unpinned
+          type: "[32]byte"
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: nm.ID == 0 || nm.SPKI == unpinned
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          init:
+            bind: _, ok
+            eval: cur.Member(nm.ID)
+            to: cur.Member
+          when: ok || slices.ContainsFunc(cur.Members, func(m core.MemberValue) bool { return m.SPKI == nm.SPKI })
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: "!r.quorumActive(r.now, r.voteWindow)"
+      - set: nm.Voter
+        value: "false"
+      - set: cur.Members
+        value: append(cur.Members, nm)
+      - return: "0"
+  - of: (*Raft).promote
+    steps:
+      - opt:
+          do:
+            - return: codeRetired
+          when: cur.IsRetired(target)
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: idx < 0 || cur.Members[idx].Voter
+      - bind: pr
+        eval: r.prs[target]
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: |-
+            pr == nil || pr.facts&peerHeard == 0 || pr.match+r.cfg.PromoteLag < r.log.committed ||
+            		r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax
+      - set: cur.Members[idx].Voter
+        value: "true"
+      - set: cur.Members[idx].Joining
+        value: "false"
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: "!r.activeMajority(*cur)"
+      - return: "0"
+  - of: (*Raft).removeMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).removeMember
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: idx < 0 || target == r.id
+      - bind: wasVoter
+        eval: cur.Members[idx].Voter
+      - set: cur.Members
+        to: slices
+        value: slices.Delete(cur.Members, idx, idx+1)
+      - set: cur.Retired
+        value: append(cur.Retired, target)
+      - opt:
+          do:
+            - bind: "n"
+              eval: len(cur.Voters())
+            - opt:
+                do:
+                  - return: codeMembershipInvalid
+                when: n == 0 || n < r.cfg.MinVoters
+          when: wasVoter
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: "!r.activeMajority(*cur)"
+      - return: "0"
+  - of: (*Raft).updateAddress
+    steps:
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur)
+      - set: cur.Members[idx].Address
+        value: admin.Membership.Members[0].Address
+      - return: "0"
+  - of: denyPin
+    steps:
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: idx < 0
+      - eval: clear(cur.Members[idx].SPKI[:])
+      - return: "0"
+  - of: (*Raft).activeMajority
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).activeMajority
+        kind: self
+      - id: m.Voters
+        kind: value
+    steps:
+      - bind: vs
+        eval: m.Voters()
+        to: m.Voters
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                  - continue: true
+                when: id == r.id
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                init:
+                  bind: pr
+                  eval: r.prs[id]
+                when: pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow
+          key: _
+          range: vs
+          value: id
+      - return: len(vs) > 0 && n >= len(vs)/2+1
+  - of: (*fwdTable).lookup
+    steps:
+      - bind: v, ok
+        eval: a.byKey[k]
+      - return: v, ok
+  - of: (*fwdTable).remember
+    steps:
+      - opt:
+          do:
+            - set: a.byKey
+              value: map[fwdKey]fwdAnswer{}
+          when: a.byKey == nil
+      - alt:
+          - do:
+              - set: a.order
+                value: append(a.order, k)
+            when: len(a.order) < limit
+          - do:
+              - eval: delete(a.byKey, a.order[a.next])
+              - set: a.order[a.next]
+                value: k
+              - set: a.next
+                value: (a.next + 1) % limit
+            else: true
+      - set: a.byKey[k]
+        value: v
+  - of: (*Raft).handleForward
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handleForward
+        kind: self
+      - id: r.fwdAnswers.lookup
+        kind: internal
+      - id: r.answerForward
+        kind: internal
+      - id: r.fwdAnswers.remember
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: key
+        eval: "fwdKey{from: m.From, ctx: m.Context}"
+      - bind: a, ok
+        eval: r.fwdAnswers.lookup(key)
+        to: r.fwdAnswers.lookup
+      - opt:
+          do:
+            - set: a
+              to: r.answerForward
+              value: r.answerForward(m)
+            - eval: r.fwdAnswers.remember(key, a, maxFwdAnswers)
+              to: r.fwdAnswers.remember
+          when: "!ok || r.mutated(mutForwardNoDedupe)"
+      - bind: resp
+        eval: core.MsgForwardResp
+      - opt:
+          do:
+            - set: resp
+              value: core.MsgForwardAdminResp
+          when: m.Kind == core.MsgForwardAdmin
+      - eval: |-
+          r.send(core.MessageValue{
+          		Kind: resp, To: m.From, Context: m.Context,
+          		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm,
+          	})
+        to: r.send
+  - of: (*Raft).answerForward
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerForward
+        kind: self
+      - id: ownCopy
+        kind: internal
+      - id: r.admitForward
+        kind: internal
+      - id: r.Propose
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "fwdAnswer{reject: true, code: codeNotLeader, hint: uint64(r.lead)}"
+          when: r.role != core.RoleLeader || len(m.Entries) != 1
+      - bind: e
+        eval: m.Entries[0]
+      - set: e.Data
+        to: ownCopy
+        value: ownCopy(e.Data)
+      - opt:
+          do:
+            - return: "fwdAnswer{reject: true, code: core.CodeFrameInvalid}"
+          when: wire.BodySum(e.Data) != e.BodySum
+      - opt:
+          do:
+            - return: "fwdAnswer{reject: true, code: codeVersion}"
+          when: (m.Kind == core.MsgForward) != (e.Kind == core.EntryCommand)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "fwdAnswer{reject: true, code: code}"
+                init:
+                  bind: code
+                  eval: r.admitForward(len(e.Data))
+                  to: r.admitForward
+                when: code != 0
+          when: e.Kind == core.EntryCommand
+      - bind: pos, code
+        eval: r.Propose(r.now, []core.EntryValue{e})
+        to: r.Propose
+      - opt:
+          do:
+            - return: "fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}"
+          when: code != 0
+      - opt:
+          do:
+            - set: r.fwd
+              value: "append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})"
+            - op: +=
+              set: r.fwdBytes
+              value: int64(len(e.Data))
+          when: e.Kind == core.EntryCommand
+      - return: "fwdAnswer{index: pos[0].Index, logTerm: pos[0].Term}"
+  - of: (*Raft).admitForward
+    steps:
+      - opt:
+          do:
+            - set: r.fwd, r.fwdBytes, r.fwdTerm
+              value: r.fwd[:0], 0, r.term
+          when: r.fwdTerm != r.term
+      - bind: k
+        eval: "0"
+      - loop:
+          cond: k < len(r.fwd) && r.fwd[k].index <= r.log.committed
+          do:
+            - op: "-="
+              set: r.fwdBytes
+              value: r.fwd[k].size
+            - op: ++
+              set: k
+      - set: r.fwd
+        value: r.fwd[k:]
+      - switch:
+          cases:
+            - case: r.cfg.MaxEntryBytes > 0 && size > r.cfg.MaxEntryBytes
+              do:
+                - return: core.CodeEntryTooLarge
+            - case: r.facts&raftOverloaded != 0, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes
+              do:
+                - return: core.CodeOverloaded
+      - return: "0"
+  - of: (*Raft).ReadIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).ReadIndex
+        kind: self
+      - id: r.serveLeaseRead
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - set: r.now
+        value: now
+      - switch:
+          cases:
+            - case: r.role == core.RoleLeader
+              do:
+                - set: r.pendingReads
+                  value: "append(r.pendingReads, readReq{ctx: ctx})"
+                - eval: r.serveLeaseRead(!noLease)
+                  to: r.serveLeaseRead
+            - case: r.lead != 0
+              do:
+                - bind: m
+                  eval: "core.MessageValue{Kind: core.MsgReadIndex, To: r.lead, Context: ctx}"
+                - opt:
+                    do:
+                      - op: "|="
+                        set: m.Flags
+                        value: core.FlagNoLease
+                    when: noLease
+                - eval: r.send(m)
+                  to: r.send
+            - default: true
+              do:
+                - set: r.rd.ReadStates
+                  value: "append(r.rd.ReadStates, ReadState{Context: ctx, Code: codeNotLeader})"
+  - of: (*Raft).serveLeaseRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).serveLeaseRead
+        kind: self
+      - id: r.answerRead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!allowLease || !r.LeaseValid(r.now)"
+      - loop:
+          do:
+            - eval: r.answerRead(q, r.log.committed, 0)
+              to: r.answerRead
+          key: _
+          range: r.pendingReads
+          value: q
+      - set: r.pendingReads
+        value: r.pendingReads[:0]
+  - of: (*Raft).flushReads
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).flushReads
+        kind: self
+      - id: r.answerRead
+        kind: internal
+      - id: r.broadcastHeartbeat
+        kind: internal
+      - id: r.confirmRounds
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.role != core.RoleLeader || len(r.pendingReads) == 0 || r.log.committed < r.termStart
+      - opt:
+          do:
+            - loop:
+                do:
+                  - eval: r.answerRead(q, r.log.committed, 0)
+                    to: r.answerRead
+                key: _
+                range: r.pendingReads
+                value: q
+            - set: r.pendingReads
+              value: r.pendingReads[:0]
+            - return: ""
+          when: r.mutated(mutReadNoRound)
+      - eval: r.broadcastHeartbeat(r.now)
+        to: r.broadcastHeartbeat
+      - bind: id
+        eval: r.nextRound
+      - loop:
+          do:
+            - set: q.round, q.index
+              value: id, r.log.committed
+            - set: r.waitingReads
+              value: append(r.waitingReads, q)
+          key: _
+          range: r.pendingReads
+          value: q
+      - set: r.pendingReads
+        value: r.pendingReads[:0]
+      - eval: r.confirmRounds()
+        to: r.confirmRounds
+  - of: (*Raft).contractWindow
+    steps:
+      - opt:
+          do:
+            - return: c.ElectionTimeoutMin
+          init:
+            bind: c, ok
+            eval: r.contracts[gen]
+          when: ok
+      - bind: w
+        eval: r.timing.ElectionTimeoutMin
+      - loop:
+          do:
+            - set: w
+              value: min(w, c.ElectionTimeoutMin)
+          key: _
+          range: r.contracts
+          value: c
+      - return: w
+  - of: (*Raft).confirmRounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).confirmRounds
+        kind: self
+      - id: r.lastConfirmedRound
+        kind: internal
+      - id: r.extendLease
+        kind: internal
+      - id: r.answerConfirmed
+        kind: internal
+      - id: r.dropRoundsThrough
+        kind: internal
+    steps:
+      - bind: confirmed, sentAt, leaseLen
+        eval: r.lastConfirmedRound()
+        to: r.lastConfirmedRound
+      - opt:
+          do:
+            - return: ""
+          when: confirmed == 0
+      - eval: r.extendLease(sentAt, leaseLen)
+        to: r.extendLease
+      - eval: r.answerConfirmed(confirmed)
+        to: r.answerConfirmed
+      - eval: r.dropRoundsThrough(confirmed)
+        to: r.dropRoundsThrough
+  - of: (*Raft).lastConfirmedRound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).lastConfirmedRound
+        kind: self
+      - id: r.roundAcks
+        kind: internal
+    steps:
+      - bind: confIdx
+        eval: r.conf().Index
+      - bind: confirmed
+        eval: uint64(0)
+      - var:
+          name: sentAt
+          type: time.Time
+      - var:
+          name: leaseLen
+          type: time.Duration
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: rd.conf != confIdx
+            - bind: n, minWindow
+              eval: r.roundAcks(rd)
+              to: r.roundAcks
+            - opt:
+                do:
+                  - set: confirmed, sentAt, leaseLen
+                    value: rd.id, rd.sentAt, minWindow
+                when: n >= r.quorum()
+          key: _
+          range: r.rounds
+          value: rd
+      - return: confirmed, sentAt, leaseLen
+  - of: (*Raft).roundAcks
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).roundAcks
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: r.contractWindow
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: "0"
+      - bind: minWindow
+        eval: time.Duration(0)
+        to: time
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                  - opt:
+                      do:
+                        - set: minWindow
+                          value: w
+                      init:
+                        bind: w
+                        eval: r.contractWindow(g - 1)
+                        to: r.contractWindow
+                      when: minWindow == 0 || w < minWindow
+                init:
+                  bind: g
+                  eval: rd.acks[id]
+                when: g != 0
+          key: _
+          range: r.voters()
+          value: id
+      - return: n, minWindow
+  - of: (*Raft).extendLease
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).extendLease
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.facts&raftLeaseDropped != 0 || !sentAt.After(r.leaseStart)
+      - set: r.leaseStart
+        value: sentAt
+      - opt:
+          do:
+            - set: leaseLen
+              value: r.timing.ElectionTimeoutMin
+          when: r.mutated(mutLeaseLeaderView)
+      - set: r.leaseLen
+        to: time
+        value: time.Duration(float64(leaseLen) * (1 - r.timing.MaxClockDrift))
+  - of: (*Raft).answerConfirmed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerConfirmed
+        kind: self
+      - id: r.answerRead
+        kind: internal
+    steps:
+      - bind: k
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: r.answerRead(q, q.index, 0)
+                    to: r.answerRead
+                  - continue: true
+                when: q.round <= confirmed
+            - set: r.waitingReads[k]
+              value: q
+            - op: ++
+              set: k
+          key: _
+          range: r.waitingReads
+          value: q
+      - set: r.waitingReads
+        value: r.waitingReads[:k]
+  - of: (*Raft).dropRoundsThrough
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(r.rounds) && r.rounds[n].id <= confirmed
+          do:
+            - op: ++
+              set: "n"
+      - set: r.rounds
+        value: append(r.rounds[:0], r.rounds[n:]...)
+  - of: (*Raft).answerRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerRead
+        kind: self
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.rd.ReadStates
+              value: "append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})"
+            - return: ""
+          when: q.from == 0 || q.from == r.id
+      - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})"
+        to: r.send
+  - of: (*Raft).TransferLeadership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).TransferLeadership
+        kind: self
+      - id: r.startTransfer
+        kind: internal
+    steps:
+      - set: r.now
+        value: now
+      - opt:
+          do:
+            - return: codeNotLeader
+          when: r.role != core.RoleLeader
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: to == r.id || !r.isVoter(to)
+      - eval: r.startTransfer(to)
+        to: r.startTransfer
+      - return: "0"
+  - of: (*Raft).startTransfer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).startTransfer
+        kind: self
+      - id: r.now.Add
+        kind: value
+      - id: r.sendAppend
+        kind: internal
+      - id: r.maybeSendTimeoutNow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.transferTo != 0
+      - set: r.transferTo
+        value: to
+      - op: "&^="
+        set: r.facts
+        value: raftTransferSent
+      - set: r.transferDeadline
+        to: r.now.Add
+        value: r.now.Add(r.timing.ElectionTimeoutMax)
+      - opt:
+          do:
+            - op: "|="
+              set: r.facts
+              value: raftLeaseDropped
+          when: "!r.mutated(mutLeaseAfterTransfer)"
+      - opt:
+          do:
+            - eval: r.sendAppend(to, false)
+              to: r.sendAppend
+          init:
+            bind: pr
+            eval: r.prs[to]
+          when: pr != nil && pr.match < r.log.lastIndex()
+      - eval: r.maybeSendTimeoutNow()
+        to: r.maybeSendTimeoutNow
+  - of: (*Raft).maybeSendTimeoutNow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).maybeSendTimeoutNow
+        kind: self
+      - id: r.log.lastIndex
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.transferTo == 0 || r.facts&raftTransferSent != 0 || r.role != core.RoleLeader
+      - bind: pr
+        eval: r.prs[r.transferTo]
+      - bind: last
+        eval: r.log.lastIndex()
+        to: r.log.lastIndex
+      - opt:
+          do:
+            - return: ""
+          when: pr == nil || r.log.committed != last || pr.match != last
+      - op: "|="
+        set: r.facts
+        value: raftTransferSent
+      - eval: "r.send(core.MessageValue{Kind: core.MsgTimeoutNow, To: r.transferTo})"
+        to: r.send
+  - of: (*Raft).CheckOffer
+    steps:
+      - opt:
+          do:
+            - return: codeNotLeader
+          when: o.Term != r.term || from != r.lead || r.role == core.RoleLeader
+      - opt:
+          do:
+            - return: codePrecondition
+          when: o.Meta.Position.Index <= r.log.committed && !needTable
+      - opt:
+          do:
+            - return: core.CodeCompacted
+          when: o.Meta.Position.Index < r.log.snapIndex && !r.mutated(mutInstallBelowBase)
+      - return: "0"
+  - of: (*Raft).InstallSnapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).InstallSnapshot
+        kind: self
+      - id: r.log.compactTo
+        kind: internal
+      - id: r.dropConfsThrough
+        kind: internal
+      - id: r.restartLogAt
+        kind: internal
+      - id: meta.Membership.Clone
+        kind: value
+      - id: r.installEngine
+        kind: internal
+      - id: r.confChanged
+        kind: internal
+      - id: r.log.lastIndex
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: idx, t
+        eval: meta.Position.Index, meta.Position.Term
+      - opt:
+          do:
+            - return: ""
+          when: r.ignoresInstall(idx)
+      - alt:
+          - do:
+              - eval: r.log.compactTo(idx, t, meta.ChainTip)
+                to: r.log.compactTo
+              - eval: r.dropConfsThrough(idx)
+                to: r.dropConfsThrough
+              - set: r.rd.Compact
+                value: max(r.rd.Compact, idx)
+            when: r.log.matchTerm(idx, t) && idx <= r.log.lastIndex()
+          - do:
+              - eval: r.restartLogAt(idx, t, meta.ChainTip)
+                to: r.restartLogAt
+            else: true
+      - set: r.log.committed
+        value: max(r.log.committed, idx)
+      - set: r.log.applied
+        value: max(r.log.applied, idx)
+      - set: r.log.stable
+        value: max(r.log.stable, idx)
+      - set: r.base
+        to: meta.Membership.Clone
+        value: meta.Membership.Clone()
+      - set: r.base.Index
+        value: idx
+      - eval: r.installEngine(&meta)
+        to: r.installEngine
+      - set: r.cfg.NoTable
+        value: "false"
+      - eval: r.confChanged()
+        to: r.confChanged
+      - bind: ack
+        eval: idx
+      - opt:
+          do:
+            - set: ack
+              to: r.log.lastIndex
+              value: r.log.lastIndex()
+          when: r.mutated(mutSnapshotAckLastIndex)
+      - opt:
+          do:
+            - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: r.lead, Index: ack})"
+              to: r.send
+          when: r.lead != 0
+  - of: (*Raft).ignoresInstall
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase)
+      - return: r.role == core.RoleLeader || (idx <= r.log.committed && !r.cfg.NoTable)
+  - of: (*Raft).installEngine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).installEngine
+        kind: self
+      - id: r.resetEngines
+        kind: internal
+      - id: r.applyCommitEffects
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.timing
+              value: meta.Timing
+            - set: r.contracts[r.timing.Generation]
+              value: r.timing
+          when: adoptsTiming(meta.Timing, r.timing)
+      - opt:
+          do:
+            - set: r.voteWindow
+              value: meta.Timing.ElectionTimeoutMin
+          when: meta.Timing.ElectionTimeoutMin > r.voteWindow
+      - set: r.clusterVer, r.clusterGen, r.noSpace
+        value: meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
+      - eval: r.resetEngines()
+        to: r.resetEngines
+      - eval: r.applyCommitEffects(meta.Position.Index+1, r.log.committed)
+        to: r.applyCommitEffects
+  - of: (*Raft).restartLogAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).restartLogAt
+        kind: self
+      - id: r.truncateFrom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.truncateFrom(r.log.snapIndex + 1)
+              to: r.truncateFrom
+          when: r.log.lastIndex() > r.log.snapIndex
+      - set: r.log.ents
+        value: nil
+      - set: r.log.window, r.log.evicted
+        value: 0, idx
+      - set: r.log.snapIndex, r.log.snapTerm, r.log.snapChain
+        value: idx, t, chainTip
+      - set: r.log.stable
+        value: max(r.log.stable, idx)
+      - set: r.confs
+        value: nil
+      - set: r.rd.Compact
+        value: max(r.rd.Compact, idx)
+  - of: (*Raft).dropConfsThrough
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(r.confs) && r.confs[n].index <= index
+          do:
+            - op: ++
+              set: "n"
+      - set: r.confs
+        value: append(r.confs[:0], r.confs[n:]...)
+  - of: ownCopy
+    participants:
+      - id: caller
+        kind: actor
+      - id: ownCopy
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b) == 0
+      - return: slices.Clone(b)
+        to: slices
+  - of: (*memLog).lastIndex
+    steps:
+      - return: l.snapIndex + uint64(len(l.ents))
+  - of: (*memLog).lastTerm
+    steps:
+      - opt:
+          do:
+            - return: l.snapTerm
+          when: len(l.ents) == 0
+      - return: l.ents[len(l.ents)-1].Position.Term
+  - of: (*memLog).term
+    steps:
+      - switch:
+          cases:
+            - case: i == l.snapIndex
+              do:
+                - return: l.snapTerm, true
+            - case: i < l.snapIndex || i > l.lastIndex()
+              do:
+                - return: 0, false
+      - return: l.ents[i-l.snapIndex-1].Position.Term, true
+  - of: (*memLog).chain
+    steps:
+      - opt:
+          do:
+            - return: l.snapChain
+          when: i == l.snapIndex || i < l.snapIndex || i > l.lastIndex()
+      - return: l.ents[i-l.snapIndex-1].ChainSum
+  - of: (*memLog).at
+    steps:
+      - return: "&l.ents[i-l.snapIndex-1]"
+  - of: (*memLog).matchTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memLog).matchTerm
+        kind: self
+      - id: l.term
+        kind: internal
+    steps:
+      - bind: x, ok
+        eval: l.term(i)
+        to: l.term
+      - return: ok && x == t
+  - of: (*memLog).slice
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memLog).slice
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: lo > hi || lo <= l.snapIndex
+      - opt:
+          do:
+            - set: hi
+              value: l.lastIndex() + 1
+          when: hi > l.lastIndex()+1
+      - bind: src
+        eval: "l.ents[lo-l.snapIndex-1 : hi-l.snapIndex-1]"
+      - bind: n, size
+        eval: 0, 0
+      - loop:
+          cond: n < len(src)
+          do:
+            - op: +=
+              set: size
+              value: len(src[n].Data) + 64
+            - opt:
+                do:
+                  - break: true
+                when: n > 0 && size > maxBytes
+            - op: ++
+              set: "n"
+      - return: slices.Clone(src[:n])
+        to: slices
+  - of: (*memLog).resident
+    steps:
+      - var:
+          name: "n"
+          type: int64
+      - loop:
+          cond: i <= to && i <= l.lastIndex()
+          do:
+            - op: +=
+              set: "n"
+              value: int64(len(l.at(i).Data))
+          init: i := max(from, l.evicted, l.snapIndex) + 1
+          post: i++
+      - return: "n"
+  - of: (*memLog).evict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memLog).evict
+        kind: self
+      - id: l.at
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: limit <= 0
+      - set: l.evicted
+        value: max(l.evicted, l.snapIndex)
+      - loop:
+          cond: l.window > limit && l.evicted < through && l.evicted < l.lastIndex()
+          do:
+            - bind: e
+              eval: l.at(l.evicted + 1)
+              to: l.at
+            - op: "-="
+              set: l.window
+              value: int64(len(e.Data))
+            - set: e.Data
+              value: nil
+            - op: ++
+              set: l.evicted
+  - of: (*memLog).truncateFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memLog).truncateFrom
+        kind: self
+      - id: l.resident
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - op: "-="
+              set: l.window
+              to: l.resident
+              value: l.resident(i-1, l.lastIndex())
+          when: i <= l.lastIndex()
+      - opt:
+          do:
+            - set: l.ents
+              value: l.ents[:0]
+            - return: ""
+          when: i <= l.snapIndex
+      - opt:
+          do:
+            - set: l.ents
+              value: l.ents[:i-l.snapIndex-1]
+          when: i <= l.lastIndex()
+      - opt:
+          do:
+            - set: l.stable
+              value: i - 1
+          when: l.stable >= i
+  - of: (*memLog).compactTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memLog).compactTo
+        kind: self
+      - id: l.resident
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: i <= l.snapIndex
+      - op: "-="
+        set: l.window
+        to: l.resident
+        value: l.resident(l.snapIndex, min(i, l.lastIndex()))
+      - alt:
+          - do:
+              - bind: keep
+                eval: l.ents[i-l.snapIndex:]
+              - set: l.ents
+                value: append(make([]core.EntryValue, 0, len(keep)), keep...)
+            when: i < l.lastIndex()
+          - do:
+              - set: l.ents
+                value: nil
+            else: true
+      - set: l.snapIndex, l.snapTerm, l.snapChain
+        value: i, t, chain
+      - set: l.evicted
+        value: max(l.evicted, i)
+      - opt:
+          do:
+            - set: l.window
+              value: "0"
+          when: l.window < 0
+      - opt:
+          do:
+            - set: l.stable
+              value: i
+          when: l.stable < i
+      - opt:
+          do:
+            - set: l.committed
+              value: i
+          when: l.committed < i
+      - opt:
+          do:
+            - set: l.applied
+              value: i
+          when: l.applied < i
+  - of: (*Raft).mutated
+    steps:
+      - return: r.mut&m != 0
+  - of: PeerStatFlags.Has
+    steps:
+      - return: f&x == x
+  - of: statFlag
+    steps:
+      - opt:
+          do:
+            - return: x
+          when: "on"
+      - return: "0"
+  - of: (*progress).becomeProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*progress).becomeProbe
+        kind: self
+      - id: p.freeAll
+        kind: internal
+    steps:
+      - alt:
+          - do:
+              - set: p.next
+                value: max(p.match+1, p.pendingSnapshot+1)
+            when: p.state == stateSnapshot
+          - do:
+              - set: p.next
+                value: p.match + 1
+            else: true
+      - set: p.state
+        value: stateProbe
+      - op: "&^="
+        set: p.facts
+        value: peerProbeSent
+      - set: p.pendingSnapshot
+        value: "0"
+      - eval: p.freeAll()
+        to: p.freeAll
+  - of: (*progress).becomeReplicate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*progress).becomeReplicate
+        kind: self
+      - id: p.freeAll
+        kind: internal
+    steps:
+      - set: p.state
+        value: stateReplicate
+      - set: p.next
+        value: p.match + 1
+      - op: "&^="
+        set: p.facts
+        value: peerProbeSent
+      - eval: p.freeAll()
+        to: p.freeAll
+  - of: (*progress).becomeSnapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*progress).becomeSnapshot
+        kind: self
+      - id: p.freeAll
+        kind: internal
+    steps:
+      - set: p.state
+        value: stateSnapshot
+      - set: p.pendingSnapshot
+        value: index
+      - op: "&^="
+        set: p.facts
+        value: peerProbeSent
+      - eval: p.freeAll()
+        to: p.freeAll
+  - of: (*progress).freeAll
+    steps:
+      - set: p.inflight
+        value: p.inflight[:0]
+      - set: p.inflightBytes
+        value: p.inflightBytes[:0]
+      - set: p.bytes
+        value: "0"
+  - of: (*progress).freeTo
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(p.inflight) && p.inflight[n] <= index
+          do:
+            - op: "-="
+              set: p.bytes
+              value: p.inflightBytes[n]
+            - op: ++
+              set: "n"
+      - set: p.inflight
+        value: append(p.inflight[:0], p.inflight[n:]...)
+      - set: p.inflightBytes
+        value: append(p.inflightBytes[:0], p.inflightBytes[n:]...)
+  - of: (*progress).add
+    steps:
+      - set: p.inflight
+        value: append(p.inflight, last)
+      - set: p.inflightBytes
+        value: append(p.inflightBytes, size)
+      - op: +=
+        set: p.bytes
+        value: size
+  - of: (*progress).paused
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: p.facts&peerFetching != 0
+      - switch:
+          cases:
+            - case: stateProbe
+              do:
+                - return: p.facts&peerProbeSent != 0
+            - case: stateReplicate
+              do:
+                - return: len(p.inflight) >= maxInflight || p.bytes >= maxBytes
+            - default: true
+              do:
+                - return: "true"
+          "on": p.state
+  - of: (*progress).rejectCounts
+    steps:
+      - switch:
+          cases:
+            - case: stateProbe
+              do:
+                - return: index == p.next-1
+            - case: stateReplicate
+              do:
+                - return: index > p.match && index < p.next
+            - default: true
+              do:
+                - return: "false"
+          "on": p.state
+  - of: (*progress).maybeUpdate
+    steps:
+      - bind: updated
+        eval: "false"
+      - opt:
+          do:
+            - set: p.match
+              value: "n"
+            - set: updated
+              value: "true"
+            - op: "&^="
+              set: p.facts
+              value: peerProbeSent
+          when: p.match < n
+      - set: p.next
+        value: max(p.next, n+1)
+      - return: updated
+  - of: (*Raft).SetOverloaded
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: r.facts
+              value: raftOverloaded
+            - return: ""
+          when: "on"
+      - op: "&^="
+        set: r.facts
+        value: raftOverloaded
+  - of: (*ReadyValue).NeedsWrite
+    steps:
+      - return: rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0 || rd.Commit != 0
+  - of: NewRaft
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRaft
+        kind: self
+      - id: sm.Membership.Clone
+        kind: value
+      - id: node.engine
+        kind: internal
+      - id: node.noteAppended
+        kind: internal
+      - id: node.log.lastIndex
+        kind: internal
+      - id: node.applyCommitEffects
+        kind: internal
+      - id: node.resetElection
+        kind: internal
+      - id: node.admitted
+        kind: internal
+    steps:
+      - bind: node
+        eval: |-
+          &Raft{
+          		cfg:    *cfg,
+          		mut:    cfg.mut,
+          		rng:    rand.New(rand.NewPCG(cfg.Seed, uint64(cfg.ID))),
+          		id:     cfg.ID,
+          		term:   st.HardState.Term,
+          		vote:   st.HardState.Vote,
+          		prs:    map[core.NodeID]*progress{},
+          		votes:  map[core.NodeID]bool{},
+          		timing: cfg.Timing,
+          		now:    st.Now,
+          	}
+      - bind: sm
+        eval: st.Snapshot
+      - set: node.log
+        value: "memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}"
+      - set: node.base
+        to: sm.Membership.Clone
+        value: sm.Membership.Clone()
+      - set: node.base.Index
+        value: sm.Position.Index
+      - opt:
+          do:
+            - set: node.timing
+              value: sm.Timing
+          when: adoptsTiming(sm.Timing, node.timing)
+      - set: node.clusterVer, node.clusterGen, node.noSpace
+        value: sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
+      - set: node.voteWindow
+        value: node.timing.ElectionTimeoutMin
+      - set: node.contracts
+        value: "map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}"
+      - set: node.engBase
+        to: node.engine
+        value: node.engine()
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: e.Position.Index <= node.log.snapIndex
+            - set: node.log.ents
+              value: append(node.log.ents, e)
+            - op: +=
+              set: node.log.window
+              value: int64(len(e.Data))
+            - eval: node.noteAppended(&e)
+              to: node.noteAppended
+          key: _
+          range: st.Entries
+          value: e
+      - set: node.log.stable
+        to: node.log.lastIndex
+        value: node.log.lastIndex()
+      - set: node.log.committed
+        value: min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
+      - set: node.log.applied
+        value: max(st.Applied, node.log.snapIndex)
+      - set: node.log.applied
+        value: min(node.log.applied, node.log.committed)
+      - eval: node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
+        to: node.applyCommitEffects
+      - set: node.hs
+        value: "core.HardState{Term: node.term, Vote: node.vote, Commit: node.log.committed}"
+      - set: node.role
+        value: core.RoleFollower
+      - opt:
+          do:
+            - set: node.role
+              value: core.RoleLearner
+          when: "!node.isVoter(node.id)"
+      - set: node.lastLeaderContact
+        value: st.Now
+      - opt:
+          do:
+            - set: node.lastLeaderContact
+              value: time.Time{}
+          when: node.mutated(mutNoRestartRefusal)
+      - eval: node.resetElection(st.Now)
+        to: node.resetElection
+      - set: node.rd.Membership
+        to: node.admitted
+        value: node.admitted()
+      - return: node
+  - of: (*Raft).Tick
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Tick
+        kind: self
+      - id: r.tickLeader
+        kind: internal
+      - id: r.resetElection
+        kind: internal
+      - id: r.campaign
+        kind: internal
+    steps:
+      - set: r.now
+        value: now
+      - opt:
+          do:
+            - eval: r.tickLeader(now)
+              to: r.tickLeader
+            - return: ""
+          when: r.role == core.RoleLeader
+      - opt:
+          do:
+            - eval: r.resetElection(now)
+              to: r.resetElection
+            - opt:
+                do:
+                  - eval: r.campaign(true, 0, 0)
+                    to: r.campaign
+                when: r.promotable()
+          when: "!now.Before(r.electionDeadline)"
+  - of: (*Raft).StorageDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).StorageDone
+        kind: self
+      - id: r.noteSelfVote
+        kind: internal
+      - id: pr.maybeUpdate
+        kind: internal
+      - id: r.broadcastAppend
+        kind: internal
+    steps:
+      - eval: r.noteSelfVote(seq)
+        to: r.noteSelfVote
+      - opt:
+          do:
+            - return: ""
+          when: index == 0 || index <= r.log.stable || (!r.mutated(mutStaleCompletion) && !r.log.matchTerm(index, term))
+      - set: r.log.stable
+        value: min(index, r.log.lastIndex())
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: pr.maybeUpdate(r.log.stable)
+                    to: pr.maybeUpdate
+                init:
+                  bind: pr
+                  eval: r.prs[r.id]
+                when: pr != nil
+            - opt:
+                do:
+                  - eval: r.broadcastAppend(true)
+                    to: r.broadcastAppend
+                when: r.maybeCommit()
+          when: r.role == core.RoleLeader
+  - of: (*Raft).noteSelfVote
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).noteSelfVote
+        kind: self
+      - id: r.tallyVotes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.selfVoteSeq == 0 || seq < r.selfVoteSeq
+      - set: r.selfVoteSeq
+        value: "0"
+      - opt:
+          do:
+            - op: "|="
+              set: r.facts
+              value: raftSelfVoteDurable
+            - set: r.votes[r.id]
+              value: "true"
+            - eval: r.tallyVotes()
+              to: r.tallyVotes
+          when: r.role == core.RoleCandidate
+  - of: (*Raft).ReportUnreachable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).ReportUnreachable
+        kind: self
+      - id: pr.becomeProbe
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: pr.becomeProbe()
+              to: pr.becomeProbe
+          init:
+            bind: pr
+            eval: r.prs[id]
+          when: r.role == core.RoleLeader && pr != nil && pr.state == stateReplicate
+  - of: (*Raft).SnapshotDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).SnapshotDone
+        kind: self
+      - id: pr.becomeProbe
+        kind: internal
+    steps:
+      - bind: pr
+        eval: r.prs[to]
+      - opt:
+          do:
+            - return: ""
+          when: r.role != core.RoleLeader || pr == nil || pr.state != stateSnapshot
+      - opt:
+          do:
+            - set: pr.pendingSnapshot
+              value: "0"
+          when: "!ok"
+      - eval: pr.becomeProbe()
+        to: pr.becomeProbe
+      - op: "|="
+        set: pr.facts
+        value: peerProbeSent
+  - of: (*Raft).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Compact
+        kind: self
+      - id: r.log.term
+        kind: internal
+      - id: r.log.chain
+        kind: internal
+      - id: r.confAt
+        kind: internal
+      - id: r.log.compactTo
+        kind: internal
+      - id: m.Clone
+        kind: value
+      - id: r.compactEngines
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: index <= r.log.snapIndex || index > r.log.applied
+      - bind: t, _
+        eval: r.log.term(index)
+        to: r.log.term
+      - bind: c
+        eval: r.log.chain(index)
+        to: r.log.chain
+      - bind: m
+        eval: r.confAt(index)
+        to: r.confAt
+      - eval: r.log.compactTo(index, t, c)
+        to: r.log.compactTo
+      - set: r.rd.Compact
+        value: max(r.rd.Compact, index)
+      - set: r.base
+        to: m.Clone
+        value: m.Clone()
+      - set: r.base.Index
+        value: index
+      - eval: r.compactEngines(index)
+        to: r.compactEngines
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(r.confs) && r.confs[n].index <= index
+          do:
+            - op: ++
+              set: "n"
+      - set: r.confs
+        value: append(r.confs[:0], r.confs[n:]...)
+  - of: (*Raft).NoTable
+    steps:
+      - return: r.cfg.NoTable
+  - of: (*Raft).SetCanVote
+    steps:
+      - set: r.cfg.CanVote
+        value: v
+  - of: (*Raft).SnapshotIndex
+    steps:
+      - return: r.log.snapIndex
+  - of: (*Raft).Entry
+    steps:
+      - opt:
+          do:
+            - return: core.EntryValue{}, false
+          when: i <= r.log.snapIndex || i > r.log.lastIndex() || i <= r.log.evicted
+      - return: "*r.log.at(i), true"
+  - of: (*Raft).ConfAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).ConfAt
+        kind: self
+      - id: r.confAt(i).Clone
+        kind: value
+    steps:
+      - return: r.confAt(i).Clone()
+        to: r.confAt(i).Clone
+  - of: (*Raft).ChainAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).ChainAt
+        kind: self
+      - id: r.log.chain
+        kind: internal
+    steps:
+      - return: r.log.chain(i)
+        to: r.log.chain
+  - of: (*Raft).TermAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).TermAt
+        kind: self
+      - id: r.log.term
+        kind: internal
+    steps:
+      - return: r.log.term(i)
+        to: r.log.term
+  - of: (*Raft).Status
+    steps:
+      - return: |-
+          StatusValue{
+          		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
+          		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
+          		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
+          		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
+          		Transfer: r.transferTo,
+          	}
+  - of: (*Raft).Progress
+    steps:
+      - bind: pr
+        eval: r.prs[id]
+      - opt:
+          do:
+            - return: 0, time.Time{}, false
+          when: r.role != core.RoleLeader || pr == nil
+      - return: pr.match, pr.lastHeard, true
+  - of: (*Raft).LeaseValid
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!r.cfg.Lease || r.role != core.RoleLeader || r.facts&raftLeaseDropped != 0 || r.leaseStart.IsZero() || r.log.committed < r.termStart"
+      - return: now.Sub(r.leaseStart) < r.leaseLen
+  - of: (*Raft).DropLease
+    steps:
+      - op: "|="
+        set: r.facts
+        value: raftLeaseDropped
+  - of: (*Raft).HasReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).HasReady
+        kind: self
+      - id: r.flushReads
+        kind: internal
+    steps:
+      - eval: r.flushReads()
+        to: r.flushReads
+      - bind: rd
+        eval: "&r.rd"
+      - opt:
+          do:
+            - return: "true"
+          when: |-
+            r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit ||
+            		(r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable)
+      - return: rd.hasLogWork() || rd.hasNotices()
+  - of: (*ReadyValue).hasLogWork
+    steps:
+      - return: rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0
+  - of: (*ReadyValue).hasNotices
+    steps:
+      - return: |-
+          len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
+          		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
+          		rd.Unsupported.Index != 0
+  - of: (*Raft).Ready
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Ready
+        kind: self
+      - id: r.flushReads
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: r.log.evict
+        kind: internal
+      - id: r.numberWrite
+        kind: internal
+    steps:
+      - eval: r.flushReads()
+        to: r.flushReads
+      - bind: rd
+        eval: r.rd
+      - set: r.rd
+        value: ReadyValue{}
+      - bind: hsChanged
+        eval: r.term != r.hs.Term || r.vote != r.hs.Vote
+      - opt:
+          do:
+            - set: rd.HardState
+              value: "new(core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed})"
+            - set: rd.AfterSync
+              value: append(rd.AfterSync, rd.Messages...)
+            - set: rd.Messages
+              value: nil
+          when: hsChanged
+      - opt:
+          do:
+            - set: rd.Commit
+              value: r.log.committed
+          when: r.log.committed != r.hs.Commit
+      - set: r.hs
+        value: "core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}"
+      - opt:
+          do:
+            - set: rd.Apply
+              to: slices
+              value: "slices.Clone(r.log.ents[r.log.applied-r.log.snapIndex : hi-r.log.snapIndex])"
+            - set: r.log.applied
+              value: hi
+          init:
+            bind: hi
+            eval: min(r.log.committed, r.log.stable)
+          when: r.log.applied < hi && !r.cfg.NoTable
+      - eval: r.log.evict(r.cfg.RecentEntriesBytes, min(r.log.applied, r.log.stable))
+        to: r.log.evict
+      - eval: r.numberWrite(&rd, hsChanged)
+        to: r.numberWrite
+      - return: rd
+  - of: (*Raft).numberWrite
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!rd.NeedsWrite()"
+      - op: ++
+        set: r.seq
+      - set: rd.Seq
+        value: r.seq
+      - opt:
+          do:
+            - set: r.selfVoteSeq
+              value: rd.Seq
+          when: hsChanged && r.role == core.RoleCandidate && r.facts&raftSelfVoteDurable == 0
+  - of: (*Raft).conf
+    steps:
+      - opt:
+          do:
+            - return: "&r.confs[n-1].m"
+          init:
+            bind: "n"
+            eval: len(r.confs)
+          when: n > 0
+      - return: "&r.base"
+  - of: (*Raft).isVoter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).isVoter
+        kind: self
+      - id: r.conf().Member
+        kind: value
+    steps:
+      - bind: m, ok
+        eval: r.conf().Member(id)
+        to: r.conf().Member
+      - return: ok && m.Voter
+  - of: (*Raft).voters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).voters
+        kind: self
+      - id: r.conf().Voters
+        kind: value
+    steps:
+      - return: r.conf().Voters()
+        to: r.conf().Voters
+  - of: (*Raft).quorum
+    steps:
+      - return: len(r.voters())/2 + 1
+  - of: (*Raft).promotable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).promotable
+        kind: self
+      - id: r.conf().Member
+        kind: value
+    steps:
+      - bind: m, ok
+        eval: r.conf().Member(r.id)
+        to: r.conf().Member
+      - return: ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable
+  - of: (*Raft).randomTimeout
+    steps:
+      - bind: lo, hi
+        eval: r.timing.ElectionTimeoutMin, r.timing.ElectionTimeoutMax
+      - opt:
+          do:
+            - return: lo
+          when: hi <= lo
+      - return: lo + time.Duration(r.rng.Int64N(int64(hi-lo)))
+  - of: (*Raft).resetElection
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).resetElection
+        kind: self
+      - id: now.Add
+        kind: value
+    steps:
+      - set: r.electionDeadline
+        to: now.Add
+        value: now.Add(r.randomTimeout())
+  - of: (*Raft).admitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).admitted
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: slices.Clone(r.conf().Members)
+        to: slices
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, m)
+                when: "!slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID })"
+          key: _
+          range: r.confAt(r.log.committed).Members
+          value: m
+      - return: out
+  - of: (*Raft).send
+    steps:
+      - set: m.Version
+        value: "1"
+      - set: m.Group
+        value: r.cfg.Group
+      - set: m.From
+        value: r.id
+      - opt:
+          do:
+            - set: m.Term
+              value: r.term
+          when: m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: "!m.Reject"
+            - op: "|="
+              set: m.Flags
+              value: core.FlagTruncated
+          when: m.Kind == core.MsgAppResp && r.cfg.SilentIndex != 0
+      - opt:
+          do:
+            - set: r.rd.AfterSync
+              value: append(r.rd.AfterSync, m)
+            - return: ""
+          when: r.waitsForSync(m.Kind)
+      - set: r.rd.Messages
+        value: append(r.rd.Messages, m)
+  - of: (*Raft).waitsForSync
+    steps:
+      - return: (kind == core.MsgAppResp || kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync)
+  - of: (*Raft).noteAppended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).noteAppended
+        kind: self
+      - id: wire
+        kind: package
+      - id: r.confChanged
+        kind: internal
+      - id: foundingContract
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.EntryMembership
+              do:
+                - bind: a, err
+                  eval: wire.ParseAdmin(e.Data)
+                  to: wire
+                - opt:
+                    do:
+                      - return: ""
+                    when: err != nil
+                - bind: m
+                  eval: a.Membership
+                - set: m.Index
+                  value: e.Position.Index
+                - set: r.confs
+                  value: "append(r.confs, confAt{index: e.Position.Index, m: m})"
+                - eval: r.confChanged()
+                  to: r.confChanged
+                - opt:
+                    do:
+                      - set: r.contracts[1]
+                        value: c
+                      - opt:
+                          do:
+                            - set: r.voteWindow
+                              value: c.ElectionTimeoutMin
+                          when: c.ElectionTimeoutMin > r.voteWindow
+                    init:
+                      bind: c, ok
+                      eval: foundingContract(&a)
+                      to: foundingContract
+                    when: ok
+            - case: core.EntryTimingContract
+              do:
+                - opt:
+                    do:
+                      - bind: c
+                        eval: a.Contract
+                      - set: c.Generation
+                        value: a.Pre.Generation + 1
+                      - set: r.contracts[c.Generation]
+                        value: c
+                      - opt:
+                          do:
+                            - set: r.voteWindow
+                              value: c.ElectionTimeoutMin
+                          when: c.ElectionTimeoutMin > r.voteWindow
+                    init:
+                      bind: a, err
+                      eval: wire.ParseAdmin(e.Data)
+                      to: wire
+                    when: err == nil
+            - default: true
+          "on": e.Kind
+  - of: (*Raft).confChanged
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).confChanged
+        kind: self
+      - id: r.admitted
+        kind: internal
+      - id: r.trackMembers
+        kind: internal
+    steps:
+      - set: r.rd.Membership
+        to: r.admitted
+        value: r.admitted()
+      - switch:
+          cases:
+            - case: core.RoleLeader
+              do:
+                - eval: r.trackMembers()
+                  to: r.trackMembers
+            - case: core.RoleLearner, core.RoleFollower
+              do:
+                - alt:
+                    - do:
+                        - set: r.role
+                          value: core.RoleFollower
+                      when: r.isVoter(r.id)
+                    - do:
+                        - set: r.role
+                          value: core.RoleLearner
+                      else: true
+            - default: true
+          "on": r.role
+  - of: (*Raft).trackMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).trackMembers
+        kind: self
+      - id: r.conf
+        kind: internal
+      - id: conf.Member
+        kind: value
+    steps:
+      - bind: conf
+        eval: r.conf()
+        to: r.conf
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: r.prs[m.ID]
+                    value: "&progress{next: r.log.lastIndex() + 1, lastHeard: r.now}"
+                when: r.prs[m.ID] == nil
+          key: _
+          range: conf.Members
+          value: m
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(r.prs, id)
+                init:
+                  bind: _, ok
+                  eval: conf.Member(id)
+                  to: conf.Member
+                when: "!ok"
+          key: id
+          range: r.prs
+      - loop:
+          do:
+            - set: rd.conf
+              value: "0"
+          key: _
+          range: r.rounds
+          value: rd
+  - of: (*Raft).truncateFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).truncateFrom
+        kind: self
+      - id: r.log.truncateFrom
+        kind: internal
+      - id: r.confChanged
+        kind: internal
+    steps:
+      - eval: r.log.truncateFrom(i)
+        to: r.log.truncateFrom
+      - opt:
+          do:
+            - set: r.rd.TruncateFrom
+              value: i
+          when: r.rd.TruncateFrom == 0 || i < r.rd.TruncateFrom
+      - bind: "n"
+        eval: len(r.rd.Entries)
+      - loop:
+          cond: n > 0 && r.rd.Entries[n-1].Position.Index >= i
+          do:
+            - op: "--"
+              set: "n"
+      - set: r.rd.Entries
+        value: r.rd.Entries[:n]
+      - bind: k
+        eval: len(r.confs)
+      - loop:
+          cond: k > 0 && r.confs[k-1].index >= i
+          do:
+            - op: "--"
+              set: k
+      - opt:
+          do:
+            - set: r.confs
+              value: r.confs[:k]
+            - eval: r.confChanged()
+              to: r.confChanged
+          when: k != len(r.confs)
+  - of: (*Raft).appendEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).appendEntries
+        kind: self
+      - id: r.noteAppended
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: r.log.ents
+              value: append(r.log.ents, es[i])
+            - op: +=
+              set: r.log.window
+              value: int64(len(es[i].Data))
+            - set: r.rd.Entries
+              value: append(r.rd.Entries, es[i])
+            - eval: r.noteAppended(&r.log.ents[len(r.log.ents)-1])
+              to: r.noteAppended
+          key: i
+          range: es
+  - of: (*Raft).applyCommitEffect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).applyCommitEffect
+        kind: self
+      - id: wire
+        kind: package
+      - id: r.applyAdmin
+        kind: internal
+      - id: r.noteEngine
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!actsAtCommit(e.Kind)"
+      - bind: admin, err
+        eval: wire.ParseAdmin(e.Data)
+        to: wire
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - bind: stop
+        eval: r.applyAdmin(i, e.Kind, &admin)
+        to: r.applyAdmin
+      - eval: r.noteEngine(i)
+        to: r.noteEngine
+      - return: stop
+  - of: (*Raft).engine
+    steps:
+      - return: "EngineValue{Timing: r.timing, Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace}"
+  - of: (*Raft).noteEngine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).noteEngine
+        kind: self
+      - id: r.engine
+        kind: internal
+    steps:
+      - bind: v
+        eval: r.engine()
+        to: r.engine
+      - bind: last
+        eval: r.engBase
+      - opt:
+          do:
+            - set: last
+              value: r.engines[n-1].v
+          init:
+            bind: "n"
+            eval: len(r.engines)
+          when: n > 0
+      - opt:
+          do:
+            - set: r.engines
+              value: "append(r.engines, engineAt{index: i, v: v})"
+          when: v != last
+  - of: (*Raft).compactEngines
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(r.engines) && r.engines[n].index <= index
+          do:
+            - set: r.engBase
+              value: r.engines[n].v
+            - op: ++
+              set: "n"
+      - set: r.engines
+        value: append(r.engines[:0], r.engines[n:]...)
+  - of: (*Raft).resetEngines
+    steps:
+      - set: r.engBase, r.engines
+        value: r.engine(), nil
+  - of: actsAtCommit
+    steps:
+      - switch:
+          cases:
+            - case: core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear, core.EntryMembership
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": kind
+  - of: foundingContract
+    steps:
+      - bind: c
+        eval: admin.Contract
+      - opt:
+          do:
+            - return: core.TimingContractSpec{}, false
+          when: admin.Change != wire.ChangeFounding || c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0
+      - set: c.Generation
+        value: "1"
+      - return: c, true
+  - of: (*Raft).commitFounding
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).commitFounding
+        kind: self
+      - id: foundingContract
+        kind: internal
+    steps:
+      - bind: c, ok
+        eval: foundingContract(admin)
+        to: foundingContract
+      - opt:
+          do:
+            - return: ""
+          when: "!ok || r.timing.Generation > 1"
+      - set: r.timing
+        value: c
+      - set: r.contracts[1]
+        value: c
+      - opt:
+          do:
+            - set: r.voteWindow
+              value: c.ElectionTimeoutMin
+          when: c.ElectionTimeoutMin > r.voteWindow
+  - of: adoptsTiming
+    steps:
+      - return: c.Generation > 0 && c.HeartbeatInterval > 0 && c.Generation >= cur.Generation
+  - of: (*Raft).applyAdmin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).applyAdmin
+        kind: self
+      - id: r.commitTimingContract
+        kind: internal
+      - id: r.commitClusterVersion
+        kind: internal
+      - id: core
+        kind: package
+      - id: r.commitFounding
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.EntryTimingContract
+              do:
+                - eval: r.commitTimingContract(admin)
+                  to: r.commitTimingContract
+            - case: core.EntryClusterVersion
+              do:
+                - return: r.commitClusterVersion(i, admin)
+                  to: r.commitClusterVersion
+            - case: core.EntryNoSpaceRaise
+              do:
+                - opt:
+                    do:
+                      - set: r.noSpace
+                        to: core
+                        value: core.AlarmID(i)
+                    when: r.noSpace == 0
+            - case: core.EntryNoSpaceClear
+              do:
+                - opt:
+                    do:
+                      - set: r.noSpace
+                        value: "0"
+                    when: admin.Pre.Alarm == r.noSpace
+            - case: core.EntryMembership
+              do:
+                - eval: r.commitFounding(admin)
+                  to: r.commitFounding
+            - default: true
+          "on": kind
+      - return: "false"
+  - of: (*Raft).commitTimingContract
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: admin.Pre.Generation != r.timing.Generation
+      - bind: c
+        eval: admin.Contract
+      - set: c.Generation
+        value: r.timing.Generation + 1
+      - set: r.timing
+        value: c
+      - set: r.contracts[c.Generation]
+        value: c
+      - opt:
+          do:
+            - set: r.voteWindow
+              value: c.ElectionTimeoutMin
+          when: c.ElectionTimeoutMin > r.voteWindow
+  - of: (*Raft).commitClusterVersion
+    steps:
+      - opt:
+          do:
+            - set: r.rd.Unsupported
+              value: "UnsupportedEntryValue{Index: i, Kind: core.EntryClusterVersion}"
+            - return: "true"
+          when: admin.ClusterVersion > ProtocolMax
+      - opt:
+          do:
+            - set: r.clusterVer, r.clusterGen
+              value: admin.ClusterVersion, r.clusterGen+1
+          when: admin.Pre.Generation == r.clusterGen && admin.ClusterVersion > r.clusterVer
+      - return: "false"
+  - of: (*Raft).commitTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).commitTo
+        kind: self
+      - id: r.applyCommitEffects
+        kind: internal
+      - id: r.admitted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: old
+              eval: r.log.committed
+            - set: r.log.committed
+              value: i
+            - eval: r.applyCommitEffects(old+1, i)
+              to: r.applyCommitEffects
+            - set: r.rd.Membership
+              to: r.admitted
+              value: r.admitted()
+          when: i > r.log.committed
+  - of: (*Raft).PeerStats
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: r.role != core.RoleLeader
+      - var:
+          name: out
+          type: "[]PeerStatValue"
+      - loop:
+          do:
+            - bind: pr
+              eval: r.prs[id]
+            - set: out
+              value: |-
+                append(out, PeerStatValue{
+                			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+                			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
+                				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot),
+                		})
+          key: _
+          range: r.peers()
+          value: id
+      - return: out
+  - of: (*Raft).QuorumActive
+    steps:
+      - return: r.role == core.RoleLeader && r.quorumActive(now, r.timing.ElectionTimeoutMin)
+  - of: (*Raft).ChainRefusal
+    steps:
+      - return: r.refusedFrom, r.refusedAt, r.refusals
+  - of: (*Raft).Step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Step
+        kind: self
+      - id: r.stepLeader
+        kind: internal
+      - id: r.stepCandidate
+        kind: internal
+      - id: r.stepFollower
+        kind: internal
+    steps:
+      - set: r.now
+        value: now
+      - opt:
+          do:
+            - return: ""
+          when: m.Group != r.cfg.Group || !r.stepTerm(now, m) || r.stepAnyRole(now, m)
+      - switch:
+          cases:
+            - case: core.RoleLeader
+              do:
+                - eval: r.stepLeader(now, m)
+                  to: r.stepLeader
+            - case: core.RoleCandidate, core.RolePreCandidate
+              do:
+                - eval: r.stepCandidate(now, m)
+                  to: r.stepCandidate
+            - default: true
+              do:
+                - eval: r.stepFollower(now, m)
+                  to: r.stepFollower
+          "on": r.role
+  - of: (*Raft).stepTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepTerm
+        kind: self
+      - id: r.stepHigherTerm
+        kind: internal
+      - id: r.answerOlderTerm
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: m.Term == 0 || m.Term == r.term
+              do:
+                - return: "true"
+            - case: m.Term > r.term
+              do:
+                - return: r.stepHigherTerm(now, m)
+                  to: r.stepHigherTerm
+            - default: true
+              do:
+                - eval: r.answerOlderTerm(m)
+                  to: r.answerOlderTerm
+                - return: "false"
+  - of: (*Raft).stepHigherTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepHigherTerm
+        kind: self
+      - id: r.adoptTerm
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: |-
+            (m.Kind == core.MsgTimeoutNow && !r.mutated(mutTimeoutNowAnyTerm)) ||
+            		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m))
+      - eval: r.adoptTerm(m)
+        to: r.adoptTerm
+      - return: "true"
+  - of: (*Raft).adoptTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).adoptTerm
+        kind: self
+      - id: r.becomeFollower
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: m.Kind == core.MsgPreVote
+            - case: m.Kind == core.MsgPreVoteResp && !m.Reject
+            - case: m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat
+              do:
+                - eval: r.becomeFollower(m.Term, m.From)
+                  to: r.becomeFollower
+            - default: true
+              do:
+                - eval: r.becomeFollower(m.Term, 0)
+                  to: r.becomeFollower
+  - of: (*Raft).answerOlderTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerOlderTerm
+        kind: self
+      - id: r.send
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgApp, core.MsgHeartbeat
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Reject: true, Index: m.Index})"
+                  to: r.send
+            - case: core.MsgPreVote
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: r.term, Reject: true})"
+                  to: r.send
+            - default: true
+          "on": m.Kind
+  - of: (*Raft).stepAnyRole
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepAnyRole
+        kind: self
+      - id: r.handleVote
+        kind: internal
+      - id: r.handleForward
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgPreVote, core.MsgVote
+              do:
+                - eval: r.handleVote(now, m)
+                  to: r.handleVote
+                - return: "true"
+            - case: core.MsgForward, core.MsgForwardAdmin
+              do:
+                - eval: r.handleForward(m)
+                  to: r.handleForward
+                - return: "true"
+            - case: core.MsgReadIndexResp
+              do:
+                - set: r.rd.ReadStates
+                  value: "append(r.rd.ReadStates, ReadState{Context: m.Context, Index: m.Index, Code: m.Code})"
+                - return: "true"
+            - case: core.MsgForwardResp, core.MsgForwardAdminResp
+              do:
+                - set: r.rd.Forwarded
+                  value: append(r.rd.Forwarded, m)
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": m.Kind
+  - of: (*Raft).refuseForLiveLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).refuseForLiveLeader
+        kind: self
+      - id: r.quorumActive
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: (r.mutated(mutLiveLeaderPreVoteOnly) && m.Kind == core.MsgVote) || r.validTransferFlag(m)
+      - opt:
+          do:
+            - return: r.quorumActive(now, r.voteWindow)
+              to: r.quorumActive
+          when: r.role == core.RoleLeader
+      - return: "!r.lastLeaderContact.IsZero() && now.Sub(r.lastLeaderContact) < r.voteWindow"
+  - of: (*Raft).validTransferFlag
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: m.Flags&core.FlagTransfer == 0
+      - opt:
+          do:
+            - return: "true"
+          when: r.mutated(mutTransferAnyTerm)
+      - opt:
+          do:
+            - return: "false"
+          when: m.TransferTerm != r.term || m.Term != m.TransferTerm+1
+      - opt:
+          do:
+            - return: m.TransferIssuer == r.id
+          when: r.role == core.RoleLeader
+      - return: m.TransferIssuer == r.lead && r.lead != 0
+  - of: (*Raft).upToDate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).upToDate
+        kind: self
+      - id: r.log.lastTerm
+        kind: internal
+    steps:
+      - bind: lt
+        eval: r.log.lastTerm()
+        to: r.log.lastTerm
+      - return: m.LogTerm > lt || (m.LogTerm == lt && m.Index >= r.log.lastIndex())
+  - of: (*Raft).handleVote
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handleVote
+        kind: self
+      - id: r.mayGrant
+        kind: internal
+      - id: r.voteRestricted
+        kind: internal
+      - id: r.send
+        kind: internal
+      - id: r.resetElection
+        kind: internal
+    steps:
+      - bind: pre
+        eval: m.Kind == core.MsgPreVote
+      - bind: resp
+        eval: core.MsgVoteResp
+      - opt:
+          do:
+            - set: resp
+              value: core.MsgPreVoteResp
+          when: pre
+      - bind: canVote
+        eval: r.mayGrant(pre, m)
+        to: r.mayGrant
+      - bind: restricted
+        eval: r.voteRestricted(pre, m)
+        to: r.voteRestricted
+      - bind: ok
+        eval: canVote && r.cfg.CanVote && r.cfg.SilentIndex == 0 && (!restricted || r.upToDate(m))
+      - opt:
+          do:
+            - eval: "r.send(core.MessageValue{Kind: resp, To: m.From, Term: r.term, Reject: true})"
+              to: r.send
+            - return: ""
+          when: "!ok"
+      - opt:
+          do:
+            - eval: "r.send(core.MessageValue{Kind: resp, To: m.From, Term: m.Term})"
+              to: r.send
+            - return: ""
+          when: pre
+      - set: r.vote
+        value: m.From
+      - eval: r.resetElection(now)
+        to: r.resetElection
+      - eval: "r.send(core.MessageValue{Kind: resp, To: m.From, Term: m.Term})"
+        to: r.send
+  - of: (*Raft).mayGrant
+    steps:
+      - return: |-
+          r.vote == m.From ||
+          		(r.vote == 0 && r.lead == 0) ||
+          		(pre && m.Term > r.term)
+  - of: (*Raft).voteRestricted
+    steps:
+      - switch:
+          cases:
+            - case: pre && r.mutated(mutNoRestrictionPreVote), !pre && r.mutated(mutNoRestrictionVote), m.Flags&core.FlagTransfer != 0 && r.mutated(mutRestrictionUnderTransfer)
+              do:
+                - return: "false"
+            - default: true
+              do:
+                - return: "true"
+  - of: (*Raft).becomeFollower
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).becomeFollower
+        kind: self
+      - id: r.abortLeadership
+        kind: internal
+      - id: r.resetElection
+        kind: internal
+    steps:
+      - alt:
+          - do:
+              - set: r.term
+                value: term
+              - set: r.vote
+                value: "0"
+            when: term != r.term
+          - do:
+              - set: r.vote
+                value: "0"
+            when: r.mutated(mutSameTermVoteClear)
+      - bind: wasLeader
+        eval: r.role == core.RoleLeader
+      - set: r.lead
+        value: lead
+      - set: r.role
+        value: core.RoleFollower
+      - opt:
+          do:
+            - set: r.role
+              value: core.RoleLearner
+          when: "!r.isVoter(r.id)"
+      - set: r.votes
+        value: map[core.NodeID]bool{}
+      - set: r.selfVoteSeq
+        value: "0"
+      - op: "&^="
+        set: r.facts
+        value: raftSelfVoteDurable
+      - set: r.campaignIssuer, r.campaignTerm
+        value: 0, 0
+      - op: "&^="
+        set: r.facts
+        value: raftLeaseDropped
+      - set: r.leaseStart
+        value: time.Time{}
+      - set: r.refusedLead
+        value: "0"
+      - opt:
+          do:
+            - eval: r.abortLeadership()
+              to: r.abortLeadership
+          when: wasLeader
+      - eval: r.resetElection(r.now)
+        to: r.resetElection
+  - of: (*Raft).abortLeadership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).abortLeadership
+        kind: self
+      - id: r.answerRead
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: r.answerRead(q, 0, codeNotLeader)
+              to: r.answerRead
+          key: _
+          range: append(r.pendingReads, r.waitingReads...)
+          value: q
+      - set: r.pendingReads, r.waitingReads, r.rounds
+        value: nil, nil, nil
+      - opt:
+          do:
+            - bind: res
+              eval: "TransferResult{To: r.transferTo}"
+            - opt:
+                do:
+                  - set: res.Code
+                    value: codeTransferFailed
+                when: r.facts&raftTransferSent == 0
+            - set: r.rd.Transfers
+              value: append(r.rd.Transfers, res)
+            - set: r.transferTo
+              value: "0"
+          when: r.transferTo != 0
+      - set: r.prs
+        value: map[core.NodeID]*progress{}
+  - of: (*Raft).campaign
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).campaign
+        kind: self
+      - id: r.resetElection
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.role
+              value: core.RolePreCandidate
+            - set: r.lead
+              value: "0"
+            - set: r.votes
+              value: "map[core.NodeID]bool{r.id: true}"
+            - eval: r.resetElection(r.now)
+              to: r.resetElection
+            - opt:
+                do:
+                  - return: ""
+                when: r.tallyVotes()
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - continue: true
+                      when: id == r.id
+                  - eval: |-
+                      r.send(core.MessageValue{
+                      				Kind: core.MsgPreVote, To: id, Term: r.term + 1,
+                      				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex(),
+                      			})
+                    to: r.send
+                key: _
+                range: r.voters()
+                value: id
+            - return: ""
+          when: pre
+      - op: ++
+        set: r.term
+      - set: r.vote
+        value: r.id
+      - set: r.lead
+        value: "0"
+      - set: r.role
+        value: core.RoleCandidate
+      - set: r.votes
+        value: map[core.NodeID]bool{}
+      - op: "&^="
+        set: r.facts
+        value: raftSelfVoteDurable
+      - set: r.campaignIssuer, r.campaignTerm
+        value: issuer, issuerTerm
+      - eval: r.resetElection(r.now)
+        to: r.resetElection
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: id == r.id
+            - bind: m
+              eval: "core.MessageValue{Kind: core.MsgVote, To: id, LogTerm: r.log.lastTerm(), Index: r.log.lastIndex()}"
+            - opt:
+                do:
+                  - op: "|="
+                    set: m.Flags
+                    value: core.FlagTransfer
+                  - set: m.TransferIssuer, m.TransferTerm
+                    value: issuer, issuerTerm
+                when: issuer != 0
+            - eval: r.send(m)
+              to: r.send
+          key: _
+          range: r.voters()
+          value: id
+  - of: (*Raft).tallyVotes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).tallyVotes
+        kind: self
+      - id: r.countVotes
+        kind: internal
+      - id: r.quorum
+        kind: internal
+      - id: r.campaign
+        kind: internal
+      - id: r.becomeLeader
+        kind: internal
+      - id: r.becomeFollower
+        kind: internal
+    steps:
+      - bind: granted, rejected
+        eval: r.countVotes()
+        to: r.countVotes
+      - bind: q
+        eval: r.quorum()
+        to: r.quorum
+      - switch:
+          cases:
+            - case: granted >= q && r.role == core.RolePreCandidate
+              do:
+                - eval: r.campaign(false, 0, 0)
+                  to: r.campaign
+                - return: "true"
+            - case: granted >= q && r.role == core.RoleCandidate
+              do:
+                - eval: r.becomeLeader()
+                  to: r.becomeLeader
+                - return: "true"
+            - case: rejected >= q
+              do:
+                - eval: r.becomeFollower(r.term, 0)
+                  to: r.becomeFollower
+                - return: "true"
+      - return: "false"
+  - of: (*Raft).stepCandidate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepCandidate
+        kind: self
+      - id: r.becomeFollower
+        kind: internal
+      - id: r.stepFollower
+        kind: internal
+      - id: r.tallyVotes
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgApp, core.MsgHeartbeat
+              do:
+                - eval: r.becomeFollower(m.Term, m.From)
+                  to: r.becomeFollower
+                - eval: r.stepFollower(now, m)
+                  to: r.stepFollower
+            - case: core.MsgPreVoteResp
+              do:
+                - opt:
+                    do:
+                      - set: r.votes[m.From]
+                        value: "!m.Reject"
+                      - eval: r.tallyVotes()
+                        to: r.tallyVotes
+                    when: r.role == core.RolePreCandidate
+            - case: core.MsgVoteResp
+              do:
+                - opt:
+                    do:
+                      - set: r.votes[m.From]
+                        value: "!m.Reject"
+                      - opt:
+                          do:
+                            - eval: r.tallyVotes()
+                              to: r.tallyVotes
+                          when: r.facts&raftSelfVoteDurable != 0
+                    when: r.role == core.RoleCandidate
+            - case: core.MsgReadIndex
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: m.From, Context: m.Context, Code: codeNotLeader})"
+                  to: r.send
+            - default: true
+          "on": m.Kind
+  - of: (*Raft).stepFollower
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepFollower
+        kind: self
+      - id: r.resetElection
+        kind: internal
+      - id: r.handleAppend
+        kind: internal
+      - id: r.maybeEndSilence
+        kind: internal
+      - id: r.followHeartbeat
+        kind: internal
+      - id: r.followTimeoutNow
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgApp
+              do:
+                - set: r.lead
+                  value: m.From
+                - set: r.lastLeaderContact
+                  value: now
+                - eval: r.resetElection(now)
+                  to: r.resetElection
+                - eval: r.handleAppend(m)
+                  to: r.handleAppend
+                - eval: r.maybeEndSilence(m)
+                  to: r.maybeEndSilence
+            - case: core.MsgHeartbeat
+              do:
+                - eval: r.followHeartbeat(now, m)
+                  to: r.followHeartbeat
+            - case: core.MsgTimeoutNow
+              do:
+                - eval: r.followTimeoutNow(m)
+                  to: r.followTimeoutNow
+            - case: core.MsgReadIndex
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: m.From, Context: m.Context, Code: codeNotLeader})"
+                  to: r.send
+            - default: true
+          "on": m.Kind
+  - of: (*Raft).followHeartbeat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).followHeartbeat
+        kind: self
+      - id: r.resetElection
+        kind: internal
+      - id: r.commitTo
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - set: r.lead
+        value: m.From
+      - set: r.lastLeaderContact
+        value: now
+      - eval: r.resetElection(now)
+        to: r.resetElection
+      - opt:
+          do:
+            - return: ""
+          when: r.refusedLead == m.From
+      - opt:
+          do:
+            - eval: r.commitTo(c)
+              to: r.commitTo
+          init:
+            bind: c
+            eval: min(m.Commit, r.log.lastIndex())
+          when: c > r.log.committed
+      - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.timing.Generation})"
+        to: r.send
+  - of: (*Raft).followTimeoutNow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).followTimeoutNow
+        kind: self
+      - id: r.campaign
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!r.mutated(mutTimeoutNowAnyTerm) && (m.From != r.lead || m.Term != r.term)"
+      - opt:
+          do:
+            - eval: r.campaign(false, m.From, m.Term)
+              to: r.campaign
+          when: r.promotable()
+  - of: (*Raft).handleAppend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handleAppend
+        kind: self
+      - id: r.send
+        kind: internal
+      - id: r.dropUnknownKinds
+        kind: internal
+      - id: r.firstNewEntry
+        kind: internal
+      - id: r.acknowledgeAppend
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: |-
+                r.send(core.MessageValue{
+                			Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true,
+                			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot,
+                		})
+              to: r.send
+            - return: ""
+          when: r.cfg.NoTable
+      - opt:
+          do:
+            - return: ""
+          when: "!r.rebaseOnCommit(&m)"
+      - opt:
+          do:
+            - bind: hint
+              eval: min(m.Index, r.log.lastIndex())
+            - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint})"
+              to: r.send
+            - return: ""
+          when: "!r.log.matchTerm(m.Index, m.LogTerm)"
+      - eval: r.dropUnknownKinds(&m)
+        to: r.dropUnknownKinds
+      - bind: start, prevChain, ok
+        eval: r.firstNewEntry(&m)
+        to: r.firstNewEntry
+      - opt:
+          do:
+            - return: ""
+          when: "!ok || (start >= 0 && !r.appendNew(&m, start, prevChain))"
+      - eval: r.acknowledgeAppend(&m)
+        to: r.acknowledgeAppend
+  - of: (*Raft).rebaseOnCommit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).rebaseOnCommit
+        kind: self
+      - id: r.log.term
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: m.Index >= r.log.committed
+      - bind: k
+        eval: int(r.log.committed - m.Index - 1)
+      - bind: t, ok
+        eval: r.log.term(r.log.committed)
+        to: r.log.term
+      - opt:
+          do:
+            - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})"
+              to: r.send
+            - return: "false"
+          when: k >= len(m.Entries) || !ok || m.Entries[k].Position.Term != t
+      - set: m.Entries
+        value: m.Entries[k+1:]
+      - set: m.Index, m.LogTerm
+        value: r.log.committed, t
+      - return: "true"
+  - of: (*Raft).firstNewEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).firstNewEntry
+        kind: self
+      - id: r.log.chain
+        kind: internal
+      - id: r.log.term
+        kind: internal
+    steps:
+      - set: prevChain
+        to: r.log.chain
+        value: r.log.chain(m.Index)
+      - loop:
+          do:
+            - bind: e
+              eval: "&m.Entries[k]"
+            - opt:
+                do:
+                  - return: "-1, prevChain, false"
+                when: e.Position.Index != m.Index+uint64(k)+1
+            - opt:
+                do:
+                  - set: prevChain
+                    value: e.ChainSum
+                  - continue: true
+                init:
+                  bind: t, held
+                  eval: r.log.term(e.Position.Index)
+                  to: r.log.term
+                when: held && t == e.Position.Term
+            - return: k, prevChain, true
+          key: k
+          range: m.Entries
+      - return: "-1, prevChain, true"
+  - of: (*Raft).appendNew
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).appendNew
+        kind: self
+      - id: r.truncateFrom
+        kind: internal
+      - id: ownCopy
+        kind: internal
+      - id: r.appendEntries
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!r.verifyChain(m, start, prevChain)"
+      - bind: first
+        eval: m.Entries[start].Position.Index
+      - opt:
+          do:
+            - return: "false"
+          when: first <= r.log.committed
+      - opt:
+          do:
+            - eval: r.truncateFrom(first)
+              to: r.truncateFrom
+          when: first <= r.log.lastIndex()
+      - bind: es
+        eval: make([]core.EntryValue, len(m.Entries)-start)
+      - loop:
+          do:
+            - set: es[k]
+              value: m.Entries[start+k]
+            - set: es[k].Data
+              to: ownCopy
+              value: ownCopy(es[k].Data)
+          key: k
+          range: es
+      - eval: r.appendEntries(es)
+        to: r.appendEntries
+      - return: "true"
+  - of: (*Raft).verifyChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).verifyChain
+        kind: self
+      - id: r.chainRefused
+        kind: internal
+    steps:
+      - bind: chain
+        eval: prevChain
+      - loop:
+          cond: k < len(m.Entries)
+          do:
+            - bind: e
+              eval: "&m.Entries[k]"
+            - opt:
+                do:
+                  - eval: r.chainRefused(*m, e.Position.Index)
+                    to: r.chainRefused
+                  - return: "false"
+                when: "!r.mutated(mutChainSkip) && (wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(chain, e) != e.ChainSum)"
+            - set: chain
+              value: e.ChainSum
+          init: k := start
+          post: k++
+      - return: "true"
+  - of: (*Raft).acknowledgeAppend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).acknowledgeAppend
+        kind: self
+      - id: r.log.lastIndex
+        kind: internal
+      - id: r.commitTo
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: lastNew
+        eval: m.Index + uint64(len(m.Entries))
+      - bind: ack
+        eval: lastNew
+      - opt:
+          do:
+            - set: ack
+              to: r.log.lastIndex
+              value: r.log.lastIndex()
+          when: r.mutated(mutAckLastIndex)
+      - bind: commit
+        eval: min(m.Commit, lastNew)
+      - opt:
+          do:
+            - set: commit
+              value: min(m.Commit, r.log.lastIndex())
+          when: r.mutated(mutCommitBeyondVerified)
+      - opt:
+          do:
+            - eval: r.commitTo(commit)
+              to: r.commitTo
+          when: commit > r.log.committed
+      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: ack})"
+        to: r.send
+  - of: (*Raft).chainRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).chainRefused
+        kind: self
+      - id: r.send
+        kind: internal
+    steps:
+      - alt:
+          - do:
+              - op: ++
+                set: r.refusals
+            when: r.refusedAt == at && r.refusedFrom == m.From
+          - do:
+              - set: r.refusedAt, r.refusedFrom, r.refusals
+                value: at, m.From, 1
+            else: true
+      - opt:
+          do:
+            - set: r.refusedLead
+              value: m.From
+          when: r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals
+      - set: r.rd.ChainRefusedBy
+        value: append(r.rd.ChainRefusedBy, m.From)
+      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})"
+        to: r.send
+  - of: (*Raft).maybeEndSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).maybeEndSilence
+        kind: self
+      - id: r.log.term
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm || r.log.lastIndex() < r.cfg.SilentIndex
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: t, ok
+            eval: r.log.term(r.log.committed)
+            to: r.log.term
+          when: "!ok || t != m.Term || r.log.committed < r.cfg.SilentIndex"
+      - set: r.cfg.SilentIndex, r.cfg.SilentTerm
+        value: 0, 0
+      - set: r.rd.SilenceEnded
+        value: "true"
+      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})"
+        to: r.send

@@ -1,0 +1,178 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: Apply
+        kind: self
+      - id: applyLimits
+        kind: internal
+    steps:
+      - return: applyLimits(pid, limits)
+        to: applyLimits
+  - of: PrepareSysProcAttr
+    participants:
+      - id: caller
+        kind: actor
+      - id: PrepareSysProcAttr
+        kind: self
+      - id: prepareLimits
+        kind: internal
+    steps:
+      - return: prepareLimits(limits)
+        to: prepareLimits
+  - of: resolve
+    steps:
+      - opt:
+          do:
+            - return: rl, nil
+          init:
+            bind: rl, ok
+            eval: resourceToRLIMIT[r]
+          when: ok
+      - return: 0, coreproc.UnknownResource
+  - of: prepareLimits
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareLimits
+        kind: self
+      - id: resolve
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: resolve(r)
+                  to: resolve
+                when: err != nil
+          key: r
+          range: limits
+      - return: nil
+  - of: applyLimits
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyLimits
+        kind: self
+      - id: applyOne
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: applyOne(pid, r, lv)
+                  to: applyOne
+                when: err != nil
+          key: r
+          range: limits
+          value: lv
+      - return: nil
+  - of: applyOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyOne
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: rlim
+        kind: package
+      - id: applySelf
+        kind: internal
+      - id: applyForeign
+        kind: internal
+    steps:
+      - bind: rl, err
+        eval: resolve(r)
+        to: resolve
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: ceiling
+        eval: rlim.Make(lv.Soft, lv.Hard)
+        to: rlim
+      - opt:
+          do:
+            - return: applySelf(pid, r.String(), rl, &ceiling)
+              to: applySelf
+          when: pid == 0 || pid == syscall.Getpid()
+      - return: applyForeign(pid, r.String(), rl, &ceiling)
+        to: applyForeign
+  - of: rlimitFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: rlimitFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeRlimitFailed,
+          		Reason:   "RLIMIT_FAILED",
+          		Public:   "Could not apply the resource limit",
+          		Private:  "service/proc/rlimit.Apply: setrlimit(2) failed",
+          		ExitCode: exitOSErr,
+          	}, errs.Int("pid", pid), errs.String("resource", resource), errs.String("syscall", syscallName))
+        to: errs
+  - of: applySelf
+    participants:
+      - id: caller
+        kind: actor
+      - id: applySelf
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: rlimitFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: rlimitFailed(err, pid, resource, syscallSetrlimit)
+              to: rlimitFailed
+          init:
+            bind: err
+            eval: syscall.Setrlimit(rl, rlim)
+            to: syscall
+          when: err != nil
+      - return: nil
+  - of: applyForeign
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyForeign
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: rlimitFailed
+        kind: internal
+    steps:
+      - bind: _, _, errno
+        eval: |-
+          syscall.Syscall6(
+          		syscall.SYS_PRLIMIT64,
+          		uintptr(pid),
+          		uintptr(rl),
+          		uintptr(unsafe.Pointer(rlim)),
+          		0, 0, 0,
+          	)
+        to: syscall
+      - opt:
+          do:
+            - return: rlimitFailed(errno, pid, resource, syscallPrlimit64)
+              to: rlimitFailed
+          when: errno != 0
+      - return: nil

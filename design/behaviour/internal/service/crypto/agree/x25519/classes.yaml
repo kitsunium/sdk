@@ -1,0 +1,62 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: algorithm is the canonical registry key for X25519.
+    items:
+      - name: algorithm
+        type: corecrypto.Algorithm
+        value: "\"x25519\""
+    name: algorithm
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - algorithm
+      - Agreement
+      - x25519Agreement
+      - x25519Agreement.Algorithm
+      - x25519Agreement.GenerateKey
+      - x25519Agreement.Shared
+    name: x25519.go
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+  ecdh: crypto/ecdh
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/crypto/agree/x25519
+  name: x25519
+  purpose: Package x25519 registers the "x25519" key-agreement scheme (ADR 0014).
+types:
+  - doc: x25519Agreement implements core/crypto.Agreement over crypto/ecdh's X25519 curve.
+    kind: struct
+    methods:
+      - doc: Algorithm reports the canonical algorithm key.
+        name: Algorithm
+        recv: x25519Agreement
+        results: corecrypto.Algorithm
+      - doc: |-
+          GenerateKey draws a fresh X25519 keypair from crypto/rand and returns the raw
+          32-byte public and private key bytes. The only realistic failure is a host
+          entropy fault. Treat priv as secret material and Zeroize it when done.
+        name: GenerateKey
+        recv: x25519Agreement
+        results: pub, priv []byte, err error
+      - doc: |-
+          Shared derives the raw shared secret from priv and peerPub. crypto/ecdh
+          rejects low-order or malformed peer points, so a bad peerPub (or priv) returns
+          a non-nil error rather than a degenerate secret. The returned secret is RAW
+          key material — the caller MUST KDF it before use and Zeroize it when done.
+        name: Shared
+        params: priv, peerPub []byte
+        recv: x25519Agreement
+        results: secret []byte, err error
+    name: x25519Agreement
+vars:
+  - doc: |-
+      Agreement is the registered X25519 scheme singleton (no init(); package-level
+      var initialiser, mirroring the codec/AEAD convention).
+    items:
+      - name: Agreement
+        value: corecrypto.RegisterAgreement(x25519Agreement{})
+    name: Agreement

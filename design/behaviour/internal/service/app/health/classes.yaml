@@ -1,0 +1,1268 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      DefaultAskTimeout is the budget an Ask gets when [AskConfig.Timeout] is zero.
+
+      Three seconds sits far above what a readiness endpoint answering from
+      memory needs, and an order of magnitude under Docker's own HEALTHCHECK
+      timeout of thirty seconds: a probe that cannot get an answer reports why,
+      with its own code, before the supervisor gives up on the command itself.
+    items:
+      - name: DefaultAskTimeout
+        type: time.Duration
+        value: 3 * time.Second
+    name: DefaultAskTimeout
+  - doc: |-
+      MaxAskDrainBytes is how much of a response body Ask reads before closing it.
+
+      Reading a short answer to its end lets the server finish writing instead of
+      meeting a reset on every probe; the bound stops an endless or hostile body
+      from holding the probe once the status, which is the whole answer, is in.
+    items:
+      - name: MaxAskDrainBytes
+        type: int64
+        value: 64 << 10
+    name: MaxAskDrainBytes
+  - doc: |-
+      maxAskHeaderBytes bounds the response header the transport accepts, far
+      under net/http's default: a readiness answer's header is a few lines.
+    items:
+      - name: maxAskHeaderBytes
+        type: int64
+        value: 64 << 10
+    name: maxAskHeaderBytes
+  - doc: highestPort is the largest TCP port number.
+    items:
+      - name: highestPort
+        type: int
+        value: "65535"
+    name: highestPort
+  - doc: Field names the Ask refusals carry.
+    grouped: true
+    items:
+      - doc: fieldArgument names the AskConfig field a misconfigured Ask got wrong.
+        name: fieldArgument
+        type: string
+        value: "\"argument\""
+      - doc: fieldTarget carries the host:port the Ask dialled.
+        name: fieldTarget
+        type: string
+        value: "\"target\""
+      - doc: fieldBudget carries the budget an Ask ran out of.
+        name: fieldBudget
+        type: string
+        value: "\"budget\""
+      - doc: fieldStatus carries the status the process answered.
+        name: fieldStatus
+        type: string
+        value: "\"status\""
+    name: fieldArgument
+  - doc: |-
+      DefaultCheckTimeout is the per-check budget a non-positive Timeout clamps
+      to.
+
+      One second, and the number is defensible rather than round. A probe is
+      polled on a period an orchestrator owns — Kubernetes defaults to
+      periodSeconds 10 with timeoutSeconds 1 — and the SDK's own budget has to sit
+      UNDER the orchestrator's, or the orchestrator gives up first and the caller
+      gets no body, no attribution and no idea which check was slow.
+
+      A check that legitimately needs longer than a second is a check that should
+      carry a [corehealth.ReadinessCheckValue.MaxAge] and be measured off the
+      probe path, not one that should be given a longer budget on it.
+    items:
+      - name: DefaultCheckTimeout
+        type: time.Duration
+        value: time.Second
+    name: DefaultCheckTimeout
+  - doc: |-
+      MaxCacheAge is the ceiling on [corehealth.ReadinessCheckValue.MaxAge]. A
+      registration above it is REFUSED ([corehealth.StaleCacheWindow]), never clamped.
+
+      Thirty seconds is three conventional poll periods. Past that, at most three
+      consecutive probes could replay one measurement — which is already longer
+      than an operator watching a probe recover would wait before concluding it
+      had not. A cached answer is a dated statement; beyond this bound it is
+      simply a claim the SDK cannot support, and quietly serving 30s to a caller
+      who asked for five minutes would be the same lie in a smaller size.
+    items:
+      - name: MaxCacheAge
+        type: time.Duration
+        value: 30 * time.Second
+    name: MaxCacheAge
+  - doc: |-
+      genericReason is what a probe body says about a failure carrying no errs
+      Public of its own. It names a condition and never a cause: a probe endpoint
+      is routinely reachable by more than whoever added it.
+    items:
+      - name: genericReason
+        type: string
+        value: "\"A health check reported a failure\""
+    name: genericReason
+  - doc: |-
+      readyState is the sd_notify state name used in a NotifyFailed field. It is
+      the protocol's own spelling, so an operator reading the error can grep the
+      unit's journal for the same word.
+    items:
+      - name: readyState
+        type: string
+        value: "\"READY\""
+    name: readyState
+  - doc: statusState is its counterpart for the STATUS= line.
+    items:
+      - name: statusState
+        type: string
+        value: "\"STATUS\""
+    name: statusState
+  - grouped: true
+    items:
+      - doc: |-
+          phaseStarting means at least one registered startup check has not
+          passed. With no startup checks registered this is never reached, which
+          is what makes a registry that only has readiness checks work out of the
+          box instead of sitting not-ready forever.
+        name: phaseStarting
+        type: phase
+        value: iota
+      - doc: phaseServing means the process is up and has not been drained.
+        name: phaseServing
+      - doc: phaseDraining means Drain was called. One-way.
+        name: phaseDraining
+    name: phaseStarting
+files:
+  - decls:
+      - DefaultAskTimeout
+      - MaxAskDrainBytes
+      - maxAskHeaderBytes
+      - highestPort
+      - fieldArgument
+      - AskConfig
+      - askRequest
+      - Ask
+      - AskConfig.resolve
+      - dialTarget
+      - loopbackFor
+      - absoluteURL
+      - armAsk
+      - askClient
+      - askRequest.send
+      - askRequest.exchange
+      - keepRedirect
+      - discard
+      - askRequest.unanswered
+      - sentinelIdentity
+      - paramsOf
+      - askMisconfigured
+    name: ask.go
+  - decls:
+      - bodyValue
+      - checkValue
+    name: body.go
+  - decls:
+      - Component
+      - startupGate
+      - startupUnexplained
+      - drainGate
+      - failures
+    name: component.go
+  - decls:
+      - DefaultCheckTimeout
+      - MaxCacheAge
+      - Config
+      - Config.checkBudget
+      - Config.resolvedClock
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - entry
+      - (*entry).fresh
+      - (*entry).claim
+      - (*entry).finish
+    name: entry.go
+  - decls:
+      - genericReason
+      - fallbackBody
+      - NewStartupHandler
+      - NewReadinessHandler
+      - NewLivenessHandler
+      - handler
+      - (*handler).ServeHTTP
+      - statusCode
+      - (*handler).render
+      - renderChecks
+      - publicReason
+    name: handler.go
+  - decls:
+      - HandlerConfig
+    name: handler_config.go
+  - decls:
+      - health
+      - New
+      - (*health).AddStartup
+      - (*health).AddReadiness
+      - (*health).AddLiveness
+      - (*health).add
+      - (*health).register
+      - (*health).Drain
+      - (*health).startupPassed
+      - (*health).entriesFor
+    name: health.go
+  - decls:
+      - inflight
+      - (*inflight).expire
+    name: inflight.go
+  - decls:
+      - readyState
+      - statusState
+      - (*health).announce
+      - (*health).notify
+      - (*health).sendBudget
+      - (*health).owed
+    name: notify.go
+  - decls:
+      - phase
+      - phaseStarting
+      - (*health).phase
+      - (*health).Probe
+      - (*health).answer
+      - (*health).readiness
+      - (*health).liveness
+      - (*health).shortCircuit
+      - (*health).unknown
+      - (*health).evaluateAll
+      - (*health).publish
+    name: probe.go
+  - decls:
+      - (*health).evaluate
+      - (*health).perform
+      - (*health).outcome
+      - (*health).boundRun
+      - (*health).invoke
+      - (*entry).call
+      - (*entry).verdict
+      - (*health).wrapFailure
+      - (*health).abandoned
+      - (*health).departed
+    name: runner.go
+functions:
+  - name: Ask
+    params: ctx context.Context, cfg AskConfig
+    results: status int, err error
+  - doc: |-
+      dialTarget turns the address a process listens on into the host:port this
+      process dials to reach it.
+    name: dialTarget
+    params: listen string
+    results: string, error
+  - doc: |-
+      loopbackFor returns the host to dial for a listener's host: this machine's
+      loopback of the same family when the listener named no particular address,
+      the host itself otherwise.
+    name: loopbackFor
+    params: host string
+    results: string
+  - doc: "absoluteURL builds the URL an Ask gets: plain HTTP to target, at path."
+    name: absoluteURL
+    params: target, path string
+    results: string, error
+  - doc: |-
+      armAsk arms the budget on the injected clock: when it fires first, the Ask's
+      context is cancelled with AskTimeout as its cause. It returns the release
+      the Ask runs on its way out.
+
+      # Goroutine lifetime
+
+      One goroutine per Ask. It ends at the budget, having cancelled, or at the
+      release, whichever comes first.
+    name: armAsk
+    params: clk clock.Timed, budget time.Duration, cancel context.CancelCauseFunc
+    results: release func()
+  - doc: |-
+      askClient builds the client of one Ask: a fresh transport that never
+      proxies, keeps nothing alive and bounds the header, and no redirect
+      followed.
+    name: askClient
+    results: "*http.Client"
+  - doc: |-
+      keepRedirect answers a redirect with the redirect itself: the probe asked
+      this process, and a Location naming another is an answer, not a new address.
+      Neither the next request nor the ones before it are consulted: every
+      redirect is refused alike.
+    name: keepRedirect
+    params: next *http.Request, previous []*http.Request
+    results: error
+  - doc: |-
+      discard reads at most MaxAskDrainBytes of body, closes it, and returns what
+      stopped the drain early: nil for a body that ended or reached the bound.
+      The body is never read into anything; a close failure leaves nothing to
+      release, since keep-alive is off.
+    name: discard
+    params: body io.ReadCloser
+    results: error
+  - doc: |-
+      paramsOf reads a sentinel's identity into WrapParams, with a Private of its
+      own, so a plain cause can be wrapped under that sentinel's code.
+    name: paramsOf
+    params: sentinel sentinelIdentity, private string
+    results: kerrs.WrapParams
+  - doc: askMisconfigured refuses an Ask before anything is dialled.
+    name: askMisconfigured
+    params: argument string
+    results: error
+  - name: Component
+    params: registry corehealth.Health, name string
+    results: corelc.ComponentValue
+  - doc: |-
+      startupGate returns a lifecycle Start that refuses to declare the
+      application up while a startup check is failing.
+
+      It reports the checks' OWN errors, joined, rather than a sentinel of its
+      own: the caller registered those checks and wrote those errors, and
+      relabelling them here would cost them their errors.Is. The one exception is
+      a refusal with no error to report at all — see startupUnexplained.
+    name: startupGate
+    params: registry corehealth.Health
+    results: corelc.Start
+  - doc: |-
+      startupUnexplained is the refusal for a startup report that is not serving
+      and carries no error saying why.
+
+      This package's own registry never produces one — every result it reports as
+      failing carries its error — so the path is reached through a Health written
+      elsewhere, or a Status outside the three. It is StartupPending's code,
+      reason, public message and exit code, so errors.Is and errs.HasCode both
+      match it; the Private is this path's own, because wrapping the sentinel would
+      inherit one describing a readiness short-circuit instead.
+    name: startupUnexplained
+    params: status string
+    results: error
+  - doc: |-
+      drainGate returns a lifecycle Stop that marks the registry draining and
+      returns at once.
+
+      It closes nothing and waits for nothing. The withdrawal it triggers is
+      observed by an orchestrator polling from outside the process, on ITS
+      schedule, which the SDK neither knows nor should guess at: sleeping here for
+      a "propagation delay" would spend the shutdown budget of a component that
+      has nothing to shut down. A caller who needs that delay expresses it as its
+      own component, added after this one.
+    name: drainGate
+    params: registry corehealth.Health
+    results: corelc.Stop
+  - doc: failures collects the errors of every result that did not pass.
+    name: failures
+    params: report corehealth.ReportValue
+    results: "[]error"
+  - name: NewStartupHandler
+    params: registry corehealth.Health, cfg HandlerConfig
+    results: http.Handler
+  - name: NewReadinessHandler
+    params: registry corehealth.Health, cfg HandlerConfig
+    results: http.Handler
+  - name: NewLivenessHandler
+    params: registry corehealth.Health, cfg HandlerConfig
+    results: http.Handler
+  - doc: statusCode maps an aggregate to the only thing most callers read.
+    name: statusCode
+    params: status corehealth.Status
+    results: int
+  - doc: renderChecks projects each result onto the wire shape.
+    name: renderChecks
+    params: report corehealth.ReportValue
+    results: "[]checkValue"
+  - doc: |-
+      publicReason is the ONLY path by which anything derived from a check's error
+      reaches the wire. It always names something: err is a FAILURE, which its one
+      caller has already established, so there is no "no reason" answer to give.
+
+      errs.PublicOf walks to the deepest *errs.Error and returns its wire-safe
+      half — which the SDK validated at construction: at most 120 runes, no
+      newline, and written by whoever declared the sentinel to be read by a
+      stranger. A chain with no *errs.Error in it yields "", and that becomes the
+      SDK's own generic string rather than err.Error(): a driver message carries
+      hosts, ports and occasionally credentials, and trimming one is a guess about
+      where the secret is.
+    name: publicReason
+    params: err error
+    results: string
+  - name: New
+    params: cfg Config
+    results: corehealth.Health
+imports:
+  atomic: sync/atomic
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corehealth: github.com/kitsunium/sdk/internal/core/app/health
+  corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
+  errors: errors
+  fmt: fmt
+  group: github.com/kitsunium/sdk/internal/kernel/concur/group
+  http: net/http
+  io: io
+  json: encoding/json
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  net: net
+  netip: net/netip
+  notify: github.com/kitsunium/sdk/internal/service/proc/systemd/notify
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/health
+  name: health
+  purpose: "Package health — hosts Ask, the client half of a readiness probe: the question a container's HEALTHCHECK asks a running process, from an image that has no shell and no curl to ask it with (ADR 0131)."
+types:
+  - fields:
+      - doc: |-
+          Addr is the address the process LISTENS on, spelled as its listener was
+          given it: ":4000", "0.0.0.0:4000", "[::]:4000", "127.0.0.1:4000",
+          "localhost:4000". An unspecified host is not an address one can dial,
+          so it becomes this machine's loopback of the same family: an empty host
+          and 0.0.0.0 dial 127.0.0.1, :: dials ::1. Any other host is dialled as
+          written. The port must be a number from 1 to 65535.
+        name: Addr
+        type: string
+      - doc: |-
+          Path is the readiness endpoint, absolute and with an optional query:
+          "/readyz", "/_kit/health/ready".
+        name: Path
+        type: string
+      - doc: |-
+          Timeout bounds the whole exchange: dial, request, answer and drained
+          body. Zero is [DefaultAskTimeout]; a negative value is refused. The
+          caller's context bounds the exchange too, and whichever ends first ends
+          it.
+        name: Timeout
+        type: time.Duration
+      - doc: |-
+          Clock is the time source the budget is armed on; nil is clock.System. A
+          manual clock makes the timeout a test can reach without waiting.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: resolve validates cfg and fills its zeros.
+        name: resolve
+        recv: c AskConfig
+        results: askRequest, error
+    name: AskConfig
+  - doc: |-
+      askRequest is an AskConfig that passed validation: the URL to GET, the
+      host:port it names, the budget and the clock that measures it.
+    fields:
+      - name: url
+        type: string
+      - name: target
+        type: string
+      - name: budget
+        type: time.Duration
+      - name: clk
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: "send performs the exchange: one GET on askClient."
+        name: send
+        params: ctx context.Context
+        recv: r askRequest
+        results: status int, err error
+      - doc: |-
+          exchange sends the GET on client and reads the answer: the status, and the
+          body drained within MaxAskDrainBytes. A drain the Ask's own bound cut short
+          is no answer: the budget or the caller's context ended while the process was
+          still sending, so the verdict is the timeout, not the status line.
+        name: exchange
+        params: ctx context.Context, client *http.Client
+        recv: r askRequest
+        results: status int, err error
+      - doc: unanswered classifies an exchange that produced no answer.
+        name: unanswered
+        params: ctx context.Context, doErr error
+        recv: r askRequest
+        results: error
+    name: askRequest
+  - doc: |-
+      sentinelIdentity is what paramsOf reads from a sentinel: everything but its
+      Private.
+    kind: named
+    name: sentinelIdentity
+    underlying: |-
+      interface {
+      	Code() kerrs.Code
+      	Reason() string
+      	Public() string
+      	ExitCode() int
+      }
+  - doc: bodyValue is the wire shape of a probe response.
+    fields:
+      - doc: Status is the aggregate, in Status.String()'s stable spelling.
+        name: Status
+        type: string
+      - doc: Checks is present only when HandlerConfig.Detail is set.
+        name: Checks
+        type: "[]checkValue"
+    kind: struct
+    name: bodyValue
+  - doc: |-
+      checkValue is the wire shape of one check inside a detailed body. Every
+      field here is either the caller's own vocabulary (the name), a closed SDK
+      enum, a duration, or an errs Public. Nothing else may be added: the raw
+      error, the Private half and the fields are the three things this type exists
+      to keep out.
+    fields:
+      - doc: Name is the check's registered name, chosen by the caller.
+        name: Name
+        type: string
+      - doc: Status is this check's verdict.
+        name: Status
+        type: string
+      - doc: |-
+          Reason is an errs Public, or the SDK's generic string. Absent when the
+          check passed.
+        name: Reason
+        type: string
+      - doc: TookMs is how long the measurement took.
+        name: TookMs
+        type: int64
+      - doc: |-
+          AgeMs is how stale a replayed answer is. Absent when it was measured
+          during this probe.
+        name: AgeMs
+        type: int64
+      - doc: |-
+          TimedOut distinguishes "the dependency said no" from "the dependency
+          said nothing". Absent when false.
+        name: TimedOut
+        type: bool
+      - doc: |-
+          Cached says the answer was replayed rather than measured. Absent when
+          false.
+        name: Cached
+        type: bool
+    kind: struct
+    name: checkValue
+  - fields:
+      - doc: |-
+          Clock is the time source the registry reads AND waits on. A nil Clock
+          falls back to clock.System.
+
+          It is clock.Timed rather than clock.Clock because this engine does both
+          halves: it stamps every result and it waits out every check budget.
+          Reading package time directly instead would make every timeout
+          assertion in the suite a sleep, a sleep a tolerance, and a tolerance a
+          flake somebody eventually deletes — taking the guard on "a slow
+          dependency must not restart the process" with it.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          DefaultTimeout is the budget a check gets when its own Timeout is
+          non-positive. A non-positive value here clamps in turn to
+          [DefaultCheckTimeout].
+
+          It CLAMPS rather than refuses because the fallback is not arbitrary: it
+          is a documented, exported constant tied to a stated argument about poll
+          periods. What must never happen is the third reading — that a zero
+          means "no time at all" — which would turn a forgotten line into a probe
+          where every check fails before it runs (ADR 0031).
+        name: DefaultTimeout
+        type: time.Duration
+      - doc: |-
+          OnReport observes every probe the registry answers, after the verdict
+          is computed and before it is returned.
+
+          Calls are SERIALISED: the hook need not be safe for concurrent use, and
+          in exchange a hook that blocks blocks the probe. Keep it short; hand
+          off to a logger or a channel rather than doing work in it.
+
+          This is where a check's FULL error belongs — its Private half, its
+          fields, the driver's own message. None of that ever reaches an HTTP
+          body; the split is the whole point (ADR 0060 §D6).
+
+          A nil hook is a working configuration. It does mean the reports go
+          NOWHERE — the SDK will not write them to stderr on the caller's behalf,
+          and never to stdout at all (ADR 0030).
+        name: OnReport
+        type: func(corehealth.ReportValue)
+      - doc: |-
+          Notify asks for the systemd sd_notify(3) readiness protocol: READY=1
+          the first time a READINESS probe reports a serving status, and STATUS=
+          on every aggregate change after that.
+
+          It is deliberately driven by readiness and not by startup. "Every
+          component constructed" and "this replica can serve a request" are two
+          different claims, and a supervisor that acts on the first while the
+          second is false starts routing to a process that cannot answer.
+          lifecycle.RunConfig.Notify makes the earlier claim; use one or the
+          other, not both.
+
+          It is safe to set on a process that may not be supervised: with
+          $NOTIFY_SOCKET unset every notifier call is a documented no-op that
+          returns nil, so an unsupervised binary stays silent rather than
+          failing.
+        name: Notify
+        type: bool
+      - doc: |-
+          OnNotifyError receives a [corehealth.NotifyFailed] when an opt-in sd_notify
+          datagram could not be delivered.
+
+          It is a second hook rather than a second argument to OnReport because
+          the two have different audiences: a probe verdict is for whatever
+          watches the service, and a supervisor datagram that did not arrive is
+          for whoever wired the unit file. Folding them together would make every
+          observer switch on which of the two it had been handed.
+
+          A nil hook drops the error, for the same ADR 0030 reason OnReport does:
+          the SDK writes nothing anywhere on the caller's behalf.
+        name: OnNotifyError
+        type: func(error)
+    kind: struct
+    methods:
+      - doc: checkBudget resolves the budget for one check, applying both clamps.
+        name: checkBudget
+        params: own time.Duration
+        recv: c Config
+        results: time.Duration
+      - doc: resolvedClock resolves the time source, applying the documented fallback.
+        name: resolvedClock
+        recv: c Config
+        results: clock.Timed
+    name: Config
+  - doc: |-
+      entry is one registered check plus everything the registry remembers about
+      it between probes.
+
+      The two bodies are mutually exclusive: run for startup and readiness,
+      runSelf for liveness. That asymmetry is the domain's central rule made
+      concrete — a liveness body has no context, so it cannot be handed a
+      dependency API (see core/app/health.SelfCheck).
+    fields:
+      - doc: name identifies the check in every result and error field.
+        name: name
+        type: string
+      - doc: probe says which of the three questions this check answers.
+        name: probe
+        type: corehealth.Probe
+      - doc: budget is this check's resolved timeout, already clamped.
+        name: budget
+        type: time.Duration
+      - doc: |-
+          nonCritical downgrades a failure to degraded. Readiness only: the other
+          two registration types do not carry the field at all.
+
+          It is written once, at registration, and read afterwards WITHOUT mu —
+          see [entry.verdict], which runs on the measuring goroutine outside every
+          critical section. That is why it is a field of its own rather than a bit
+          sharing a word with the mutable `passed` below.
+        name: nonCritical
+        type: bool
+      - doc: |-
+          maxAge is the cache window for a SUCCESS, zero for no cache. Readiness
+          only.
+        name: maxAge
+        type: time.Duration
+      - doc: |-
+          latching keeps a success forever rather than for maxAge. Startup only:
+          a startup check that passed has answered its question for good, and
+          re-running it at steady state would repeat a one-shot.
+        name: latching
+        type: bool
+      - doc: run is the startup / readiness body.
+        name: run
+        type: corehealth.Check
+      - doc: runSelf is the liveness body.
+        name: runSelf
+        type: corehealth.SelfCheck
+      - doc: |-
+          mu guards the three fields below, and is NEVER held while a check body
+          runs — a check that blocks must block only itself.
+
+          It is an RWMutex because [entry.fresh] is a pure read that runs on every
+          probe of every check, while the two writers run once per measurement.
+          fresh copies the cached result out and mutates only that copy; nothing
+          under the read lock touches the entry.
+        name: mu
+        type: sync.RWMutex
+      - doc: |-
+          active is the run outstanding right now, or nil. At most one exists per
+          check at any instant; see [entry.claim].
+        name: active
+        type: "*inflight"
+      - doc: |-
+          cached is the last success kept for replay, or nil. A failure is never
+          stored here. It is REPLACED wholesale by [entry.finish] and never
+          mutated in place, which is what lets concurrent readers share it.
+        name: cached
+        type: "*corehealth.ResultValue"
+      - doc: |-
+          passed records that a latching check has succeeded once, so the startup
+          counter is decremented exactly once however many probes race.
+        name: passed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          fresh returns a replayable answer for this check, if one is held.
+
+          Only successes are ever held. A failure is re-measured on every probe,
+          because the answer an operator needs promptly is the one that says the
+          outage ended — and because a cached failure would keep a recovered replica
+          out of rotation for a window nobody chose for that purpose.
+        name: fresh
+        params: now time.Time
+        recv: e *entry
+        results: result corehealth.ResultValue, ok bool
+      - doc: |-
+          claim returns the run this probe will wait on, and whether this caller is
+          the one that must start it.
+
+          A probe arriving while a run is outstanding JOINS it rather than starting a
+          second one or reporting a timeout it has not waited for. Two overlapping
+          probes therefore see one measurement, and a wedged check is measured by one
+          goroutine no matter how long the outage lasts.
+        name: claim
+        params: parent context.Context
+        recv: e *entry
+        results: run *inflight, mine bool
+      - doc: |-
+          finish records the outcome of a run and reports whether it just latched a
+          startup check for the first time.
+
+          It clears active BEFORE the run's waiters are woken (see health.perform): a
+          probe that begins once a waiter has returned must measure, not join a run
+          that finished before it was asked.
+        name: finish
+        params: result corehealth.ResultValue
+        recv: e *entry
+        results: bool
+      - doc: call dispatches to whichever of the two bodies this entry carries.
+        name: call
+        params: run *inflight
+        recv: e *entry
+        results: error
+      - doc: verdict turns an error into this check's status, applying criticality.
+        name: verdict
+        params: err error
+        recv: e *entry
+        results: corehealth.Status
+    name: entry
+  - doc: handler serves exactly one probe.
+    fields:
+      - doc: registry answers the probe.
+        name: registry
+        type: corehealth.Health
+      - doc: |-
+          probe is fixed at construction and is never read from the request: a
+          route cannot redirect a liveness handler onto readiness.
+        name: probe
+        type: corehealth.Probe
+      - doc: cfg carries the body's verbosity.
+        name: cfg
+        type: HandlerConfig
+    kind: struct
+    methods:
+      - doc: |-
+          ServeHTTP answers one probe request.
+
+          It writes to the ResponseWriter and to nowhere else — not stdout, which may
+          be the process's protocol channel, and not stderr (ADR 0030). A caller who
+          wants a probe logged wires Config.OnReport, which sees the whole error.
+        name: ServeHTTP
+        params: w http.ResponseWriter, r *http.Request
+        recv: h *handler
+      - doc: render turns a report into the bytes that leave the process.
+        name: render
+        params: report corehealth.ReportValue
+        recv: h *handler
+        results: "[]byte"
+    name: handler
+  - fields:
+      - doc: |-
+          Detail adds the per-check breakdown to the body.
+
+          It is off by default because the default reader of a probe body is an
+          orchestrator that only looks at the status code, while the default
+          REACHER of a probe endpoint is more or less anyone on the network. Even
+          with it on, a check contributes its name, its status, its timing and an
+          errs Public — never a raw error, never a Private, never a field.
+        name: Detail
+        type: bool
+    kind: struct
+    name: HandlerConfig
+  - doc: |-
+      health is the concrete core/app/health.Health. It is unexported: there is one
+      canonical way to answer the three probes, so a registry of registries would
+      be over-abstraction (the proc, resilience, scheduler and lifecycle
+      precedents — ADR 0016 / ADR 0026 / ADR 0041 / ADR 0050).
+    fields:
+      - doc: cfg is the resolved configuration; budgets are clamped through it.
+        name: cfg
+        type: Config
+      - doc: clk is the injected time source; never package time.
+        name: clk
+        type: clock.Timed
+      - doc: hookMu serialises OnReport so the hook need not be concurrency-safe.
+        name: hookMu
+        type: sync.Mutex
+      - doc: |-
+          mu guards the registration sets and the two phase fields below,
+          startupPending and draining.
+
+          It is an RWMutex because the two hot paths — [health.phase], read once
+          per probe, and [health.entriesFor], read once per probe per probe kind —
+          take nothing away from it, while every writer runs at registration or
+          once per transition.
+        name: mu
+        type: sync.RWMutex
+      - doc: |-
+          checks holds one slice per probe, each in registration order — which is
+          the order results are reported in, so two identical probes render
+          identically and a diff of two responses is readable.
+        name: checks
+        type: map[corehealth.Probe][]*entry
+      - doc: |-
+          names is the duplicate index, keyed per probe: the same name may appear
+          once on readiness and once on liveness, because those are two answers
+          about different evidence rather than a collision.
+        name: names
+        type: map[corehealth.Probe]map[string]bool
+      - doc: |-
+          startupPending counts registered startup checks that have yet to pass.
+          Zero — including the zero of a registry with no startup checks at all —
+          means the process is past its startup phase.
+        name: startupPending
+        type: int
+      - doc: draining records that Drain was called. It is one-way; see Drain.
+        name: draining
+        type: bool
+      - doc: |-
+          notifyMu serialises the whole sd_notify step — decide, send, commit —
+          and guards the two fields below. It is not mu: the send is a syscall,
+          and a probe's phase read must never queue behind a datagram. See
+          [health.notify] for why the three steps share one critical section.
+        name: notifyMu
+        type: sync.Mutex
+      - doc: |-
+          notified records that READY=1 has been DELIVERED, so it is sent once —
+          and sent again after a failure, because a failure never sets it.
+        name: notified
+        type: bool
+      - doc: |-
+          lastNotified is the aggregate readiness status last DELIVERED, so a
+          STATUS= datagram is sent on change rather than on every poll, and a
+          change whose datagram failed is still owed.
+        name: lastNotified
+        type: corehealth.Status
+    kind: struct
+    methods:
+      - doc: AddStartup registers a check that gates the startup probe.
+        name: AddStartup
+        params: check corehealth.StartupCheckValue
+        recv: h *health
+        results: error
+      - doc: AddReadiness registers a check that gates routing.
+        name: AddReadiness
+        params: check corehealth.ReadinessCheckValue
+        recv: h *health
+        results: error
+      - doc: |-
+          AddLiveness registers process-local evidence that the process is not
+          irrecoverable.
+        name: AddLiveness
+        params: check corehealth.LivenessCheckValue
+        recv: h *health
+        results: error
+      - doc: |-
+          add is the shared registration path. bodyMissing is passed in because the
+          three registrations carry two different function types, and a nil check on
+          an interface-typed field would be a different question from a nil check on
+          each concrete one.
+        name: add
+        params: e *entry, bodyMissing bool
+        recv: h *health
+        results: error
+      - doc: |-
+          register installs a validated entry, refusing a name already taken on that
+          probe.
+        name: register
+        params: e *entry
+        recv: h *health
+        results: error
+      - doc: |-
+          Drain marks the process as going away. Readiness reports not-ready from here
+          on without running a check; liveness keeps answering normally.
+
+          It is one-way by construction: there is no field to clear and no method to
+          clear it. A process that has announced its departure has already had its
+          endpoints withdrawn, and a flap would send live traffic back to a process
+          that is closing the dependencies that traffic needs.
+        name: Drain
+        recv: h *health
+      - doc: startupPassed records that one startup check latched.
+        name: startupPassed
+        recv: h *health
+      - doc: |-
+          entriesFor returns the registered checks for one probe, in registration
+          order, as a snapshot the probe can read without holding the lock.
+        name: entriesFor
+        params: probe corehealth.Probe
+        recv: h *health
+        results: "[]*entry"
+      - doc: |-
+          announce delivers the opt-in sd_notify state for one readiness aggregate:
+          READY=1 the first time the replica can serve, and STATUS= on every change
+          after that.
+
+          It is driven by READINESS on purpose. "Every component constructed" and
+          "this replica can answer a request" are two different claims, and a
+          supervisor acting on the first while the second is false routes traffic to a
+          process that cannot serve it. lifecycle.RunConfig.Notify makes the earlier
+          claim; a caller picks one of the two, not both.
+
+          # What has been announced is what was DELIVERED
+
+          The announced state moves only once a datagram has actually gone out. It
+          used to move before the send: a READY=1 that failed was then recorded as
+          sent and never sent again, and a Type=notify unit is killed at
+          TimeoutStartSec by a supervisor still waiting for it — while every probe
+          reported the replica ready. The same ordering left a STATUS= line that failed
+          recorded as the supervisor's current text, stale until the aggregate happened
+          to change again.
+        name: announce
+        params: ctx context.Context, status corehealth.Status
+        recv: h *health
+      - doc: |-
+          notify decides what this aggregate owes the supervisor, sends it, and only
+          then records it as announced.
+
+          The decision, the send and the commit happen under one lock, notifyMu. Two
+          probes that decided in one order and sent in the other would leave the
+          supervisor showing the OLDER status line, recorded here as the newer one —
+          with nothing left that would ever correct it.
+
+          The phase is read under the same lock. A readiness probe measures its
+          dependencies BEFORE it announces, so one that began while the process was
+          serving can finish after Drain, and after another probe has already
+          announced the drain; its serving aggregate would then be sent last and leave
+          the supervisor showing healthy for the rest of the drain. Draining is
+          one-way, so once it has begun a serving status is owed to nobody, and the
+          decision reads the phase where it can no longer change under it.
+
+          The send is BOUNDED, which is what makes serialising it affordable. A
+          unixgram write blocks once the supervisor's receive buffer is full, and
+          nothing in this process can make it drain; an unbounded send under this lock
+          meant one stuck supervisor stopped every later readiness probe from
+          answering at all — the readiness the datagram announces, made unobservable by
+          the act of announcing it. The bound is the PROBE's deadline where the caller
+          set one, so the announcement can never outlive the answer it belongs to, and
+          otherwise the same budget one check gets (Config.DefaultTimeout, else
+          DefaultCheckTimeout): a datagram nobody is reading is exactly as unavailable
+          as a dependency nobody is answering, and the registry already has a number
+          for that.
+        name: notify
+        params: ctx context.Context, status corehealth.Status
+        recv: h *health
+        results: state string, err error
+      - doc: |-
+          sendBudget derives the context one datagram is allowed to take, and returns
+          the release that must run on every path out.
+
+          The probe's own deadline wins whenever it has one: the announcement belongs
+          to that answer and must not outlive it, and a deadline the caller set needs
+          no machinery at all — systemd/notify hands it to the kernel as the socket's write
+          deadline. Without one it takes the budget a check would get, because an
+          unreadable notify socket and an unresponsive dependency are the same kind of
+          wait and the registry already states how long it tolerates one.
+
+          # Goroutine lifetime
+
+          The second branch starts ONE goroutine per datagram, and it is armed on the
+          INJECTED clock rather than through context.WithTimeout — this package waits
+          on no wall clock, which its own AST audit enforces, and a budget that cannot
+          be moved by a test is a budget nothing verifies. It ends on whichever comes
+          first: the timer, or the returned release, which every caller defers. It
+          therefore cannot outlive the send.
+        name: sendBudget
+        params: ctx context.Context
+        recv: h *health
+        results: bounded context.Context, release func()
+      - doc: |-
+          owed decides what, if anything, this aggregate owes the supervisor. It reads
+          the announced state and changes nothing: only a delivered datagram does.
+        name: owed
+        params: status corehealth.Status
+        recv: h *health
+        results: state string, send func(ctx context.Context) error
+      - doc: phase reads the current phase.
+        name: phase
+        recv: h *health
+        results: phase
+      - doc: Probe answers one probe and publishes the report to the observation hook.
+        name: Probe
+        params: ctx context.Context, probe corehealth.Probe
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: answer dispatches to the probe that was asked for.
+        name: answer
+        params: ctx context.Context, probe corehealth.Probe
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: |-
+          readiness answers the routing question, short-circuiting in the two phases
+          where the answer does not depend on any dependency.
+        name: readiness
+        params: ctx context.Context, current phase
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: liveness answers the restart question.
+        name: liveness
+        params: ctx context.Context, current phase
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: |-
+          shortCircuit builds a one-result report for a probe that deliberately ran
+          nothing, naming the phase that decided it.
+
+          It carries a result rather than an empty list because "unhealthy, no
+          details" is the least actionable thing a probe can say: an operator reading
+          the body should see the word `draining` and stop looking for a broken
+          dependency.
+        name: shortCircuit
+        params: |
+          probe corehealth.Probe, name string,
+          	status corehealth.Status, sentinel error,
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: unknown refuses a Probe value the domain never mints.
+        name: unknown
+        params: probe corehealth.Probe
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: |-
+          evaluateAll runs every check registered for one probe and aggregates them.
+
+          The checks run in PARALLEL, so a probe's latency is the largest budget and
+          not their sum. Serialising them would make the endpoint's worst case grow
+          with the number of dependencies — and an endpoint an orchestrator polls on a
+          fixed period must not get slower every time somebody registers a check.
+
+          They run through kernel/concur/group's Collect: the results come back in
+          REGISTRATION order rather than completion order — two identical probes must
+          render identically — and a fault in the evaluation path itself is re-raised
+          here, on the probing goroutine, after every sibling check has returned,
+          instead of crashing the process from a goroutine nobody can recover. A
+          check's own panic never gets that far: invoke recovers it into a result.
+        name: evaluateAll
+        params: ctx context.Context, probe corehealth.Probe
+        recv: h *health
+        results: corehealth.ReportValue
+      - doc: publish hands the report to the observation hook, serialised.
+        name: publish
+        params: report corehealth.ReportValue
+        recv: h *health
+      - doc: |-
+          evaluate answers one check: from the cache if it holds a current success,
+          otherwise by waiting out one run under this check's own budget.
+
+          # Goroutine lifetime
+
+          A cache hit launches nothing. On a miss, [entry.claim] hands exactly one
+          caller `mine`, and that caller spawns ONE goroutine running [health.perform]
+          — every other probe joins the same run. Its lifetime is the check body's,
+          which the SDK does not bound: it ends when the body returns, and nothing
+          here ends it earlier, because Go cannot kill a goroutine.
+
+          What CAN be stopped is the waiting. When the budget fires, [health.abandoned]
+          cancels the run's context — an announcement the body may honour — and this
+          function returns without the goroutine. The run stays registered on the
+          entry, so the next probe joins it rather than spawning a second: a wedged
+          dependency costs one goroutine for the whole outage, not one per poll.
+
+          The goroutine's only shared state is the run it was given: it writes
+          `result` before closing `done`, and every waiter reads `result` only after
+          `done` closes.
+
+          The caller can stop waiting too. Its context is its own — a lifecycle
+          startup interrupted by a signal, an HTTP client that hung up — and a waiter
+          that ignored it sat out the whole budget for an answer nobody would read.
+          That is [health.departed], and unlike the budget it cancels nothing.
+        name: evaluate
+        params: ctx context.Context, e *entry
+        recv: h *health
+        results: corehealth.ResultValue
+      - doc: perform runs one check body and publishes its result to everyone waiting.
+        name: perform
+        params: e *entry, run *inflight
+        recv: h *health
+      - doc: |-
+          outcome turns a finished body into the result every later probe will read.
+
+          A run whose budget expired reports a TIMEOUT even when the body came back on
+          its own, because the body coming back is what cancelling it was FOR: a check
+          that honours its context returns ctx.Err(), which is an ordinary failure
+          wearing no timeout, and the next probe to join this run would read a plain
+          cancellation where the truth is that the check was too slow. The waiter that
+          was there when the budget fired already got [health.abandoned]'s verdict;
+          this is the same verdict, for everybody who arrives after.
+
+          A body that SUCCEEDED despite the cancellation keeps its success: the answer
+          is late, not wrong, and a later probe reading a real healthy measurement is
+          more useful than one reading a timeout nobody is waiting on any more.
+        name: outcome
+        params: e *entry, run *inflight, err error, begun time.Time
+        recv: h *health
+        results: corehealth.ResultValue
+      - doc: |-
+          boundRun arms the budget the RUN owns, and returns the release its caller
+          runs when the body returns.
+
+          The budget used to live only on the waiting side, so the run's context was
+          cancelled by whichever probe sat out the whole budget — and a run every
+          caller had left was cancelled by nobody. That is the ordinary shape of a
+          polled endpoint behind a proxy with its own, shorter timeout: each probe
+          departs early (health.departed, which deliberately cancels nothing, since
+          one caller's context is not the shared run's), the run keeps the next probe
+          from starting a second body, and the body itself is never told its time is
+          up. A check that honours its context then holds its dependency's connection
+          for the entire outage while every probe reports a timeout.
+
+          The announcement is the same one [health.abandoned] makes and means the same
+          thing: the SDK cannot kill a goroutine, so cancelling the context is the
+          only thing it can do, and the body decides what that means.
+
+          # Goroutine lifetime
+
+          One goroutine per run, and it does NOT last the outage: it ends at the
+          budget — having cancelled — or at the release, whichever comes first. So a
+          wedged dependency still costs one goroutine for the whole outage (the body),
+          plus this one for the length of one budget.
+        name: boundRun
+        params: e *entry, run *inflight
+        recv: h *health
+        results: release func()
+      - doc: |-
+          invoke calls the check body with its panic recovered, and wraps a failure so
+          that what reaches a probe body is decided here and nowhere else.
+
+          A panic escaping a check would take the whole process down over a health
+          question — the endpoint becoming the outage it was watching for.
+        name: invoke
+        params: e *entry, run *inflight
+        recv: h *health
+        results: err error
+      - doc: |-
+          wrapFailure gives a check's error an SDK identity WITHOUT overwriting one it
+          already has.
+
+          This is the whole public/private mechanism doing the work. Origin-wins means
+          a caller's own *errs.Error keeps its Code, Reason, Public and Private, so a
+          wire-safe message they wrote is what a stranger reads; a plain error — the
+          driver's `dial tcp 10.0.3.14:5432: connect: connection refused` — becomes
+          [corehealth.CheckFailed] instead, and its text survives only in the Err a handler never
+          renders and Config.OnReport does.
+        name: wrapFailure
+        params: e *entry, err error
+        recv: h *health
+        results: error
+      - doc: |-
+          abandoned reports a check whose answer did not arrive within its budget.
+
+          The registry cancels the run's context — an ANNOUNCEMENT, the one piece of
+          information the check cannot otherwise have — and stops waiting. It does not
+          kill the goroutine, which Go cannot do, and it closes nothing the check
+          holds. The run stays outstanding, so the NEXT probe joins it rather than
+          starting a second one: a wedged dependency costs one goroutine for the
+          duration of the outage, not one per poll.
+        name: abandoned
+        params: e *entry, run *inflight
+        recv: h *health
+        results: corehealth.ResultValue
+      - doc: |-
+          departed reports a check whose CALLER stopped waiting before it answered:
+          the probe's context ended before the check returned and before its budget.
+
+          It is abandoned's mirror, and the difference is the whole point — the run is
+          NOT cancelled. That context belonged to one caller, while the run belongs to
+          every probe waiting on it, which is why entry.claim detached it from the
+          context that started it. So this probe stops waiting, the run keeps going,
+          the next probe JOINS it rather than starting a second body, and that probe's
+          own budget is what announces a timeout. A wedged dependency still costs one
+          goroutine for the whole outage.
+
+          The result is still a failure, and still CheckTimeout with TimedOut set: the
+          check said nothing within the time this probe had. What changes is whose
+          time ran out, and the chain says so — the caller's context error is the
+          cause, so errors.Is(err, context.Canceled) tells a departure apart from an
+          expired budget, and Took is how long this probe actually waited.
+        name: departed
+        params: ctx context.Context, e *entry, waited time.Duration
+        recv: h *health
+        results: corehealth.ResultValue
+    name: health
+  - doc: |-
+      inflight is one execution of a check, shared by every probe waiting on it.
+
+      It exists so that a check which ignores its cancellation costs ONE goroutine
+      for as long as it is wedged, not one per poll. A probe endpoint polled every
+      ten seconds against a dependency call with no deadline would otherwise
+      accumulate a goroutine — and a connection — every ten seconds, for as long
+      as the outage lasts, which is a leak triggered precisely by the thing the
+      endpoint was watching for.
+    fields:
+      - doc: |-
+          ctx is the body's context, detached from the probe that started it so
+          an HTTP client hanging up does not cancel a run other probes are
+          waiting on. Nil for a liveness body, which takes no context.
+        name: ctx
+        type: context.Context
+      - doc: |-
+          cancel announces to the body that a budget expired. It is an
+          ANNOUNCEMENT: the registry cannot kill the goroutine and does not try.
+        name: cancel
+        type: context.CancelFunc
+      - doc: |-
+          done is closed once result is written, and is the only synchronisation
+          a waiter needs. Exactly one goroutine ever closes it — the one
+          [entry.claim] handed `mine` to, under the entry's own lock.
+        name: done
+        type: chan struct{}
+      - doc: result is written exactly once, before done is closed.
+        name: result
+        type: corehealth.ResultValue
+      - doc: |-
+          expired records that a BUDGET is what cancelled this run, so the
+          outcome can say so. Without it, a body that honours its context returns
+          ctx.Err() and the run publishes an ordinary failure — and the next probe
+          to join reads a plain cancellation where the truth is CHECK_TIMEOUT.
+        name: expired
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: |-
+          expire announces to the body that its budget is over and records that this is
+          why. Idempotent: the waiting side and the run's own timer can both reach it,
+          and they mean the same thing.
+        name: expire
+        recv: r *inflight
+    name: inflight
+  - doc: |-
+      phase is the process's own position in its life, derived from state rather
+      than stored as a mode: draining is a flag, starting is "a startup check has
+      yet to pass", and serving is neither. Nothing has to remember to advance it,
+      so nothing can forget.
+    kind: named
+    name: phase
+    underlying: uint8
+vars:
+  - doc: |-
+      fallbackBody is written when rendering itself fails. It is a byte literal
+      rather than a marshalled value so that the one path that cannot rely on the
+      encoder does not depend on it.
+    items:
+      - name: fallbackBody
+        value: "[]byte(`{\"status\":\"unhealthy\"}`)"
+    name: fallbackBody

@@ -1,0 +1,275 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - sdkClock
+      - clockOf
+      - sdkClock.NewTimer
+      - sdkClock.NewTicker
+    name: clock.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - engine
+      - (*engine).Start
+      - (*engine).Fire
+      - (*engine).Changed
+      - (*engine).Deleted
+      - (*engine).Census
+      - (*engine).Records
+      - (*engine).Run
+      - journal
+      - journal.Load
+      - journal.Save
+      - journal.Delete
+      - recordOf
+      - sdkRecordOf
+      - changeOf
+      - observeOf
+      - onLoopOf
+      - triggerOf
+      - sdkTriggerOf
+      - wakeOf
+      - loopKindOf
+    name: engine.go
+  - decls:
+      - entity
+      - Enable
+      - stateOf
+      - open
+      - definitionOf
+      - declare
+      - sentinels
+      - failed
+    name: workflowengine.go
+  - decls:
+      - _
+    name: workflowengine_compliance.go
+functions:
+  - doc: |-
+      clockOf is c as the SDK's engine takes it, nil — the engine's own, the
+      system's — for none.
+    name: clockOf
+    params: c plug.Clock
+    results: clock.Timed
+  - doc: recordOf is the engine's record as plug spells it.
+    name: recordOf
+    params: r *statemachine.Record[string]
+    results: plug.WorkflowRecordValue
+  - doc: sdkRecordOf is plug's record as the engine reads it.
+    name: sdkRecordOf
+    params: r *plug.WorkflowRecordValue
+    results: statemachine.Record[string]
+  - doc: changeOf is the engine's stored transition as plug spells it.
+    name: changeOf
+    params: c *statemachine.Change[entity, string]
+    results: plug.WorkflowChangeValue
+  - doc: |-
+      observeOf is kit's bracket around each transition the loop fires, as
+      the engine calls it; nil for none.
+    name: observeOf
+    params: fn func(context.Context, plug.WorkflowFiringValue) (context.Context, func(error))
+    results: func(context.Context, statemachine.Firing[string]) (context.Context, func(error))
+  - doc: |-
+      onLoopOf is kit's view of the loop, as the engine tells it; nil for
+      none.
+    name: onLoopOf
+    params: fn func(plug.WorkflowLoopEventValue)
+    results: func(statemachine.LoopEvent)
+  - doc: triggerOf is the engine's trigger as plug says it.
+    name: triggerOf
+    params: t statemachine.Trigger
+    results: plug.WorkflowTrigger
+  - doc: sdkTriggerOf is plug's trigger as the engine says it.
+    name: sdkTriggerOf
+    params: t plug.WorkflowTrigger
+    results: statemachine.Trigger
+  - doc: wakeOf is why the engine's loop ran, as plug says it.
+    name: wakeOf
+    params: w statemachine.Wake
+    results: plug.WorkflowWake
+  - doc: loopKindOf is what the engine's loop reports, as plug says it.
+    name: loopKindOf
+    params: k statemachine.LoopEventKind
+    results: plug.WorkflowLoopEvent
+  - name: Enable
+  - doc: "stateOf is the state of e as the engine reads and sets it: its spelling."
+    name: stateOf
+    params: e *entity
+    results: "*string"
+  - doc: |-
+      open opens the SDK's engine over cfg: its definition, its store and its
+      journal, the app's clock, and kit's brackets around what the loop fires.
+
+      IFACE-PLUGIN: kit reaches a workflow's engine through plug.WorkflowEngine;
+      this is its implementation.
+    name: open
+    params: ctx context.Context, cfg *plug.WorkflowConfig
+    results: plug.WorkflowEngine, error
+  - doc: |-
+      definitionOf declares cfg's states, transitions and hooks to the SDK's
+      engine.
+    name: definitionOf
+    params: cfg *plug.WorkflowConfig
+    results: "*statemachine.Definition[entity, string]"
+  - doc: |-
+      declare declares the transition t to def: a guard's, a deadline's, a
+      delay's or an event's.
+    name: declare
+    params: def *statemachine.Definition[entity, string], t *plug.TransitionSpec
+  - doc: |-
+      failed reports whether err, or an error it wraps, is the SDK's sentinel
+      of kind.
+    name: failed
+    params: err error, kind plug.WorkflowFailure
+    results: bool
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errors: errors
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  resilience: github.com/kitsunium/sdk/pkg/v1/app/resilience
+  statemachine: github.com/kitsunium/sdk/pkg/v1/app/statemachine
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/workflowengine
+  name: workflowengine
+  purpose: "Package workflowengine is what framework/app/workflow plugs into kit: the engine the framework's workflows run on — the SDK's statemachine, instantiated once, over the framework's entity and the state's spelling (ADR 0179 §1, step 5, Q3) —, its loop of timers and guards, and the conversions between the engine's values and plug's."
+types:
+  - doc: |-
+      sdkClock is the app's clock, as kit's core hands it (plug.Clock), as the
+      SDK's engine stamps and waits on it: the same instants and the same
+      timers, a test's manual clock included.
+    fields:
+      - name: ""
+        role: embedded
+        type: plug.Clock
+    kind: struct
+    methods:
+      - doc: NewTimer is the clock's timer, as the SDK's.
+        name: NewTimer
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Timer
+      - doc: NewTicker is the clock's ticker, as the SDK's.
+        name: NewTicker
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Ticker
+    name: sdkClock
+  - doc: |-
+      engine is the SDK's engine as kit's core uses it: its one instantiation,
+      at kit's entity and the state's spelling.
+    fields:
+      - name: m
+        type: "*statemachine.Machine[entity, string]"
+    kind: struct
+    methods:
+      - doc: Start enters e in the workflow.
+        name: Start
+        params: ctx context.Context, e entity
+        recv: x *engine
+        results: entity, error
+      - doc: Fire moves the entity under key along event's transition.
+        name: Fire
+        params: ctx context.Context, key, event string
+        recv: x *engine
+        results: entity, error
+      - doc: Changed tells the engine the entity under key was written.
+        name: Changed
+        params: ctx context.Context, key string
+        recv: x *engine
+        results: error
+      - doc: Deleted tells the engine the entity under key was deleted.
+        name: Deleted
+        params: ctx context.Context, key string
+        recv: x *engine
+        results: error
+      - doc: Census counts the entities per state.
+        name: Census
+        recv: x *engine
+        results: map[string]int
+      - doc: Records are what the engine knows of each entity, as plug spells them.
+        name: Records
+        recv: x *engine
+        results: "[]plug.WorkflowRecordValue"
+      - doc: Run runs the engine's loop until ctx ends.
+        name: Run
+        params: ctx context.Context
+        recv: x *engine
+        results: error
+    name: engine
+  - doc: |-
+      journal is a workflow's journal, which the core keeps, as the SDK's
+      engine reads and writes it.
+    fields:
+      - name: j
+        type: plug.WorkflowJournal
+    kind: struct
+    methods:
+      - doc: Load reads every record the journal kept.
+        name: Load
+        params: ctx context.Context
+        recv: j journal
+        results: "[]statemachine.Record[string], error"
+      - doc: Save keeps records.
+        name: Save
+        params: ctx context.Context, records ...statemachine.Record[string]
+        recv: j journal
+        results: error
+      - doc: Delete forgets the records of keys.
+        name: Delete
+        params: ctx context.Context, keys ...string
+        recv: j journal
+        results: error
+    name: journal
+  - alias: true
+    doc: |-
+      entity is kit's entity as the SDK's engine runs it: the one type it is
+      instantiated at (ADR 0179 Q3), whatever the product's entity and state.
+    kind: alias
+    name: entity
+    underlying: plug.WorkflowEntityValue
+vars:
+  - doc: sentinels are the SDK's sentinels of each failure kit tells apart.
+    items:
+      - name: sentinels
+        value: |-
+          map[plug.WorkflowFailure]error{
+          	plug.WorkflowTransitionRefused: statemachine.TransitionRefused,
+          	plug.WorkflowEntityMissing:     statemachine.EntityMissing,
+          	plug.WorkflowEntityExists:      statemachine.EntityExists,
+          	plug.WorkflowKeyEmpty:          statemachine.KeyEmpty,
+          	plug.WorkflowHookFailed:        statemachine.HookFailed,
+          	plug.WorkflowHookPanicked:      statemachine.HookPanicked,
+          	plug.WorkflowHookChangedState:  statemachine.HookChangedState,
+          	plug.WorkflowHookChangedKey:    statemachine.HookChangedKey,
+          	plug.WorkflowReentrant:         statemachine.Reentrant,
+          	plug.WorkflowStoreFailed:       statemachine.StoreFailed,
+          	plug.WorkflowJournalFailed:     statemachine.JournalFailed,
+          	plug.WorkflowFunctionPanicked:  statemachine.FunctionPanicked,
+          	plug.WorkflowLoopPanicked:      statemachine.LoopPanicked,
+          	plug.WorkflowWaitAbandoned:     statemachine.WaitAbandoned,
+          }
+    name: sentinels
+  - doc: |-
+      : Asserts at compile time that a workflow's engine is what plug
+      describes, that the store the core hands is the SDK's engine's port as it
+      is — the same methods over kit's entity —, that the journal it hands is,
+      once converted, and that the app's clock is the SDK's.
+    grouped: true
+    items:
+      - name: _
+        type: plug.WorkflowEngine
+        value: (*engine)(nil)
+      - name: _
+        type: statemachine.Store[entity]
+        value: plug.WorkflowStore(nil)
+      - name: _
+        type: statemachine.Journal[string]
+        value: journal{}
+      - name: _
+        type: clock.Timed
+        value: sdkClock{}
+    name: _

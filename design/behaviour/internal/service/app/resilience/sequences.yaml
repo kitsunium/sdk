@@ -1,0 +1,897 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewCircuitBreaker
+    steps:
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - bind: threshold
+        eval: cfg.FailureThreshold
+      - opt:
+          do:
+            - set: threshold
+              value: defaultThreshold
+          when: threshold < 1
+      - bind: openFor
+        eval: cfg.OpenDuration
+      - opt:
+          do:
+            - set: openFor
+              value: defaultOpenDuration
+          when: openFor <= 0
+      - return: "&circuitBreaker{clk: clk, retryable: cfg.Retryable, threshold: threshold, openFor: openFor}"
+  - of: (*circuitBreaker).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).Run
+        kind: self
+      - id: wrapAs
+        kind: internal
+      - id: b.record
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coreres.CircuitOpen, nil)
+              to: wrapAs
+          when: "!b.allow()"
+      - bind: err
+        eval: op(ctx)
+      - opt:
+          do:
+            - return: err
+          when: err != nil && !isRetryable(b.retryable, err)
+      - eval: b.record(err == nil)
+        to: b.record
+      - return: err
+  - of: (*circuitBreaker).allow
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: b.clk.Since(b.openedAt) < b.openFor
+            - set: b.state
+              value: stateHalfOpen
+          when: b.state == stateOpen
+      - return: "true"
+  - of: (*circuitBreaker).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).record
+        kind: self
+      - id: b.trip
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - set: b.state
+              value: stateClosed
+            - set: b.failures
+              value: "0"
+            - return: ""
+          when: success
+      - opt:
+          do:
+            - eval: b.trip()
+              to: b.trip
+            - return: ""
+          when: b.state == stateHalfOpen
+      - op: ++
+        set: b.failures
+      - opt:
+          do:
+            - eval: b.trip()
+              to: b.trip
+          when: b.failures >= b.threshold
+  - of: (*circuitBreaker).trip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).trip
+        kind: self
+      - id: b.clk.Now
+        kind: value
+    steps:
+      - set: b.state
+        value: stateOpen
+      - set: b.openedAt
+        to: b.clk.Now
+        value: b.clk.Now()
+  - of: NewBulkhead
+    steps:
+      - opt:
+          do:
+            - set: maxConcurrent
+              value: "1"
+          when: maxConcurrent < 1
+      - return: "&bulkhead{slots: make(chan struct{}, maxConcurrent)}"
+  - of: (*bulkhead).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bulkhead).Run
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - select:
+          cases:
+            - comm: b.slots <- struct{}{}
+              do:
+                - defer: func() { <-b.slots }()
+                - return: op(ctx)
+            - default: true
+              do:
+                - return: wrapAs(coreres.BulkheadFull, nil)
+                  to: wrapAs
+  - of: NewFallback
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewFallback
+        kind: self
+      - id: newMisconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: newMisconfigured("fallback", "Fallback")
+              to: newMisconfigured
+          when: cfg.Fallback == nil
+      - return: "fallbackRunner{secondary: cfg.Fallback, retryable: cfg.Retryable}"
+  - of: fallbackRunner.Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: fallbackRunner.Run
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: wrapAsFields
+        kind: internal
+    steps:
+      - bind: primaryErr
+        eval: op(ctx)
+      - opt:
+          do:
+            - return: nil
+          when: primaryErr == nil
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: primaryErr
+          when: "!isRetryable(f.retryable, primaryErr)"
+      - bind: fallbackErr
+        eval: f.secondary(ctx)
+      - opt:
+          do:
+            - return: nil
+          when: fallbackErr == nil
+      - opt:
+          do:
+            - return: ctxErr
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - return: |-
+          wrapAsFields(coreres.FallbackFailed,
+          		kerrs.String("primary", primaryErr.Error()),
+          		kerrs.String("fallback", fallbackErr.Error()))
+        to: wrapAsFields
+  - of: NewHedge
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHedge
+        kind: self
+      - id: newMisconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: newMisconfigured("hedge", "Idempotent")
+              to: newMisconfigured
+          when: "!cfg.Idempotent"
+      - opt:
+          do:
+            - return: newMisconfigured("hedge", "Delay")
+              to: newMisconfigured
+          when: cfg.Delay <= 0
+      - opt:
+          do:
+            - return: newMisconfigured("hedge", "MaxInFlight")
+              to: newMisconfigured
+          when: cfg.MaxInFlight < minInFlight
+      - bind: maxHedges
+        eval: max(cfg.MaxHedges, minHedges)
+      - return: |-
+          &hedge{
+          		delay: cfg.Delay, maxHedges: maxHedges,
+          		slots: make(chan struct{}, cfg.MaxInFlight), clk: timedOrSystem(cfg.Clock),
+          	}
+  - of: (*hedge).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedge).Run
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: h.attempt
+        kind: internal
+      - id: timedOrSystem(h.clk).NewTicker
+        kind: value
+      - id: ticker.Stop
+        kind: value
+      - id: ticker.C
+        kind: value
+      - id: ctx.Err
+        kind: value
+      - id: race.record
+        kind: internal
+      - id: h.duplicate
+        kind: internal
+    steps:
+      - bind: actx, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - defer: cancel()
+      - bind: results
+        eval: make(chan attemptOutcome)
+      - go: h.attempt(actx, op, results)
+        to: h.attempt
+      - bind: ticker
+        eval: timedOrSystem(h.clk).NewTicker(h.delay)
+        to: timedOrSystem(h.clk).NewTicker
+      - defer: ticker.Stop()
+        to: ticker.Stop
+      - bind: ticks
+        eval: ticker.C()
+        to: ticker.C
+      - bind: race
+        eval: "hedgeRace{launched: 1}"
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ctx.Err()
+                        to: ctx.Err
+                  - comm: outcome := <-results
+                    do:
+                      - opt:
+                          do:
+                            - panic: outcome.raised
+                          when: outcome.panicked
+                      - opt:
+                          do:
+                            - return: verdict
+                          init:
+                            bind: decided, verdict
+                            eval: race.record(outcome.err)
+                            to: race.record
+                          when: decided
+                  - comm: <-ticks
+                    do:
+                      - opt:
+                          do:
+                            - continue: true
+                          when: "!h.claimHedge(race.launched)"
+                      - op: ++
+                        set: race.launched
+                      - go: h.duplicate(actx, op, results)
+                        to: h.duplicate
+          forever: true
+  - of: (*hedge).claimHedge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedge).claimHedge
+        kind: self
+      - id: h.acquire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: launched > h.maxHedges
+      - return: h.acquire()
+        to: h.acquire
+  - of: (*hedge).attempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedge).attempt
+        kind: self
+      - id: outcome.capture
+        kind: internal
+    steps:
+      - var:
+          name: outcome
+          type: attemptOutcome
+      - eval: outcome.capture(ctx, op)
+        to: outcome.capture
+      - select:
+          cases:
+            - comm: out <- outcome
+            - comm: <-ctx.Done()
+  - of: (*hedge).duplicate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedge).duplicate
+        kind: self
+      - id: h.release
+        kind: internal
+      - id: h.attempt
+        kind: internal
+    steps:
+      - defer: h.release()
+        to: h.release
+      - eval: h.attempt(ctx, op, out)
+        to: h.attempt
+  - of: (*hedge).acquire
+    steps:
+      - select:
+          cases:
+            - comm: h.slots <- struct{}{}
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+  - of: (*hedge).release
+    steps:
+      - eval: <-h.slots
+  - of: (*attemptOutcome).capture
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*attemptOutcome).capture
+        kind: self
+      - id: o.recoverPanic
+        kind: internal
+    steps:
+      - set: o.panicked
+        value: "true"
+      - defer: o.recoverPanic()
+        to: o.recoverPanic
+      - set: o.err
+        value: op(ctx)
+      - set: o.panicked
+        value: "false"
+  - of: (*attemptOutcome).recoverPanic
+    steps:
+      - opt:
+          do:
+            - set: o.raised
+              value: recover()
+          when: o.panicked
+  - of: (*hedgeRace).record
+    steps:
+      - op: ++
+        set: r.completed
+      - opt:
+          do:
+            - return: true, nil
+          when: err == nil
+      - opt:
+          do:
+            - set: r.firstErr
+              value: err
+          when: r.firstErr == nil
+      - return: r.completed == r.launched, r.firstErr
+  - of: NewKeyedRateLimiter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewKeyedRateLimiter
+        kind: self
+      - id: newMisconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: newMisconfigured(keyedPolicy, "Rate")
+              to: newMisconfigured
+          when: "!usableRate(cfg.Rate)"
+      - opt:
+          do:
+            - return: newMisconfigured(keyedPolicy, "Key")
+              to: newMisconfigured
+          when: cfg.Key == nil
+      - opt:
+          do:
+            - return: newMisconfigured(keyedPolicy, "MaxKeys")
+              to: newMisconfigured
+          when: cfg.MaxKeys <= 0
+      - opt:
+          do:
+            - return: newMisconfigured(keyedPolicy, "IdleTimeout")
+              to: newMisconfigured
+          when: cfg.IdleTimeout <= 0
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: |-
+          &keyedLimiter{
+          		clk: clk, key: cfg.Key, rate: cfg.Rate, burst: bucketSize(cfg.Burst),
+          		idle: cfg.IdleTimeout, limit: cfg.MaxKeys, byKey: make(map[string]*keyedBucket),
+          	}
+  - of: (*keyedLimiter).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keyedLimiter).Run
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coreres.RateLimited, nil)
+              to: wrapAs
+          when: "!l.bucketOf(l.key(ctx)).take()"
+      - return: op(ctx)
+  - of: (*keyedLimiter).bucketOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keyedLimiter).bucketOf
+        kind: self
+      - id: l.clk.Now
+        kind: value
+      - id: l.moveFront
+        kind: internal
+      - id: l.forget
+        kind: internal
+      - id: l.evict
+        kind: internal
+      - id: l.pushFront
+        kind: internal
+    steps:
+      - bind: now
+        eval: l.clk.Now()
+        to: l.clk.Now
+      - lock:
+          mutex: l.mu
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: held.used
+                    value: now
+                  - eval: l.moveFront(held)
+                    to: l.moveFront
+                  - return: held.bucket
+                when: now.Sub(held.used) < l.idle
+            - eval: l.forget(held)
+              to: l.forget
+          init:
+            bind: held, found
+            eval: l.byKey[key]
+          when: found
+      - eval: l.evict(now)
+        to: l.evict
+      - bind: fresh
+        eval: "&keyedBucket{key: key, used: now, bucket: newTokenBucket(l.clk, l.rate, l.burst)}"
+      - set: l.byKey[key]
+        value: fresh
+      - eval: l.pushFront(fresh)
+        to: l.pushFront
+      - return: fresh.bucket
+  - of: (*keyedLimiter).evict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keyedLimiter).evict
+        kind: self
+      - id: l.forget
+        kind: internal
+    steps:
+      - loop:
+          cond: l.tail != nil
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: len(l.byKey) < l.limit && now.Sub(l.tail.used) < l.idle
+            - eval: l.forget(l.tail)
+              to: l.forget
+  - of: (*keyedLimiter).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keyedLimiter).forget
+        kind: self
+      - id: l.unlink
+        kind: internal
+    steps:
+      - eval: l.unlink(entry)
+        to: l.unlink
+      - eval: delete(l.byKey, entry.key)
+  - of: (*keyedLimiter).pushFront
+    steps:
+      - set: entry.prev
+        value: nil
+      - set: entry.next
+        value: l.head
+      - opt:
+          do:
+            - set: l.head.prev
+              value: entry
+          when: l.head != nil
+      - set: l.head
+        value: entry
+      - opt:
+          do:
+            - set: l.tail
+              value: entry
+          when: l.tail == nil
+  - of: (*keyedLimiter).moveFront
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keyedLimiter).moveFront
+        kind: self
+      - id: l.unlink
+        kind: internal
+      - id: l.pushFront
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: l.head == entry
+      - eval: l.unlink(entry)
+        to: l.unlink
+      - eval: l.pushFront(entry)
+        to: l.pushFront
+  - of: (*keyedLimiter).unlink
+    steps:
+      - alt:
+          - do:
+              - set: entry.prev.next
+                value: entry.next
+            when: entry.prev != nil
+          - do:
+              - set: l.head
+                value: entry.next
+            else: true
+      - alt:
+          - do:
+              - set: entry.next.prev
+                value: entry.prev
+            when: entry.next != nil
+          - do:
+              - set: l.tail
+                value: entry.prev
+            else: true
+      - set: entry.prev, entry.next
+        value: nil, nil
+  - of: newMisconfigured
+    steps:
+      - return: "misconfiguredRunner{policy: policy, knob: knob}"
+  - of: misconfiguredRunner.Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfiguredRunner.Run
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coreres.PolicyMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("policy", m.policy), kerrs.String("knob", m.knob))
+        to: kerrs
+  - of: NewRateLimiter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRateLimiter
+        kind: self
+      - id: newMisconfigured
+        kind: internal
+      - id: newTokenBucket
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: newMisconfigured("ratelimit", "Rate")
+              to: newMisconfigured
+          when: "!usableRate(cfg.Rate)"
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: newTokenBucket(clk, cfg.Rate, bucketSize(cfg.Burst))
+        to: newTokenBucket
+  - of: usableRate
+    steps:
+      - return: "!math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0"
+  - of: bucketSize
+    steps:
+      - opt:
+          do:
+            - return: oneToken
+          when: burst < 1
+      - return: float64(burst)
+  - of: newTokenBucket
+    steps:
+      - return: "&tokenBucket{clk: clk, rate: rate, burst: burst, tokens: burst, last: clk.Now()}"
+  - of: (*tokenBucket).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBucket).Run
+        kind: self
+      - id: wrapAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coreres.RateLimited, nil)
+              to: wrapAs
+          when: "!t.take()"
+      - return: op(ctx)
+  - of: (*tokenBucket).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBucket).take
+        kind: self
+      - id: t.clk.Now
+        kind: value
+    steps:
+      - lock:
+          mutex: t.mu
+      - bind: now
+        eval: t.clk.Now()
+        to: t.clk.Now
+      - op: +=
+        set: t.tokens
+        value: now.Sub(t.last).Seconds() * t.rate
+      - set: t.last
+        value: now
+      - opt:
+          do:
+            - set: t.tokens
+              value: t.burst
+          when: t.tokens > t.burst
+      - opt:
+          do:
+            - op: "-="
+              set: t.tokens
+              value: oneToken
+            - return: "true"
+          when: t.tokens >= oneToken
+      - return: "false"
+  - of: NewRetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRetry
+        kind: self
+      - id: kbackoff
+        kind: package
+      - id: timedOrSystem
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: cfg.MaxAttempts
+              value: minAttempts
+          when: cfg.MaxAttempts < minAttempts
+      - set: cfg.Multiplier
+        to: kbackoff
+        value: kbackoff.NormalMultiplier(cfg.Multiplier)
+      - set: cfg.Jitter
+        to: kbackoff
+        value: kbackoff.NormalJitter(cfg.Jitter)
+      - set: cfg.Clock
+        to: timedOrSystem
+        value: timedOrSystem(cfg.Clock)
+      - return: "&retryRunner{cfg: cfg}"
+  - of: (*retryRunner).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).Run
+        kind: self
+      - id: r.wait
+        kind: internal
+      - id: ctx.Err
+        kind: value
+      - id: wrapAs
+        kind: internal
+    steps:
+      - var:
+          name: lastErr
+          type: error
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: waitErr
+                      init:
+                        bind: waitErr
+                        eval: r.wait(ctx, attempt)
+                        to: r.wait
+                      when: waitErr != nil
+                when: attempt > 0
+            - set: lastErr
+              value: op(ctx)
+            - opt:
+                do:
+                  - return: nil
+                when: lastErr == nil
+            - opt:
+                do:
+                  - return: ctx.Err()
+                    to: ctx.Err
+                when: ctx.Err() != nil
+            - opt:
+                do:
+                  - return: lastErr
+                when: "!isRetryable(r.cfg.Retryable, lastErr)"
+          key: attempt
+          range: r.cfg.MaxAttempts
+      - return: wrapAs(coreres.RetryExhausted, lastErr)
+        to: wrapAs
+  - of: (*retryRunner).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).wait
+        kind: self
+      - id: timedOrSystem(r.cfg.Clock).NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: timer
+        eval: timedOrSystem(r.cfg.Clock).NewTimer(r.jittered(r.backoff(attempt)))
+        to: timedOrSystem(r.cfg.Clock).NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: (*retryRunner).backoff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).backoff
+        kind: self
+      - id: kbackoff
+        kind: package
+    steps:
+      - return: kbackoff.Grow(r.cfg.BaseDelay, r.cfg.MaxDelay, r.cfg.Multiplier, attempt)
+        to: kbackoff
+  - of: (*retryRunner).jittered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).jittered
+        kind: self
+      - id: kbackoff
+        kind: package
+    steps:
+      - return: kbackoff.Widen(delay, r.cfg.Jitter)
+        to: kbackoff
+  - of: timedOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: isRetryable
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: pred == nil
+      - return: pred(err)
+  - of: NewTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTimeout
+        kind: self
+      - id: newMisconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: newMisconfigured("timeout", "duration")
+              to: newMisconfigured
+          when: d <= 0
+      - return: "timeoutRunner{timeout: d}"
+  - of: timeoutRunner.Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutRunner.Run
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: wrapAs
+        kind: internal
+    steps:
+      - bind: dctx, cancel
+        eval: context.WithTimeout(ctx, t.timeout)
+        to: context
+      - defer: cancel()
+      - bind: err
+        eval: op(dctx)
+      - opt:
+          do:
+            - return: wrapAs(coreres.TimeoutExceeded, err)
+              to: wrapAs
+          when: dctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded)
+      - return: err
+  - of: wrapAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAs
+        kind: self
+      - id: wrapAsFields
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sentinel
+          when: cause == nil
+      - return: wrapAsFields(sentinel, kerrs.String("cause", cause.Error()))
+        to: wrapAsFields
+  - of: wrapAsFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapAsFields
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.Wrap(sentinel, kerrs.WrapParams{}, fields...)
+        to: kerrs

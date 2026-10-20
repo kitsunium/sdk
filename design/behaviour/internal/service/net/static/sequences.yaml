@@ -1,0 +1,513 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corenet.StaticMisconfigured, errs.WrapParams{}, errs.String(fieldOption, option))
+        to: errs
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: fsys.Open
+        kind: value
+      - id: file.Stat
+        kind: value
+      - id: closeQuietly
+        kind: internal
+    steps:
+      - bind: file, err
+        eval: fsys.Open(name)
+        to: fsys.Open
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, nil, absent
+                when: nameRefused(err)
+            - return: nil, nil, broken
+          when: err != nil
+      - set: info, err
+        to: file.Stat
+        value: file.Stat()
+      - opt:
+          do:
+            - eval: closeQuietly(file)
+              to: closeQuietly
+            - return: nil, nil, broken
+          when: err != nil
+      - return: file, info, present
+  - of: nameRefused
+    steps:
+      - return: errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrInvalid) || platformNameRefused(err)
+  - of: platformNameRefused
+    steps:
+      - return: errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ENAMETOOLONG)
+  - of: (*Handler).serveFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Handler).serveFile
+        kind: self
+      - id: w.Header
+        kind: value
+      - id: header.Set
+        kind: value
+      - id: pinnedType
+        kind: internal
+      - id: http
+        kind: stdlib
+      - id: stream
+        kind: internal
+    steps:
+      - bind: header
+        eval: w.Header()
+        to: w.Header
+      - opt:
+          do:
+            - eval: header.Set("Cache-Control", ImmutableCacheControl)
+              to: header.Set
+          when: h.immutable != nil && h.immutable(name)
+      - opt:
+          do:
+            - eval: header.Set("Content-Type", contentType)
+              to: header.Set
+          init:
+            bind: contentType, pinned
+            eval: pinnedType(path.Ext(name))
+            to: pinnedType
+          when: pinned
+      - opt:
+          do:
+            - eval: http.ServeContent(w, r, name, info.ModTime(), content)
+              to: http
+            - return: ""
+          init:
+            bind: content, seekable
+            eval: file.(io.ReadSeeker)
+          when: seekable
+      - eval: stream(w, r, name, file, info)
+        to: stream
+  - of: stream
+    participants:
+      - id: caller
+        kind: actor
+      - id: stream
+        kind: self
+      - id: w.Header
+        kind: value
+      - id: bufio
+        kind: stdlib
+      - id: body.Peek
+        kind: value
+      - id: failed
+        kind: internal
+      - id: mime
+        kind: stdlib
+      - id: http
+        kind: stdlib
+      - id: header.Set
+        kind: value
+      - id: info.Size
+        kind: value
+      - id: w.WriteHeader
+        kind: value
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: header
+        eval: w.Header()
+        to: w.Header
+      - bind: body
+        eval: bufio.NewReaderSize(file, sniffBytes)
+        to: bufio
+      - bind: head, err
+        eval: body.Peek(sniffBytes)
+        to: body.Peek
+      - opt:
+          do:
+            - eval: failed(w)
+              to: failed
+            - return: ""
+          when: err != nil && err != io.EOF && err != bufio.ErrBufferFull
+      - opt:
+          do:
+            - bind: contentType
+              eval: mime.TypeByExtension(path.Ext(name))
+              to: mime
+            - opt:
+                do:
+                  - set: contentType
+                    to: http
+                    value: http.DetectContentType(head)
+                when: contentType == ""
+            - eval: header.Set("Content-Type", contentType)
+              to: header.Set
+          when: header.Get("Content-Type") == ""
+      - opt:
+          do:
+            - eval: header.Set("Content-Length", strconv.FormatInt(size, 10))
+              to: header.Set
+          init:
+            bind: size
+            eval: info.Size()
+            to: info.Size
+          when: size >= 0
+      - eval: w.WriteHeader(http.StatusOK)
+        to: w.WriteHeader
+      - opt:
+          do:
+            - return: ""
+          when: r.Method == http.MethodHead
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: io.Copy(w, body)
+            to: io
+          when: err != nil
+  - of: pinnedType
+    steps:
+      - switch:
+          cases:
+            - case: "\".html\", \".htm\""
+              do:
+                - return: "\"text/html; charset=utf-8\", true"
+            - case: "\".js\", \".mjs\""
+              do:
+                - return: "\"text/javascript; charset=utf-8\", true"
+            - case: "\".css\""
+              do:
+                - return: "\"text/css; charset=utf-8\", true"
+            - case: "\".json\", \".map\""
+              do:
+                - return: "\"application/json\", true"
+            - case: "\".wasm\""
+              do:
+                - return: "\"application/wasm\", true"
+            - case: "\".svg\""
+              do:
+                - return: "\"image/svg+xml\", true"
+            - case: "\".webmanifest\""
+              do:
+                - return: "\"application/manifest+json\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
+          "on": strings.ToLower(extension)
+  - of: NewHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHandler
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("fs")
+          when: fsys == nil
+      - bind: csp
+        eval: cmp.Or(cfg.ContentSecurityPolicy, DefaultContentSecurityPolicy)
+        to: cmp
+      - opt:
+          do:
+            - return: nil, misconfigured("content_security_policy")
+          when: "!headerValueSafe(csp)"
+      - bind: referrer
+        eval: cmp.Or(cfg.ReferrerPolicy, DefaultReferrerPolicy)
+        to: cmp
+      - opt:
+          do:
+            - return: nil, misconfigured("referrer_policy")
+          when: "!referrerPolicyKnown(referrer)"
+      - return: "&Handler{fsys: fsys, csp: csp, referrer: referrer, spa: cfg.SinglePageApp, immutable: cfg.Immutable}, nil"
+  - of: (*Handler).ServeHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Handler).ServeHTTP
+        kind: self
+      - id: w.Header
+        kind: value
+      - id: header.Set
+        kind: value
+      - id: http
+        kind: stdlib
+      - id: failed
+        kind: internal
+      - id: h.serveName
+        kind: internal
+    steps:
+      - bind: header
+        eval: w.Header()
+        to: w.Header
+      - eval: header.Set("Content-Security-Policy", cmp.Or(h.csp, DefaultContentSecurityPolicy))
+        to: header.Set
+      - eval: header.Set("X-Content-Type-Options", "nosniff")
+        to: header.Set
+      - eval: header.Set("Referrer-Policy", cmp.Or(h.referrer, DefaultReferrerPolicy))
+        to: header.Set
+      - eval: header.Set("Cache-Control", RevalidateCacheControl)
+        to: header.Set
+      - opt:
+          do:
+            - eval: header.Set("Allow", allowedMethods)
+              to: header.Set
+            - eval: http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+              to: http
+            - return: ""
+          when: r.Method != http.MethodGet && r.Method != http.MethodHead
+      - opt:
+          do:
+            - eval: failed(w)
+              to: failed
+            - return: ""
+          when: h.fsys == nil
+      - eval: h.serveName(w, r, cleanName(r.URL.Path), strings.HasSuffix(r.URL.Path, "/"))
+        to: h.serveName
+  - of: cleanName
+    participants:
+      - id: caller
+        kind: actor
+      - id: cleanName
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: name
+        eval: strings.TrimPrefix(path.Clean("/"+requestPath), "/")
+        to: strings
+      - opt:
+          do:
+            - return: "\".\""
+          when: name == ""
+      - return: name
+  - of: (*Handler).serveName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Handler).serveName
+        kind: self
+      - id: open
+        kind: internal
+      - id: closeQuietly
+        kind: internal
+      - id: h.serveDirectory
+        kind: internal
+      - id: h.serveFile
+        kind: internal
+      - id: notFound
+        kind: internal
+      - id: h.fallback
+        kind: internal
+      - id: failed
+        kind: internal
+    steps:
+      - bind: file, info, found
+        eval: open(h.fsys, name)
+        to: open
+      - switch:
+          cases:
+            - case: found == present && info.IsDir()
+              do:
+                - eval: closeQuietly(file)
+                  to: closeQuietly
+                - eval: h.serveDirectory(w, r, name, slash)
+                  to: h.serveDirectory
+            - case: found == present && info.Mode().IsRegular() && !slash
+              do:
+                - defer: closeQuietly(file)
+                  to: closeQuietly
+                - eval: h.serveFile(w, r, name, file, info)
+                  to: h.serveFile
+            - case: found == present
+              do:
+                - eval: closeQuietly(file)
+                  to: closeQuietly
+                - eval: notFound(w)
+                  to: notFound
+            - case: found == absent
+              do:
+                - eval: h.fallback(w, r, name)
+                  to: h.fallback
+            - default: true
+              do:
+                - eval: failed(w)
+                  to: failed
+  - of: (*Handler).serveDirectory
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Handler).serveDirectory
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: open
+        kind: internal
+      - id: closeQuietly
+        kind: internal
+      - id: redirectToDirectory
+        kind: internal
+      - id: h.serveFile
+        kind: internal
+      - id: notFound
+        kind: internal
+      - id: failed
+        kind: internal
+    steps:
+      - bind: index
+        eval: path.Join(name, indexName)
+        to: path
+      - bind: file, info, found
+        eval: open(h.fsys, index)
+        to: open
+      - switch:
+          cases:
+            - case: found == present && info.Mode().IsRegular()
+              do:
+                - defer: closeQuietly(file)
+                  to: closeQuietly
+                - opt:
+                    do:
+                      - eval: redirectToDirectory(w, r, name)
+                        to: redirectToDirectory
+                      - return: ""
+                    when: "!slash && name != \".\""
+                - eval: h.serveFile(w, r, index, file, info)
+                  to: h.serveFile
+            - case: found == present
+              do:
+                - eval: closeQuietly(file)
+                  to: closeQuietly
+                - eval: notFound(w)
+                  to: notFound
+            - case: found == absent
+              do:
+                - eval: notFound(w)
+                  to: notFound
+            - default: true
+              do:
+                - eval: failed(w)
+                  to: failed
+  - of: (*Handler).fallback
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Handler).fallback
+        kind: self
+      - id: notFound
+        kind: internal
+      - id: open
+        kind: internal
+      - id: closeQuietly
+        kind: internal
+      - id: h.serveFile
+        kind: internal
+      - id: failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: notFound(w)
+              to: notFound
+            - return: ""
+          when: "!h.spa || path.Ext(name) != \"\""
+      - bind: file, info, found
+        eval: open(h.fsys, indexName)
+        to: open
+      - switch:
+          cases:
+            - case: found == present && info.Mode().IsRegular()
+              do:
+                - defer: closeQuietly(file)
+                  to: closeQuietly
+                - eval: h.serveFile(w, r, indexName, file, info)
+                  to: h.serveFile
+            - case: found == present
+              do:
+                - eval: closeQuietly(file)
+                  to: closeQuietly
+                - eval: notFound(w)
+                  to: notFound
+            - case: found == absent
+              do:
+                - eval: notFound(w)
+                  to: notFound
+            - default: true
+              do:
+                - eval: failed(w)
+                  to: failed
+  - of: redirectToDirectory
+    participants:
+      - id: caller
+        kind: actor
+      - id: redirectToDirectory
+        kind: self
+      - id: w.Header().Set
+        kind: value
+      - id: w.WriteHeader
+        kind: value
+    steps:
+      - bind: location
+        eval: "\"./\" + url.PathEscape(path.Base(name)) + \"/\""
+      - opt:
+          do:
+            - op: +=
+              set: location
+              value: "\"?\" + r.URL.RawQuery"
+          when: r.URL.RawQuery != ""
+      - eval: w.Header().Set("Location", location)
+        to: w.Header().Set
+      - eval: w.WriteHeader(http.StatusMovedPermanently)
+        to: w.WriteHeader
+  - of: notFound
+    participants:
+      - id: caller
+        kind: actor
+      - id: notFound
+        kind: self
+      - id: http
+        kind: stdlib
+    steps:
+      - eval: http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+        to: http
+  - of: failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: failed
+        kind: self
+      - id: http
+        kind: stdlib
+    steps:
+      - eval: http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+        to: http
+  - of: closeQuietly
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeQuietly
+        kind: self
+      - id: file.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: file.Close()
+            to: file.Close
+          when: err != nil
