@@ -298,7 +298,7 @@ sequences:
     steps:
       - opt:
           do:
-            - panic: err.Error()
+            - panic: "err.Error() + \": \" + err.Private()"
           init:
             bind: err
             eval: validateDefineArgs(code, reason, public, private)
@@ -318,7 +318,7 @@ sequences:
       - return: "&Error{code: code, reason: reason, public: public, private: private, httpOverride: http, exitOverride: exit}"
   - of: newValidationError
     steps:
-      - return: "&Error{code: code, reason: reason, public: public}"
+      - return: "&Error{code: code, reason: reason, public: public, private: private}"
   - of: Wrap
     participants:
       - id: caller
@@ -396,7 +396,7 @@ sequences:
                 			code:    CodeInvalidWrapParams,
                 			reason:  "INVALID_WRAP_PARAMS",
                 			public:  "internal wrap failure",
-                			private: "Wrap received invalid params: " + bad.Public(),
+                			private: "Wrap received invalid params: " + bad.Private(),
                 			source:  cause,
                 		}
           init:
@@ -1027,14 +1027,14 @@ sequences:
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidCode, "INVALID_CODE",
+                newValidationError(CodeInvalidCode, "INVALID_CODE", publicCodeZero,
                 			fmt.Sprintf("code must be non-zero, got %d", int(uint32(code))))
               to: newValidationError
           when: code == 0
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidCode, "INVALID_CODE",
+                newValidationError(CodeInvalidCode, "INVALID_CODE", publicCodeOverflow,
                 			fmt.Sprintf("code must fit int32 positive range, got %#08x", uint32(code)))
               to: newValidationError
           when: uint32(code) > maxInt32Positive
@@ -1043,7 +1043,7 @@ sequences:
             - opt:
                 do:
                   - return: |-
-                      newValidationError(CodeInvalidCode, "INVALID_CODE",
+                      newValidationError(CodeInvalidCode, "INVALID_CODE", publicCodeMetaLayer,
                       				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code))
                     to: newValidationError
                 init:
@@ -1064,8 +1064,8 @@ sequences:
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidReason, "INVALID_REASON",
-                			fmt.Sprintf("reason %q must match %s", reason, reasonPattern))
+                newValidationError(CodeInvalidReason, "INVALID_REASON", publicReason,
+                			fmt.Sprintf("reason %q must match %s", clipEcho(reason), reasonPattern))
               to: newValidationError
           when: "!isScreamingSnake(reason)"
       - return: nil
@@ -1081,14 +1081,14 @@ sequences:
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC", publicEmpty,
                 			"public must not be empty")
               to: newValidationError
           when: public == ""
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC", publicTooLong,
                 			fmt.Sprintf("public exceeds %d runes (got %d)",
                 				maxPublicRunes, utf8.RuneCountInString(public)))
               to: newValidationError
@@ -1096,7 +1096,7 @@ sequences:
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+                newValidationError(CodeInvalidPublic, "INVALID_PUBLIC", publicNewline,
                 			"public must not contain a newline")
               to: newValidationError
           when: containsNewline(public)
@@ -1113,7 +1113,7 @@ sequences:
       - opt:
           do:
             - return: |-
-                newValidationError(CodeInvalidPrivate, "INVALID_PRIVATE",
+                newValidationError(CodeInvalidPrivate, "INVALID_PRIVATE", publicPrivateEmpty,
                 			"private must not be empty")
               to: newValidationError
           when: private == ""

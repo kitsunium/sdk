@@ -99,8 +99,9 @@ func NewRuntime(code Code, reason, public, private string, fields ...FieldValue)
 func Define(code Code, reason, public, private string, opts ...DefineOption) *Error {
 	//: validate up-front so bad sentinels never reach runtime call sites.
 	if err := validateDefineArgs(code, reason, public, private); err != nil {
-		//: panic at init fails the binary — operators grep the meta-code.
-		panic(err.Error())
+		//: panic at init fails the binary — operators grep the meta-code, and
+		//: the detail Public no longer carries rides beside it.
+		panic(err.Error() + ": " + err.Private())
 	}
 	//: construct the base sentinel; overrides apply after.
 	sentinel := &Error{code: code, reason: reason, public: public, private: private}
@@ -132,11 +133,11 @@ func Static(code Code, reason, public, private string, http, exit int) *Error {
 // recurse into validateDefineArgs again and blow the stack at init).
 //
 // Direct struct literal — does not call Define or validateDefineArgs.
-func newValidationError(code Code, reason, public string) *Error {
+func newValidationError(code Code, reason, public, private string) *Error {
 	//: bypass the whole validation/construction pipeline — this is the
 	//: ONLY correct way to surface structural failures from inside the
 	//: validator itself without risking init recursion.
-	return &Error{code: code, reason: reason, public: public}
+	return &Error{code: code, reason: reason, public: public, private: private}
 }
 
 // Wrap attaches a cause to a new *Error with origin-wins semantics.
@@ -208,7 +209,7 @@ func newFromStdlibCause(cause error, params WrapParams, fields []FieldValue) *Er
 			code:    CodeInvalidWrapParams,
 			reason:  "INVALID_WRAP_PARAMS",
 			public:  "internal wrap failure",
-			private: "Wrap received invalid params: " + bad.Public(),
+			private: "Wrap received invalid params: " + bad.Private(),
 			source:  cause,
 		}
 	}
