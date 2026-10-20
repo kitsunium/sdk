@@ -1,0 +1,63 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Format is the name BSON is registered under. It is an untyped constant, so
+      it goes wherever a format name is taken — the codec package's Marshal,
+      config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
+    items:
+      - name: Format
+        value: "\"bson\""
+    name: Format
+files:
+  - decls:
+      - Format
+      - MarshalFailed
+      - Marshal
+      - Append
+      - Unmarshal
+    name: bson.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: Marshal
+    params: v any
+    results: "[]byte, error"
+  - name: Append
+    params: dst []byte, v any
+    results: "[]byte, error"
+  - name: Unmarshal
+    params: data []byte, v any
+    results: error
+imports:
+  corebson: github.com/kitsunium/sdk/internal/core/data/codec/bson
+  svcbson: github.com/kitsunium/sdk/internal/service/data/codec/bson
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/bson
+  name: bson
+  purpose: Package bson is BSON, MongoDB's binary document format, implemented with the standard library alone.
+types: []
+vars:
+  - doc: The sentinels, for errors.Is, and the nil ObjectID.
+    grouped: true
+    items:
+      - doc: MarshalFailed marks a value Marshal or Append cannot encode.
+        name: MarshalFailed
+        value: corebson.MarshalFailed
+      - doc: UnmarshalFailed marks input Unmarshal refuses.
+        name: UnmarshalFailed
+        value: corebson.UnmarshalFailed
+      - doc: SizeExceeded marks an Unmarshal input past 10 MiB.
+        name: SizeExceeded
+        value: corebson.SizeExceeded
+      - doc: DepthExceeded marks nesting past 100 levels.
+        name: DepthExceeded
+        value: corebson.DepthExceeded
+      - doc: ValueInvalid marks a value type's constructor or parser refusing its input.
+        name: ValueInvalid
+        value: corebson.ValueInvalid
+      - doc: NilObjectID is the zero ObjectID.
+        name: NilObjectID
+        type: ObjectID
+    name: MarshalFailed

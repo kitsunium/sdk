@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/rlimit
+  name: rlimit
+  purpose: Package rlimit applies per-process resource ceilings via setrlimit(2) / prlimit64(2).
+types: []

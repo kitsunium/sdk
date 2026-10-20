@@ -1,0 +1,45 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      kdfAlgorithm is the scheme SharedKey runs the raw DH secret through. HKDF-SHA256
+      is activated by this package's blank import above.
+    items:
+      - name: kdfAlgorithm
+        type: corecrypto.Algorithm
+        value: "\"hkdf-sha256\""
+    name: kdfAlgorithm
+  - doc: X25519 is Diffie-Hellman over Curve25519 (RFC 7748) — the modern default.
+    items:
+      - name: X25519
+        type: Algorithm
+        value: "\"x25519\""
+    name: X25519
+files:
+  - decls:
+      - kdfAlgorithm
+      - X25519
+      - Algorithm
+      - GenerateKey
+      - SharedKey
+    name: agree.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: GenerateKey
+    params: a Algorithm
+    results: pub, priv []byte, err error
+  - name: SharedKey
+    params: a Algorithm, priv, peerPub []byte, info string
+    results: key Key, err error
+imports:
+  corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/crypto/agree
+  name: agree
+  purpose: "Package agree is the key-agreement facade: establish a shared symmetric key between two parties from their keypairs."
+types:
+  - kind: named
+    name: Algorithm
+    underlying: corecrypto.Algorithm

@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/systemd/listen
+  name: listen
+  purpose: "Package listen is the public facade for systemd-style socket activation (sd_listen_fds(3)): a service recovers already-bound listening sockets handed to it by an activator, and an activator hands sockets to a child it spawns."
+types: []

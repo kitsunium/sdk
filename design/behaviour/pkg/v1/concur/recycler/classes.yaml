@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/concur/recycler
+  name: recycler
+  purpose: "Package recycler pools objects for reuse, typed: Get borrows one, Put hands it back, and the pool never hands out a value of the wrong type."
+types: []

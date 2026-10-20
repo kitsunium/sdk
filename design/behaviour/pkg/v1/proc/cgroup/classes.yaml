@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - MustCreate
+    name: cgroup.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: MustCreate
+    params: name string, opts ...Option
+    results: Group
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/cgroup
+  name: cgroup
+  purpose: Package cgroup creates and manages cgroup v2 control groups to confine a process tree's memory, CPU, pids, and IO.
+types: []

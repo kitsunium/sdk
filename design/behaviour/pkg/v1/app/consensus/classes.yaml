@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/consensus
+  name: consensus
+  purpose: "Package consensus is the public facade of the SDK's consensus domain (ADR 0152): agreement of several machines on the order of their writes."
+types: []

@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/concur/batcher
+  name: batcher
+  purpose: "Package batcher coalesces items into batches: Add appends, and a deliver function you supply receives them a batch at a time — when a count or a weight cap is reached, on a ticker, or when you Flush or Close."
+types: []

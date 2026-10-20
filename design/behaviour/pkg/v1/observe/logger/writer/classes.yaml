@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: writer.go
+imports: {}
+package:
+  doc: |-
+    Package writer activates the dependency-free logger writers — "console",
+    "file", and "rotfile" — by blank-importing their service factory packages. A
+    single
+
+    	import _ "github.com/kitsunium/sdk/pkg/v1/observe/logger/writer"
+
+    registers all three factories so logger.NewMulti can resolve the "console",
+    "file", and "rotfile" names. It pulls NO third-party dependencies; the AWS
+    writers (s3, cloudwatch) live in separate third-party/aws/writer packages
+    that a consumer imports individually when — and only when — they want the AWS
+    SDK in their build (ADR 0012).
+  docFile: writer.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/observe/logger/writer
+  name: writer
+  purpose: Package writer activates the dependency-free logger writers — "console", "file", and "rotfile" — by blank-importing their service factory packages.
+types: []

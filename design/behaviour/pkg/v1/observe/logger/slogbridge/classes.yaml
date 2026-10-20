@@ -1,0 +1,159 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      groupSeparator joins a group chain to an attribute key ("g1.g2.key"). It is
+      the separator the SDK text and JSON encoders already emit for nested
+      attributes, so a bridged record is indistinguishable from a native one.
+    items:
+      - name: groupSeparator
+        type: string
+        value: "\".\""
+    name: groupSeparator
+files:
+  - decls:
+      - groupSeparator
+      - toLevel
+      - qualifyGroup
+      - qualifyKey
+      - appendAttr
+      - appendGroup
+      - convert
+    name: convert.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - handler
+      - handler.Enabled
+      - handler.Handle
+      - handler.WithAttrs
+      - handler.WithGroup
+    name: handler.go
+  - decls:
+      - NewHandler
+      - New
+    name: slogbridge.go
+functions:
+  - doc: |-
+      toLevel converts an slog.Level to the SDK Level.
+
+      The two scales share their integers by construction — Debug/Info/Warn/Error
+      are -4/0/4/8 on both sides — so this is a value-preserving cast, and a custom
+      level such as slog.Level(2) keeps its exact position between the named ones.
+      Only the width differs: the SDK Level is an int8, so out-of-range levels
+      saturate rather than wrap into a lower severity, which is the safe direction
+      (an absurdly high level stays an error, it does not become a debug).
+    name: toLevel
+    params: lv slog.Level
+    results: logger.Level
+  - doc: |-
+      qualifyGroup extends the group chain with a nested group's name.
+
+      An empty name inlines the group's members, which slog specifies and which
+      this expresses by handing the prefix back untouched.
+    name: qualifyGroup
+    params: prefix, name string
+    results: string
+  - doc: |-
+      qualifyKey prefixes a leaf attribute's key with the active group chain.
+
+      An empty KEY is not an empty group: slog's own handlers emit "g.=v" for
+      String("", "v") bound under WithGroup("g"), keeping the separator so the
+      record still shows which group the value came from. Collapsing it to "g"
+      would make a bridged record differ from a native one on the one detail the
+      bridge exists to preserve.
+    name: qualifyKey
+    params: prefix, key string
+    results: string
+  - doc: |-
+      appendAttr converts a and appends the result to dst, flattening groups into
+      dotted keys under prefix.
+
+      slog's elision rules are honoured here rather than pushed down to the SDK
+      handler, which has no notion of them: an empty Attr is dropped, and a group
+      is expanded into its members.
+    name: appendAttr
+    params: dst []logger.Attr, prefix string, a slog.Attr
+    results: "[]logger.Attr"
+  - doc: appendGroup flattens a group's members into dst under the group's name.
+    name: appendGroup
+    params: dst []logger.Attr, prefix, name string, members []slog.Attr
+    results: "[]logger.Attr"
+  - doc: convert maps a resolved, non-group slog.Value onto its SDK Attr peer.
+    name: convert
+    params: key string, v slog.Value
+    results: logger.Attr
+  - name: NewHandler
+    params: lg logger.Logger
+    results: h slog.Handler, err error
+  - name: New
+    params: lg logger.Logger
+    results: sl *slog.Logger, err error
+imports:
+  context: context
+  logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+  math: math
+  slog: log/slog
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge
+  name: slogbridge
+  purpose: Package slogbridge — converts slog levels and attributes to their SDK peers.
+types:
+  - doc: |-
+      handler forwards every slog record to an SDK Logger.
+
+      It is immutable: WithAttrs and WithGroup derive a new handler, so a parent
+      never observes a child's bindings. That is the slog.Handler contract, and it
+      falls out naturally because the SDK Logger's With is copy-on-write too.
+    fields:
+      - doc: |-
+          lg is the destination. Attrs bound through WithAttrs are folded into it,
+          so a derived handler carries its own derived Logger.
+        name: lg
+        type: logger.Logger
+      - doc: |-
+          prefix is the active group chain ("g1.g2"), applied to every key this
+          handler qualifies.
+
+          The chain is tracked HERE rather than delegated to lg.WithGroup because
+          the two group models disagree: the SDK handler applies its final group
+          stack to every bound attr, so an attr bound BEFORE a group would be
+          retroactively moved under it. slog's model is positional — a group only
+          governs what is bound after it. Qualifying keys in the bridge reproduces
+          slog's semantics exactly, and does so independently of which SDK handler
+          or encoder sits underneath.
+        name: prefix
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          Enabled reports whether the underlying Logger would emit a record at lv.
+
+          The SDK Logger's threshold is the only one consulted: the bridge holds no
+          level of its own, which is what makes "one pipeline, one threshold" true.
+        name: Enabled
+        params: ctx context.Context, lv slog.Level
+        recv: h handler
+        results: bool
+      - doc: |-
+          Handle converts r's attributes and emits the record through the Logger.
+
+          It always returns nil: the SDK Logger.Log contract reports no error, so the
+          bridge has none to forward. Sink-level failures are handled by the sink's own
+          middleware (failover / recover), not surfaced through slog.
+        name: Handle
+        params: ctx context.Context, r slog.Record
+        recv: h handler
+        results: error
+      - doc: WithAttrs returns a handler whose records always carry as.
+        name: WithAttrs
+        params: as []slog.Attr
+        recv: h handler
+        results: slog.Handler
+      - doc: WithGroup returns a handler that namespaces subsequent keys under name.
+        name: WithGroup
+        params: name string
+        recv: h handler
+        results: slog.Handler
+    name: handler

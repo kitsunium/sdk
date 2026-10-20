@@ -1,0 +1,55 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The Algorithms registered by importing this package.
+    grouped: true
+    items:
+      - doc: "Gzip is RFC 1952: a DEFLATE stream in a gzip envelope with a CRC-32."
+        name: Gzip
+        type: Algorithm
+        value: "\"gzip\""
+      - doc: Flate is the raw DEFLATE stream of RFC 1951, with no envelope.
+        name: Flate
+        type: Algorithm
+        value: "\"flate\""
+      - doc: |-
+          Zlib is the RFC 1950 envelope with an Adler-32 — what HTTP calls
+          "deflate".
+        name: Zlib
+        type: Algorithm
+        value: "\"zlib\""
+    name: Gzip
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Gzip
+      - Compress
+      - Decompress
+      - DecompressBounded
+      - judgeAfter
+    name: transform.go
+functions:
+  - name: Compress
+    params: algo Algorithm, dst, src []byte
+    results: encoded []byte, err error
+  - name: Decompress
+    params: algo Algorithm, dst, src []byte
+    results: decoded []byte, err error
+  - name: DecompressBounded
+    params: algo Algorithm, dst, src []byte, limit int64
+    results: decoded []byte, err error
+  - doc: |-
+      judgeAfter decompresses with a scheme that cannot be told a ceiling, under
+      its own backstop, and refuses a result past limit.
+    name: judgeAfter
+    params: c Compressor, dst, src []byte, limit int64
+    results: decoded []byte, err error
+imports:
+  coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/transform
+  name: transform
+  purpose: Package transform compresses and decompresses bytes with the SDK's compressors, without the codec package (ADR 0014).
+types: []

@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Format is the name TLV is registered under. It is an untyped constant, so it
+      goes wherever a format name is taken — the codec package's Marshal,
+      config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
+    items:
+      - name: Format
+        value: "\"tlv\""
+    name: Format
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Format
+    name: tlv.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/tlv
+  name: tlv
+  purpose: "Package tlv registers the TLV codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/tlv\" The codec is the SDK's self-describing Type-Length-Value binary: every value carries its kind and its length, so a document decodes without a schema, into a typed target or into an interface."
+types: []

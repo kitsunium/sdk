@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/events
+  name: events
+  purpose: "Package events is the public facade for the SDK's IN-PROCESS event bus: one fact is published, and every listener registered for that fact's type reacts to it, in an order you choose, on your goroutine, before Publish returns."
+types: []

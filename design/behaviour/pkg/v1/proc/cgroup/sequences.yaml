@@ -1,0 +1,20 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: MustCreate
+    participants:
+      - id: caller
+        kind: actor
+      - id: MustCreate
+        kind: self
+      - id: Create
+        kind: internal
+    steps:
+      - bind: grp, err
+        eval: Create(name, opts...)
+        to: Create
+      - opt:
+          do:
+            - panic: err
+          when: err != nil
+      - return: grp

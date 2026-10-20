@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Format is the name PEM is registered under. It is an untyped constant, so it
+      goes wherever a format name is taken — the codec package's Marshal,
+      config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
+    items:
+      - name: Format
+        value: "\"pem\""
+    name: Format
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Format
+    name: pem.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/pem
+  name: pem
+  purpose: "Package pem registers the PEM codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/pem\" The codec is the standard library's encoding/pem, RFC 7468's textual armour: its native value is a *pem.Block — a type, headers and the bytes — and an Unmarshal target is a **pem.Block."
+types: []

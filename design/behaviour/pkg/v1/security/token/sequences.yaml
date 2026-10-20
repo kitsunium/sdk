@@ -1,0 +1,50 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: PrivateClaim
+    participants:
+      - id: caller
+        kind: actor
+      - id: PrivateClaim
+        kind: self
+      - id: claims.PrivateRaw
+        kind: value
+      - id: json
+        kind: stdlib
+    steps:
+      - bind: raw, present
+        eval: claims.PrivateRaw(name)
+        to: claims.PrivateRaw
+      - opt:
+          do:
+            - return: value, false, nil
+          when: "!present"
+      - opt:
+          do:
+            - return: value, true, uerr
+          init:
+            bind: uerr
+            eval: json.Unmarshal(raw, &value)
+            to: json
+          when: uerr != nil
+      - return: value, true, nil
+  - of: SetPrivateClaim
+    participants:
+      - id: caller
+        kind: actor
+      - id: SetPrivateClaim
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: claims.WithPrivateRaw
+        kind: value
+    steps:
+      - bind: raw, merr
+        eval: json.Marshal(value)
+        to: json
+      - opt:
+          do:
+            - return: Claims{}, merr
+          when: merr != nil
+      - return: claims.WithPrivateRaw(name, raw)
+        to: claims.WithPrivateRaw

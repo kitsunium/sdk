@@ -1,0 +1,24 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Format is the name XML is registered under. It is an untyped constant, so it
+      goes wherever a format name is taken — the codec package's Marshal,
+      config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
+    items:
+      - name: Format
+        value: "\"xml\""
+    name: Format
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Format
+    name: xml.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/xml
+  name: xml
+  purpose: "Package xml registers the XML codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/xml\" The codec is the standard library's encoding/xml, with its struct tags and its rules: a value marshals as an element, a struct names it with an XMLName field or its type name."
+types: []

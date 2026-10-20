@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/view
+  name: view
+  purpose: "Package view is the public facade for the SDK's server-side rendering: a named template plus a data value become a complete HTML document, escaped according to the context each value lands in."
+types: []
