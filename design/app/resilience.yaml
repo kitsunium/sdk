@@ -246,7 +246,11 @@ packages:
           whose cooldown is zero admits the next call immediately and therefore
           protects nothing (ADR 0031). An error rejected by cfg.Retryable is returned
           verbatim and left out of the state machine entirely, so deterministic
-          failures cannot trip the breaker.
+          failures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen
+          trial runs at a time and every other call returns CircuitOpen until it
+          settles. The outcome of a call admitted before the breaker last opened
+          is ignored: its success cannot close the breaker and its failure cannot
+          restart the cooldown.
         in:
           - name: cfg
             type: BreakerConfig
@@ -984,6 +988,8 @@ packages:
           doc: |-
             NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by
             cfg.Retryable is returned verbatim and left out of the state machine.
+            HalfOpen runs one trial at a time, and the outcome of a call admitted
+            before the breaker last opened is ignored.
           forward: svcres.NewCircuitBreaker
           in:
             - name: cfg
