@@ -53,6 +53,7 @@ A box is \[1-byte version]\[1-byte algorithm-id]\[nonce]\[ciphertext || tag]. Th
 - [type Algorithm](<#Algorithm>)
 - [type Key](<#Key>)
   - [func \(Key\) Bytes\(\) \[\]byte](<#Key.Bytes>)
+  - [func \(Key\) Format\(state fmt.State, verb rune\)](<#Key.Format>)
   - [func \(Key\) GoString\(\) string](<#Key.GoString>)
   - [func \(Key\) String\(\) string](<#Key.String>)
   - [func \(Key\) Zeroize\(\)](<#Key.Zeroize>)
@@ -190,7 +191,16 @@ type Key struct{}
 func (Key) Bytes() []byte
 ```
 
-Bytes returns a fresh copy of the raw key material for handoff to a cipher. Callers MUST NOT log the result; the redaction only covers String / GoString. A zero-value Key returns nil.
+Bytes returns a fresh copy of the raw key material for handoff to a cipher. Callers MUST NOT log the result; the redaction only covers the renderings. A zero-value Key returns nil.
+
+<a name="Key.Format"></a>
+### func \(Key\) [Format](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)
+
+```go
+func (Key) Format(state fmt.State, verb rune)
+```
+
+Format implements fmt.Formatter, so EVERY verb writes "\<redacted>" — %d included, which bypasses String and would otherwise print the struct's bytes. %q writes it quoted.
 
 <a name="Key.GoString"></a>
 ### func \(Key\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)

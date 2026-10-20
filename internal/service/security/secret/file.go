@@ -202,6 +202,35 @@ func (s *fileStore) Prune(ctx context.Context, name string, keep int) error {
 	})
 }
 
+// PruneBelow drops every version of name numbered below floor, except the
+// newest, under name's writer lock (FloorPruner): the read and the drop are one
+// step, so a version another process stores meanwhile is either read and
+// judged by its number, or stored after and kept.
+func (s *fileStore) PruneBelow(ctx context.Context, name string, floor int) error {
+	//: the name, checked as every store checks it.
+	if pruneErr := checkPruneBelow(name); pruneErr != nil {
+		//: InvalidName.
+		return pruneErr
+	}
+	//: the read-modify-write runs with the writer lock held.
+	return s.withWriter(ctx, name, func() error {
+		history, readErr := s.readHistory(name)
+		//: NotFound, StoreUnavailable or RecordUnreadable.
+		if readErr != nil {
+			//: nothing to prune, or nothing readable.
+			return readErr
+		}
+		kept, dropped := prunedBelow(history, floor)
+		//: nothing below the floor: no write, so no needless publication.
+		if !dropped {
+			//: nothing to drop.
+			return nil
+		}
+		//: the kept versions, republished as the whole record.
+		return s.publish(name, kept)
+	})
+}
+
 // Names lists every secret with a record, sorted. The lock files and a
 // publication's temporary share the directory and are not records.
 func (s *fileStore) Names(ctx context.Context) (names []string, err error) {

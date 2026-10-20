@@ -26,6 +26,12 @@ const fileSuffix string = "_FILE"
 // data), and reading it whole into memory to find out would be the failure.
 const maxEnvFileBytes int64 = 64 << 10
 
+// readLimit is how many bytes readBounded reads at most: the largest secret,
+// the longest line ending trimLineEnding removes, and one byte more. A read
+// that returns readLimit bytes stopped inside the file, so the file is
+// refused, never truncated.
+const readLimit int64 = maxEnvFileBytes + int64(len("\r\n")) + 1
+
 // prefixSeparator joins a prefix to the variable part of a name.
 const prefixSeparator string = "_"
 
@@ -218,6 +224,14 @@ func (e envStore) Prune(_ context.Context, _ string, _ int) error {
 		errs.String("store", "env"), errs.String("operation", "prune"))
 }
 
+// PruneBelow is refused like Prune (FloorPruner): the environment keeps
+// exactly one version and the process cannot remove it.
+func (e envStore) PruneBelow(_ context.Context, _ string, _ int) error {
+	//: ReadOnly, as for Prune.
+	return errs.Wrap(coresecret.ReadOnly, errs.WrapParams{},
+		errs.String("store", "env"), errs.String("operation", "prune"))
+}
+
 // Names lists every secret name the environment supplies under the prefix, in
 // either form, sorted. A variable that does not map back to a valid name —
 // lowercase letters in it, a character outside the grammar — is not a secret
@@ -266,6 +280,16 @@ func (e envStore) nameOf(entry string) (name string, ok bool) {
 // timestamp the environment store can honestly report.
 func readSecretFile(name, fileVariable, path string) (current coresecret.VersionValue, err error) {
 	content, modified, readErr := readBounded(path)
+	//: a read that reached its limit stopped inside the file: the file is
+	//: larger than any secret plus one line ending, and whatever was read is
+	//: a prefix. Judged on the raw bytes, BEFORE a line ending is trimmed, so
+	//: a truncated read can never pass for a whole secret (#435).
+	if readErr == nil && int64(len(content)) >= readLimit {
+		clear(content)
+		//: EnvRefused, naming the variable, never the content or the path.
+		return coresecret.VersionValue{}, wrapAs(coresecret.EnvRefused, nil, errs.String("secret", name),
+			errs.String("file_variable", fileVariable), errs.String("problem", "the file is empty or larger than 64 KiB"))
+	}
 	//: unreadable: absent, forbidden, a directory — possibly a volume that is
 	//: not mounted YET, so it is the retryable verdict. The path is not
 	//: repeated; the variable that names it is.
@@ -286,8 +310,9 @@ func readSecretFile(name, fileVariable, path string) (current coresecret.Version
 	return coresecret.VersionValue{Name: name, Version: 1, Value: coresecret.NewValue(content), Created: modified}, nil
 }
 
-// readBounded reads at most maxEnvFileBytes+1 bytes of path — one more than
-// allowed, so an oversized file is detected without being read whole.
+// readBounded reads at most readLimit bytes of path — one more than a secret
+// and its line ending can take, so an oversized file is detected without
+// being read whole, and before anything is trimmed from what was read.
 func readBounded(path string) (content []byte, modified time.Time, err error) {
 	file, openErr := os.Open(path)
 	//: absent, forbidden, or not a path at all.
@@ -316,7 +341,7 @@ func readBounded(path string) (content []byte, modified time.Time, err error) {
 		//: the store's own verdict; the caller wraps it without the path.
 		return nil, time.Time{}, coresecret.StoreUnavailable
 	}
-	content, err = io.ReadAll(io.LimitReader(file, maxEnvFileBytes+1))
+	content, err = io.ReadAll(io.LimitReader(file, readLimit))
 	//: a read that failed part-way leaves nothing the caller may use.
 	if err != nil {
 		clear(content)

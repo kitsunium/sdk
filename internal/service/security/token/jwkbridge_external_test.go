@@ -112,10 +112,11 @@ func TestJWKConfusionIsRefused(t *testing.T) {
 		t.Fatalf("NewSetVerifier: %v", err)
 	}
 	//: the set verifier skips a candidate whose algorithm does not match and
-	//: runs out of candidates, so the answer is the generic refusal — never a
-	//: MAC computed with the public key.
-	if _, verr := set.Verify(forged); !errs.HasCode(verr, coretoken.CodeSignatureInvalid) {
-		t.Fatalf("set verifier: got %v, want SIGNATURE_INVALID", verr)
+	//: runs out of candidates — never a MAC computed with the public key — and
+	//: since no candidate accepted the header, it names the header's fault as
+	//: the single-key verifier does (#440).
+	if _, verr := set.Verify(forged); !errs.HasCode(verr, coretoken.CodeAlgorithmMismatch) {
+		t.Fatalf("set verifier: got %v, want ALGORITHM_MISMATCH", verr)
 	}
 }
 
@@ -232,6 +233,46 @@ func TestSetVerifierRequiresAKid(t *testing.T) {
 	}
 	if _, verr := verifier.Verify(stray); !errs.HasCode(verr, coretoken.CodeKeyNotFound) {
 		t.Fatalf("unknown kid: got %v, want KEY_NOT_FOUND", verr)
+	}
+}
+
+// TestSetVerifierNamesTheHeaderVerdict is the regression for
+// kitsunium/sdk#440: the set verifier gives a header's fault the single-key
+// verifier's verdict — "alg": "none" is AlgorithmNone whatever the kid says,
+// and a "crit" header is HeaderUnsupported — and keeps SignatureInvalid for a
+// header a candidate accepted and a signature that did not verify.
+func TestSetVerifierNamesTheHeaderVerdict(t *testing.T) {
+	t.Parallel()
+	ec := testECKey(t)
+	set, err := svctoken.NewSetVerifier(jwk.NewSet(ecJWK(t, &ec.PublicKey, "k1")), laxConfig())
+	if err != nil {
+		t.Fatalf("NewSetVerifier: %v", err)
+	}
+	noSignature := func(string) []byte { return nil }
+	garbage := func(string) []byte { return make([]byte, 64) }
+	tests := []struct {
+		name  string
+		token string
+		want  errs.Code
+	}{
+		{"alg none under a kid the set holds", forge(`{"alg":"none","kid":"k1"}`, `{"sub":"a"}`, noSignature), coretoken.CodeAlgorithmNone},
+		{"alg none with no kid", forge(`{"alg":"none"}`, `{"sub":"a"}`, noSignature), coretoken.CodeAlgorithmNone},
+		{"alg NONE under an unknown kid", forge(`{"alg":"NONE","kid":"k9"}`, `{"sub":"a"}`, noSignature), coretoken.CodeAlgorithmNone},
+		{"a crit header", forge(`{"alg":"ES256","crit":["exp"],"kid":"k1"}`, `{"sub":"a"}`, garbage), coretoken.CodeHeaderUnsupported},
+		{"an algorithm no candidate is bound to", forge(`{"alg":"EdDSA","kid":"k1"}`, `{"sub":"a"}`, garbage), coretoken.CodeAlgorithmMismatch},
+		{"an accepted header and a bad signature", forge(`{"alg":"ES256","kid":"k1"}`, `{"sub":"a"}`, garbage), coretoken.CodeSignatureInvalid},
+	}
+	runCase := func(t *testing.T, name, token string, want errs.Code) {
+		t.Helper()
+		if _, verr := set.Verify(token); !errs.HasCode(verr, want) {
+			t.Fatalf("%s: got %v, want %v", name, verr, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.name, c.token, c.want)
+		})
 	}
 }
 

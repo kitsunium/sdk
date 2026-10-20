@@ -12,11 +12,18 @@ constants:
         type: int
         value: "32"
     name: IDLen
+  - doc: redactedID is the one rendering an ID has, whatever it holds.
+    items:
+      - name: redactedID
+        type: string
+        value: "\"<redacted>\""
+    name: redactedID
 files:
   - decls: []
     name: doc.go
   - decls:
       - IDLen
+      - redactedID
       - canonicalEncoding
       - ID
       - NewID
@@ -24,12 +31,19 @@ files:
       - ID.Reveal
       - ID.Digest
       - ID.Equal
+      - equalIDs
       - ID.IsZero
       - ID.String
       - ID.GoString
+      - ID.Format
+      - ID.bytes
+      - writeRendering
     name: id.go
   - decls:
       - SessionValue
+      - sessionState
+      - zeroSessionState
+      - SessionValue.view
       - NewSessionValue
       - SessionValue.ID
       - SessionValue.Subject
@@ -45,6 +59,7 @@ files:
       - SessionValue.Data
       - SessionValue.String
       - SessionValue.GoString
+      - SessionValue.Format
     name: session_value.go
   - decls:
       - StateValue
@@ -56,12 +71,29 @@ functions:
   - name: ParseID
     params: encoded string
     results: id ID, err error
+  - doc: |-
+      equalIDs is ID.Equal's body. ConstantTimeCompare already returns 0 on a
+      length mismatch, so a zero ID never equals a real one and no early return
+      leaks the length. It is kept out of line: inlined, the two nil-guarded reads
+      would push ID.Equal past the inline budget, and every caller already pays
+      ConstantTimeCompare's call.
+    name: equalIDs
+    params: a, b ID
+    results: bool
+  - doc: |-
+      writeRendering writes a rendering into the state fmt handed to Format.
+      fmt.Formatter has no error return and fmt discards what a write into its own
+      buffer reports, so the error is read here and dropped as a visible decision.
+    name: writeRendering
+    params: state fmt.State, text string
   - name: NewSessionValue
     params: state StateValue
     results: session SessionValue, err error
 imports:
   base64: encoding/base64
+  fmt: fmt
   hex: encoding/hex
+  io: io
   maps: maps
   sha256: crypto/sha256
   slices: slices
@@ -76,10 +108,15 @@ package:
 types:
   - fields:
       - doc: |-
-          raw holds exactly IDLen bytes; the zero value holds nil and is not
+          _ makes the struct non-comparable at zero cost: with the bytes behind a
+          pointer, == would otherwise compile and compare allocations.
+        name: _
+        type: "[0]func()"
+      - doc: |-
+          held points at exactly IDLen bytes; the zero value holds nil and is not
           usable. NewID and ParseID are the only producers, and both copy.
-        name: raw
-        type: "[]byte"
+        name: held
+        type: "*[IDLen]byte"
     kind: struct
     methods:
       - name: Reveal
@@ -101,41 +138,39 @@ types:
       - name: GoString
         recv: i ID
         results: string
+      - name: Format
+        params: state fmt.State, verb rune
+        recv: i ID
+      - doc: |-
+          bytes returns the identifier's bytes without copying, for the comparisons
+          and encodings inside this package; nil for the zero ID. It never leaves the
+          package.
+        name: bytes
+        recv: i ID
+        results: "[]byte"
     name: ID
   - fields:
       - doc: |-
-          id names the session; it is the presented identifier, never one read
-          back from storage (a store keeps only ID.Digest, see id.go).
-        name: id
-        type: ID
+          _ makes the struct non-comparable at zero cost: with the state behind a
+          pointer, == would otherwise compile and compare allocations.
+        name: _
+        type: "[0]func()"
       - doc: |-
-          subject is the authenticated principal, or "" for anonymous. Written
-          only by the regeneration path.
-        name: subject
-        type: string
-      - doc: |-
-          createdAt anchors the absolute deadline and never moves for the life of
-          this identifier.
-        name: createdAt
-        type: time.Time
-      - doc: lastSeen anchors the idle deadline and moves on every Load.
-        name: lastSeen
-        type: time.Time
-      - doc: |-
-          absoluteExpiry is createdAt + AbsoluteTimeout — the ceiling. It is
-          stamped once and no operation extends it.
-        name: absoluteExpiry
-        type: time.Time
-      - doc: |-
-          idleExpiry is lastSeen + IdleTimeout, ALREADY CLAMPED to absoluteExpiry
-          by whoever built the value, so ExpiresAt needs no special case.
-        name: idleExpiry
-        type: time.Time
-      - doc: data is the caller's key/value payload; nil until something is set.
-        name: data
-        type: map[string]string
+          state holds every field behind a pointer, so fmt walking an unexported
+          SessionValue field by reflection prints an address, never the
+          identifier, the subject or the data. It is never mutated after
+          construction — every mutator builds a new one — so copies share it
+          safely. Nil for the zero SessionValue.
+        name: state
+        type: "*sessionState"
     kind: struct
     methods:
+      - doc: |-
+          view returns the state to read, the shared zero state for the zero
+          SessionValue, so no accessor needs a nil guard of its own.
+        name: view
+        recv: s SessionValue
+        results: "*sessionState"
       - name: ID
         recv: s SessionValue
         results: ID
@@ -182,7 +217,45 @@ types:
       - name: GoString
         recv: s SessionValue
         results: string
+      - name: Format
+        params: state fmt.State, verb rune
+        recv: s SessionValue
     name: SessionValue
+  - doc: |-
+      sessionState is what a SessionValue holds. It is a separate type only so
+      that the field a SessionValue carries is a pointer — see the SessionValue
+      doc comment.
+    fields:
+      - doc: |-
+          id names the session; it is the presented identifier, never one read
+          back from storage (a store keeps only ID.Digest, see id.go).
+        name: id
+        type: ID
+      - doc: |-
+          subject is the authenticated principal, or "" for anonymous. Written
+          only by the regeneration path.
+        name: subject
+        type: string
+      - doc: |-
+          createdAt anchors the absolute deadline and never moves for the life of
+          this identifier.
+        name: createdAt
+        type: time.Time
+      - doc: lastSeen anchors the idle deadline and moves on every Load.
+        name: lastSeen
+        type: time.Time
+      - doc: |-
+          expiresAt is the effective deadline: lastSeen + IdleTimeout ALREADY
+          CLAMPED to the absolute ceiling (createdAt + AbsoluteTimeout) by
+          NewSessionValue, the only producer, so ExpiresAt is a read. No operation
+          extends it.
+        name: expiresAt
+        type: time.Time
+      - doc: data is the caller's key/value payload; nil until something is set.
+        name: data
+        type: map[string]string
+    kind: struct
+    name: sessionState
   - fields:
       - doc: ID names the session. NewSessionValue refuses a zero one.
         name: ID
@@ -226,3 +299,10 @@ vars:
       - name: canonicalEncoding
         value: base64.RawURLEncoding.Strict()
     name: canonicalEncoding
+  - doc: |-
+      zeroSessionState is what the zero SessionValue reads through: every field
+      zero. It is never written.
+    items:
+      - name: zeroSessionState
+        type: sessionState
+    name: zeroSessionState

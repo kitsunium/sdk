@@ -106,7 +106,11 @@ type RotatorConfig struct {
 	// rotation then prunes no version at or above it, whatever Policy.Keep
 	// says: Keep becomes a floor, and the store holds more versions until the
 	// dependants move on (SubjectKeys.Rewrap). It is asked after the new
-	// version is stored and before the prune. Its error is returned as it is
+	// version is stored and before the prune, and the prune drops by version
+	// number below the lower of the two floors — through [coresecret.FloorPruner] when
+	// the store has it, as every store this SDK ships does — so a version
+	// another process stores meanwhile cannot push a version in use out of
+	// the window. Its error is returned as it is
 	// and nothing is pruned — the rotation happened, and the next one prunes
 	// again — because a version pruned while still needed destroys whatever
 	// depends on it, and no later call can bring it back.
@@ -383,24 +387,27 @@ func (r *Rotator) rotateLocked(ctx context.Context) (created coresecret.VersionV
 		//: the store's verdict — ReadOnly for a store that only reads.
 		return coresecret.VersionValue{}, putErr
 	}
-	keep, keepErr := r.keepFor(ctx, created.Version)
+	floor, floorErr := r.floorFor(ctx, created.Version)
 	//: nobody could say which versions are still needed: prune nothing.
-	if keepErr != nil {
+	if floorErr != nil {
 		//: the rotation happened; the next one prunes.
-		return created, keepErr
+		return created, floorErr
 	}
 	//: the rotation happened; retire what is no longer kept.
-	return created, r.store.Prune(ctx, r.name, keep)
+	return created, r.pruneBelow(ctx, floor)
 }
 
-// keepFor is how many versions the prune after a rotation to newest keeps:
-// the policy's Keep, or more when InUse reports an older version still
-// needed, so that version and every newer one survive.
-func (r *Rotator) keepFor(ctx context.Context, newest int) (keep int, err error) {
+// floorFor is the lowest version number the prune after a rotation to newest
+// keeps: the policy's Keep counted down from newest — the version THIS
+// rotation stored, so a version another process stored meanwhile only adds to
+// what is kept — or lower when InUse reports an older version still needed,
+// so that version and every newer one survive (#434).
+func (r *Rotator) floorFor(ctx context.Context, newest int) (floor int, err error) {
+	floor = newest - r.policy.Keep + 1
 	//: nothing depends on old versions but what Keep already covers.
 	if r.inUse == nil {
-		//: the policy's number.
-		return r.policy.Keep, nil
+		//: the policy's window.
+		return floor, nil
 	}
 	oldest, inUseErr := r.inUse(ctx)
 	//: unknown is not "none": a guess here destroys what depends on a version.
@@ -410,11 +417,48 @@ func (r *Rotator) keepFor(ctx context.Context, newest int) (keep int, err error)
 	}
 	//: nothing in use, or an answer outside the versions this store numbered.
 	if oldest < 1 || oldest > newest {
-		//: the policy's number.
-		return r.policy.Keep, nil
+		//: the policy's window.
+		return floor, nil
 	}
-	//: every version from the oldest in use to the newest, or Keep if more.
-	return max(r.policy.Keep, newest-oldest+1), nil
+	//: the oldest in use and every version above it, or Keep's window if wider.
+	return min(floor, oldest), nil
+}
+
+// pruneBelow drops every version below floor. A store with the FloorPruner
+// sibling drops them by number in one step, so nothing stored meanwhile moves
+// the line. A store without it — a third party's — is pruned by count: the
+// versions are read again and every one at or above floor is counted, which
+// narrows the window a concurrent Put can shift to the gap between that read
+// and the Prune; configure a Locker, and keep manual Puts out of rotations,
+// to close it.
+func (r *Rotator) pruneBelow(ctx context.Context, floor int) error {
+	//: a floor at or below the first version drops nothing.
+	if floor <= 1 {
+		//: nothing to prune.
+		return nil
+	}
+	//: the exact form: by number, in the store's own step.
+	if byFloor, ok := r.store.(coresecret.FloorPruner); ok {
+		//: the store's verdict.
+		return byFloor.PruneBelow(ctx, r.name, floor)
+	}
+	versions, readErr := r.store.Versions(ctx, r.name)
+	//: without the history, no count is safe.
+	if readErr != nil {
+		//: the store's verdict; nothing pruned.
+		return readErr
+	}
+	keep := 0
+	//: newest-first: count the versions at or above the floor.
+	for _, version := range versions {
+		//: the first one below the floor ends the count.
+		if version.Version < floor {
+			break
+		}
+		keep++
+	}
+	//: the count, and never fewer than one: pruning never deletes a secret.
+	return r.store.Prune(ctx, r.name, max(keep, 1))
 }
 
 // generate runs the policy's generator and refuses an empty result.

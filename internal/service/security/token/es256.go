@@ -2,6 +2,7 @@ package token
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"math/big"
@@ -16,6 +17,13 @@ import (
 // that cannot inherit an exit override — lands on the same number its sibling
 // sentinel would have produced.
 const exitConfigFault int = 78
+
+// p256HalfOrder is n/2 for P-256. An ECDSA signature (r, s) verifies exactly
+// as (r, n−s) does, so a token signed once would have two spellings — and a
+// revocation or replay list keyed on the token string would hold one of them
+// and let the other through. One spelling is kept: s at most n/2 ("low S"),
+// which the signer produces and the verifier requires.
+var p256HalfOrder = new(big.Int).Rsh(elliptic.P256().Params().N, 1)
 
 // es256Signing is ECDSA P-256 signing with the RFC 7518 §3.4 R||S encoding.
 type es256Signing struct {
@@ -54,6 +62,11 @@ func (b es256Signing) sign(input []byte) (sig []byte, err error) {
 			ExitCode: exitConfigFault,
 		})
 	}
+	//: the low-S form, the one spelling the verifier accepts: n−s verifies as
+	//: s does, so a high s is replaced by its twin rather than emitted.
+	if s.Cmp(p256HalfOrder) > 0 {
+		s.Sub(b.key.Params().N, s)
+	}
 	var fixed [p256SigLen]byte
 	//: FillBytes left-pads to the fixed width, which is what §3.4 requires.
 	r.FillBytes(fixed[:p256CoordLen])
@@ -85,6 +98,12 @@ func (b es256Verifying) verify(input, sig []byte) bool {
 	digest := sha256.Sum256(input)
 	r := new(big.Int).SetBytes(sig[:p256CoordLen])
 	s := new(big.Int).SetBytes(sig[p256CoordLen:])
+	//: a high s is the second spelling of a low-S signature — the twin
+	//: anyone can compute without the key — so it is refused (#438).
+	if s.Cmp(p256HalfOrder) > 0 {
+		//: one signature, one spelling.
+		return false
+	}
 	//: crypto/ecdsa rejects out-of-range scalars itself.
 	return ecdsa.Verify(b.key, digest[:], r, s)
 }

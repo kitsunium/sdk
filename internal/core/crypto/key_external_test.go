@@ -3,6 +3,7 @@ package crypto_test
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/crypto"
@@ -131,6 +132,72 @@ func TestKey_GoString(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// keyHider carries a Key in an UNEXPORTED field, which fmt formats by
+// reflection instead of through the Key's methods.
+type keyHider struct {
+	key crypto.Key
+}
+
+// TestKey_Format is the regression for kitsunium/sdk#433: %d bypasses String
+// and a Key in an unexported field is walked by reflection, and neither may
+// print the key bytes.
+func TestKey_Format(t *testing.T) {
+	t.Parallel()
+	k, err := crypto.NewKey(bytes.Repeat([]byte{0xAB}, crypto.KeyLen))
+	if err != nil {
+		t.Fatalf("NewKey: %v", err)
+	}
+	type tc struct {
+		name   string
+		render func() string
+		// opaque is set where fmt cannot reach the Key's methods — an
+		// unexported field — so no marker is written either.
+		opaque bool
+	}
+	tests := []tc{
+		{"%d", func() string { return fmt.Sprintf("%d", k) }, false},
+		{"%x", func() string { return fmt.Sprintf("%x", k) }, false},
+		{"%X", func() string { return fmt.Sprintf("%X", k) }, false},
+		{"%q", func() string { return fmt.Sprintf("%q", k) }, false},
+		{"%+v", func() string { return fmt.Sprintf("%+v", k) }, false},
+		{"a pointer, %d", func() string { return fmt.Sprintf("%d", &k) }, false},
+		{"an unexported field, %v", func() string { return fmt.Sprintf("%v", keyHider{key: k}) }, true},
+		{"an unexported field, %+v", func() string { return fmt.Sprintf("%+v", keyHider{key: k}) }, true},
+		{"an unexported field, %d", func() string { return fmt.Sprintf("%d", keyHider{key: k}) }, true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := c.render()
+		//: through the methods, the marker is what was written.
+		if !c.opaque && !strings.Contains(got, "redacted") {
+			t.Errorf("%s: got %q, which does not carry the marker", c.name, got)
+		}
+		//: no spelling of the key bytes — decimal or hex — may appear.
+		for _, forbidden := range []string{"171 171 171", "abababababababab", "ABABABABABABABAB"} {
+			if strings.Contains(got, forbidden) {
+				t.Fatalf("%s: rendered the key (%q) in %q", c.name, forbidden, got)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestKey_ZeroValue pins the zero Key after the bytes moved behind a pointer:
+// it reveals nil and Zeroize is a no-op rather than a nil dereference.
+func TestKey_ZeroValue(t *testing.T) {
+	t.Parallel()
+	var k crypto.Key
+	k.Zeroize()
+	if got := k.Bytes(); got != nil {
+		t.Errorf("zero Key Bytes() = %v, want nil", got)
 	}
 }
 

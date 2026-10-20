@@ -48,6 +48,13 @@ func NewVerifierFromJWK(key jwk.KeyValue, cfg VerifierConfig) (verifier coretoke
 // claiming HS256 through — the binding built from that key reports ES256, the
 // header comparison refuses, and no key material reaches a MAC.
 //
+// The verdicts are the single-key verifier's. A token with "alg": "none" is
+// refused with AlgorithmNone before any key is selected, kid or no kid. A
+// token whose header no candidate accepts — an algorithm none of them is
+// bound to, a "crit" parameter, an unexpected "typ" — is refused with that
+// header's own verdict, never reduced to SignatureInvalid, which means a
+// candidate accepted the header and no signature verified.
+//
 // # Duplicate kids
 //
 // jwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing
@@ -216,12 +223,31 @@ func (v *setVerifier) Verify(token string) (claims coretoken.ClaimsValue, err er
 		//: propagate TooLarge / Malformed / TooDeep / DuplicateMember.
 		return coretoken.ClaimsValue{}, perr
 	}
+	//: an unsecured token is refused by name before any key is selected,
+	//: exactly as the single-key verifier refuses it — no kid, and no set,
+	//: changes that verdict (#440).
+	if uerr := refuseUnsecured(parts.header); uerr != nil {
+		//: AlgorithmNone.
+		return coretoken.ClaimsValue{}, uerr
+	}
 	candidates, cerr := v.candidates(parts.header.kid)
 	//: selection failures are named separately from verification failures.
 	if cerr != nil {
 		//: propagate KeyIDMissing / KeyNotFound / KeyIDAmbiguous.
 		return coretoken.ClaimsValue{}, cerr
 	}
+	//: the first candidate that accepts the header and verifies wins.
+	return v.tryCandidates(parts, candidates)
+}
+
+// tryCandidates verifies parts against each candidate in order and decodes
+// the claims under the first that accepts the header and verifies the
+// signature.
+func (v *setVerifier) tryCandidates(parts jwsPartsValue, candidates []boundKeyValue) (claims coretoken.ClaimsValue, err error) {
+	//: the header verdict of the first candidate that refused the header,
+	//: and whether any candidate accepted it.
+	var headerErr error
+	headerPassed := false
 	//: try each candidate; the first whose signature verifies wins.
 	for _, candidate := range candidates {
 		//: a candidate the SDK cannot verify with is skipped, not fatal — a
@@ -231,13 +257,26 @@ func (v *setVerifier) Verify(token string) (claims coretoken.ClaimsValue, err er
 		}
 		//: the algorithm gate, per candidate, before any primitive runs.
 		if herr := v.policy.checkHeader(parts.header, candidate.binding.algorithm()); herr != nil {
+			//: kept: if no candidate accepts the header, this is the verdict.
+			if headerErr == nil {
+				headerErr = herr
+			}
 			continue
 		}
+		headerPassed = true
 		//: authenticate.
 		if candidate.binding.verify(parts.input, parts.signature) {
 			//: authenticated: now the claims may be decoded and judged.
 			return v.policy.decodeAndValidate(parts.payload, joseShape{})
 		}
+	}
+	//: no candidate accepted the header: the header is what was wrong — an
+	//: algorithm mismatch, a critical parameter, an unexpected typ — and is
+	//: named as the single-key verifier names it, never reduced to a
+	//: signature failure (#440).
+	if !headerPassed && headerErr != nil {
+		//: AlgorithmMismatch, HeaderUnsupported or Malformed.
+		return coretoken.ClaimsValue{}, headerErr
 	}
 	//: no candidate authenticated the token. The verdict is deliberately the
 	//: same as a single-key failure: which of several keys did not match is

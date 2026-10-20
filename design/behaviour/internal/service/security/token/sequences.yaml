@@ -262,8 +262,18 @@ sequences:
           do:
             - return: time.Time{}, nil
           when: "!present"
-      - return: shape.decodeTime(raw)
+      - set: instant, err
         to: shape.decodeTime
+        value: shape.decodeTime(raw)
+      - opt:
+          do:
+            - return: time.Time{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: time.Time{}, malformed("registered claim " + name + " is the zero instant")
+          when: instant.IsZero()
+      - return: instant, nil
   - of: encodeClaims
     participants:
       - id: caller
@@ -796,6 +806,8 @@ sequences:
         kind: stdlib
       - id: ecdsa
         kind: stdlib
+      - id: s.Sub
+        kind: value
       - id: r.FillBytes
         kind: value
       - id: s.FillBytes
@@ -818,6 +830,11 @@ sequences:
                 			ExitCode: exitConfigFault,
                 		})
           when: serr != nil
+      - opt:
+          do:
+            - eval: s.Sub(b.key.Params().N, s)
+              to: s.Sub
+          when: s.Cmp(p256HalfOrder) > 0
       - var:
           name: fixed
           type: "[p256SigLen]byte"
@@ -855,6 +872,10 @@ sequences:
       - bind: s
         eval: new(big.Int).SetBytes(sig[p256CoordLen:])
         to: new(big.Int).SetBytes
+      - opt:
+          do:
+            - return: "false"
+          when: s.Cmp(p256HalfOrder) > 0
       - return: ecdsa.Verify(b.key, digest[:], r, s)
         to: ecdsa
   - of: hs256Binding.algorithm
@@ -1189,11 +1210,11 @@ sequences:
         kind: self
       - id: v.policy.parseJWS
         kind: internal
+      - id: refuseUnsecured
+        kind: internal
       - id: v.candidates
         kind: internal
-      - id: v.policy.checkHeader
-        kind: internal
-      - id: v.policy.decodeAndValidate
+      - id: v.tryCandidates
         kind: internal
     steps:
       - bind: parts, perr
@@ -1203,6 +1224,14 @@ sequences:
           do:
             - return: coretoken.ClaimsValue{}, perr
           when: perr != nil
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, uerr
+          init:
+            bind: uerr
+            eval: refuseUnsecured(parts.header)
+            to: refuseUnsecured
+          when: uerr != nil
       - bind: candidates, cerr
         eval: v.candidates(parts.header.kid)
         to: v.candidates
@@ -1210,6 +1239,24 @@ sequences:
           do:
             - return: coretoken.ClaimsValue{}, cerr
           when: cerr != nil
+      - return: v.tryCandidates(parts, candidates)
+        to: v.tryCandidates
+  - of: (*setVerifier).tryCandidates
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*setVerifier).tryCandidates
+        kind: self
+      - id: v.policy.checkHeader
+        kind: internal
+      - id: v.policy.decodeAndValidate
+        kind: internal
+    steps:
+      - var:
+          name: headerErr
+          type: error
+      - bind: headerPassed
+        eval: "false"
       - loop:
           do:
             - opt:
@@ -1218,12 +1265,19 @@ sequences:
                 when: "!candidate.usable"
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - set: headerErr
+                          value: herr
+                      when: headerErr == nil
                   - continue: true
                 init:
                   bind: herr
                   eval: v.policy.checkHeader(parts.header, candidate.binding.algorithm())
                   to: v.policy.checkHeader
                 when: herr != nil
+            - set: headerPassed
+              value: "true"
             - opt:
                 do:
                   - return: v.policy.decodeAndValidate(parts.payload, joseShape{})
@@ -1232,6 +1286,10 @@ sequences:
           key: _
           range: candidates
           value: candidate
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, headerErr
+          when: "!headerPassed && headerErr != nil"
       - return: coretoken.ClaimsValue{}, coretoken.SignatureInvalid
   - of: (*setVerifier).candidates
     steps:
@@ -1528,13 +1586,19 @@ sequences:
         kind: actor
       - id: policyValue.checkHeader
         kind: self
+      - id: refuseUnsecured
+        kind: internal
       - id: errs
         kind: package
     steps:
       - opt:
           do:
-            - return: coretoken.AlgorithmNone
-          when: strings.EqualFold(header.alg, algNone)
+            - return: uerr
+          init:
+            bind: uerr
+            eval: refuseUnsecured(header)
+            to: refuseUnsecured
+          when: uerr != nil
       - opt:
           do:
             - return: coretoken.Malformed
@@ -1594,6 +1658,13 @@ sequences:
             to: p.validateClaims
           when: verr != nil
       - return: decoded, nil
+  - of: refuseUnsecured
+    steps:
+      - opt:
+          do:
+            - return: coretoken.AlgorithmNone
+          when: strings.EqualFold(header.alg, algNone)
+      - return: nil
   - of: newJWSIssuer
     participants:
       - id: caller
@@ -2379,6 +2450,10 @@ sequences:
           do:
             - return: body, nil, nil
           when: seg.count == pasetoMinSegments
+      - opt:
+          do:
+            - return: nil, nil, coretoken.Malformed
+          when: seg.part[pasetoFooterSegment] == ""
       - bind: decodedFooter, ferr
         eval: decodeSegment(seg.part[pasetoFooterSegment], maxFooterLen)
         to: decodeSegment

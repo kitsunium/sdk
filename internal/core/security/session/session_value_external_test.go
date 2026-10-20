@@ -218,6 +218,78 @@ func TestSessionRendersItsShapeNeverItsContents(t *testing.T) {
 	}
 }
 
+// sessionHider carries a SessionValue in an UNEXPORTED field — a request
+// context a handler printed — which fmt formats by reflection instead of
+// through the SessionValue's methods.
+type sessionHider struct {
+	session session.SessionValue
+}
+
+// TestSessionNeverRendersItsContentsThroughAnyVerb is the regression for
+// kitsunium/sdk#433: %d bypasses String, and a SessionValue nested in an
+// unexported field is walked by reflection, and neither may print the bearer
+// identifier, the subject or the data.
+func TestSessionNeverRendersItsContentsThroughAnyVerb(t *testing.T) {
+	t.Parallel()
+	id := mustID(t, sampleRaw())
+	built := mustSession(t, session.StateValue{
+		ID: id, Subject: "user-42-alice@example.test",
+		CreatedAt: origin, LastSeen: origin,
+		AbsoluteExpiry: origin.Add(time.Hour), IdleExpiry: origin.Add(time.Hour),
+		Data: map[string]string{"cart_total": "1499"},
+	})
+	type tc struct {
+		name   string
+		render func() string
+	}
+	tests := []tc{
+		{"%d", func() string { return fmt.Sprintf("%d", built) }},
+		{"%x", func() string { return fmt.Sprintf("%x", built) }},
+		{"%q", func() string { return fmt.Sprintf("%q", built) }},
+		{"an unexported field, %v", func() string { return fmt.Sprintf("%v", sessionHider{session: built}) }},
+		{"an unexported field, %+v", func() string { return fmt.Sprintf("%+v", sessionHider{session: built}) }},
+		{"an unexported field, %d", func() string { return fmt.Sprintf("%d", sessionHider{session: built}) }},
+		{"inside an array of any, %+v", func() string { return fmt.Sprintf("%+v", struct{ x [1]any }{[1]any{built}}) }},
+	}
+	forbidden := []string{id.Reveal(), "0 1 2 3 4 5 6", "000102030405", "alice", "user-42", "cart_total", "1499"}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		rendered := c.render()
+		for _, spelling := range forbidden {
+			if strings.Contains(rendered, spelling) {
+				t.Fatalf("%s leaked %q: %s", c.name, spelling, rendered)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestZeroSessionValueReadsAsEmpty pins the zero SessionValue after its state
+// moved behind a pointer: every accessor answers as for an empty session, and
+// a mutator on it builds a value without panicking.
+func TestZeroSessionValueReadsAsEmpty(t *testing.T) {
+	t.Parallel()
+	var zero session.SessionValue
+	if !zero.IsZero() || zero.Subject() != "" || zero.Keys() != nil || zero.Data() != nil {
+		t.Fatalf("zero SessionValue is not empty: %v", zero)
+	}
+	if zero.LiveAt(origin) {
+		t.Error("zero SessionValue is live")
+	}
+	set := zero.Set("k", "v")
+	if got, ok := set.Get("k"); !ok || got != "v" {
+		t.Errorf("Set on the zero value: Get = %q, %v", got, ok)
+	}
+	if _, ok := zero.Get("k"); ok {
+		t.Error("Set on the zero value changed the receiver")
+	}
+}
+
 // mustSession builds a SessionValue or fails the test.
 func mustSession(t *testing.T, state session.StateValue) session.SessionValue {
 	t.Helper()

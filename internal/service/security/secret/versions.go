@@ -66,6 +66,29 @@ func nextVersion(versions []coresecret.VersionValue) int {
 	return versions[0].Version + 1
 }
 
+// prunedBelow returns the versions of a newest-first history numbered at or
+// above floor, and the newest whatever floor says — pruning never deletes a
+// secret. The bool reports whether anything was dropped, so a store with
+// nothing to drop writes nothing.
+func prunedBelow(versions []coresecret.VersionValue, floor int) (kept []coresecret.VersionValue, dropped bool) {
+	//: the head is the newest and is always kept.
+	keep := 1
+	//: every further version at or above the floor stays; the history is
+	//: newest-first, so the first one below it ends the kept prefix.
+	for keep < len(versions) && versions[keep].Version >= floor {
+		keep++
+	}
+	//: a copy all the same, so the caller owns what it gets.
+	return slices.Clone(versions[:keep]), keep < len(versions)
+}
+
+// checkPruneBelow refuses a PruneBelow every store must refuse: a malformed
+// name. Any floor is meaningful — one at or below 1 drops nothing.
+func checkPruneBelow(name string) error {
+	//: InvalidName, or nothing.
+	return coresecret.ValidateName(name)
+}
+
 // pruned returns the newest keep versions of a newest-first history.
 func pruned(versions []coresecret.VersionValue, keep int) []coresecret.VersionValue {
 	//: a history already within the bound is kept whole.

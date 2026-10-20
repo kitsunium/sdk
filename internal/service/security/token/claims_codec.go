@@ -209,7 +209,22 @@ func decodeTimeClaim(members map[string]json.RawMessage, name string, shape clai
 		return time.Time{}, nil
 	}
 	//: the format decides how a timestamp is spelled.
-	return shape.decodeTime(raw)
+	instant, err = shape.decodeTime(raw)
+	//: propagate the format's own refusal.
+	if err != nil {
+		//: Malformed, from the shape.
+		return time.Time{}, err
+	}
+	//: a present claim at exactly 0001-01-01T00:00:00Z decodes to the zero
+	//: Time, which is this domain's "absent": an exp there would read as no
+	//: expiry at all, and a signed token would never expire (#439). Refused
+	//: as malformed — no real timestamp sits at that instant.
+	if instant.IsZero() {
+		//: name the claim, not its value.
+		return time.Time{}, malformed("registered claim " + name + " is the zero instant")
+	}
+	//: a real instant.
+	return instant, nil
 }
 
 // encodeClaims renders claims under shape. The member map marshals with sorted

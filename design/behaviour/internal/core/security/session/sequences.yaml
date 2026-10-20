@@ -7,11 +7,10 @@ sequences:
           do:
             - return: ID{}, InvalidID
           when: len(raw) != IDLen
-      - var:
-          name: buf
-          type: "[IDLen]byte"
+      - bind: buf
+        eval: new([IDLen]byte)
       - eval: copy(buf[:], raw)
-      - return: "ID{raw: buf[:]}, nil"
+      - return: "ID{held: buf}, nil"
   - of: ParseID
     participants:
       - id: caller
@@ -41,7 +40,7 @@ sequences:
       - id: canonicalEncoding.EncodeToString
         kind: value
     steps:
-      - return: canonicalEncoding.EncodeToString(i.raw)
+      - return: canonicalEncoding.EncodeToString(i.bytes())
         to: canonicalEncoding.EncodeToString
   - of: ID.Digest
     participants:
@@ -57,24 +56,83 @@ sequences:
       - opt:
           do:
             - return: "\"\""
-          when: len(i.raw) == 0
+          when: i.held == nil
       - bind: sum
-        eval: sha256.Sum256(i.raw)
+        eval: sha256.Sum256(i.held[:])
         to: sha256
       - return: hex.EncodeToString(sum[:])
         to: hex
   - of: ID.Equal
+    participants:
+      - id: caller
+        kind: actor
+      - id: ID.Equal
+        kind: self
+      - id: equalIDs
+        kind: internal
     steps:
-      - return: subtle.ConstantTimeCompare(i.raw, other.raw) == 1
+      - return: equalIDs(i, other)
+        to: equalIDs
+  - of: equalIDs
+    steps:
+      - return: subtle.ConstantTimeCompare(a.bytes(), b.bytes()) == 1
   - of: ID.IsZero
     steps:
-      - return: len(i.raw) == 0
+      - return: i.held == nil
   - of: ID.String
     steps:
-      - return: "\"<redacted>\""
+      - return: redactedID
   - of: ID.GoString
     steps:
-      - return: "\"<redacted>\""
+      - return: redactedID
+  - of: ID.Format
+    participants:
+      - id: caller
+        kind: actor
+      - id: ID.Format
+        kind: self
+      - id: writeRendering
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: writeRendering(state, strconv.Quote(redactedID))
+              to: writeRendering
+            - return: ""
+          when: verb == 'q'
+      - eval: writeRendering(state, redactedID)
+        to: writeRendering
+  - of: ID.bytes
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: i.held == nil
+      - return: i.held[:]
+  - of: writeRendering
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeRendering
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: io.WriteString(state, text)
+            to: io
+          when: err != nil
+  - of: SessionValue.view
+    steps:
+      - opt:
+          do:
+            - return: "&zeroSessionState"
+          when: s.state == nil
+      - return: s.state
   - of: NewSessionValue
     steps:
       - opt:
@@ -89,34 +147,29 @@ sequences:
               value: state.AbsoluteExpiry
           when: idle.After(state.AbsoluteExpiry)
       - return: |-
-          SessionValue{
-          		id:             state.ID,
-          		subject:        state.Subject,
-          		createdAt:      state.CreatedAt,
-          		lastSeen:       state.LastSeen,
-          		absoluteExpiry: state.AbsoluteExpiry,
-          		idleExpiry:     idle,
-          		data:           maps.Clone(state.Data),
-          	}, nil
+          SessionValue{state: &sessionState{
+          		id:        state.ID,
+          		subject:   state.Subject,
+          		createdAt: state.CreatedAt,
+          		lastSeen:  state.LastSeen,
+          		expiresAt: idle,
+          		data:      maps.Clone(state.Data),
+          	}}, nil
   - of: SessionValue.ID
     steps:
-      - return: s.id
+      - return: s.view().id
   - of: SessionValue.Subject
     steps:
-      - return: s.subject
+      - return: s.view().subject
   - of: SessionValue.CreatedAt
     steps:
-      - return: s.createdAt
+      - return: s.view().createdAt
   - of: SessionValue.LastSeen
     steps:
-      - return: s.lastSeen
+      - return: s.view().lastSeen
   - of: SessionValue.ExpiresAt
     steps:
-      - opt:
-          do:
-            - return: s.idleExpiry
-          when: s.idleExpiry.Before(s.absoluteExpiry)
-      - return: s.absoluteExpiry
+      - return: s.view().expiresAt
   - of: SessionValue.LiveAt
     participants:
       - id: caller
@@ -134,15 +187,15 @@ sequences:
         kind: actor
       - id: SessionValue.IsZero
         kind: self
-      - id: s.id.IsZero
+      - id: s.view().id.IsZero
         kind: internal
     steps:
-      - return: s.id.IsZero()
-        to: s.id.IsZero
+      - return: s.view().id.IsZero()
+        to: s.view().id.IsZero
   - of: SessionValue.Get
     steps:
       - set: value, ok
-        value: s.data[key]
+        value: s.view().data[key]
       - return: value, ok
   - of: SessionValue.Set
     participants:
@@ -154,10 +207,10 @@ sequences:
         kind: stdlib
     steps:
       - bind: next
-        eval: s
+        eval: "*s.view()"
       - set: next.data
         to: maps
-        value: maps.Clone(s.data)
+        value: maps.Clone(next.data)
       - opt:
           do:
             - set: next.data
@@ -165,7 +218,7 @@ sequences:
           when: next.data == nil
       - set: next.data[key]
         value: value
-      - return: next
+      - return: "SessionValue{state: &next}"
   - of: SessionValue.Delete
     participants:
       - id: caller
@@ -176,12 +229,12 @@ sequences:
         kind: stdlib
     steps:
       - bind: next
-        eval: s
+        eval: "*s.view()"
       - set: next.data
         to: maps
-        value: maps.Clone(s.data)
+        value: maps.Clone(next.data)
       - eval: delete(next.data, key)
-      - return: next
+      - return: "SessionValue{state: &next}"
   - of: SessionValue.Keys
     participants:
       - id: caller
@@ -191,7 +244,7 @@ sequences:
       - id: slices
         kind: stdlib
     steps:
-      - return: slices.Sorted(maps.Keys(s.data))
+      - return: slices.Sorted(maps.Keys(s.view().data))
         to: slices
   - of: SessionValue.Data
     participants:
@@ -202,7 +255,7 @@ sequences:
       - id: maps
         kind: stdlib
     steps:
-      - return: maps.Clone(s.data)
+      - return: maps.Clone(s.view().data)
         to: maps
   - of: SessionValue.String
     steps:
@@ -212,9 +265,9 @@ sequences:
           do:
             - set: bound
               value: "\"bound\""
-          when: s.subject != ""
+          when: s.view().subject != ""
       - return: |-
-          "session.Session{" + bound + " keys:" + strconv.Itoa(len(s.data)) +
+          "session.Session{" + bound + " keys:" + strconv.Itoa(len(s.view().data)) +
           		" expires:" + s.ExpiresAt().UTC().Format(time.RFC3339) + "}"
   - of: SessionValue.GoString
     participants:
@@ -227,3 +280,20 @@ sequences:
     steps:
       - return: s.String()
         to: s.String
+  - of: SessionValue.Format
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionValue.Format
+        kind: self
+      - id: writeRendering
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: writeRendering(state, strconv.Quote(s.String()))
+              to: writeRendering
+            - return: ""
+          when: verb == 'q'
+      - eval: writeRendering(state, s.String())
+        to: writeRendering

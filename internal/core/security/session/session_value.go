@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -16,7 +17,28 @@ import (
 // no Elevate: the subject is written exactly once, by [Store.Regenerate], and
 // that call always mints a new identifier. A caller therefore cannot express
 // "keep this identifier and log this user in" — the sentence has no method.
+//
+// Every rendering — String, GoString and Format, so every verb — writes the
+// session's shape, never its contents. The state sits behind a pointer, so a
+// struct holding a SessionValue in an UNEXPORTED field, which fmt prints by
+// reflection without calling Format, prints an address rather than the
+// identifier, the subject or the data.
 type SessionValue struct {
+	// _ makes the struct non-comparable at zero cost: with the state behind a
+	// pointer, == would otherwise compile and compare allocations.
+	_ [0]func()
+	// state holds every field behind a pointer, so fmt walking an unexported
+	// SessionValue field by reflection prints an address, never the
+	// identifier, the subject or the data. It is never mutated after
+	// construction — every mutator builds a new one — so copies share it
+	// safely. Nil for the zero SessionValue.
+	state *sessionState
+}
+
+// sessionState is what a SessionValue holds. It is a separate type only so
+// that the field a SessionValue carries is a pointer — see the SessionValue
+// doc comment.
+type sessionState struct {
 	// id names the session; it is the presented identifier, never one read
 	// back from storage (a store keeps only ID.Digest, see id.go).
 	id ID
@@ -28,14 +50,29 @@ type SessionValue struct {
 	createdAt time.Time
 	// lastSeen anchors the idle deadline and moves on every Load.
 	lastSeen time.Time
-	// absoluteExpiry is createdAt + AbsoluteTimeout — the ceiling. It is
-	// stamped once and no operation extends it.
-	absoluteExpiry time.Time
-	// idleExpiry is lastSeen + IdleTimeout, ALREADY CLAMPED to absoluteExpiry
-	// by whoever built the value, so ExpiresAt needs no special case.
-	idleExpiry time.Time
+	// expiresAt is the effective deadline: lastSeen + IdleTimeout ALREADY
+	// CLAMPED to the absolute ceiling (createdAt + AbsoluteTimeout) by
+	// NewSessionValue, the only producer, so ExpiresAt is a read. No operation
+	// extends it.
+	expiresAt time.Time
 	// data is the caller's key/value payload; nil until something is set.
 	data map[string]string
+}
+
+// zeroSessionState is what the zero SessionValue reads through: every field
+// zero. It is never written.
+var zeroSessionState sessionState
+
+// view returns the state to read, the shared zero state for the zero
+// SessionValue, so no accessor needs a nil guard of its own.
+func (s SessionValue) view() *sessionState {
+	//: the zero SessionValue holds no state.
+	if s.state == nil {
+		//: read-only, never handed out of the package.
+		return &zeroSessionState
+	}
+	//: the held, immutable state.
+	return s.state
 }
 
 // NewSessionValue builds an immutable [SessionValue] from state. It is the only
@@ -60,28 +97,27 @@ func NewSessionValue(state StateValue) (session SessionValue, err error) {
 		idle = state.AbsoluteExpiry
 	}
 	//: copy the payload so the caller's map is not the session's storage.
-	return SessionValue{
-		id:             state.ID,
-		subject:        state.Subject,
-		createdAt:      state.CreatedAt,
-		lastSeen:       state.LastSeen,
-		absoluteExpiry: state.AbsoluteExpiry,
-		idleExpiry:     idle,
-		data:           maps.Clone(state.Data),
-	}, nil
+	return SessionValue{state: &sessionState{
+		id:        state.ID,
+		subject:   state.Subject,
+		createdAt: state.CreatedAt,
+		lastSeen:  state.LastSeen,
+		expiresAt: idle,
+		data:      maps.Clone(state.Data),
+	}}, nil
 }
 
 // ID reports the session's identifier. It is a bearer secret: see [ID].
 func (s SessionValue) ID() ID {
 	//: ID's own redaction protects it from here on.
-	return s.id
+	return s.view().id
 }
 
 // Subject reports the authenticated principal, or "" when the session is
 // anonymous. It changes only through [Store.Regenerate].
 func (s SessionValue) Subject() string {
 	//: read-only; there is deliberately no setter.
-	return s.subject
+	return s.view().subject
 }
 
 // CreatedAt reports when this identifier was minted. Regeneration mints a new
@@ -90,14 +126,14 @@ func (s SessionValue) Subject() string {
 // session in every sense that matters.
 func (s SessionValue) CreatedAt() time.Time {
 	//: the absolute-deadline anchor.
-	return s.createdAt
+	return s.view().createdAt
 }
 
 // LastSeen reports the instant the idle window last slid, i.e. the most recent
 // successful [Store.Load].
 func (s SessionValue) LastSeen() time.Time {
 	//: the idle-deadline anchor.
-	return s.lastSeen
+	return s.view().lastSeen
 }
 
 // ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute
@@ -106,14 +142,10 @@ func (s SessionValue) LastSeen() time.Time {
 // which is what makes the absolute timeout a ceiling rather than a suggestion.
 func (s SessionValue) ExpiresAt() time.Time {
 	//: a sliding window that outran the ceiling would make the ceiling
-	//: decorative; the store clamps at write time and this is the guard that
-	//: makes the invariant true even for a value built elsewhere.
-	if s.idleExpiry.Before(s.absoluteExpiry) {
-		//: idle bites first.
-		return s.idleExpiry
-	}
-	//: the ceiling bites first, or they coincide.
-	return s.absoluteExpiry
+	//: decorative; NewSessionValue — the only producer, every mutator copies
+	//: what it built — clamps it once, so the stored deadline is already the
+	//: earlier of the two.
+	return s.view().expiresAt
 }
 
 // LiveAt reports whether the session is still usable at now. The boundary is
@@ -128,14 +160,14 @@ func (s SessionValue) LiveAt(now time.Time) bool {
 // are the claims anyway" path.
 func (s SessionValue) IsZero() bool {
 	//: the identifier is the one field no real session lacks.
-	return s.id.IsZero()
+	return s.view().id.IsZero()
 }
 
 // Get reads one datum. The second return distinguishes "absent" from "present
 // and empty", which a bare "" cannot.
 func (s SessionValue) Get(key string) (value string, ok bool) {
 	//: a nil map reads as empty, so no guard is needed.
-	value, ok = s.data[key]
+	value, ok = s.view().data[key]
 	//: absent keys report ok == false.
 	return value, ok
 }
@@ -147,8 +179,8 @@ func (s SessionValue) Get(key string) (value string, ok bool) {
 //	err = store.Save(ctx, session)
 func (s SessionValue) Set(key, value string) SessionValue {
 	//: copy-on-write: a shared value must not change under another holder.
-	next := s
-	next.data = maps.Clone(s.data)
+	next := *s.view()
+	next.data = maps.Clone(next.data)
 	//: Clone(nil) is nil, so the first Set has to allocate.
 	if next.data == nil {
 		//: one entry is the common case for a first write.
@@ -156,17 +188,17 @@ func (s SessionValue) Set(key, value string) SessionValue {
 	}
 	next.data[key] = value
 	//: the caller keeps the old value if they want it.
-	return next
+	return SessionValue{state: &next}
 }
 
 // Delete returns a copy without key. Deleting an absent key is not an error —
 // the caller asked for the key to be gone and it is.
 func (s SessionValue) Delete(key string) SessionValue {
-	next := s
-	next.data = maps.Clone(s.data)
+	next := *s.view()
+	next.data = maps.Clone(next.data)
 	delete(next.data, key)
 	//: the receiver still has the key.
-	return next
+	return SessionValue{state: &next}
 }
 
 // Keys reports the data keys in sorted order, so a caller iterating them gets
@@ -174,14 +206,14 @@ func (s SessionValue) Delete(key string) SessionValue {
 func (s SessionValue) Keys() []string {
 	//: sorted rather than map order: reproducible output is worth the sort on
 	//: a payload this size.
-	return slices.Sorted(maps.Keys(s.data))
+	return slices.Sorted(maps.Keys(s.view().data))
 }
 
 // Data returns a copy of the whole payload. It is a copy so a caller cannot
 // reach behind the value type and mutate a session another goroutine holds.
 func (s SessionValue) Data() map[string]string {
 	//: Clone(nil) is nil, which ranges as empty — the caller needs no guard.
-	return maps.Clone(s.data)
+	return maps.Clone(s.view().data)
 }
 
 // String implements fmt.Stringer and renders the session's SHAPE, never its
@@ -197,13 +229,13 @@ func (s SessionValue) String() string {
 	//: "anon" and "bound" describe the subject without naming it.
 	bound := "anon"
 	//: a non-empty subject means the session survived a Regenerate.
-	if s.subject != "" {
+	if s.view().subject != "" {
 		//: still no name — only the fact.
 		bound = "bound"
 	}
 	//: counts and a deadline: enough to tell an empty session from a full one,
 	//: and not enough to identify anybody.
-	return "session.Session{" + bound + " keys:" + strconv.Itoa(len(s.data)) +
+	return "session.Session{" + bound + " keys:" + strconv.Itoa(len(s.view().data)) +
 		" expires:" + s.ExpiresAt().UTC().Format(time.RFC3339) + "}"
 }
 
@@ -212,4 +244,19 @@ func (s SessionValue) String() string {
 func (s SessionValue) GoString() string {
 	//: same shape-only rendering as String.
 	return s.String()
+}
+
+// Format implements fmt.Formatter, so EVERY verb writes the same shape-only
+// rendering as String — %d included, which bypasses String and would
+// otherwise print every field. %q writes it quoted.
+func (s SessionValue) Format(state fmt.State, verb rune) {
+	//: %q quotes, so a surrounding quoted rendering stays well formed.
+	if verb == 'q' {
+		//: the shape, quoted.
+		writeRendering(state, strconv.Quote(s.String()))
+		//: nothing else to write.
+		return
+	}
+	//: every other verb writes the bare shape.
+	writeRendering(state, s.String())
 }

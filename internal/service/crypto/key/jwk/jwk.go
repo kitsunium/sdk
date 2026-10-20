@@ -2,6 +2,8 @@ package jwk
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"slices"
 	"strconv"
 
@@ -53,6 +55,11 @@ const (
 // Every field is unexported so encoding/json cannot reach the material by
 // reflection; the only serialisation paths are the named MarshalPublic /
 // MarshalPrivate pair and the MarshalJSON delegate.
+//
+// Every rendering — String, GoString and Format, so every verb — writes only
+// non-secret metadata. The private member sits behind a pointer, so a struct
+// holding a KeyValue in an UNEXPORTED field, which fmt prints by reflection
+// without calling Format, prints an address rather than the secret octets.
 type KeyValue struct {
 	// kty is the key-type family; the empty string marks the zero KeyValue.
 	kty Type
@@ -73,8 +80,42 @@ type KeyValue struct {
 	// priv holds the secret member: the EC "d" scalar, the OKP "d" seed, or the
 	// oct "k" key. Nil on a public-only key. One field, because exactly one of
 	// those members can be set and "does this key hold a secret" must be a
-	// single question.
-	priv []byte
+	// single question. A pointer rather than a slice, so fmt walking a KeyValue
+	// held in an unexported field prints an address, never the octets.
+	priv *privateMember
+}
+
+// privateMember is the one allocation holding a KeyValue's secret octets. It is
+// a separate type only so that the field a KeyValue carries is a pointer — see
+// the KeyValue doc comment.
+type privateMember struct {
+	// raw is the secret member, never empty: no secret is a nil pointer.
+	raw []byte
+}
+
+// holdPrivate wraps secret octets for a KeyValue, nil when there are none, so
+// IsPrivate stays the one question "is the pointer set". It does not copy: the
+// callers already hand over octets they own.
+func holdPrivate(raw []byte) *privateMember {
+	//: an empty secret is no secret.
+	if len(raw) == 0 {
+		//: a public-only key.
+		return nil
+	}
+	//: the caller's octets, now the key's.
+	return &privateMember{raw: raw}
+}
+
+// secret returns the secret octets without copying, nil on a public-only key.
+// It never leaves the package; every exported path copies or encodes.
+func (k KeyValue) secret() []byte {
+	//: a public-only key has none.
+	if k.priv == nil {
+		//: nil, so len and bytes.Equal treat it as empty.
+		return nil
+	}
+	//: the held octets, shared and never mutated.
+	return k.priv.raw
 }
 
 // Kty reports the key's "kty" member. The zero KeyValue reports the empty Type.
@@ -127,7 +168,7 @@ func (k KeyValue) IsZero() bool {
 // and only MarshalPrivate, can serialise this key whole.
 func (k KeyValue) IsPrivate() bool {
 	//: the single secret member covers EC "d", OKP "d" and oct "k".
-	return len(k.priv) != 0
+	return k.priv != nil
 }
 
 // WithKid returns a copy of k carrying kid. Passing the empty string clears it.
@@ -209,7 +250,7 @@ func (k KeyValue) equalMetadata(other KeyValue) bool {
 func (k KeyValue) equalMaterial(other KeyValue) bool {
 	//: all three octet members, so a dropped secret never reads as equal.
 	return bytes.Equal(k.x, other.x) && bytes.Equal(k.y, other.y) &&
-		bytes.Equal(k.priv, other.priv)
+		bytes.Equal(k.secret(), other.secret())
 }
 
 // String implements fmt.Stringer and renders only non-secret metadata, so a
@@ -229,4 +270,30 @@ func (k KeyValue) String() string {
 func (k KeyValue) GoString() string {
 	//: same rendering; the point is that no path reaches the material.
 	return k.String()
+}
+
+// Format implements fmt.Formatter, so EVERY verb writes the same metadata-only
+// rendering as String — %d included, which bypasses String and would
+// otherwise print the octet slices. %q writes it quoted.
+func (k KeyValue) Format(state fmt.State, verb rune) {
+	//: %q quotes, so a surrounding quoted rendering stays well formed.
+	if verb == 'q' {
+		//: the metadata, quoted.
+		writeRendering(state, strconv.Quote(k.String()))
+		//: nothing else to write.
+		return
+	}
+	//: every other verb writes the bare metadata.
+	writeRendering(state, k.String())
+}
+
+// writeRendering writes a rendering into the state fmt handed to Format.
+// fmt.Formatter has no error return and fmt discards what a write into its own
+// buffer reports, so the error is read here and dropped as a visible decision.
+func writeRendering(state fmt.State, text string) {
+	//: fmt's buffer is the only destination, and it does not fail.
+	if _, err := io.WriteString(state, text); err != nil {
+		//: nothing to report to — fmt drops the same error.
+		return
+	}
 }

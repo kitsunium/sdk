@@ -16,11 +16,12 @@ type candidate struct {
 	tagged bool
 }
 
-// writtenField is a member encoding/json writes: its name and the field whose
-// value it writes.
+// writtenField is a member encoding/json writes: its name, the field whose
+// value it writes, and that field's index path from the struct being planned.
 type writtenField struct {
 	name  string
 	field reflect.StructField
+	index []int
 }
 
 // embedding is a struct type whose fields are promoted into the struct being
@@ -76,7 +77,7 @@ func writtenFields(t reflect.Type) []writtenField {
 	written := make([]writtenField, len(winners))
 	//: the field behind each winner, reached through its embeddings.
 	for i, winner := range winners {
-		written[i] = writtenField{name: winner.name, field: t.FieldByIndex(winner.index)}
+		written[i] = writtenField{name: winner.name, field: t.FieldByIndex(winner.index), index: winner.index}
 	}
 	//: one field per name, and none for a name encoding/json leaves out.
 	return written

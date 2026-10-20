@@ -31,7 +31,7 @@ codes and `JWK*` sentinels.
 ## The decision this package exists to make
 
 `core/crypto.Key` is redacting **by design** (ADR 0013): `String` / `GoString`
-answer `<redacted>`, and `Bytes()` is the single, deliberate way out. A JWK
+/ `Format` answer `<redacted>`, and `Bytes()` is the single, deliberate way out. A JWK
 serialiser is, definitionally, a function that turns that protected material
 into JSON somebody will write to a file or an HTTP response. So the two
 directions are **two differently named methods**, never one method with a flag:
@@ -53,13 +53,17 @@ implement `String` / `GoString` so `%v`, `%s` and `%#v` print kty / crv / kid
 and a `private:` boolean, never an octet. Without `Set.String`, `fmt` walks the
 unexported members reflectively and dumps every scalar — that is not a
 hypothetical, it is what `TestFormattingNeverPrintsMaterial` catches when the
-methods are removed.
+methods are removed. `KeyValue` also implements `Format`, so `%d` — which
+bypasses `String` — prints the same metadata, and its private member sits
+behind a pointer (`privateMember`), so a `KeyValue` in an UNEXPORTED field,
+which `fmt` walks without calling any method, prints an address where the
+secret octets would be (#433, `TestFormattingNeverPrintsMaterialThroughAnyVerb`).
 
 ## Contents
 
 | File | Surface |
 |---|---|
-| `jwk.go` | `Type` (EC/OKP/oct), `Curve` (P-256/384/521, Ed25519), the immutable `KeyValue` + accessors (`Kty`/`Crv`/`Kid`/`Use`/`Alg`/`KeyOps`/`IsZero`/`IsPrivate`), `With*` copy-on-write setters, `Public`, `Equal`, redacting `String`/`GoString` |
+| `jwk.go` | `Type` (EC/OKP/oct), `Curve` (P-256/384/521, Ed25519), the immutable `KeyValue` + accessors (`Kty`/`Crv`/`Kid`/`Use`/`Alg`/`KeyOps`/`IsZero`/`IsPrivate`), `With*` copy-on-write setters, `Public`, `Equal`, redacting `String`/`GoString`/`Format`; the private member behind a pointer (`privateMember`, `holdPrivate`, `secret`) |
 | `parse.go` | `Parse` — the single decode entry point, plus the per-family validators |
 | `marshal.go` | `MarshalPublic` / `MarshalPrivate` / `MarshalJSON`, RFC 7638 `Thumbprint` and `WithThumbprintKid` |
 | `bridge.go` | `FromECDSAPublic`/`FromECDSAPrivate`/`FromEd25519Public`/`FromEd25519Private`/`FromSecret` and the reverse `ECDSAPublic`/`ECDSAPrivate`/`Ed25519Public`/`Ed25519Private`/`Secret` |
@@ -71,7 +75,8 @@ The codes and sentinels — `Malformed` (.1), `MissingMember` (.2),
 `UnsupportedKeyType` (.3), `UnsupportedCurve` (.4), `InvalidEncoding` (.5),
 `KeyMismatch` (.6), `NoPublicForm` (.7), `NoPrivateMaterial` (.8),
 `TypeMismatch` (.9), `KeyNotFound` (.10), `AmbiguousKid` (.11) — are
-`internal/core/crypto/key/jwk`'s `codes.go` and `errors.go`.
+`internal/core/crypto/key/jwk`'s `gen_codes.go`, written by kit gen from
+`design/crypto/key/jwk.yaml` (ADR 0164, ADR 0181).
 
 ## Key types
 

@@ -190,6 +190,58 @@ func TestStoresRefuseWhatEveryStoreRefuses(t *testing.T) {
 	}
 }
 
+// TestStoresPruneBelowByNumber pins the FloorPruner sibling every writable
+// store implements: versions below the floor go, the newest never does, and
+// the refusals match Prune's (#434).
+func TestStoresPruneBelowByNumber(t *testing.T) {
+	t.Parallel()
+	runCase := func(t *testing.T, c writableStore) {
+		t.Helper()
+		store := c.build(t, nil)
+		byFloor, ok := store.(coresecret.FloorPruner)
+		if !ok {
+			t.Fatalf("%s store does not implement FloorPruner", c.name)
+		}
+		ctx := t.Context()
+		for _, text := range []string{"one", "two", "three", "four", "five"} {
+			if _, err := store.Put(ctx, "db-password", coresecret.FromString(text)); err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+		}
+		steps := []struct {
+			floor int
+			want  []int
+		}{
+			{0, []int{5, 4, 3, 2, 1}},
+			{1, []int{5, 4, 3, 2, 1}},
+			{3, []int{5, 4, 3}},
+			{3, []int{5, 4, 3}},
+			{100, []int{5}},
+		}
+		for _, step := range steps {
+			if err := byFloor.PruneBelow(ctx, "db-password", step.floor); err != nil {
+				t.Fatalf("PruneBelow(%d): %v", step.floor, err)
+			}
+			versions, err := store.Versions(ctx, "db-password")
+			if err != nil || !slices.Equal(numbers(versions), step.want) {
+				t.Fatalf("Versions after PruneBelow(%d) = (%v, %v), want %v", step.floor, numbers(versions), err, step.want)
+			}
+		}
+		if err := byFloor.PruneBelow(ctx, "absent", 2); !errs.HasCode(err, coresecret.CodeNotFound) {
+			t.Errorf("PruneBelow(absent) = %v, want NotFound", err)
+		}
+		if err := byFloor.PruneBelow(ctx, "Bad_Name", 2); !errs.HasCode(err, coresecret.CodeInvalidName) {
+			t.Errorf("PruneBelow(Bad_Name) = %v, want InvalidName", err)
+		}
+	}
+	for _, c := range writableStores(t) {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestStoresHandOutCopies pins that a caller mutating what it was given cannot
 // change what the store holds.
 func TestStoresHandOutCopies(t *testing.T) {

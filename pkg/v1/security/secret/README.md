@@ -120,6 +120,8 @@ Package secret — subject keys: one data key per subject under a rotating root,
 - [func ValidateSubject\(subject string\) error](<#ValidateSubject>)
 - [type EnvConfig](<#EnvConfig>)
 - [type FileConfig](<#FileConfig>)
+- [type FloorPruner](<#FloorPruner>)
+  - [func \(FloorPruner\) PruneBelow\(ctx context.Context, name string, floor int\) error](<#FloorPruner.PruneBelow>)
 - [type Keyring](<#Keyring>)
   - [func \(\*Keyring\) Open\(ctx context.Context, box \[\]byte, aad \[\]byte\) \(plaintext \[\]byte, err error\)](<#Keyring.Open>)
   - [func \(\*Keyring\) Seal\(ctx context.Context, plaintext \[\]byte, aad \[\]byte\) \(box \[\]byte, err error\)](<#Keyring.Seal>)
@@ -595,6 +597,37 @@ type FileConfig struct {
 }
 ```
 
+<a name="FloorPruner"></a>
+## type [FloorPruner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
+
+FloorPruner is the [Store](#Store) sibling that prunes by version number rather than by count, so a version stored concurrently cannot push a kept one out; every store this package builds implements it.
+
+```go
+type FloorPruner = coresecret.FloorPruner
+```
+
+FloorPruner is an alias of `github.com/kitsunium/sdk/internal/core/security/secret.FloorPruner`, declared as:
+
+```go
+type FloorPruner interface {
+	// PruneBelow drops every version of name numbered below floor, except the
+	// newest: pruning never deletes a secret, whatever floor says. A floor of 1
+	// or less drops nothing, and pruning a name whose versions are all at or
+	// above floor is not an error. A store that only reads refuses it with
+	// [ReadOnly], and a name holding no version is [NotFound].
+	PruneBelow(ctx context.Context, name string, floor int) error
+}
+```
+
+<a name="FloorPruner.PruneBelow"></a>
+### func \(FloorPruner\) [PruneBelow](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
+
+```go
+func (FloorPruner) PruneBelow(ctx context.Context, name string, floor int) error
+```
+
+PruneBelow drops every version of name numbered below floor, except the newest: pruning never deletes a secret, whatever floor says. A floor of 1 or less drops nothing, and pruning a name whose versions are all at or above floor is not an error. A store that only reads refuses it with [ReadOnly](#ReadOnly), and a name holding no version is [NotFound](#NotFound).
+
 <a name="Keyring"></a>
 ## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
@@ -839,7 +872,11 @@ type RotatorConfig struct {
 	// rotation then prunes no version at or above it, whatever Policy.Keep
 	// says: Keep becomes a floor, and the store holds more versions until the
 	// dependants move on (SubjectKeys.Rewrap). It is asked after the new
-	// version is stored and before the prune. Its error is returned as it is
+	// version is stored and before the prune, and the prune drops by version
+	// number below the lower of the two floors — through [coresecret.FloorPruner] when
+	// the store has it, as every store this SDK ships does — so a version
+	// another process stores meanwhile cannot push a version in use out of
+	// the window. Its error is returned as it is
 	// and nothing is pruned — the rotation happened, and the next one prunes
 	// again — because a version pruned while still needed destroys whatever
 	// depends on it, and no later call can bring it back.

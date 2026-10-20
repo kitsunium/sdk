@@ -330,8 +330,8 @@ packages:
           - doc: |-
               JSON returns document with its secrets replaced, at most maxBytes long
               (raised to MinBytes): every member whose name the Redactor recognises has
-              its value, whatever it is, replaced by Placeholder, and every string has
-              the credentials of the URLs in it replaced.
+              its value, whatever it is, replaced by Placeholder, and every string — a
+              member name included — has the credentials of the URLs in it replaced.
 
               document is read, never modified. One that is not exactly one JSON value is
               refused with DocumentInvalid and nothing is returned for it: a partial copy
@@ -356,9 +356,11 @@ packages:
               secrets replaced, at most maxBytes long (raised to MinBytes). Beyond what
               JSON recognises by name, a struct field the Redactor's tag or field rule
               declares secret is replaced too — found by walking v's type the way
-              encoding/json lays it out, once per type. A type that writes its own JSON
-              (json.Marshaler, encoding.TextMarshaler) is opaque to that walk, and only
-              the names in its output are judged.
+              encoding/json lays it out, once per type. Below a member of interface type
+              — a field of type any, an element of a []any, a value of a map[string]any
+              — the walk follows the type the value holds, for this value. A type that
+              writes its own JSON (json.Marshaler, encoding.TextMarshaler) is opaque to
+              that walk, and only the names in its output are judged.
 
               v is encoded, never modified. A value encoding/json refuses — a channel, a
               function, a cycle — is refused with ValueUnencodable.

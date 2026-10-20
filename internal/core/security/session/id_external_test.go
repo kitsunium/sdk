@@ -294,6 +294,48 @@ func TestIDNeverRendersItself(t *testing.T) {
 	}
 }
 
+// idHider carries an ID in an UNEXPORTED field, which fmt formats by
+// reflection instead of through the ID's methods.
+type idHider struct {
+	id session.ID
+}
+
+// TestIDNeverRendersItsBytes is the regression for kitsunium/sdk#433: %d
+// bypasses String, and an ID in an unexported field is walked by reflection;
+// neither may print the identifier's bytes, in decimal or in hex.
+func TestIDNeverRendersItsBytes(t *testing.T) {
+	t.Parallel()
+	id := mustID(t, sampleRaw())
+	type tc struct {
+		name   string
+		render func() string
+	}
+	tests := []tc{
+		{"%d", func() string { return fmt.Sprintf("%d", id) }},
+		{"%x", func() string { return fmt.Sprintf("%x", id) }},
+		{"%X", func() string { return fmt.Sprintf("%X", id) }},
+		{"an unexported field, %v", func() string { return fmt.Sprintf("%v", idHider{id: id}) }},
+		{"an unexported field, %+v", func() string { return fmt.Sprintf("%+v", idHider{id: id}) }},
+		{"an unexported field, %d", func() string { return fmt.Sprintf("%d", idHider{id: id}) }},
+	}
+	forbidden := []string{id.Reveal(), "0 1 2 3 4 5 6", "000102030405", "0x0 0x1 0x2"}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		rendered := c.render()
+		for _, spelling := range forbidden {
+			if strings.Contains(rendered, spelling) {
+				t.Fatalf("%s rendered the identifier (%q) in %s", c.name, spelling, rendered)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // mustID builds an ID or fails the test.
 func mustID(t *testing.T, raw []byte) session.ID {
 	t.Helper()

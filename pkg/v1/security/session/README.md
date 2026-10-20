@@ -99,6 +99,7 @@ Both stores implement [Sweeper](#Sweeper), reached by type assertion rather than
 - [type ID](<#ID>)
   - [func \(ID\) Digest\(\) string](<#ID.Digest>)
   - [func \(ID\) Equal\(other ID\) bool](<#ID.Equal>)
+  - [func \(ID\) Format\(state fmt.State, verb rune\)](<#ID.Format>)
   - [func \(ID\) GoString\(\) string](<#ID.GoString>)
   - [func \(ID\) IsZero\(\) bool](<#ID.IsZero>)
   - [func \(ID\) Reveal\(\) string](<#ID.Reveal>)
@@ -111,6 +112,7 @@ Both stores implement [Sweeper](#Sweeper), reached by type assertion rather than
   - [func \(Session\) Data\(\) map\[string\]string](<#Session.Data>)
   - [func \(Session\) Delete\(key string\) SessionValue](<#Session.Delete>)
   - [func \(Session\) ExpiresAt\(\) time.Time](<#Session.ExpiresAt>)
+  - [func \(Session\) Format\(state fmt.State, verb rune\)](<#Session.Format>)
   - [func \(Session\) Get\(key string\) \(value string, ok bool\)](<#Session.Get>)
   - [func \(Session\) GoString\(\) string](<#Session.GoString>)
   - [func \(Session\) ID\(\) ID](<#Session.ID>)
@@ -485,6 +487,15 @@ func (ID) Equal(other ID) bool
 
 Equal reports whether i and other are the same identifier, in time that does not depend on how many leading bytes they share. Every comparison of a session identifier in this SDK goes through here or through crypto/subtle directly; none of them uses == or string equality.
 
+<a name="ID.Format"></a>
+### func \(ID\) [Format](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/id.go>)
+
+```go
+func (ID) Format(state fmt.State, verb rune)
+```
+
+Format implements fmt.Formatter, so EVERY verb writes "\<redacted>" — %d included, which bypasses String and would otherwise print the struct. %q writes it quoted.
+
 <a name="ID.GoString"></a>
 ### func \(ID\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/id.go>)
 
@@ -612,6 +623,15 @@ func (Session) ExpiresAt() time.Time
 ```
 
 ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute ceiling and the sliding idle window. The two are never reconciled by averaging or by preferring the later one — the earlier deadline always wins, which is what makes the absolute timeout a ceiling rather than a suggestion.
+
+<a name="Session.Format"></a>
+### func \(Session\) [Format](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)
+
+```go
+func (Session) Format(state fmt.State, verb rune)
+```
+
+Format implements fmt.Formatter, so EVERY verb writes the same shape-only rendering as String — %d included, which bypasses String and would otherwise print every field. %q writes it quoted.
 
 <a name="Session.Get"></a>
 ### func \(Session\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/session/session_value.go>)

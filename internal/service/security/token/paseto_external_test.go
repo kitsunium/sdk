@@ -147,6 +147,27 @@ func TestPasetoFooterIsAuthenticatedAndExpected(t *testing.T) {
 	}
 }
 
+// TestPasetoEmptyFooterHasOneSpelling is the regression for
+// kitsunium/sdk#438: an empty footer is written by omitting the fourth
+// segment, so the same token with an empty fourth segment — "<token>." — is a
+// second spelling, and is refused as malformed rather than verified.
+func TestPasetoEmptyFooterHasOneSpelling(t *testing.T) {
+	t.Parallel()
+	issuer, verifier := pasetoPair(t,
+		svctoken.PasetoIssuerConfig{Lifetime: time.Hour},
+		svctoken.PasetoVerifierConfig{})
+	minted, err := issuer.Issue(coretoken.NewClaimsValue().WithSubject("alice"))
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, verr := verifier.Verify(minted); verr != nil {
+		t.Fatalf("canonical spelling: %v", verr)
+	}
+	if _, verr := verifier.Verify(minted + "."); !errs.HasCode(verr, coretoken.CodeMalformed) {
+		t.Fatalf("an empty footer segment: got %v, want MALFORMED", verr)
+	}
+}
+
 // TestPasetoFooterBoundIsOneNumberOnBothSides pins that a footer the SDK's own
 // verifiers refuse can be CONFIGURED on neither side.
 //

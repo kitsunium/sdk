@@ -248,7 +248,7 @@ sequences:
       - loop:
           do:
             - set: written[i]
-              value: "writtenField{name: winner.name, field: t.FieldByIndex(winner.index)}"
+              value: "writtenField{name: winner.name, field: t.FieldByIndex(winner.index), index: winner.index}"
           key: i
           range: winners
           value: winner
@@ -445,6 +445,8 @@ sequences:
         kind: stdlib
       - id: r.planOf
         kind: internal
+      - id: r.resolve
+        kind: internal
       - id: r.redact
         kind: internal
     steps:
@@ -465,6 +467,12 @@ sequences:
             - set: declared
               to: r.planOf
               value: r.planOf(reflect.TypeOf(v))
+            - opt:
+                do:
+                  - set: declared
+                    to: r.resolve
+                    value: r.resolve(declared, reflect.ValueOf(v))
+                when: r.opensAt(reflect.TypeOf(v), declared)
           when: v != nil
       - return: r.redact(encoded, declared, maxBytes)
         to: r.redact
@@ -596,6 +604,8 @@ sequences:
         kind: value
       - id: nameToken.String
         kind: value
+      - id: c.redactor.scrub
+        kind: internal
       - id: c.decoder.SkipValue
         kind: value
       - id: c.member
@@ -622,6 +632,9 @@ sequences:
             - bind: name
               eval: nameToken.String()
               to: nameToken.String
+            - bind: shown
+              eval: c.redactor.scrub(name)
+              to: c.redactor.scrub
             - opt:
                 do:
                   - set: c.cut
@@ -635,8 +648,8 @@ sequences:
                         to: c.decoder.SkipValue
                       when: skipErr != nil
                   - continue: true
-                when: c.cut || !c.fitsMember(first, name)
-            - eval: c.member(first, name)
+                when: c.cut || !c.fitsMember(first, shown)
+            - eval: c.member(first, shown)
               to: c.member
             - set: first
               value: "false"
@@ -698,9 +711,11 @@ sequences:
                   - return: copyErr
                 init:
                   bind: copyErr
-                  eval: c.value(declared.item(), false)
+                  eval: c.value(declared.itemAt(index), false)
                   to: c.value
                 when: copyErr != nil
+          init: index := 0
+          post: index++
       - return: c.close(']')
         to: c.close
   - of: (*copier).open
@@ -926,12 +941,20 @@ sequences:
             - return: p.items
           when: p.members == nil
       - return: p.members[name]
-  - of: (*plan).item
+  - of: (*plan).itemAt
     steps:
       - opt:
           do:
             - return: nil
           when: p == nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: index >= len(p.elements)
+            - return: p.elements[index]
+          when: p.elements != nil
       - return: p.items
   - of: (*Redactor).planOf
     participants:
@@ -1013,7 +1036,7 @@ sequences:
                       eval: seen[t]
                     when: found
                 - bind: built
-                  eval: "&plan{members: map[string]*plan{}}"
+                  eval: "&plan{members: map[string]*plan{}, paths: map[string][]int{}}"
                 - set: seen[t]
                   value: built
                 - eval: r.fields(built, t, seen)
@@ -1031,10 +1054,286 @@ sequences:
               do:
                 - return: r.below(t.Elem(), seen)
                   to: r.below
+            - case: reflect.Interface
+              do:
+                - return: dynamicPlan
             - default: true
               do:
                 - return: nil
           "on": t.Kind()
+  - of: (*Redactor).opensAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).opensAt
+        kind: self
+      - id: r.opens.Load
+        kind: value
+      - id: isOpen
+        kind: internal
+      - id: r.opens.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: open
+                init:
+                  bind: open, isBool
+                  eval: cached.(bool)
+                when: isBool
+          init:
+            bind: cached, found
+            eval: r.opens.Load(t)
+            to: r.opens.Load
+          when: found
+      - bind: open
+        eval: isOpen(declared, map[*plan]bool{})
+        to: isOpen
+      - eval: r.opens.Store(t, open)
+        to: r.opens.Store
+      - return: open
+  - of: isOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: isOpen
+        kind: self
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: p == nil || seen[p]
+      - set: seen[p]
+        value: "true"
+      - opt:
+          do:
+            - return: "true"
+          when: p.dynamic
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: isOpen(member, seen)
+          key: _
+          range: p.members
+          value: member
+      - return: isOpen(p.items, seen)
+        to: isOpen
+  - of: (*Redactor).resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).resolve
+        kind: self
+      - id: r.resolveHeld
+        kind: internal
+      - id: rv.Elem
+        kind: value
+      - id: r.resolveStruct
+        kind: internal
+      - id: r.resolveElements
+        kind: internal
+      - id: r.resolveEntries
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p
+          when: p == nil || p.secret
+      - opt:
+          do:
+            - return: r.resolveHeld(rv)
+              to: r.resolveHeld
+          when: p.dynamic
+      - loop:
+          cond: rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface
+          do:
+            - opt:
+                do:
+                  - return: p
+                when: rv.IsNil()
+            - set: rv
+              to: rv.Elem
+              value: rv.Elem()
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - return: r.resolveStruct(p, rv)
+                  to: r.resolveStruct
+            - case: reflect.Slice, reflect.Array
+              do:
+                - return: r.resolveElements(p, rv)
+                  to: r.resolveElements
+            - case: reflect.Map
+              do:
+                - return: r.resolveEntries(p, rv)
+                  to: r.resolveEntries
+            - default: true
+              do:
+                - return: p
+          "on": rv.Kind()
+  - of: (*Redactor).resolveHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).resolveHeld
+        kind: self
+      - id: rv.Elem
+        kind: value
+      - id: r.resolve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: rv.Kind() != reflect.Interface || rv.IsNil()
+      - bind: held
+        eval: rv.Elem()
+        to: rv.Elem
+      - return: r.resolve(r.planOf(held.Type()), held)
+        to: r.resolve
+  - of: (*Redactor).resolveElements
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).resolveElements
+        kind: self
+      - id: r.resolve
+        kind: internal
+    steps:
+      - bind: resolved
+        eval: "&plan{elements: make([]*plan, rv.Len())}"
+      - loop:
+          do:
+            - set: resolved.elements[index]
+              to: r.resolve
+              value: r.resolve(p.items, rv.Index(index))
+          key: index
+          range: rv.Len()
+      - return: resolved
+  - of: (*Redactor).resolveEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).resolveEntries
+        kind: self
+      - id: rv.MapRange
+        kind: value
+      - id: mapKeyName
+        kind: internal
+      - id: r.resolve
+        kind: internal
+    steps:
+      - bind: resolved
+        eval: "&plan{members: map[string]*plan{}}"
+      - bind: entries
+        eval: rv.MapRange()
+        to: rv.MapRange
+      - loop:
+          cond: entries.Next()
+          do:
+            - bind: name, named
+              eval: mapKeyName(entries.Key())
+              to: mapKeyName
+            - opt:
+                do:
+                  - continue: true
+                when: "!named"
+            - opt:
+                do:
+                  - set: resolved.members[name]
+                    value: member
+                init:
+                  bind: member
+                  eval: r.resolve(p.items, entries.Value())
+                  to: r.resolve
+                when: member != nil
+      - return: resolved
+  - of: (*Redactor).resolveStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Redactor).resolveStruct
+        kind: self
+      - id: rv.FieldByIndexErr
+        kind: value
+      - id: r.resolve
+        kind: internal
+    steps:
+      - bind: resolved
+        eval: "&plan{members: map[string]*plan{}}"
+      - loop:
+          do:
+            - bind: field, unreachable
+              eval: rv.FieldByIndexErr(p.paths[name])
+              to: rv.FieldByIndexErr
+            - opt:
+                do:
+                  - continue: true
+                when: unreachable != nil
+            - opt:
+                do:
+                  - set: resolved.members[name]
+                    value: inner
+                init:
+                  bind: inner
+                  eval: r.resolve(member, field)
+                  to: r.resolve
+                when: inner != nil
+          key: name
+          range: p.members
+          value: member
+      - return: resolved
+  - of: mapKeyName
+    participants:
+      - id: caller
+        kind: actor
+      - id: mapKeyName
+        kind: self
+      - id: key.String
+        kind: value
+      - id: marshaler.MarshalText
+        kind: value
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: key.String(), true
+              to: key.String
+          when: key.Kind() == reflect.String
+      - opt:
+          do:
+            - bind: text, textErr
+              eval: marshaler.MarshalText()
+              to: marshaler.MarshalText
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: textErr != nil
+            - return: string(text), true
+          init:
+            bind: marshaler, isText
+            eval: reflect.TypeAssert[encoding.TextMarshaler](key)
+          when: isText
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: strconv.FormatInt(key.Int(), 10), true
+                  to: strconv
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr
+              do:
+                - return: strconv.FormatUint(key.Uint(), 10), true
+                  to: strconv
+            - default: true
+              do:
+                - return: "\"\", false"
+          "on": key.Kind()
   - of: (*Redactor).below
     participants:
       - id: caller
@@ -1068,6 +1367,8 @@ sequences:
                 do:
                   - set: p.members[written.name]
                     value: member
+                  - set: p.paths[written.name]
+                    value: written.index
                 init:
                   bind: member
                   eval: r.memberPlan(written.field, seen)

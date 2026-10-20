@@ -103,7 +103,7 @@ func (k KeyValue) privateWire() (raw keyJSON, err error) {
 		//: "k" carries the whole key; metadata rides alongside.
 		return keyJSON{
 			Kty: string(k.kty), Kid: k.kid, Use: k.use,
-			Alg: k.alg, KeyOps: k.keyOps, K: b64Encode(k.priv),
+			Alg: k.alg, KeyOps: k.keyOps, K: b64Encode(k.secret()),
 		}, nil
 	}
 	//: EC and OKP extend their public form with "d".
@@ -113,7 +113,7 @@ func (k KeyValue) privateWire() (raw keyJSON, err error) {
 		//: already typed.
 		return keyJSON{}, werr
 	}
-	raw.D = b64Encode(k.priv)
+	raw.D = b64Encode(k.secret())
 	//: the full member set.
 	return raw, nil
 }
@@ -244,5 +244,5 @@ func (k KeyValue) thumbprintOct() (canonical []byte, err error) {
 		return nil, corejwk.NoPrivateMaterial
 	}
 	//: members in lexicographic order, no whitespace.
-	return []byte(`{"k":"` + b64Encode(k.priv) + `","kty":"oct"}`), nil
+	return []byte(`{"k":"` + b64Encode(k.secret()) + `","kty":"oct"}`), nil
 }

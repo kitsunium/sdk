@@ -324,27 +324,61 @@ sequences:
           do:
             - return: Key{}, InvalidKey
           when: len(raw) != KeyLen
-      - return: "Key{raw: bytes.Clone(raw)}, nil"
+      - return: "Key{held: &keyBytes{raw: bytes.Clone(raw)}}, nil"
   - of: Key.Bytes
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: k.held == nil
+      - return: append(make([]byte, 0, KeyLen), k.held.raw...)
+  - of: Key.Zeroize
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: k.held == nil
+      - eval: clear(k.held.raw)
+  - of: Key.String
+    steps:
+      - return: redactedKey
+  - of: Key.GoString
+    steps:
+      - return: redactedKey
+  - of: Key.Format
     participants:
       - id: caller
         kind: actor
-      - id: Key.Bytes
+      - id: Key.Format
         kind: self
-      - id: bytes
+      - id: writeKeyRendering
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: writeKeyRendering(state, strconv.Quote(redactedKey))
+              to: writeKeyRendering
+            - return: ""
+          when: verb == 'q'
+      - eval: writeKeyRendering(state, redactedKey)
+        to: writeKeyRendering
+  - of: writeKeyRendering
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeKeyRendering
+        kind: self
+      - id: io
         kind: stdlib
     steps:
-      - return: bytes.Clone(k.raw)
-        to: bytes
-  - of: Key.Zeroize
-    steps:
-      - eval: clear(k.raw)
-  - of: Key.String
-    steps:
-      - return: "\"<redacted>\""
-  - of: Key.GoString
-    steps:
-      - return: "\"<redacted>\""
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: io.WriteString(state, text)
+            to: io
+          when: err != nil
   - of: RegisterMAC
     participants:
       - id: caller

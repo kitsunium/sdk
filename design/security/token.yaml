@@ -1132,6 +1132,13 @@ packages:
           claiming HS256 through — the binding built from that key reports ES256, the
           header comparison refuses, and no key material reaches a MAC.
 
+          The verdicts are the single-key verifier's. A token with "alg": "none" is
+          refused with AlgorithmNone before any key is selected, kid or no kid. A
+          token whose header no candidate accepts — an algorithm none of them is
+          bound to, a "crit" parameter, an unexpected "typ" — is refused with that
+          header's own verdict, never reduced to SignatureInvalid, which means a
+          candidate accepted the header and no signature verified.
+
           # Duplicate kids
 
           jwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing

@@ -144,11 +144,19 @@ files:
   - decls:
       - plan
       - (*plan).member
-      - (*plan).item
+      - (*plan).itemAt
       - jsonMarshalerType
       - (*Redactor).planOf
       - writesOwnJSON
       - (*Redactor).build
+      - (*Redactor).opensAt
+      - isOpen
+      - (*Redactor).resolve
+      - (*Redactor).resolveHeld
+      - (*Redactor).resolveElements
+      - (*Redactor).resolveEntries
+      - (*Redactor).resolveStruct
+      - mapKeyName
       - (*Redactor).below
       - (*Redactor).fields
       - (*Redactor).memberPlan
@@ -266,6 +274,20 @@ functions:
     name: writesOwnJSON
     params: t reflect.Type
     results: bool
+  - doc: |-
+      isOpen reports whether p reaches an interface, so a value of its type must
+      be resolved before its plan applies. seen holds the plans already visited,
+      so a recursive type is walked once.
+    name: isOpen
+    params: p *plan, seen map[*plan]bool
+    results: bool
+  - doc: |-
+      mapKeyName returns the member name encoding/json writes map key key under:
+      a string as it is, a TextMarshaler's text, an integer in decimal. named is
+      false for a key encoding/json cannot write.
+    name: mapKeyName
+    params: key reflect.Value
+    results: name string, named bool
   - name: DefaultWords
     results: "[]string"
   - name: NewRedactor
@@ -322,13 +344,15 @@ types:
     kind: struct
     name: candidate
   - doc: |-
-      writtenField is a member encoding/json writes: its name and the field whose
-      value it writes.
+      writtenField is a member encoding/json writes: its name, the field whose
+      value it writes, and that field's index path from the struct being planned.
     fields:
       - name: name
         type: string
       - name: field
         type: reflect.StructField
+      - name: index
+        type: "[]int"
     kind: struct
     name: writtenField
   - doc: |-
@@ -436,12 +460,30 @@ types:
       plan says, for one Go type, which members of its JSON form are secret by
       declaration, and the plans of the members below them. A nil plan declares
       nothing: only names are then judged.
+
+      A type's plan is built once and cached. An interface-typed member is the one
+      thing a type cannot plan: what it holds is decided per value, so its plan is
+      dynamicPlan, and Value resolves a plan that reaches one against the value
+      itself (resolve) before the copy — that per-value plan is never cached.
     fields:
       - name: members
         type: map[string]*plan
+      - doc: |-
+          paths is, for a struct's plan, the index path of the field behind each
+          planned member, so resolve reaches the value encoding/json wrote.
+        name: paths
+        type: map[string][]int
       - name: items
         type: "*plan"
+      - doc: |-
+          elements is, for an array resolved against a value, one plan per
+          element: the elements of a []any differ in type.
+        name: elements
+        type: "[]*plan"
       - name: secret
+        type: bool
+      - doc: "dynamic marks an interface: the plan is its dynamic value's."
+        name: dynamic
         type: bool
     kind: struct
     methods:
@@ -452,8 +494,9 @@ types:
         params: name string
         recv: p *plan
         results: "*plan"
-      - doc: item returns the plan of an array's elements.
-        name: item
+      - doc: itemAt returns the plan of an array's element at index.
+        name: itemAt
+        params: index int
         recv: p *plan
         results: "*plan"
     name: plan
@@ -492,6 +535,8 @@ types:
       - name: error
         type: func(err error) string
       - name: plans
+        type: sync.Map
+      - name: opens
         type: sync.Map
       - name: tag
         type: string
@@ -561,6 +606,51 @@ types:
         recv: r *Redactor
         results: "*plan"
       - doc: |-
+          opensAt reports whether the plan declared for t reaches an interface,
+          walking it once per type and caching the answer.
+        name: opensAt
+        params: t reflect.Type, declared *plan
+        recv: r *Redactor
+        results: bool
+      - doc: |-
+          resolve returns the plan of the value rv under the static plan p: p itself
+          where nothing below it is an interface, and otherwise a plan built for this
+          value, every interface replaced by the plan of the type it holds. It
+          follows rv the way encoding/json wrote it — through pointers, the fields
+          behind each member, every element and every map entry.
+        name: resolve
+        params: p *plan, rv reflect.Value
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          resolveHeld returns the plan of what interface value rv holds: the plan of
+          its dynamic type, cached like any type's, resolved against it.
+        name: resolveHeld
+        params: rv reflect.Value
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          resolveElements resolves each element of array or slice value rv on its
+          own: the elements of a []any differ in type.
+        name: resolveElements
+        params: p *plan, rv reflect.Value
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          resolveEntries resolves each entry of map value rv under the member name
+          encoding/json writes its key as.
+        name: resolveEntries
+        params: p *plan, rv reflect.Value
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
+          resolveStruct resolves each planned member of struct value rv against the
+          field encoding/json wrote under its name.
+        name: resolveStruct
+        params: p *plan, rv reflect.Value
+        recv: r *Redactor
+        results: "*plan"
+      - doc: |-
           below builds the plan shared by every element of an array or value of a
           map, or nil when the element declares nothing.
         name: below
@@ -616,13 +706,18 @@ vars:
           	'"': '"', '\\': '\\', '\b': 'b', '\f': 'f', '\n': 'n', '\r': 'r', '\t': 't',
           }
     name: shortEscapes
-  - doc: Types whose JSON form reflection cannot see.
+  - doc: |-
+      Types whose JSON form reflection cannot see, and the plan of every interface
+      type — shared and never written: resolve replaces it with the plan of the
+      value it holds.
     grouped: true
     items:
       - name: jsonMarshalerType
         value: reflect.TypeFor[json.Marshaler]()
       - name: textMarshalerType
         value: reflect.TypeFor[encoding.TextMarshaler]()
+      - name: dynamicPlan
+        value: "&plan{dynamic: true}"
     name: jsonMarshalerType
   - doc: |-
       defaultWords are the fragments of a member name that make it a secret,

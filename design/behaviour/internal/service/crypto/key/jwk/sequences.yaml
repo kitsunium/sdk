@@ -80,6 +80,8 @@ sequences:
         kind: value
       - id: checkECScalar
         kind: internal
+      - id: holdPrivate
+        kind: internal
     steps:
       - bind: size
         eval: coordLen(base.crv)
@@ -100,7 +102,8 @@ sequences:
             to: checkECScalar
           when: serr != nil
       - set: base.priv
-        value: fixed
+        to: holdPrivate
+        value: holdPrivate(fixed)
       - return: base, nil
   - of: fromECDSAPublicKey
     participants:
@@ -199,7 +202,7 @@ sequences:
             - return: nil, corejwk.NoPrivateMaterial
           when: "!k.IsPrivate()"
       - bind: priv
-        eval: "&ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(k.priv)}"
+        eval: "&ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(k.secret())}"
       - bind: out, merr
         eval: x509.MarshalECPrivateKey(priv)
         to: x509
@@ -260,7 +263,7 @@ sequences:
       - return: |-
           KeyValue{
           		kty: TypeOKP, crv: CurveEd25519,
-          		x: bytes.Clone(priv[ed25519KeyLen:]), priv: bytes.Clone(seed),
+          		x: bytes.Clone(priv[ed25519KeyLen:]), priv: holdPrivate(bytes.Clone(seed)),
           	}, nil
   - of: KeyValue.Ed25519Public
     participants:
@@ -294,7 +297,7 @@ sequences:
           do:
             - return: nil, corejwk.NoPrivateMaterial
           when: "!k.IsPrivate()"
-      - return: ed25519.NewKeyFromSeed(k.priv), nil
+      - return: ed25519.NewKeyFromSeed(k.secret()), nil
         to: ed25519
   - of: FromSecret
     participants:
@@ -312,7 +315,7 @@ sequences:
           do:
             - return: KeyValue{}, corecrypto.InvalidKey
           when: len(raw) != corecrypto.KeyLen
-      - return: "KeyValue{kty: TypeOct, priv: raw}, nil"
+      - return: "KeyValue{kty: TypeOct, priv: holdPrivate(raw)}, nil"
   - of: KeyValue.Secret
     participants:
       - id: caller
@@ -330,7 +333,7 @@ sequences:
           do:
             - return: corecrypto.Key{}, corejwk.NoPrivateMaterial
           when: "!k.IsPrivate()"
-      - return: corecrypto.NewKey(k.priv)
+      - return: corecrypto.NewKey(k.secret())
         to: corecrypto
   - of: coordLen
     steps:
@@ -484,6 +487,20 @@ sequences:
             - return: corejwk.KeyMismatch
           when: err != nil || !bytes.Equal(priv.PublicKey().Bytes(), uncompressedPoint(x, y))
       - return: nil
+  - of: holdPrivate
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(raw) == 0
+      - return: "&privateMember{raw: raw}"
+  - of: KeyValue.secret
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: k.priv == nil
+      - return: k.priv.raw
   - of: KeyValue.Kty
     steps:
       - return: k.kty
@@ -515,7 +532,7 @@ sequences:
       - return: k.kty == ""
   - of: KeyValue.IsPrivate
     steps:
-      - return: len(k.priv) != 0
+      - return: k.priv != nil
   - of: KeyValue.WithKid
     steps:
       - set: k.kid
@@ -570,7 +587,7 @@ sequences:
     steps:
       - return: |-
           bytes.Equal(k.x, other.x) && bytes.Equal(k.y, other.y) &&
-          		bytes.Equal(k.priv, other.priv)
+          		bytes.Equal(k.secret(), other.secret())
   - of: KeyValue.String
     steps:
       - return: |-
@@ -589,6 +606,40 @@ sequences:
     steps:
       - return: k.String()
         to: k.String
+  - of: KeyValue.Format
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.Format
+        kind: self
+      - id: writeRendering
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: writeRendering(state, strconv.Quote(k.String()))
+              to: writeRendering
+            - return: ""
+          when: verb == 'q'
+      - eval: writeRendering(state, k.String())
+        to: writeRendering
+  - of: writeRendering
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeRendering
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: io.WriteString(state, text)
+            to: io
+          when: err != nil
   - of: KeyValue.MarshalPublic
     participants:
       - id: caller
@@ -699,7 +750,7 @@ sequences:
             - return: |-
                 keyJSON{
                 			Kty: string(k.kty), Kid: k.kid, Use: k.use,
-                			Alg: k.alg, KeyOps: k.keyOps, K: b64Encode(k.priv),
+                			Alg: k.alg, KeyOps: k.keyOps, K: b64Encode(k.secret()),
                 		}, nil
           when: k.kty == TypeOct
       - bind: raw, werr
@@ -711,7 +762,7 @@ sequences:
           when: werr != nil
       - set: raw.D
         to: b64Encode
-        value: b64Encode(k.priv)
+        value: b64Encode(k.secret())
       - return: raw, nil
   - of: encodeWire
     participants:
@@ -840,7 +891,7 @@ sequences:
           do:
             - return: nil, corejwk.NoPrivateMaterial
           when: "!k.IsPrivate()"
-      - return: "[]byte(`{\"k\":\"` + b64Encode(k.priv) + `\",\"kty\":\"oct\"}`), nil"
+      - return: "[]byte(`{\"k\":\"` + b64Encode(k.secret()) + `\",\"kty\":\"oct\"}`), nil"
   - of: Parse
     participants:
       - id: caller
@@ -995,6 +1046,8 @@ sequences:
         kind: internal
       - id: checkECScalar
         kind: internal
+      - id: holdPrivate
+        kind: internal
     steps:
       - opt:
           do:
@@ -1016,7 +1069,8 @@ sequences:
             to: checkECScalar
           when: serr != nil
       - set: base.priv
-        value: scalar
+        to: holdPrivate
+        value: holdPrivate(scalar)
       - return: base, nil
   - of: parseOKP
     participants:
@@ -1056,6 +1110,8 @@ sequences:
         kind: self
       - id: b64DecodeFixed
         kind: internal
+      - id: holdPrivate
+        kind: internal
     steps:
       - opt:
           do:
@@ -1073,7 +1129,8 @@ sequences:
             - return: KeyValue{}, corejwk.KeyMismatch
           when: "!bytes.Equal(ed25519.NewKeyFromSeed(seed)[ed25519KeyLen:], base.x)"
       - set: base.priv
-        value: seed
+        to: holdPrivate
+        value: holdPrivate(seed)
       - return: base, nil
   - of: parseOct
     participants:
@@ -1082,6 +1139,8 @@ sequences:
       - id: parseOct
         kind: self
       - id: b64Decode
+        kind: internal
+      - id: holdPrivate
         kind: internal
     steps:
       - opt:
@@ -1100,7 +1159,8 @@ sequences:
             - return: KeyValue{}, kerr
           when: kerr != nil
       - set: base.priv
-        value: secret
+        to: holdPrivate
+        value: holdPrivate(secret)
       - return: base, nil
   - of: NewSet
     steps:

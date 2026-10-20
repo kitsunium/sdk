@@ -264,7 +264,10 @@ Two more PASETO decisions:
   (1 KiB) as `TOO_LARGE` before reading the signature, so BOTH constructors
   refuse a longer configured footer (`POLICY_MISCONFIGURED`) — an issuer with
   one would mint only tokens the SDK refuses, and a verifier with one could
-  never match anything.
+  never match anything. An empty footer is spelled by OMITTING the fourth
+  segment, as the issuer writes it; a present but empty fourth segment
+  (`<token>.`) is a second spelling of the same token and is `MALFORMED`
+  (#438, `TestPasetoEmptyFooterHasOneSpelling`).
 - **The configs are FLAT, not embedded.** `PasetoIssuerConfig` has no `Type`
   and no `KeyID` because PASETO has no header to put them in. Embedding
   `IssuerConfig` would have published two knobs this format silently ignores.
@@ -283,8 +286,20 @@ Two more PASETO decisions:
   `Private` string here names a CHECK, never a value; `ClaimsValue` renders its
   shape and not its contents.
 - Do not relax the strict base64url decoding, the exact ES256 signature length,
-  or the duplicate-member refusal to accommodate a lenient producer. Each is a
-  test row, and each exists so one token has exactly one spelling.
+  the ES256 low-S rule, the refusal of an empty PASETO footer segment, or the
+  duplicate-member refusal to accommodate a lenient producer. Each is a test
+  row, and each exists so one token has exactly one spelling. ECDSA's (r, s)
+  verifies as (r, n−s) does, and anyone holding a token can compute the twin
+  without the key: `es256Signing.sign` writes s ≤ n/2 and
+  `es256Verifying.verify` refuses s > n/2 (#438, `TestES256HasOneSpelling`).
+- Do not let a present time claim decode to the zero `time.Time`: that is
+  "absent" to `ClaimsValue`, and an `exp` at 0001-01-01T00:00:00Z would read as
+  no expiry at all. `decodeTimeClaim` refuses it as `MALFORMED` (#439).
+- Do not let the set verifier reduce a header's fault to `SIGNATURE_INVALID`.
+  `alg: none` is refused before any key is selected, and when no candidate
+  accepts the header the first candidate's header verdict is returned —
+  `ALGORITHM_MISMATCH`, `HEADER_UNSUPPORTED` — as the single-key verifier
+  returns it (#440, `TestSetVerifierNamesTheHeaderVerdict`).
 - Do not reach for `bytes.Equal` on a tag. The only secret comparison in this
   package is `hmacsha2.MAC.Verify`, which is `hmac.Equal`.
 - Do not fetch a JWKS here. Same rule as `service/crypto/key/jwk`: retrieval is a

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -375,6 +376,94 @@ func TestANullRegisteredClaimIsRefused(t *testing.T) {
 	//: a PRIVATE claim may be null: its meaning is the application's.
 	if _, verr := verifier.Verify(forge(`{"alg":"HS256","typ":"JWT"}`, `{"tenant":null}`, sign)); verr != nil {
 		t.Fatalf("a null private claim was refused: %v", verr)
+	}
+}
+
+// TestAnExpiryAtTheZeroInstantIsNotAMissingOne is the regression for
+// kitsunium/sdk#439: "exp": -62135596800 is 0001-01-01T00:00:00Z, the zero
+// Time this domain reads as "absent". It is refused as malformed — never
+// accepted as a token with no expiry, nor reported as EXPIRY_REQUIRED — and
+// one second later is an ordinary expired token.
+func TestAnExpiryAtTheZeroInstantIsNotAMissingOne(t *testing.T) {
+	t.Parallel()
+	secret := testSecret(t, 17)
+	sign := hmacSigner(secret)
+	lax, err := svctoken.NewHS256Verifier(secret, laxConfig())
+	if err != nil {
+		t.Fatalf("NewHS256Verifier: %v", err)
+	}
+	strict, err := svctoken.NewHS256Verifier(secret, svctoken.VerifierConfig{})
+	if err != nil {
+		t.Fatalf("NewHS256Verifier: %v", err)
+	}
+	tests := []struct {
+		name     string
+		verifier coretoken.Verifier
+		payload  string
+		want     errs.Code
+	}{
+		{"exp at year 1, missing expiry allowed", lax, `{"sub":"a","exp":-62135596800}`, coretoken.CodeMalformed},
+		{"exp at year 1, expiry required", strict, `{"sub":"a","exp":-62135596800}`, coretoken.CodeMalformed},
+		{"nbf at year 1", lax, `{"sub":"a","nbf":-62135596800}`, coretoken.CodeMalformed},
+		{"exp one second later", lax, `{"sub":"a","exp":-62135596799}`, coretoken.CodeExpired},
+	}
+	runCase := func(t *testing.T, name string, verifier coretoken.Verifier, payload string, want errs.Code) {
+		t.Helper()
+		if _, verr := verifier.Verify(forge(`{"alg":"HS256","typ":"JWT"}`, payload, sign)); !errs.HasCode(verr, want) {
+			t.Fatalf("%s: got %v, want %v", name, verr, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.name, c.verifier, c.payload, c.want)
+		})
+	}
+}
+
+// TestES256HasOneSpelling is the regression for kitsunium/sdk#438: an ECDSA
+// signature (r, s) verifies exactly as (r, n−s) does, so without a low-S rule
+// anyone holding a token could mint its twin without the key. The issuer
+// writes the low-S form, and the verifier refuses the high one.
+func TestES256HasOneSpelling(t *testing.T) {
+	t.Parallel()
+	key := testECKey(t)
+	issuer, err := svctoken.NewES256Issuer(key, svctoken.IssuerConfig{AllowMissingExpiry: true})
+	if err != nil {
+		t.Fatalf("NewES256Issuer: %v", err)
+	}
+	verifier, err := svctoken.NewES256Verifier(&key.PublicKey, laxConfig())
+	if err != nil {
+		t.Fatalf("NewES256Verifier: %v", err)
+	}
+	order := elliptic.P256().Params().N
+	half := new(big.Int).Rsh(order, 1)
+	//: a signature is random, so many are drawn: about half would be high-S
+	//: if the issuer did not normalise them.
+	for range 32 {
+		minted, issueErr := issuer.Issue(coretoken.NewClaimsValue().WithSubject("alice"))
+		if issueErr != nil {
+			t.Fatalf("Issue: %v", issueErr)
+		}
+		dot := strings.LastIndexByte(minted, '.')
+		signature, decodeErr := b64.DecodeString(minted[dot+1:])
+		if decodeErr != nil || len(signature) != 64 {
+			t.Fatalf("signature segment: %v (%d bytes)", decodeErr, len(signature))
+		}
+		s := new(big.Int).SetBytes(signature[32:])
+		if s.Cmp(half) > 0 {
+			t.Fatalf("the issuer wrote a high-S signature")
+		}
+		if _, verr := verifier.Verify(minted); verr != nil {
+			t.Fatalf("Verify(canonical): %v", verr)
+		}
+		var twin [64]byte
+		copy(twin[:32], signature[:32])
+		new(big.Int).Sub(order, s).FillBytes(twin[32:])
+		twinToken := minted[:dot+1] + b64.EncodeToString(twin[:])
+		if _, verr := verifier.Verify(twinToken); !errs.HasCode(verr, coretoken.CodeSignatureInvalid) {
+			t.Fatalf("Verify(high-S twin) = %v, want SIGNATURE_INVALID", verr)
+		}
 	}
 }
 

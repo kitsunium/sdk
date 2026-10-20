@@ -96,6 +96,13 @@ func (v *pasetoVerifier) split(token string) (payload, footer []byte, err error)
 		//: three-segment form.
 		return body, nil, nil
 	}
+	//: an empty footer is spelled by OMITTING the segment, which is what the
+	//: issuer writes; a present but empty one would be a second spelling of
+	//: the same token, and a list keyed on the token string would miss it.
+	if seg.part[pasetoFooterSegment] == "" {
+		//: structural failure, as any other non-canonical form (#438).
+		return nil, nil, coretoken.Malformed
+	}
 	decodedFooter, ferr := decodeSegment(seg.part[pasetoFooterSegment], maxFooterLen)
 	//: propagate.
 	if ferr != nil {

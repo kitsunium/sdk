@@ -319,6 +319,7 @@ files:
     name: encoding.go
   - decls:
       - exitConfigFault
+      - p256HalfOrder
       - es256Signing
       - es256Signing.algorithm
       - es256Signing.sign
@@ -359,6 +360,7 @@ files:
       - setVerifier
       - indexByKid
       - (*setVerifier).Verify
+      - (*setVerifier).tryCandidates
       - (*setVerifier).candidates
       - bindJWK
       - bindOctJWK
@@ -374,6 +376,7 @@ files:
       - finishHeader
       - policyValue.checkHeader
       - policyValue.decodeAndValidate
+      - refuseUnsecured
     name: jws.go
   - decls:
       - jwsIssuer
@@ -785,6 +788,13 @@ functions:
     name: finishHeader
     params: members map[string]json.RawMessage, alg string
     results: header headerValue, err error
+  - doc: |-
+      refuseUnsecured refuses an unsecured token — "alg": "none", in any case — by
+      name. It needs no key, so a verifier that selects among several runs it
+      before selecting, and the verdict never depends on which keys it holds.
+    name: refuseUnsecured
+    params: header headerValue
+    results: error
   - doc: newJWSIssuer validates cfg and pre-renders the header.
     name: newJWSIssuer
     params: bound signingKey, cfg IssuerConfig
@@ -1295,6 +1305,14 @@ types:
         params: token string
         recv: v *setVerifier
         results: claims coretoken.ClaimsValue, err error
+      - doc: |-
+          tryCandidates verifies parts against each candidate in order and decodes
+          the claims under the first that accepts the header and verifies the
+          signature.
+        name: tryCandidates
+        params: parts jwsPartsValue, candidates []boundKeyValue
+        recv: v *setVerifier
+        results: claims coretoken.ClaimsValue, err error
       - doc: candidates resolves the keys to try for kid, refusing both ends.
         name: candidates
         params: kid string
@@ -1773,6 +1791,16 @@ vars:
       - name: b64
         value: base64.RawURLEncoding.Strict()
     name: b64
+  - doc: |-
+      p256HalfOrder is n/2 for P-256. An ECDSA signature (r, s) verifies exactly
+      as (r, n−s) does, so a token signed once would have two spellings — and a
+      revocation or replay list keyed on the token string would hold one of them
+      and let the other through. One spelling is kept: s at most n/2 ("low S"),
+      which the signer produces and the verifier requires.
+    items:
+      - name: p256HalfOrder
+        value: new(big.Int).Rsh(elliptic.P256().Params().N, 1)
+    name: p256HalfOrder
   - doc: |-
       pasetoVersions is the closed set of versions the PASETO specification
       defines. It is hoisted so recognising one allocates nothing per token.

@@ -14951,7 +14951,7 @@
       "name": "Key",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "Key is an opaque, redacting 256-bit symmetric key. Its String / GoString\noutput is always \"<redacted>\" so an accidental %v / %s / %#v never leaks the\nsecret; Bytes hands a fresh copy to the cipher and is the only way out. All\ncopies of a Key share one backing array, so Zeroize on any copy clears the\nsecret everywhere — call it when you are done with the key.\n",
+      "doc": "Key is an opaque, redacting 256-bit symmetric key. Every rendering — String,\nGoString and Format, so %v, %s, %#v, %d and every other verb — writes\n\"<redacted>\", so an accidental print never leaks the secret; Bytes hands a\nfresh copy to the cipher and is the only way out. All copies of a Key share\none backing array, so Zeroize on any copy clears the secret everywhere —\ncall it when you are done with the key.\n\nThe bytes sit behind a pointer rather than in the struct: fmt cannot call\nFormat on a Key held in an UNEXPORTED field of another struct, so it prints\nthat field's own fields instead, and a pointer prints an address where a\nslice would print the key as a list of byte values. A zero-size field of a\nnon-comparable type keeps == from compiling, so no pointer comparison can\npass for a key comparison.\n",
       "file": "core/crypto/key.go",
       "layer": "core",
       "family": "crypto"
@@ -14964,7 +14964,20 @@
       "recv": "Key",
       "spelled": "func() []byte",
       "canonical": "func() []byte",
-      "doc": "Bytes returns a fresh copy of the raw key material for handoff to a cipher.\nCallers MUST NOT log the result; the redaction only covers String / GoString.\nA zero-value Key returns nil.\n",
+      "doc": "Bytes returns a fresh copy of the raw key material for handoff to a cipher.\nCallers MUST NOT log the result; the redaction only covers the renderings.\nA zero-value Key returns nil.\n",
+      "file": "core/crypto/key.go",
+      "layer": "core",
+      "family": "crypto"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/crypto.Key.Format",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/crypto",
+      "name": "Format",
+      "recv": "Key",
+      "spelled": "func(state fmt.State, verb rune)",
+      "canonical": "func(state fmt.State, verb rune)",
+      "doc": "Format implements fmt.Formatter, so EVERY verb writes \"<redacted>\" — %d\nincluded, which bypasses String and would otherwise print the struct's\nbytes. %q writes it quoted.\n",
       "file": "core/crypto/key.go",
       "layer": "core",
       "family": "crypto"
@@ -38386,6 +38399,31 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/security/secret.FloorPruner",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/security/secret",
+      "name": "FloorPruner",
+      "spelled": "interface{PruneBelow(ctx context.Context, name string, floor int) error}",
+      "canonical": "interface{PruneBelow(ctx context.Context, name string, floor int) error}",
+      "doc": "FloorPruner is the [Store] sibling that prunes by version NUMBER rather than\nby count. A store that implements it is reached by type assertion (ADR\n0039); every store this SDK ships does.\n\nPruning by count is decided when the prune runs: \"keep the newest 2\" keeps\nthe newest two at that instant, so a version another process Put between a\nrotation's own Put and its Prune shifts the window down by one and drops a\nversion the rotation meant to keep — one something may still be wrapped\nunder. A floor names the versions themselves, and a version Put meanwhile\nis newer than any floor, so it can only be kept.\n\nImplementations MUST be safe for concurrent use, and the read and the drop\nMUST be one step under whatever serialises the store's writers.\n",
+      "file": "core/security/secret/gen_ports.go",
+      "layer": "core",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/security/secret.FloorPruner.PruneBelow",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/security/secret",
+      "name": "PruneBelow",
+      "recv": "FloorPruner",
+      "spelled": "func(ctx context.Context, name string, floor int) error",
+      "canonical": "func(ctx context.Context, name string, floor int) error",
+      "doc": "PruneBelow drops every version of name numbered below floor, except the\nnewest: pruning never deletes a secret, whatever floor says. A floor of 1\nor less drops nothing, and pruning a name whose versions are all at or\nabove floor is not an error. A store that only reads refuses it with\n[ReadOnly], and a name holding no version is [NotFound].\n",
+      "file": "core/security/secret/gen_ports.go",
+      "layer": "core",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/security/secret.FromString",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/security/secret",
@@ -39439,7 +39477,7 @@
       "name": "ID",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "ID is an opaque session identifier. It IS a bearer secret — whoever holds it\nis the session — so this type is built to make leaking it hard:\n\n  - String and GoString render \"<redacted>\", so an accidental %v, %s or %#v\n    in a log line, an error message or a struct dump prints nothing usable.\n    The public/private split of errs is the same idea applied to errors: a\n    Public string is read by third parties, so no sentinel in this domain\n    ever carries an identifier in one.\n  - [ID.Reveal] is the only way to the canonical string, and it is spelled\n    to read like a mistake at a call site that is not building a cookie.\n  - [ID.Equal] compares in constant time. Comparing identifiers with == on\n    the byte slice would not compile; comparing their Reveal strings would,\n    and would leak the length of the shared prefix.\n  - [ID.Digest] is the value a store indexes and names files by, so the\n    secret itself is never a map key, never a filename, and never at rest.\n",
+      "doc": "ID is an opaque session identifier. It IS a bearer secret — whoever holds it\nis the session — so this type is built to make leaking it hard:\n\n  - String, GoString and Format render \"<redacted>\", so an accidental %v,\n    %s, %#v or %d in a log line, an error message or a struct dump prints\n    nothing usable. The bytes sit behind a pointer, so even a struct holding\n    an ID in an UNEXPORTED field — which fmt prints by reflection, without\n    calling Format — prints an address rather than the identifier, and a\n    zero-size non-comparable field keeps == from comparing that pointer.\n    The public/private split of errs is the same idea applied to errors: a\n    Public string is read by third parties, so no sentinel in this domain\n    ever carries an identifier in one.\n  - [ID.Reveal] is the only way to the canonical string, and it is spelled\n    to read like a mistake at a call site that is not building a cookie.\n  - [ID.Equal] compares in constant time. Comparing identifiers with == on\n    the byte slice would not compile; comparing their Reveal strings would,\n    and would leak the length of the shared prefix.\n  - [ID.Digest] is the value a store indexes and names files by, so the\n    secret itself is never a map key, never a filename, and never at rest.\n",
       "file": "core/security/session/id.go",
       "layer": "core",
       "family": "security"
@@ -39466,6 +39504,19 @@
       "spelled": "func(other ID) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/core/security/session.ID) bool",
       "doc": "Equal reports whether i and other are the same identifier, in time that does\nnot depend on how many leading bytes they share. Every comparison of a\nsession identifier in this SDK goes through here or through crypto/subtle\ndirectly; none of them uses == or string equality.\n",
+      "file": "core/security/session/id.go",
+      "layer": "core",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/security/session.ID.Format",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/security/session",
+      "name": "Format",
+      "recv": "ID",
+      "spelled": "func(state fmt.State, verb rune)",
+      "canonical": "func(state fmt.State, verb rune)",
+      "doc": "Format implements fmt.Formatter, so EVERY verb writes \"<redacted>\" — %d\nincluded, which bypasses String and would otherwise print the struct. %q\nwrites it quoted.\n",
       "file": "core/security/session/id.go",
       "layer": "core",
       "family": "security"
@@ -39786,7 +39837,7 @@
       "name": "SessionValue",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "SessionValue is one session as a [Store] sees it: an identifier, the subject\nit is bound to, its two deadlines, and the caller's data. Every field is\nunexported and every mutator returns a COPY, so a value handed to two\ngoroutines cannot be changed under either of them.\n\nThe absence here is load-bearing. There is no WithSubject, no SetSubject and\nno Elevate: the subject is written exactly once, by [Store.Regenerate], and\nthat call always mints a new identifier. A caller therefore cannot express\n\"keep this identifier and log this user in\" — the sentence has no method.\n",
+      "doc": "SessionValue is one session as a [Store] sees it: an identifier, the subject\nit is bound to, its two deadlines, and the caller's data. Every field is\nunexported and every mutator returns a COPY, so a value handed to two\ngoroutines cannot be changed under either of them.\n\nThe absence here is load-bearing. There is no WithSubject, no SetSubject and\nno Elevate: the subject is written exactly once, by [Store.Regenerate], and\nthat call always mints a new identifier. A caller therefore cannot express\n\"keep this identifier and log this user in\" — the sentence has no method.\n\nEvery rendering — String, GoString and Format, so every verb — writes the\nsession's shape, never its contents. The state sits behind a pointer, so a\nstruct holding a SessionValue in an UNEXPORTED field, which fmt prints by\nreflection without calling Format, prints an address rather than the\nidentifier, the subject or the data.\n",
       "file": "core/security/session/session_value.go",
       "layer": "core",
       "family": "security"
@@ -39839,6 +39890,19 @@
       "spelled": "func() time.Time",
       "canonical": "func() time.Time",
       "doc": "ExpiresAt reports the EFFECTIVE deadline: the earlier of the absolute\nceiling and the sliding idle window. The two are never reconciled by\naveraging or by preferring the later one — the earlier deadline always wins,\nwhich is what makes the absolute timeout a ceiling rather than a suggestion.\n",
+      "file": "core/security/session/session_value.go",
+      "layer": "core",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/security/session.SessionValue.Format",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/security/session",
+      "name": "Format",
+      "recv": "SessionValue",
+      "spelled": "func(state fmt.State, verb rune)",
+      "canonical": "func(state fmt.State, verb rune)",
+      "doc": "Format implements fmt.Formatter, so EVERY verb writes the same shape-only\nrendering as String — %d included, which bypasses String and would\notherwise print every field. %q writes it quoted.\n",
       "file": "core/security/session/session_value.go",
       "layer": "core",
       "family": "security"
@@ -52199,7 +52263,7 @@
       "name": "KeyValue",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "KeyValue is one parsed or constructed JSON Web Key. It is an immutable value:\nthe constructors copy every octet slice in, the accessors copy every octet\nslice out, and the With* methods return a modified copy rather than mutating\nthe receiver.\n\nEvery field is unexported so encoding/json cannot reach the material by\nreflection; the only serialisation paths are the named MarshalPublic /\nMarshalPrivate pair and the MarshalJSON delegate.\n",
+      "doc": "KeyValue is one parsed or constructed JSON Web Key. It is an immutable value:\nthe constructors copy every octet slice in, the accessors copy every octet\nslice out, and the With* methods return a modified copy rather than mutating\nthe receiver.\n\nEvery field is unexported so encoding/json cannot reach the material by\nreflection; the only serialisation paths are the named MarshalPublic /\nMarshalPrivate pair and the MarshalJSON delegate.\n\nEvery rendering — String, GoString and Format, so every verb — writes only\nnon-secret metadata. The private member sits behind a pointer, so a struct\nholding a KeyValue in an UNEXPORTED field, which fmt prints by reflection\nwithout calling Format, prints an address rather than the secret octets.\n",
       "file": "service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
@@ -52291,6 +52355,19 @@
       "spelled": "func(other KeyValue) bool",
       "canonical": "func(other github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue) bool",
       "doc": "Equal reports whether k and other describe the same key, comparing every\nmember including the private one. The comparison is NOT constant-time and\nmust not be used to authenticate anything; it exists so round-trip tests and\nset de-duplication can ask a precise question.\n",
+      "file": "service/crypto/key/jwk/jwk.go",
+      "layer": "service",
+      "family": "crypto"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/crypto/key/jwk.KeyValue.Format",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/crypto/key/jwk",
+      "name": "Format",
+      "recv": "KeyValue",
+      "spelled": "func(state fmt.State, verb rune)",
+      "canonical": "func(state fmt.State, verb rune)",
+      "doc": "Format implements fmt.Formatter, so EVERY verb writes the same metadata-only\nrendering as String — %d included, which bypasses String and would\notherwise print the octet slices. %q writes it quoted.\n",
       "file": "service/crypto/key/jwk/jwk.go",
       "layer": "service",
       "family": "crypto"
@@ -63563,7 +63640,7 @@
       "recv": "Redactor",
       "spelled": "func(document []byte, maxBytes int) (redacted coreredact.DocumentValue, err error)",
       "canonical": "func(document []byte, maxBytes int) (redacted github.com/kitsunium/sdk/internal/core/security/redact.DocumentValue, err error)",
-      "doc": "JSON returns document with its secrets replaced, at most maxBytes long\n(raised to MinBytes): every member whose name the Redactor recognises has\nits value, whatever it is, replaced by Placeholder, and every string has\nthe credentials of the URLs in it replaced.\n\ndocument is read, never modified. One that is not exactly one JSON value is\nrefused with DocumentInvalid and nothing is returned for it: a partial copy\nof a document that does not parse cannot be trusted to have had its secrets\nrecognised. Duplicate member names and invalid UTF-8 are tolerated — this\nis for showing a document, not for accepting one — and invalid UTF-8 is\nshown as U+FFFD.\n",
+      "doc": "JSON returns document with its secrets replaced, at most maxBytes long\n(raised to MinBytes): every member whose name the Redactor recognises has\nits value, whatever it is, replaced by Placeholder, and every string — a\nmember name included — has the credentials of the URLs in it replaced.\n\ndocument is read, never modified. One that is not exactly one JSON value is\nrefused with DocumentInvalid and nothing is returned for it: a partial copy\nof a document that does not parse cannot be trusted to have had its secrets\nrecognised. Duplicate member names and invalid UTF-8 are tolerated — this\nis for showing a document, not for accepting one — and invalid UTF-8 is\nshown as U+FFFD.\n",
       "file": "service/security/redact/json.go",
       "layer": "service",
       "family": "security"
@@ -63602,7 +63679,7 @@
       "recv": "Redactor",
       "spelled": "func(v any, maxBytes int) (redacted coreredact.DocumentValue, err error)",
       "canonical": "func(v any, maxBytes int) (redacted github.com/kitsunium/sdk/internal/core/security/redact.DocumentValue, err error)",
-      "doc": "Value returns v encoded as encoding/json would put it on the wire, with its\nsecrets replaced, at most maxBytes long (raised to MinBytes). Beyond what\nJSON recognises by name, a struct field the Redactor's tag or field rule\ndeclares secret is replaced too — found by walking v's type the way\nencoding/json lays it out, once per type. A type that writes its own JSON\n(json.Marshaler, encoding.TextMarshaler) is opaque to that walk, and only\nthe names in its output are judged.\n\nv is encoded, never modified. A value encoding/json refuses — a channel, a\nfunction, a cycle — is refused with ValueUnencodable.\n",
+      "doc": "Value returns v encoded as encoding/json would put it on the wire, with its\nsecrets replaced, at most maxBytes long (raised to MinBytes). Beyond what\nJSON recognises by name, a struct field the Redactor's tag or field rule\ndeclares secret is replaced too — found by walking v's type the way\nencoding/json lays it out, once per type. Below a member of interface type\n— a field of type any, an element of a []any, a value of a map[string]any\n— the walk follows the type the value holds, for this value. A type that\nwrites its own JSON (json.Marshaler, encoding.TextMarshaler) is opaque to\nthat walk, and only the names in its output are judged.\n\nv is encoded, never modified. A value encoding/json refuses — a channel, a\nfunction, a cycle — is refused with ValueUnencodable.\n",
       "file": "service/security/redact/json.go",
       "layer": "service",
       "family": "security"
@@ -64037,7 +64114,7 @@
         {
           "name": "InUse",
           "type": "func(ctx context.Context) (oldest int, err error)",
-          "doc": "InUse, when set, reports the OLDEST version something still needs — for\nthe root of a SubjectKeys, the oldest version a data key is still\nwrapped under: [SubjectKeys.OldestRoot] — or 0 when nothing does. A\nrotation then prunes no version at or above it, whatever Policy.Keep\nsays: Keep becomes a floor, and the store holds more versions until the\ndependants move on (SubjectKeys.Rewrap). It is asked after the new\nversion is stored and before the prune. Its error is returned as it is\nand nothing is pruned — the rotation happened, and the next one prunes\nagain — because a version pruned while still needed destroys whatever\ndepends on it, and no later call can bring it back.\n"
+          "doc": "InUse, when set, reports the OLDEST version something still needs — for\nthe root of a SubjectKeys, the oldest version a data key is still\nwrapped under: [SubjectKeys.OldestRoot] — or 0 when nothing does. A\nrotation then prunes no version at or above it, whatever Policy.Keep\nsays: Keep becomes a floor, and the store holds more versions until the\ndependants move on (SubjectKeys.Rewrap). It is asked after the new\nversion is stored and before the prune, and the prune drops by version\nnumber below the lower of the two floors — through [coresecret.FloorPruner] when\nthe store has it, as every store this SDK ships does — so a version\nanother process stores meanwhile cannot push a version in use out of\nthe window. Its error is returned as it is\nand nothing is pruned — the rotation happened, and the next one prunes\nagain — because a version pruned while still needed destroys whatever\ndepends on it, and no later call can bring it back.\n"
         }
       ],
       "doc": "RotatorConfig parameterises [NewRotator]: the secret to rotate, where it\nlives, the policy, and the three optional collaborators — a clock, a\ncross-process lock, and a callback told of every rotation.\n",
@@ -64551,7 +64628,7 @@
       "name": "NewSetVerifier",
       "spelled": "func(set jwk.Set, cfg VerifierConfig) (verifier coretoken.Verifier, err error)",
       "canonical": "func(set github.com/kitsunium/sdk/internal/service/crypto/key/jwk.Set, cfg github.com/kitsunium/sdk/internal/service/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/internal/core/security/token.Verifier, err error)",
-      "doc": "NewSetVerifier returns a JWT verifier that selects a key from set by the\ntoken's \"kid\" header.\n\n# The kid is a selector, not a credential\n\nThe kid chooses which key to TRY. It never decides whether the token is\nvalid: the signature does. So a kid naming an EC key does not let a token\nclaiming HS256 through — the binding built from that key reports ES256, the\nheader comparison refuses, and no key material reaches a MAC.\n\n# Duplicate kids\n\njwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing\nin the document distinguishes them and picking the first would make the\nanswer depend on member order. This verifier CAN choose, because it has\nsomething the key set does not: a signature. It tries the candidates in\ndocument order and accepts the first that verifies, which is the rotation\npath RFC 7517 §4.5 leaves open.\n\nIt tries a BOUNDED number of them. The candidate count is chosen by whoever\npublished the JWK Set, and each attempt is a signature verification, so an\nunbounded loop would let a publisher — or anybody who can influence the\ndocument — price every request. Past MaxKeyCandidates the token is refused\nwith KeyIDAmbiguous rather than verified slowly.\n\n# The set is bound ONCE, here\n\nEvery member's verifying binding is derived at construction, not per token.\nA JWK is a key's SERIALISED form and the binding is the same key in the\nshape a primitive consumes; deriving it reads the key's own kty/crv/x/y and\nnothing a token supplies, so it is a fixed function of material that is\nfixed for this verifier's lifetime. Doing it per request cost a full PKIX\nround trip — `x509.MarshalPKIXPublicKey` immediately re-parsed by\n`x509.ParsePKIXPublicKey` — measured at 8.3 % of an ES256 JWKS\nverification's CPU and 28.2 % of its allocated objects. See\n`internal/service/crypto/key/jwk/BENCH.md`.\n\nWhat deliberately did NOT move is the ORDER. Which key is selected, the\ncandidate bound, and the algorithm comparison against the binding all still\nhappen per token and in the same sequence, because that sequence is ADR\n0042's security property. Nothing here is keyed on, or cached against,\nanything the token carries.\n\n# A set that can verify nothing is refused\n\nBinding at construction is also what lets a useless set be refused there\n(ADR 0031): an empty set, and one whose every member either has no kid or is\nunusable, are both PolicyMisconfigured rather than a verifier that refuses\nevery token. The unusable members of a set that IS accepted still count\nagainst MaxKeyCandidates — see indexByKid.\n",
+      "doc": "NewSetVerifier returns a JWT verifier that selects a key from set by the\ntoken's \"kid\" header.\n\n# The kid is a selector, not a credential\n\nThe kid chooses which key to TRY. It never decides whether the token is\nvalid: the signature does. So a kid naming an EC key does not let a token\nclaiming HS256 through — the binding built from that key reports ES256, the\nheader comparison refuses, and no key material reaches a MAC.\n\nThe verdicts are the single-key verifier's. A token with \"alg\": \"none\" is\nrefused with AlgorithmNone before any key is selected, kid or no kid. A\ntoken whose header no candidate accepts — an algorithm none of them is\nbound to, a \"crit\" parameter, an unexpected \"typ\" — is refused with that\nheader's own verdict, never reduced to SignatureInvalid, which means a\ncandidate accepted the header and no signature verified.\n\n# Duplicate kids\n\njwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing\nin the document distinguishes them and picking the first would make the\nanswer depend on member order. This verifier CAN choose, because it has\nsomething the key set does not: a signature. It tries the candidates in\ndocument order and accepts the first that verifies, which is the rotation\npath RFC 7517 §4.5 leaves open.\n\nIt tries a BOUNDED number of them. The candidate count is chosen by whoever\npublished the JWK Set, and each attempt is a signature verification, so an\nunbounded loop would let a publisher — or anybody who can influence the\ndocument — price every request. Past MaxKeyCandidates the token is refused\nwith KeyIDAmbiguous rather than verified slowly.\n\n# The set is bound ONCE, here\n\nEvery member's verifying binding is derived at construction, not per token.\nA JWK is a key's SERIALISED form and the binding is the same key in the\nshape a primitive consumes; deriving it reads the key's own kty/crv/x/y and\nnothing a token supplies, so it is a fixed function of material that is\nfixed for this verifier's lifetime. Doing it per request cost a full PKIX\nround trip — `x509.MarshalPKIXPublicKey` immediately re-parsed by\n`x509.ParsePKIXPublicKey` — measured at 8.3 % of an ES256 JWKS\nverification's CPU and 28.2 % of its allocated objects. See\n`internal/service/crypto/key/jwk/BENCH.md`.\n\nWhat deliberately did NOT move is the ORDER. Which key is selected, the\ncandidate bound, and the algorithm comparison against the binding all still\nhappen per token and in the same sequence, because that sequence is ADR\n0042's security property. Nothing here is keyed on, or cached against,\nanything the token carries.\n\n# A set that can verify nothing is refused\n\nBinding at construction is also what lets a useless set be refused there\n(ADR 0031): an empty set, and one whose every member either has no kid or is\nunusable, are both PolicyMisconfigured rather than a verifier that refuses\nevery token. The unusable members of a set that IS accepted still count\nagainst MaxKeyCandidates — see indexByKid.\n",
       "file": "service/security/token/jwkbridge.go",
       "layer": "service",
       "family": "security"
