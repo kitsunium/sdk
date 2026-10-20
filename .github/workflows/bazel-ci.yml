@@ -594,3 +594,55 @@ jobs:
 
       - name: docs site — build the working tree, check it against docs/api
         run: make docs-check
+
+  # The behaviour models, held to the code (kitsunium/studio ADR 0013): `make
+  # models-check` runs the pinned kit's `kit design derive -check` and fails on
+  # a model of design/behaviour that is missing, is not what the current code
+  # derives, or is left over — a body changed without `make models`. kit lives
+  # in kitsunium/studio, which is private: installing it needs the repository
+  # secret KIT_READ_TOKEN (read access to kitsunium/studio). Without it — a
+  # fork's or Dependabot's pull request, or a repository where the secret is
+  # not set — the job warns and passes, the models NOT checked. A step a
+  # missing secret can skip is not a gate, so this job is advisory: no
+  # required job needs it (scripts/ci-gates-check.sh's ADVISORY).
+  models:
+    name: models — design/behaviour is what the code derives
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Only the tool's repository is private: the SDK's own modules and
+      # their requirements come from the module proxy.
+      GOPRIVATE: github.com/kitsunium/studio
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: install the pinned kit
+        id: kit
+        env:
+          KIT_READ_TOKEN: ${{ secrets.KIT_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          . scripts/kit-pinned.sh
+          version="$(kit_pin)"
+          if [ -z "$version" ]; then
+            echo "::error::design/sdk.yaml pins no kit (project.kit.version)"
+            exit 1
+          fi
+          if [ -z "$KIT_READ_TOKEN" ]; then
+            echo "::warning::KIT_READ_TOKEN is not set: kitsunium/studio is private, kit $version cannot be installed, the behaviour models were NOT checked"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config --global url."https://x-access-token:${KIT_READ_TOKEN}@github.com/kitsunium/".insteadOf "https://github.com/kitsunium/"
+          go install "github.com/kitsunium/studio/cmd/kit@$version"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: the models are what the code derives
+        if: steps.kit.outputs.ready == 'true'
+        run: make models-check
