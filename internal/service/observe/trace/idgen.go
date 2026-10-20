@@ -6,6 +6,9 @@ import (
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
 
+// rootIDsLen is the width of one draw of a root span's two identifiers.
+const rootIDsLen int = coretrace.TraceIDLen + coretrace.SpanIDLen
+
 // NewTraceID draws a fresh 16-byte trace identifier.
 //
 // Every byte is random. The W3C specification says a trace-id "SHOULD be
@@ -68,4 +71,30 @@ func drawSpanID() coretrace.SpanID {
 			return drawn
 		}
 	}
+}
+
+// drawRootIDs mints a root span's trace id AND span id from ONE read of the
+// CSPRNG instead of two. A read is a getrandom call with a fixed cost well
+// above the cost of the bytes it fills — a CPU profile of an unsampled root
+// put crypto/rand at 39 % of Start, half of it per-call overhead — so the
+// second call bought nothing but its overhead. Each half is still checked on
+// its own and, on the all-zero value, redrawn by the single-id draw.
+func drawRootIDs() (traceID coretrace.TraceID, spanID coretrace.SpanID) {
+	//: both identifiers from one fill of the CSPRNG, which cannot fail.
+	var drawn [rootIDsLen]byte
+	_, _ = rand.Read(drawn[:])
+	copy(traceID[:], drawn[:coretrace.TraceIDLen])
+	copy(spanID[:], drawn[coretrace.TraceIDLen:])
+	//: 2^-128 says this branch is never taken; it keeps the invariant anyway.
+	if !traceID.IsValid() {
+		//: redraw the trace id alone.
+		traceID = drawTraceID()
+	}
+	//: 2^-64, likewise.
+	if !spanID.IsValid() {
+		//: redraw the span id alone.
+		spanID = drawSpanID()
+	}
+	//: two usable identifiers.
+	return traceID, spanID
 }

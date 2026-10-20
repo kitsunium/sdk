@@ -163,6 +163,12 @@ constants:
         type: string
         value: "\"https\""
     name: schemeHTTP
+  - doc: rootIDsLen is the width of one draw of a root span's two identifiers.
+    items:
+      - name: rootIDsLen
+        type: int
+        value: coretrace.TraceIDLen + coretrace.SpanIDLen
+    name: rootIDsLen
   - grouped: true
     items:
       - doc: floatBitSize is the width every float in this package has.
@@ -393,10 +399,12 @@ files:
       - (*statusRecorder).resolvedStatus
     name: http_server.go
   - decls:
+      - rootIDsLen
       - NewTraceID
       - drawTraceID
       - NewSpanID
       - drawSpanID
+      - drawRootIDs
     name: idgen.go
   - decls:
       - noopSpan
@@ -605,6 +613,15 @@ functions:
       mints every span's id with.
     name: drawSpanID
     results: coretrace.SpanID
+  - doc: |-
+      drawRootIDs mints a root span's trace id AND span id from ONE read of the
+      CSPRNG instead of two. A read is a getrandom call with a fixed cost well
+      above the cost of the bytes it fills — a CPU profile of an unsampled root
+      put crypto/rand at 39 % of Start, half of it per-call overhead — so the
+      second call bought nothing but its overhead. Each half is still checked on
+      its own and, on the all-zero value, redrawn by the single-id draw.
+    name: drawRootIDs
+    results: traceID coretrace.TraceID, spanID coretrace.SpanID
   - doc: |-
       formatFloat renders a finite double shortest-round-trip (123, 1.5, 1e+21,
       -1.5e-08) — the spelling a refused ratio takes in its error field.
