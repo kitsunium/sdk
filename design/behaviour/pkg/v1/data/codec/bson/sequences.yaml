@@ -1,0 +1,45 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Marshal
+        kind: self
+      - id: svcbson.New().Marshal
+        kind: value
+    steps:
+      - return: svcbson.New().Marshal(v)
+        to: svcbson.New().Marshal
+  - of: Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: Append
+        kind: self
+      - id: a.Append
+        kind: internal
+    steps:
+      - bind: a, ok
+        eval: |-
+          svcbson.New().(interface {
+          		Append(dst []byte, v any) ([]byte, error)
+          	})
+      - opt:
+          do:
+            - return: dst, MarshalFailed
+          when: "!ok"
+      - return: a.Append(dst, v)
+        to: a.Append
+  - of: Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Unmarshal
+        kind: self
+      - id: svcbson.New().Unmarshal
+        kind: value
+    steps:
+      - return: svcbson.New().Unmarshal(data, v)
+        to: svcbson.New().Unmarshal

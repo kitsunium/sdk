@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/collections/ring
+  name: ring
+  purpose: "Package ring is a bounded, lock-free queue for exactly ONE producer and exactly ONE consumer: a fixed number of slots, a write that refuses when they are full, and a read that refuses when they are empty — neither ever blocks."
+types: []

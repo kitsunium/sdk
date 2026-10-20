@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/memlimit
+  name: memlimit
+  purpose: Package memlimit derives the Go runtime soft memory limit from the control group allowance governing this process, and installs it.
+types: []

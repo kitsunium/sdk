@@ -1,0 +1,38 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Status
+    participants:
+      - id: caller
+        kind: actor
+      - id: Status
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: Success
+          when: err == nil
+      - return: kerrs.ExitCodeOf(err)
+        to: kerrs
+  - of: Execute
+    participants:
+      - id: caller
+        kind: actor
+      - id: Execute
+        kind: self
+      - id: New
+        kind: internal
+      - id: app.Execute
+        kind: value
+    steps:
+      - bind: app, err
+        eval: New(cfg, root)
+        to: New
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: app.Execute(ctx, args)
+        to: app.Execute

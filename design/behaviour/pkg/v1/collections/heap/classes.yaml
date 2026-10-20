@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/collections/heap
+  name: heap
+  purpose: "Package heap is a binary heap of any element type, ordered by a comparison you give it: Push in O(log n), Pop the element that sorts first in O(log n), Peek at it in O(1)."
+types: []

@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - PrivateClaim
+      - SetPrivateClaim
+    name: token.go
+functions:
+  - name: PrivateClaim
+    params: claims Claims, name string
+    results: value T, found bool, err error
+    typeParams: T any
+  - name: SetPrivateClaim
+    params: claims Claims, name string, value T
+    results: updated Claims, err error
+    typeParams: T any
+imports:
+  json: encoding/json
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/security/token
+  name: token
+  purpose: Package token — the dotted-quad codes a consumer routes on.
+types: []

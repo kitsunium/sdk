@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/net/websocket
+  name: websocket
+  purpose: "Package websocket is the server side of RFC 6455: an HTTP request upgraded into a bidirectional, message-oriented connection over the same socket."
+types: []

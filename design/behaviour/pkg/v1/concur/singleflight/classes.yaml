@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/concur/singleflight
+  name: singleflight
+  purpose: "Package singleflight deduplicates concurrent work that names the same key: of N goroutines asking for the same thing at the same time, exactly one does the work and all N receive its result."
+types: []

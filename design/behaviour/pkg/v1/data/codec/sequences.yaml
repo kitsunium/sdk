@@ -1,0 +1,732 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Marshal
+        kind: self
+      - id: corecodec
+        kind: package
+      - id: c.Marshal
+        kind: value
+      - id: promoteMarshal
+        kind: internal
+    steps:
+      - bind: c, ok
+        eval: corecodec.Lookup(f)
+        to: corecodec
+      - opt:
+          do:
+            - return: nil, unknownFormat(f)
+          when: "!ok"
+      - set: encoded, err
+        to: c.Marshal
+        value: c.Marshal(v)
+      - opt:
+          do:
+            - return: promoteMarshal(f, c, v)
+              to: promoteMarshal
+          when: err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err)
+      - return: encoded, err
+  - of: Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Unmarshal
+        kind: self
+      - id: corecodec
+        kind: package
+      - id: unknownFormat
+        kind: internal
+      - id: c.Unmarshal
+        kind: value
+      - id: promoteUnmarshal
+        kind: internal
+    steps:
+      - bind: c, ok
+        eval: corecodec.Lookup(f)
+        to: corecodec
+      - opt:
+          do:
+            - return: unknownFormat(f)
+              to: unknownFormat
+          when: "!ok"
+      - bind: uErr
+        eval: c.Unmarshal(data, v)
+        to: c.Unmarshal
+      - opt:
+          do:
+            - return: promoteUnmarshal(f, c, data, v)
+              to: promoteUnmarshal
+          when: uErr != nil && hasPromotionStrategy(f) && isValueShapeMismatch(uErr)
+      - return: uErr
+  - of: MarshalMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: MarshalMany
+        kind: self
+      - id: corecodec
+        kind: package
+      - id: encodeWithPromotion
+        kind: internal
+    steps:
+      - set: encodedByFormat
+        value: make(map[Format][]byte, len(formats))
+      - var:
+          name: perFormat
+          type: "[]error"
+      - loop:
+          do:
+            - bind: c, ok
+              eval: corecodec.Lookup(f)
+              to: corecodec
+            - opt:
+                do:
+                  - set: perFormat
+                    value: append(perFormat, unknownFormat(f))
+                  - continue: true
+                when: "!ok"
+            - bind: data, mErr
+              eval: encodeWithPromotion(f, c, v)
+              to: encodeWithPromotion
+            - opt:
+                do:
+                  - set: perFormat
+                    value: append(perFormat, mErr)
+                  - continue: true
+                when: mErr != nil
+            - set: encodedByFormat[f]
+              value: data
+          key: _
+          range: formats
+          value: f
+      - opt:
+          do:
+            - return: encodedByFormat, errors.Join(perFormat...)
+          when: len(perFormat) > 0
+      - return: encodedByFormat, nil
+  - of: encodeWithPromotion
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeWithPromotion
+        kind: self
+      - id: c.Marshal
+        kind: value
+      - id: promoteMarshal
+        kind: internal
+    steps:
+      - set: encoded, err
+        to: c.Marshal
+        value: c.Marshal(v)
+      - opt:
+          do:
+            - return: promoteMarshal(f, c, v)
+              to: promoteMarshal
+          when: err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err)
+      - return: encoded, err
+  - of: NewEncoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewEncoder
+        kind: self
+      - id: resolveStreaming
+        kind: internal
+      - id: sc.NewEncoder
+        kind: value
+    steps:
+      - bind: sc, rerr
+        eval: resolveStreaming(f)
+        to: resolveStreaming
+      - opt:
+          do:
+            - return: nil, rerr
+          when: rerr != nil
+      - return: sc.NewEncoder(w), nil
+        to: sc.NewEncoder
+  - of: NewDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDecoder
+        kind: self
+      - id: resolveStreaming
+        kind: internal
+      - id: sc.NewDecoder
+        kind: value
+    steps:
+      - bind: sc, rerr
+        eval: resolveStreaming(f)
+        to: resolveStreaming
+      - opt:
+          do:
+            - return: nil, rerr
+          when: rerr != nil
+      - return: sc.NewDecoder(r), nil
+        to: sc.NewDecoder
+  - of: FromMIME
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromMIME
+        kind: self
+      - id: corecodec
+        kind: package
+    steps:
+      - bind: c, found
+        eval: corecodec.LookupMIME(mime)
+        to: corecodec
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!found"
+      - return: Format(c.Name()), true
+  - of: FromExtension
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromExtension
+        kind: self
+      - id: corecodec
+        kind: package
+    steps:
+      - bind: c, found
+        eval: corecodec.LookupExt(ext)
+        to: corecodec
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!found"
+      - return: Format(c.Name()), true
+  - of: resolveStreaming
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveStreaming
+        kind: self
+      - id: corecodec
+        kind: package
+    steps:
+      - bind: c, found
+        eval: corecodec.Lookup(f)
+        to: corecodec
+      - opt:
+          do:
+            - return: nil, unknownFormat(f)
+          when: "!found"
+      - bind: stream, supports
+        eval: c.(corecodec.StreamingCodec)
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    CodeStreamingUnsupported,
+                			Reason:  "STREAMING_UNSUPPORTED",
+                			Public:  "codec does not support streaming",
+                			Private: "pkg/v1/data/codec: codec " + c.Name() + " does not implement core/data/codec.StreamingCodec",
+                		})
+          when: "!supports"
+      - return: stream, nil
+  - of: unknownFormat
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownFormat
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    CodeUnknownFormat,
+          		Reason:  "UNKNOWN_FORMAT",
+          		Public:  "codec format is not registered",
+          		Private: "pkg/v1/data/codec: no codec registered under Format " + string(f),
+          	})
+        to: errs
+  - of: MarshalCompressed
+    participants:
+      - id: caller
+        kind: actor
+      - id: MarshalCompressed
+        kind: self
+      - id: frameAlgID
+        kind: internal
+      - id: Marshal
+        kind: internal
+      - id: compressFrame
+        kind: internal
+    steps:
+      - bind: id, ok
+        eval: frameAlgID(algo)
+        to: frameAlgID
+      - opt:
+          do:
+            - return: nil, transform.UnknownCompressor
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil, transform.CompressedFrameInvalid
+          when: len(f) > maxInnerFormatLen
+      - bind: encoded, mErr
+        eval: Marshal(f, v)
+        to: Marshal
+      - opt:
+          do:
+            - return: nil, mErr
+          when: mErr != nil
+      - return: compressFrame(f, id, encoded)
+        to: compressFrame
+  - of: compressFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: compressFrame
+        kind: self
+      - id: algorithmForID
+        kind: internal
+      - id: transform
+        kind: package
+      - id: appendFrame
+        kind: internal
+    steps:
+      - bind: algo, _
+        eval: algorithmForID(id)
+        to: algorithmForID
+      - bind: compressed, cErr
+        eval: transform.Compress(algo, nil, payload)
+        to: transform
+      - opt:
+          do:
+            - return: nil, cErr
+          when: cErr != nil
+      - return: appendFrame(id, f, compressed), nil
+        to: appendFrame
+  - of: appendFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFrame
+        kind: self
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+    steps:
+      - bind: box
+        eval: make([]byte, 0, frameHeaderLen+len(f)+len(compressed))
+      - set: box
+        value: append(box, frameMagic, frameVersion, id)
+      - set: box
+        to: binary.BigEndian.AppendUint16
+        value: binary.BigEndian.AppendUint16(box, uint16(len(f)))
+      - set: box
+        value: append(box, []byte(f)...)
+      - return: append(box, compressed...)
+  - of: UnmarshalCompressed
+    participants:
+      - id: caller
+        kind: actor
+      - id: UnmarshalCompressed
+        kind: self
+      - id: parseFrame
+        kind: internal
+      - id: decompressBounded
+        kind: internal
+      - id: Unmarshal
+        kind: internal
+    steps:
+      - bind: algo, f, payload, ok
+        eval: parseFrame(box)
+        to: parseFrame
+      - opt:
+          do:
+            - return: transform.CompressedFrameInvalid
+          when: "!ok"
+      - bind: plain, err
+        eval: decompressBounded(algo, payload)
+        to: decompressBounded
+      - opt:
+          do:
+            - set: err
+              to: Unmarshal
+              value: Unmarshal(f, plain, v)
+          when: err == nil
+      - return: err
+  - of: parseFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseFrame
+        kind: self
+      - id: algorithmForID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", nil, false"
+          when: len(box) < frameHeaderLen || box[0] != frameMagic || box[1] != frameVersion
+      - bind: resolved, known
+        eval: algorithmForID(box[algIDIndex])
+        to: algorithmForID
+      - opt:
+          do:
+            - return: "\"\", \"\", nil, false"
+          when: "!known"
+      - bind: nameLen
+        eval: int(binary.BigEndian.Uint16(box[formatLenStart:frameHeaderLen]))
+      - opt:
+          do:
+            - return: "\"\", \"\", nil, false"
+          when: frameHeaderLen+nameLen > len(box)
+      - return: "resolved, Format(box[frameHeaderLen : frameHeaderLen+nameLen]), box[frameHeaderLen+nameLen:], true"
+  - of: decompressBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: decompressBounded
+        kind: self
+      - id: transform
+        kind: package
+    steps:
+      - bind: out, dErr
+        eval: transform.DecompressBounded(algo, nil, payload, int64(maxDecompressedFrameBytes))
+        to: transform
+      - opt:
+          do:
+            - return: nil, transform.CompressedFrameInvalid
+          when: errors.Is(dErr, transform.DecompressedTooLarge)
+      - opt:
+          do:
+            - return: nil, dErr
+          when: dErr != nil
+      - opt:
+          do:
+            - return: nil, transform.CompressedFrameInvalid
+          when: isBomb(len(payload), len(out))
+      - return: out, nil
+  - of: isBomb
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: outLen > maxDecompressedFrameBytes
+      - opt:
+          do:
+            - return: "false"
+          when: outLen <= bombFloorBytes
+      - return: int64(outLen) > int64(inLen)*int64(maxExpansionRatio)
+  - of: frameAlgID
+    steps:
+      - opt:
+          do:
+            - return: algGzip, true
+          when: algo == Gzip
+      - opt:
+          do:
+            - return: algFlate, true
+          when: algo == Flate
+      - return: 0, false
+  - of: algorithmForID
+    steps:
+      - opt:
+          do:
+            - return: Gzip, true
+          when: id == algGzip
+      - opt:
+          do:
+            - return: Flate, true
+          when: id == algFlate
+      - return: "\"\", false"
+  - of: promoteMarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: promoteMarshal
+        kind: self
+      - id: stdjson
+        kind: stdlib
+      - id: wrapForFormat
+        kind: internal
+      - id: c.Marshal
+        kind: value
+    steps:
+      - bind: inner, jerr
+        eval: stdjson.Marshal(v)
+        to: stdjson
+      - opt:
+          do:
+            - return: nil, jerr
+          when: jerr != nil
+      - bind: container, werr
+        eval: wrapForFormat(f, inner)
+        to: wrapForFormat
+      - opt:
+          do:
+            - return: nil, werr
+          when: werr != nil
+      - return: c.Marshal(container)
+        to: c.Marshal
+  - of: promoteUnmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: promoteUnmarshal
+        kind: self
+      - id: containerForFormat
+        kind: internal
+      - id: cmp
+        kind: stdlib
+      - id: c.Unmarshal
+        kind: value
+      - id: stdjson
+        kind: stdlib
+    steps:
+      - bind: containerPtr, extract, perr
+        eval: containerForFormat(f)
+        to: containerForFormat
+      - opt:
+          do:
+            - return: cmp.Or(perr)
+              to: cmp
+          when: perr != nil
+      - opt:
+          do:
+            - return: cmp.Or(uerr)
+              to: cmp
+          init:
+            bind: uerr
+            eval: c.Unmarshal(data, containerPtr)
+            to: c.Unmarshal
+          when: uerr != nil
+      - bind: inner, eerr
+        eval: extract()
+      - opt:
+          do:
+            - return: cmp.Or(eerr)
+              to: cmp
+          when: eerr != nil
+      - return: stdjson.Unmarshal(inner, v)
+        to: stdjson
+  - of: wrapForFormat
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapForFormat
+        kind: self
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+    steps:
+      - bind: innerStr
+        eval: string(inner)
+      - switch:
+          cases:
+            - case: NDJSON
+              do:
+                - return: "[]stdjson.RawMessage{stdjson.RawMessage(inner)}, nil"
+            - case: CSV
+              do:
+                - return: "[][]string{{csvPromotionHeader}, {innerStr}}, nil"
+            - case: Form
+              do:
+                - return: "url.Values{formPromotionKey: []string{innerStr}}, nil"
+            - case: PEM
+              do:
+                - return: "&stdpem.Block{Type: pemPromotionBlockType, Bytes: inner}, nil"
+            - case: "\"flatbuffers\""
+              do:
+                - bind: out
+                  eval: make([]byte, flatBuffersHeaderBytes+len(inner))
+                - eval: binary.LittleEndian.PutUint32(out[:flatBuffersHeaderBytes], fbcodec.PromotionMagic)
+                  to: binary.LittleEndian.PutUint32
+                - eval: copy(out[flatBuffersHeaderBytes:], inner)
+                - return: out, nil
+            - case: "\"tlv\""
+              do:
+                - return: innerStr, nil
+            - default: true
+              do:
+                - return: nil, promoteFailedFor(f, "no marshal strategy")
+          "on": f
+  - of: containerForFormat
+    steps:
+      - switch:
+          cases:
+            - case: NDJSON
+              do:
+                - bind: rows
+                  eval: new([]stdjson.RawMessage)
+                - return: rows, extractNDJSON(rows), nil
+            - case: CSV
+              do:
+                - bind: table
+                  eval: new([][]string)
+                - return: table, extractCSV(table), nil
+            - case: Form
+              do:
+                - bind: values
+                  eval: new(url.Values)
+                - return: values, extractForm(values), nil
+            - case: PEM
+              do:
+                - bind: block
+                  eval: new(*stdpem.Block)
+                - return: block, extractPEM(block), nil
+            - case: "\"flatbuffers\""
+              do:
+                - bind: raw
+                  eval: new([]byte)
+                - return: raw, extractFlatBuffers(raw), nil
+            - case: "\"tlv\""
+              do:
+                - bind: s
+                  eval: new(string)
+                - return: s, extractTLV(s), nil
+            - default: true
+              do:
+                - return: nil, nil, promoteFailedFor(f, "no unmarshal strategy")
+          "on": f
+  - of: extractNDJSON
+    steps:
+      - return:
+          closure:
+            results: "[]byte, error"
+            steps:
+              - opt:
+                  do:
+                    - return: nil, promoteContainerFailed("empty ndjson promotion container")
+                  when: len(*rows) == 0
+              - return: (*rows)[0], nil
+  - of: extractCSV
+    steps:
+      - return:
+          closure:
+            results: "[]byte, error"
+            steps:
+              - opt:
+                  do:
+                    - return: nil, promoteContainerFailed("malformed csv promotion container")
+                  when: "!isCSVPromotion(*table)"
+              - return: "[]byte((*table)[1][0]), nil"
+  - of: extractForm
+    steps:
+      - return:
+          closure:
+            results: "[]byte, error"
+            steps:
+              - bind: payload
+                eval: (*values)[formPromotionKey]
+              - opt:
+                  do:
+                    - return: nil, promoteContainerFailed("malformed form promotion container")
+                  when: len(*values) != 1 || len(payload) != 1
+              - return: "[]byte(payload[0]), nil"
+  - of: isCSVPromotion
+    steps:
+      - return: |-
+          len(table) == csvPromotionRowCount &&
+          		len(table[0]) == 1 && table[0][0] == csvPromotionHeader &&
+          		len(table[1]) == 1
+  - of: extractPEM
+    steps:
+      - return:
+          closure:
+            results: "[]byte, error"
+            steps:
+              - opt:
+                  do:
+                    - return: nil, promoteContainerFailed("nil pem promotion block")
+                  when: "*block == nil"
+              - return: (*block).Bytes, nil
+  - of: extractFlatBuffers
+    steps:
+      - return:
+          closure:
+            results: "[]byte, error"
+            steps:
+              - opt:
+                  do:
+                    - return: nil, promoteContainerFailed("flatbuffers promotion payload too short")
+                  when: len(*raw) < flatBuffersHeaderBytes
+              - return: (*raw)[flatBuffersHeaderBytes:], nil
+  - of: extractTLV
+    steps:
+      - return:
+          closure:
+            results: "[]byte, error"
+            steps:
+              - return: "[]byte(*s), nil"
+  - of: promoteFailedFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: promoteFailedFor
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(nil, kerrs.WrapParams{
+          		Code:    CodePromoteFailed,
+          		Reason:  "PROMOTE_FAILED",
+          		Public:  "codec promotion failed",
+          		Private: "pkg/v1/data/codec: " + detail + " for format " + string(f),
+          	})
+        to: kerrs
+  - of: promoteContainerFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: promoteContainerFailed
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(nil, kerrs.WrapParams{
+          		Code:    CodePromoteFailed,
+          		Reason:  "PROMOTE_FAILED",
+          		Public:  "codec promotion container malformed",
+          		Private: "pkg/v1/data/codec: " + detail,
+          	})
+        to: kerrs
+  - of: hasPromotionStrategy
+    steps:
+      - switch:
+          cases:
+            - case: NDJSON, CSV, Form, PEM, "flatbuffers", "tlv"
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": f
+  - of: isValueShapeMismatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: isValueShapeMismatch
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil
+      - bind: reason, ok
+        eval: kerrs.ReasonOf(err)
+        to: kerrs
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - switch:
+          cases:
+            - case: "\"VALUE_INVALID\", \"FLATBUFFERS_BAD_TYPE\", \"FLATBUFFERS_BAD_TARGET\", \"UNMARSHAL_FAILED\""
+              do:
+                - return: "true"
+          "on": reason
+      - return: "false"

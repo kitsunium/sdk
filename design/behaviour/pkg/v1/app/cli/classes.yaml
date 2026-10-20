@@ -1,0 +1,57 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: Success is the process exit status of a command that did what it was asked.
+    items:
+      - name: Success
+        type: int
+        value: "0"
+    name: Success
+files:
+  - decls:
+      - Success
+      - Status
+      - Execute
+    name: cli.go
+  - decls:
+      - _
+    name: cli_compliance.go
+  - decls: []
+    name: doc.go
+functions:
+  - name: Status
+    params: err error
+    results: int
+  - name: Execute
+    params: ctx context.Context, cfg Config, root Command, args []string
+    results: error
+imports:
+  context: context
+  coreconfig: github.com/kitsunium/sdk/internal/core/app/config
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/cli
+  name: cli
+  purpose: "Package cli is the public facade for the SDK's command-line domain: the sub-commands, the generated help and the typed exit status that the stdlib's flag package deliberately does not have."
+types: []
+vars:
+  - doc: |-
+      Compile-time proof that a [FlagSourceValue] IS a configuration source.
+
+      ADR 0065 §D6's whole claim is that `cli` COMPOSES `config` rather than
+      reimplementing it, and the composition is exactly one thing: the flags an
+      operator typed can be handed to a `config.Load` as its last layer. That
+      claim is worth precisely what its mechanical enforcement is worth — a doc
+      line saying "satisfies config.Source" survives a signature change on either
+      side and goes on saying it; this does not.
+
+      It is the negative that would be expensive here. If `Source` grew a method,
+      or `Load` changed shape, the failure without this line would not be a build
+      error: it would be a consumer discovering at their own call site that the
+      SDK's own documented one-liner no longer compiles.
+    items:
+      - name: _
+        type: coreconfig.Source
+        value: (*FlagSourceValue)(nil)
+    name: _

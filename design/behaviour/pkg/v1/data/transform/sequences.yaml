@@ -1,0 +1,96 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Compress
+    participants:
+      - id: caller
+        kind: actor
+      - id: Compress
+        kind: self
+      - id: coretransform
+        kind: package
+      - id: c.Compress
+        kind: value
+    steps:
+      - bind: c, ok
+        eval: coretransform.Lookup(algo)
+        to: coretransform
+      - opt:
+          do:
+            - return: dst, coretransform.UnknownCompressor
+          when: "!ok"
+      - return: c.Compress(dst, src)
+        to: c.Compress
+  - of: Decompress
+    participants:
+      - id: caller
+        kind: actor
+      - id: Decompress
+        kind: self
+      - id: coretransform
+        kind: package
+      - id: c.Decompress
+        kind: value
+    steps:
+      - bind: c, ok
+        eval: coretransform.Lookup(algo)
+        to: coretransform
+      - opt:
+          do:
+            - return: dst, coretransform.UnknownCompressor
+          when: "!ok"
+      - return: c.Decompress(dst, src)
+        to: c.Decompress
+  - of: DecompressBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: DecompressBounded
+        kind: self
+      - id: coretransform
+        kind: package
+      - id: bounded.DecompressBounded
+        kind: value
+      - id: judgeAfter
+        kind: internal
+    steps:
+      - bind: c, ok
+        eval: coretransform.Lookup(algo)
+        to: coretransform
+      - opt:
+          do:
+            - return: dst, coretransform.UnknownCompressor
+          when: "!ok"
+      - opt:
+          do:
+            - return: bounded.DecompressBounded(dst, src, limit)
+              to: bounded.DecompressBounded
+          init:
+            bind: bounded, isBounded
+            eval: c.(coretransform.BoundedDecompressor)
+          when: isBounded
+      - return: judgeAfter(c, dst, src, limit)
+        to: judgeAfter
+  - of: judgeAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: judgeAfter
+        kind: self
+      - id: c.Decompress
+        kind: value
+    steps:
+      - bind: ceiling
+        eval: max(limit, 0)
+      - set: decoded, err
+        to: c.Decompress
+        value: c.Decompress(dst, src)
+      - opt:
+          do:
+            - return: decoded, err
+          when: err != nil
+      - opt:
+          do:
+            - return: dst, coretransform.DecompressedTooLarge
+          when: int64(len(decoded)-len(dst)) > ceiling
+      - return: decoded, nil

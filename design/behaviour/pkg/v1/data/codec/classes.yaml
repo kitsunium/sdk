@@ -1,0 +1,524 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Known format constants — string values are part of the public contract.
+      Prefer the typed constants over string literals at call sites: the
+      IDE catches typos at compile time, autocomplete surfaces the full
+      list, and the underlying string value (frozen post-v1.0.0) stays
+      available via `string(codec.JSON)` whenever raw access is needed.
+    grouped: true
+    items:
+      - doc: JSON denotes the stdlib encoding/json wire format.
+        name: JSON
+        type: Format
+        value: "\"json\""
+      - doc: NDJSON denotes the newline-delimited JSON dialect.
+        name: NDJSON
+        type: Format
+        value: "\"ndjson\""
+      - doc: XML denotes the stdlib encoding/xml wire format.
+        name: XML
+        type: Format
+        value: "\"xml\""
+      - doc: CSV denotes the stdlib encoding/csv wire format.
+        name: CSV
+        type: Format
+        value: "\"csv\""
+      - doc: |-
+          Form denotes application/x-www-form-urlencoded, the encoding every
+          HTML form POSTs. Its native Go shape is url.Values: a repeated key
+          carries multiple values, which is the only array syntax the format
+          has.
+        name: Form
+        type: Format
+        value: "\"form\""
+      - doc: ASN1DER denotes the stdlib encoding/asn1 DER wire format.
+        name: ASN1DER
+        type: Format
+        value: "\"asn1-der\""
+      - doc: PEM denotes the stdlib encoding/pem block format.
+        name: PEM
+        type: Format
+        value: "\"pem\""
+      - doc: |-
+          YAML denotes YAML as the SDK reads and writes it: a named subset of
+          YAML 1.2.2 on the standard library alone, which refuses anchors, tags,
+          merge keys and the other constructs it leaves out by name. The full
+          reader is the opt-in "yaml-full" Format of third-party/codec/yaml.
+        name: YAML
+        type: Format
+        value: "\"yaml\""
+      - doc: TOML denotes TOML v1.0.0, read and written by the SDK's stdlib-only codec.
+        name: TOML
+        type: Format
+        value: "\"toml\""
+      - doc: |-
+          CBOR denotes the RFC 8949 wire format, encoded and decoded on the
+          standard library alone.
+        name: CBOR
+        type: Format
+        value: "\"cbor\""
+      - doc: |-
+          MsgPack denotes the MessagePack wire format (msgpack.org specification),
+          implemented natively on the standard library.
+        name: MsgPack
+        type: Format
+        value: "\"msgpack\""
+      - doc: |-
+          TLV denotes the self-describing Type-Length-Value reflection
+          codec (one record per encode; nested composites supported).
+        name: TLV
+        type: Format
+        value: "\"tlv\""
+      - doc: |-
+          FlatBuffers denotes the passthrough codec for already-encoded
+          FlatBuffer payloads — schema-typed reads stay in the caller's
+          flatc-generated accessors.
+        name: FlatBuffers
+        type: Format
+        value: "\"flatbuffers\""
+      - doc: Base64 denotes the JSON-mediated base64 (std) text-safe wrap.
+        name: Base64
+        type: Format
+        value: "\"base64\""
+      - doc: Base64URL denotes the JSON-mediated base64 (URL-safe alphabet) wrap.
+        name: Base64URL
+        type: Format
+        value: "\"base64url\""
+      - doc: Base32 denotes the JSON-mediated base32 (std) text-safe wrap.
+        name: Base32
+        type: Format
+        value: "\"base32\""
+      - doc: Base16 denotes the JSON-mediated base16 (uppercase hex) wrap.
+        name: Base16
+        type: Format
+        value: "\"base16\""
+      - doc: Hex denotes the JSON-mediated lowercase-hex text-safe wrap.
+        name: Hex
+        type: Format
+        value: "\"hex\""
+      - doc: ASCII85 denotes the JSON-mediated Adobe Ascii85 text-safe wrap.
+        name: ASCII85
+        type: Format
+        value: "\"ascii85\""
+      - doc: Base45 denotes the JSON-mediated RFC 9285 Base45 wrap (QR-code safe).
+        name: Base45
+        type: Format
+        value: "\"base45\""
+      - doc: |-
+          Base58 denotes the JSON-mediated Bitcoin Base58 wrap (short inputs;
+          base-conversion is O(n²) so a 4 KiB input cap applies).
+        name: Base58
+        type: Format
+        value: "\"base58\""
+      - doc: |-
+          Base62 denotes the JSON-mediated Base62 wrap (short inputs; same O(n²)
+          4 KiB input cap as Base58).
+        name: Base62
+        type: Format
+        value: "\"base62\""
+      - doc: |-
+          BSON denotes the MongoDB binary document format (top-level must be a
+          document — struct or map — not a scalar). ADR 0021.
+        name: BSON
+        type: Format
+        value: "\"bson\""
+      - doc: |-
+          Multipart denotes RFC 7578 multipart/form-data. Its native Go shape is
+          a [MultipartForm] of [MultipartPart] sections; any other value travels
+          as a single JSON-mediated part. The RFC 2046 boundary lives in the
+          Content-Type header, which the Codec contract cannot carry — the codec
+          re-emits it in the body, and [MultipartContentType] recovers the header
+          value from the bytes Marshal returned.
+        name: Multipart
+        type: Format
+        value: "\"multipart\""
+    name: JSON
+  - grouped: true
+    items:
+      - doc: |-
+          frameMagic is the first byte of every compressed frame — a sentinel that
+          lets UnmarshalCompressed reject non-frame input before doing any work.
+        name: frameMagic
+        type: byte
+        value: "0xC7"
+      - doc: |-
+          frameVersion is the frame layout version, frozen post-v1.0.0; a future
+          layout change bumps it and UnmarshalCompressed rejects an unknown version.
+        name: frameVersion
+        type: byte
+        value: "0x01"
+      - doc: algGzip is the frozen 1-byte frame id for the gzip compressor.
+        name: algGzip
+        type: byte
+        value: "0x01"
+      - doc: algFlate is the frozen 1-byte frame id for the raw-DEFLATE compressor.
+        name: algFlate
+        type: byte
+        value: "0x02"
+      - doc: algIDIndex is the byte offset of the algorithm id within a frame header.
+        name: algIDIndex
+        type: int
+        value: "2"
+      - doc: formatLenStart is the byte offset of the 2-byte inner-Format length field.
+        name: formatLenStart
+        type: int
+        value: "3"
+      - doc: |-
+          frameHeaderLen is the fixed prefix before the variable inner Format:
+          magic + version + algID + a 2-byte inner-Format length.
+        name: frameHeaderLen
+        type: int
+        value: "5"
+      - doc: maxInnerFormatLen is the largest inner Format the 2-byte length addresses.
+        name: maxInnerFormatLen
+        type: int
+        value: "0xFFFF"
+      - doc: |-
+          maxExpansionRatio bounds decompressed/compressed size; above it (and above
+          the small-payload floor) the frame is treated as a decompression bomb.
+        name: maxExpansionRatio
+        type: int
+        value: "1000"
+      - comment: 4 KiB
+        doc: |-
+          bombFloorBytes lets tiny legitimate payloads expand freely below this size,
+          so the ratio guard never rejects small inputs with naturally high ratios.
+        name: bombFloorBytes
+        type: int
+        value: 4 << 10
+      - comment: 64 MiB
+        doc: |-
+          maxDecompressedFrameBytes is the absolute frame-layer ceiling (tighter than
+          the service layer's 256 MiB backstop) above which output is a bomb.
+        name: maxDecompressedFrameBytes
+        type: int
+        value: 64 << 20
+    name: frameMagic
+  - grouped: true
+    items:
+      - doc: Gzip selects the gzip compressor (frame algID 0x01).
+        name: Gzip
+        type: CompressAlgorithm
+        value: "\"gzip\""
+      - doc: Flate selects the raw-DEFLATE compressor (frame algID 0x02).
+        name: Flate
+        type: CompressAlgorithm
+        value: "\"flate\""
+    name: Gzip
+  - doc: |-
+      flatBuffersHeaderBytes is the synthetic 4-byte root-offset header
+      the flatbuffers codec validates before accepting Marshal input. The
+      promotion path stamps a zero offset (= "no root table") so flatc-
+      generated readers fail predictably while the SDK's own Unmarshal
+      strips it back off to recover the inner JSON.
+    items:
+      - name: flatBuffersHeaderBytes
+        type: int
+        value: "4"
+    name: flatBuffersHeaderBytes
+  - doc: |-
+      csvPromotionRowCount is the [][]string row count the csv promotion
+      container produces: one header row plus one body row whose first
+      column carries the inner JSON.
+    items:
+      - name: csvPromotionRowCount
+        type: int
+        value: "2"
+    name: csvPromotionRowCount
+  - doc: |-
+      csvPromotionHeader is the single-column header label written by
+      promoteMarshal's csv branch and read back by promoteUnmarshal.
+    items:
+      - name: csvPromotionHeader
+        type: string
+        value: "\"_json\""
+    name: csvPromotionHeader
+  - doc: |-
+      formPromotionKey is the single url.Values key the form promotion
+      container binds the inner JSON to. A urlencoded body has no place to
+      put a typed payload, so the wrapper is one ordinary pair — which is
+      why a promoted form body reads `_json=%7B…%7D` rather than one pair
+      per struct field: mapping a Go struct onto form fields would require
+      inventing a nesting dialect the format does not define.
+    items:
+      - name: formPromotionKey
+        type: string
+        value: "\"_json\""
+    name: formPromotionKey
+  - doc: |-
+      pemPromotionBlockType is the Type label written into the pem.Block
+      produced by promoteMarshal's pem branch. PEM accepts any Type label;
+      "JSON" tells a reader what's inside without inventing an SDK-specific
+      name.
+    items:
+      - name: pemPromotionBlockType
+        type: string
+        value: "\"JSON\""
+    name: pemPromotionBlockType
+files:
+  - decls:
+      - JSON
+      - Marshal
+      - Unmarshal
+      - MarshalMany
+      - encodeWithPromotion
+      - NewEncoder
+      - NewDecoder
+      - FromMIME
+      - FromExtension
+      - resolveStreaming
+      - unknownFormat
+    name: codec.go
+  - decls:
+      - frameMagic
+      - Gzip
+      - MarshalCompressed
+      - compressFrame
+      - appendFrame
+      - UnmarshalCompressed
+      - parseFrame
+      - decompressBounded
+      - isBomb
+      - frameAlgID
+      - algorithmForID
+    name: compressed.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - flatBuffersHeaderBytes
+      - csvPromotionRowCount
+      - csvPromotionHeader
+      - formPromotionKey
+      - pemPromotionBlockType
+      - promoteMarshal
+      - promoteUnmarshal
+      - wrapForFormat
+      - containerForFormat
+      - extractNDJSON
+      - extractCSV
+      - extractForm
+      - isCSVPromotion
+      - extractPEM
+      - extractFlatBuffers
+      - extractTLV
+      - promoteFailedFor
+      - promoteContainerFailed
+      - hasPromotionStrategy
+      - isValueShapeMismatch
+    name: promote.go
+functions:
+  - name: Marshal
+    params: f Format, v any
+    results: encoded []byte, err error
+  - name: Unmarshal
+    params: f Format, data []byte, v any
+    results: error
+  - name: MarshalMany
+    params: v any, formats ...Format
+    results: encodedByFormat map[Format][]byte, err error
+  - doc: |-
+      encodeWithPromotion runs the same fast-path + promote-fallback the
+      public Marshal does, but takes a pre-resolved Codec so MarshalMany
+      doesn't pay a second Lookup per format. Identical wire output to
+      Marshal on every Format / value combination.
+    name: encodeWithPromotion
+    params: f Format, c corecodec.Codec, v any
+    results: encoded []byte, err error
+  - name: NewEncoder
+    params: f Format, w io.Writer
+    results: enc Encoder, err error
+  - name: NewDecoder
+    params: f Format, r io.Reader
+    results: dec Decoder, err error
+  - name: FromMIME
+    params: mime string
+    results: f Format, ok bool
+  - name: FromExtension
+    params: ext string
+    results: f Format, ok bool
+  - doc: |-
+      resolveStreaming resolves f and returns its StreamingCodec shape, or a
+      typed facade error explaining why it could not.
+    name: resolveStreaming
+    params: f Format
+    results: sc corecodec.StreamingCodec, err error
+  - doc: unknownFormat builds the typed UnknownFormat error for f.
+    name: unknownFormat
+    params: f Format
+    results: error
+  - name: MarshalCompressed
+    params: f Format, algo CompressAlgorithm, v any
+    results: box []byte, err error
+  - doc: |-
+      compressFrame compresses payload with the frame id's algorithm and renders
+      the header + compressed body. Split out of MarshalCompressed to keep each
+      function within the line budget.
+    name: compressFrame
+    params: f Format, id byte, payload []byte
+    results: box []byte, err error
+  - doc: |-
+      appendFrame renders [magic][ver][algID][2B innerFormatLen BE][innerFormat]
+      followed by the compressed payload. The frame is self-describing so the reader
+      recovers the inner Format without a side channel.
+    name: appendFrame
+    params: id byte, f Format, compressed []byte
+    results: "[]byte"
+  - name: UnmarshalCompressed
+    params: box []byte, v any
+    results: error
+  - doc: |-
+      parseFrame validates the fixed header + length field and slices out the inner
+      Format and compressed payload. It reports ok=false for any structural defect:
+      short input, wrong magic/version, an unknown algorithm id, or a length field
+      that overruns the buffer.
+    name: parseFrame
+    params: box []byte
+    results: algo CompressAlgorithm, f Format, payload []byte, ok bool
+  - doc: |-
+      decompressBounded resolves the compressor for algo, decompresses payload, and
+      enforces the frame-layer decompression-bomb guard. A bomb is reported as
+      CompressedFrameInvalid; a missing compressor or a stdlib fault is forwarded.
+    name: decompressBounded
+    params: algo CompressAlgorithm, payload []byte
+    results: plain []byte, err error
+  - doc: |-
+      isBomb reports whether an output of outLen bytes from a payload of inLen bytes
+      trips the decompression-bomb guard: either it exceeds the absolute frame
+      ceiling, or it exceeds the expansion-ratio bound while above the small-payload
+      floor (small inputs may expand freely so the ratio never rejects them).
+    name: isBomb
+    params: inLen, outLen int
+    results: bool
+  - doc: |-
+      frameAlgID maps a CompressAlgorithm to its frozen 1-byte frame id, reporting
+      false for an algorithm with no assigned id (a newer scheme this frame version
+      cannot address).
+    name: frameAlgID
+    params: algo CompressAlgorithm
+    results: id byte, ok bool
+  - doc: |-
+      algorithmForID maps a frozen frame id back to its CompressAlgorithm, reporting
+      false for an id this frame version does not define (the inverse of frameAlgID).
+    name: algorithmForID
+    params: id byte
+    results: algo CompressAlgorithm, ok bool
+  - doc: |-
+      promoteMarshal handles a codec's value-shape rejection by
+      serialising v with encoding/json and wrapping the JSON bytes in the
+      codec's native shape, then re-calling Marshal. Switching on Format
+      keeps every per-codec wrap step inline so the data flow is read
+      top-down without per-format helper indirection.
+    name: promoteMarshal
+    params: f Format, c Codec, v any
+    results: encoded []byte, err error
+  - doc: |-
+      promoteUnmarshal handles a codec's target-shape rejection by
+      parsing data into the codec's native container, extracting the
+      inner JSON bytes, and json-decoding them into v.
+    name: promoteUnmarshal
+    params: f Format, c Codec, data []byte, v any
+    results: error
+  - doc: |-
+      wrapForFormat returns the codec-native value that, when Marshal'd
+      by the codec registered under f, embeds inner as a recoverable
+      payload. Returns a typed PromoteFailed sentinel for formats with no
+      promotion strategy.
+    name: wrapForFormat
+    params: f Format, inner []byte
+    results: container any, err error
+  - doc: |-
+      containerForFormat returns a (containerPtr, extract) pair: the
+      pointer passed to the codec's Unmarshal so it can populate the
+      container, and a closure that returns the inner JSON bytes once the
+      container is populated. Returns a typed PromoteFailed sentinel for
+      formats with no promotion strategy.
+    name: containerForFormat
+    params: f Format
+    results: containerPtr any, extract func() ([]byte, error), err error
+  - doc: extractNDJSON returns the inner-bytes closure for an ndjson container.
+    name: extractNDJSON
+    params: rows *[]stdjson.RawMessage
+    results: func() ([]byte, error)
+  - doc: extractCSV returns the inner-bytes closure for a csv container.
+    name: extractCSV
+    params: table *[][]string
+    results: func() ([]byte, error)
+  - doc: extractForm returns the inner-bytes closure for a form container.
+    name: extractForm
+    params: values *url.Values
+    results: func() ([]byte, error)
+  - doc: |-
+      isCSVPromotion reports whether table has exactly the shape the csv wrap
+      stage writes: the promotion header alone on the first row, and one column on
+      the second.
+    name: isCSVPromotion
+    params: table [][]string
+    results: bool
+  - doc: extractPEM returns the inner-bytes closure for a pem container.
+    name: extractPEM
+    params: block **stdpem.Block
+    results: func() ([]byte, error)
+  - doc: extractFlatBuffers returns the inner-bytes closure for a flatbuffers container.
+    name: extractFlatBuffers
+    params: raw *[]byte
+    results: func() ([]byte, error)
+  - doc: extractTLV returns the inner-bytes closure for a tlv container.
+    name: extractTLV
+    params: s *string
+    results: func() ([]byte, error)
+  - doc: |-
+      promoteFailedFor builds a typed PromoteFailed sentinel with an f-
+      and detail-specific Private message.
+    name: promoteFailedFor
+    params: f Format, detail string
+    results: error
+  - doc: |-
+      promoteContainerFailed is the typed sentinel returned by extract
+      closures when the codec populated the container with a shape that
+      no longer matches what the wrap stage produced.
+    name: promoteContainerFailed
+    params: detail string
+    results: error
+  - doc: |-
+      hasPromotionStrategy reports whether f names a codec the JSON-bridge
+      can actually promote. Only the six constrained codecs (ndjson, csv,
+      form, pem, flatbuffers, tlv) have a wrap/container pair; the
+      value-rich codecs (json, cbor, msgpack, asn1, xml, toml, yaml)
+      accept any Go value natively, so a decode failure on them is a
+      genuine wire fault — retrying would hit promote.go's default branch
+      and replace the original UNMARSHAL_FAILED with a PROMOTE_FAILED that
+      discards the cause (finding V75). Gating the retry on this predicate
+      keeps the origin reason/code routable for every corrupt-bytes input.
+    name: hasPromotionStrategy
+    params: f Format
+    results: bool
+  - doc: |-
+      isValueShapeMismatch reports whether err indicates the underlying
+      codec rejected the caller's value/target shape, which is the only
+      condition that triggers a promotion retry. Detection is by reason
+      because the constrained codecs each emit a stable SCREAMING_SNAKE
+      label across their dotted-quad code ranges.
+    name: isValueShapeMismatch
+    params: err error
+    results: bool
+imports:
+  binary: encoding/binary
+  cmp: cmp
+  corecodec: github.com/kitsunium/sdk/internal/core/data/codec
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fbcodec: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
+  io: io
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  stdjson: encoding/json
+  stdpem: encoding/pem
+  transform: github.com/kitsunium/sdk/pkg/v1/data/transform
+  url: net/url
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec
+  name: codec
+  purpose: Package codec is the universal encoder/decoder dispatch facade.
+types: []

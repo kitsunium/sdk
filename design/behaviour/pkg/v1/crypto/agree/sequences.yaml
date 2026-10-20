@@ -1,0 +1,43 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: GenerateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: GenerateKey
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - return: corecrypto.GenerateAgreementKey(corecrypto.Algorithm(a))
+        to: corecrypto
+  - of: SharedKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: SharedKey
+        kind: self
+      - id: corecrypto
+        kind: package
+    steps:
+      - bind: secret, aerr
+        eval: corecrypto.AgreementShared(corecrypto.Algorithm(a), priv, peerPub)
+        to: corecrypto
+      - opt:
+          do:
+            - return: Key{}, aerr
+          when: aerr != nil
+      - bind: derived, derr
+        eval: corecrypto.Subkey(kdfAlgorithm, secret, nil, info, corecrypto.KeyLen)
+        to: corecrypto
+      - eval: clear(secret)
+      - opt:
+          do:
+            - return: Key{}, derr
+          when: derr != nil
+      - bind: k, kerr
+        eval: corecrypto.NewKey(derived)
+        to: corecrypto
+      - eval: clear(derived)
+      - return: k, kerr

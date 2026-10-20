@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/net/client
+  name: client
+  purpose: "Package client is the outbound half of the SDK's network domain (ADR 0029): an HTTP client whose posture is enforced by the transport rather than by the call site."
+types: []

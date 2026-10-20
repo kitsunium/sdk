@@ -1,0 +1,232 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: toLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: toLevel
+        kind: self
+      - id: logger
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: math.MinInt8
+          when: lv < math.MinInt8
+      - opt:
+          do:
+            - return: math.MaxInt8
+          when: lv > math.MaxInt8
+      - return: logger.Level(lv)
+        to: logger
+  - of: qualifyGroup
+    steps:
+      - opt:
+          do:
+            - return: prefix
+          when: name == ""
+      - opt:
+          do:
+            - return: name
+          when: prefix == ""
+      - return: prefix + groupSeparator + name
+  - of: qualifyKey
+    steps:
+      - opt:
+          do:
+            - return: key
+          when: prefix == ""
+      - return: prefix + groupSeparator + key
+  - of: appendAttr
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAttr
+        kind: self
+      - id: a.Value.Resolve
+        kind: value
+      - id: appendGroup
+        kind: internal
+    steps:
+      - bind: v
+        eval: a.Value.Resolve()
+        to: a.Value.Resolve
+      - opt:
+          do:
+            - return: appendGroup(dst, prefix, a.Key, v.Group())
+              to: appendGroup
+          when: v.Kind() == slog.KindGroup
+      - opt:
+          do:
+            - return: dst
+          when: "(slog.Attr{Key: a.Key, Value: v}).Equal(slog.Attr{})"
+      - return: append(dst, convert(qualifyKey(prefix, a.Key), v))
+  - of: appendGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendGroup
+        kind: self
+      - id: qualifyGroup
+        kind: internal
+      - id: appendAttr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(members) == 0
+      - bind: inner
+        eval: qualifyGroup(prefix, name)
+        to: qualifyGroup
+      - loop:
+          do:
+            - set: dst
+              to: appendAttr
+              value: appendAttr(dst, inner, m)
+          key: _
+          range: members
+          value: m
+      - return: dst
+  - of: convert
+    participants:
+      - id: caller
+        kind: actor
+      - id: convert
+        kind: self
+      - id: logger
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: slog.KindString
+              do:
+                - return: logger.String(key, v.String())
+                  to: logger
+            - case: slog.KindInt64
+              do:
+                - return: logger.Int64(key, v.Int64())
+                  to: logger
+            - case: slog.KindUint64
+              do:
+                - return: logger.Uint64(key, v.Uint64())
+                  to: logger
+            - case: slog.KindFloat64
+              do:
+                - return: logger.Float64(key, v.Float64())
+                  to: logger
+            - case: slog.KindBool
+              do:
+                - return: logger.Bool(key, v.Bool())
+                  to: logger
+            - case: slog.KindDuration
+              do:
+                - return: logger.Duration(key, v.Duration())
+                  to: logger
+            - case: slog.KindTime
+              do:
+                - return: logger.Time(key, v.Time())
+                  to: logger
+            - default: true
+              do:
+                - return: logger.String(key, v.String())
+                  to: logger
+          "on": v.Kind()
+  - of: handler.Enabled
+    participants:
+      - id: caller
+        kind: actor
+      - id: handler.Enabled
+        kind: self
+      - id: h.lg.Enabled
+        kind: value
+    steps:
+      - return: h.lg.Enabled(ctx, toLevel(lv))
+        to: h.lg.Enabled
+  - of: handler.Handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: handler.Handle
+        kind: self
+      - id: r.Attrs
+        kind: value
+      - id: h.lg.Log
+        kind: value
+    steps:
+      - bind: attrs
+        eval: make([]logger.Attr, 0, r.NumAttrs())
+      - eval: |-
+          r.Attrs(func(a slog.Attr) bool {
+          		//: qualify under the active group chain and convert.
+          		attrs = appendAttr(attrs, h.prefix, a)
+          		//: never stop early — every attr belongs in the record.
+          		return true
+          	})
+        to: r.Attrs
+      - eval: h.lg.Log(ctx, toLevel(r.Level), r.Message, attrs...)
+        to: h.lg.Log
+      - return: nil
+  - of: handler.WithAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: handler.WithAttrs
+        kind: self
+      - id: appendAttr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: h
+          when: len(as) == 0
+      - bind: attrs
+        eval: make([]logger.Attr, 0, len(as))
+      - loop:
+          do:
+            - set: attrs
+              to: appendAttr
+              value: appendAttr(attrs, h.prefix, a)
+          key: _
+          range: as
+          value: a
+      - opt:
+          do:
+            - return: h
+          when: len(attrs) == 0
+      - return: "handler{lg: h.lg.With(attrs...), prefix: h.prefix}"
+  - of: handler.WithGroup
+    steps:
+      - opt:
+          do:
+            - return: h
+          when: name == ""
+      - return: "handler{lg: h.lg, prefix: qualifyGroup(h.prefix, name)}"
+  - of: NewHandler
+    steps:
+      - opt:
+          do:
+            - return: nil, LoggerRequired
+          when: lg == nil
+      - return: "handler{lg: lg}, nil"
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: NewHandler
+        kind: internal
+      - id: slog
+        kind: stdlib
+    steps:
+      - bind: hdl, hErr
+        eval: NewHandler(lg)
+        to: NewHandler
+      - opt:
+          do:
+            - return: nil, hErr
+          when: hErr != nil
+      - return: slog.New(hdl), nil
+        to: slog

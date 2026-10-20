@@ -1,0 +1,25 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      Format is the name FlatBuffers is registered under. It is an untyped
+      constant, so it goes wherever a format name is taken — the codec package's
+      Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
+      conversion.
+    items:
+      - name: Format
+        value: "\"flatbuffers\""
+    name: Format
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Format
+    name: flatbuffers.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/flatbuffers
+  name: flatbuffers
+  purpose: "Package flatbuffers registers the FlatBuffers codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/flatbuffers\" The codec is a passthrough for payloads flatc-generated code already encoded: Marshal takes a []byte or a [BytesProvider] and hands the bytes back, Unmarshal fills a *[]byte or a [BytesAcceptor]."
+types: []
