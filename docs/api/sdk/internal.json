@@ -64532,7 +64532,7 @@
       "name": "NewES256Issuer",
       "spelled": "func(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer coretoken.Issuer, err error)",
       "canonical": "func(priv *crypto/ecdsa.PrivateKey, cfg github.com/kitsunium/sdk/internal/service/security/token.IssuerConfig) (issuer github.com/kitsunium/sdk/internal/core/security/token.Issuer, err error)",
-      "doc": "NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256,\nemitting the fixed-width R||S signature of RFC 7518 §3.4.\n",
+      "doc": "NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256,\nemitting the fixed-width R||S signature of RFC 7518 §3.4, always in its\nlow-S form, so a token it signs has one spelling.\n",
       "file": "service/security/token/jwt.go",
       "layer": "service",
       "family": "security"
@@ -64544,7 +64544,7 @@
       "name": "NewES256Verifier",
       "spelled": "func(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier coretoken.Verifier, err error)",
       "canonical": "func(pub *crypto/ecdsa.PublicKey, cfg github.com/kitsunium/sdk/internal/service/security/token.VerifierConfig) (verifier github.com/kitsunium/sdk/internal/core/security/token.Verifier, err error)",
-      "doc": "NewES256Verifier returns a JWT verifier bound to ECDSA P-256 under pub.\n\npub is validated as a curve point, not merely measured: an off-curve point\nis a documented route to key recovery (RFC 8725 §3.4).\n",
+      "doc": "NewES256Verifier returns a JWT verifier bound to ECDSA P-256 under pub.\n\npub is validated as a curve point, not merely measured: an off-curve point\nis a documented route to key recovery (RFC 8725 §3.4).\n\nIt accepts a high-S signature as well as a low-S one: RFC 7518 §3.4 does\nnot require low S, and most producers emit a high s about half the time.\nSince (r, s) and (r, n−s) both verify, a token from another issuer has two\nvalid spellings, so a revocation or replay list is keyed on jti, or on\nthe claims, never on the token string.\n",
       "file": "service/security/token/jwt.go",
       "layer": "service",
       "family": "security"

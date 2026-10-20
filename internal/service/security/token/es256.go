@@ -19,10 +19,12 @@ import (
 const exitConfigFault int = 78
 
 // p256HalfOrder is n/2 for P-256. An ECDSA signature (r, s) verifies exactly
-// as (r, n−s) does, so a token signed once would have two spellings — and a
-// revocation or replay list keyed on the token string would hold one of them
-// and let the other through. One spelling is kept: s at most n/2 ("low S"),
-// which the signer produces and the verifier requires.
+// as (r, n−s) does, so the signer writes the low-S form (s at most n/2): a
+// token THIS SDK signs has one spelling. The verifier accepts both forms —
+// RFC 7518 §3.4 does not require low S, and most producers, crypto/ecdsa
+// included, emit a high s about half the time, so refusing it would refuse
+// valid tokens from every external issuer. A token string is therefore not a
+// key for a revocation or replay list; jti, or the claims, are.
 var p256HalfOrder = new(big.Int).Rsh(elliptic.P256().Params().N, 1)
 
 // es256Signing is ECDSA P-256 signing with the RFC 7518 §3.4 R||S encoding.
@@ -62,8 +64,8 @@ func (b es256Signing) sign(input []byte) (sig []byte, err error) {
 			ExitCode: exitConfigFault,
 		})
 	}
-	//: the low-S form, the one spelling the verifier accepts: n−s verifies as
-	//: s does, so a high s is replaced by its twin rather than emitted.
+	//: the low-S form: n−s verifies as s does, so a high s is replaced by its
+	//: twin rather than emitted, and a token signed here has one spelling.
 	if s.Cmp(p256HalfOrder) > 0 {
 		s.Sub(b.key.Params().N, s)
 	}
@@ -98,12 +100,6 @@ func (b es256Verifying) verify(input, sig []byte) bool {
 	digest := sha256.Sum256(input)
 	r := new(big.Int).SetBytes(sig[:p256CoordLen])
 	s := new(big.Int).SetBytes(sig[p256CoordLen:])
-	//: a high s is the second spelling of a low-S signature — the twin
-	//: anyone can compute without the key — so it is refused (#438).
-	if s.Cmp(p256HalfOrder) > 0 {
-		//: one signature, one spelling.
-		return false
-	}
 	//: crypto/ecdsa rejects out-of-range scalars itself.
 	return ecdsa.Verify(b.key, digest[:], r, s)
 }

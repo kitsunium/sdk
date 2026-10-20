@@ -1793,10 +1793,12 @@ vars:
     name: b64
   - doc: |-
       p256HalfOrder is n/2 for P-256. An ECDSA signature (r, s) verifies exactly
-      as (r, n−s) does, so a token signed once would have two spellings — and a
-      revocation or replay list keyed on the token string would hold one of them
-      and let the other through. One spelling is kept: s at most n/2 ("low S"),
-      which the signer produces and the verifier requires.
+      as (r, n−s) does, so the signer writes the low-S form (s at most n/2): a
+      token THIS SDK signs has one spelling. The verifier accepts both forms —
+      RFC 7518 §3.4 does not require low S, and most producers, crypto/ecdsa
+      included, emit a high s about half the time, so refusing it would refuse
+      valid tokens from every external issuer. A token string is therefore not a
+      key for a revocation or replay list; jti, or the claims, are.
     items:
       - name: p256HalfOrder
         value: new(big.Int).Rsh(elliptic.P256().Params().N, 1)

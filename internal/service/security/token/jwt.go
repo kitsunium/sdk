@@ -25,7 +25,8 @@ func NewHS256Issuer(secret corecrypto.Key, cfg IssuerConfig) (issuer coretoken.I
 }
 
 // NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256,
-// emitting the fixed-width R||S signature of RFC 7518 §3.4.
+// emitting the fixed-width R||S signature of RFC 7518 §3.4, always in its
+// low-S form, so a token it signs has one spelling.
 func NewES256Issuer(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer coretoken.Issuer, err error) {
 	binding, berr := bindP256Private(priv)
 	//: curve and point are checked at construction.
@@ -65,6 +66,12 @@ func NewHS256Verifier(secret corecrypto.Key, cfg VerifierConfig) (verifier coret
 //
 // pub is validated as a curve point, not merely measured: an off-curve point
 // is a documented route to key recovery (RFC 8725 §3.4).
+//
+// It accepts a high-S signature as well as a low-S one: RFC 7518 §3.4 does
+// not require low S, and most producers emit a high s about half the time.
+// Since (r, s) and (r, n−s) both verify, a token from another issuer has two
+// valid spellings, so a revocation or replay list is keyed on jti, or on
+// the claims, never on the token string.
 func NewES256Verifier(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier coretoken.Verifier, err error) {
 	binding, berr := bindP256Public(pub)
 	//: no verifier exists until the key is valid.

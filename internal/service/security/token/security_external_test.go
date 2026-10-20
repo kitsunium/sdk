@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -421,11 +422,13 @@ func TestAnExpiryAtTheZeroInstantIsNotAMissingOne(t *testing.T) {
 	}
 }
 
-// TestES256HasOneSpelling is the regression for kitsunium/sdk#438: an ECDSA
-// signature (r, s) verifies exactly as (r, n−s) does, so without a low-S rule
-// anyone holding a token could mint its twin without the key. The issuer
-// writes the low-S form, and the verifier refuses the high one.
-func TestES256HasOneSpelling(t *testing.T) {
+// TestES256SignsLowSAndVerifiesBoth is the regression for kitsunium/sdk#438,
+// as decided on review: an ECDSA signature (r, s) verifies exactly as (r, n−s)
+// does. The issuer writes the low-S form, so a token this SDK signs has one
+// spelling; the verifier accepts the high-S form too, because RFC 7518 §3.4
+// does not require low S and an external issuer — crypto/ecdsa included —
+// emits a high s about half the time.
+func TestES256SignsLowSAndVerifiesBoth(t *testing.T) {
 	t.Parallel()
 	key := testECKey(t)
 	issuer, err := svctoken.NewES256Issuer(key, svctoken.IssuerConfig{AllowMissingExpiry: true})
@@ -455,16 +458,36 @@ func TestES256HasOneSpelling(t *testing.T) {
 			t.Fatalf("the issuer wrote a high-S signature")
 		}
 		if _, verr := verifier.Verify(minted); verr != nil {
-			t.Fatalf("Verify(canonical): %v", verr)
+			t.Fatalf("Verify(low-S): %v", verr)
 		}
+		//: the twin, as a third-party signer could have written it.
 		var twin [64]byte
 		copy(twin[:32], signature[:32])
 		new(big.Int).Sub(order, s).FillBytes(twin[32:])
-		twinToken := minted[:dot+1] + b64.EncodeToString(twin[:])
-		if _, verr := verifier.Verify(twinToken); !errs.HasCode(verr, coretoken.CodeSignatureInvalid) {
-			t.Fatalf("Verify(high-S twin) = %v, want SIGNATURE_INVALID", verr)
+		if _, verr := verifier.Verify(minted[:dot+1] + b64.EncodeToString(twin[:])); verr != nil {
+			t.Fatalf("Verify(high-S, as another issuer signs) = %v, want it accepted", verr)
 		}
 	}
+	//: a token signed outside the SDK by crypto/ecdsa, high-S kept as drawn.
+	input := b64.EncodeToString([]byte(`{"alg":"ES256","typ":"JWT"}`)) + "." + b64.EncodeToString([]byte(`{"sub":"bob"}`))
+	digest := sha256.Sum256([]byte(input))
+	for range 64 {
+		r, s, signErr := ecdsa.Sign(rand.Reader, key, digest[:])
+		if signErr != nil {
+			t.Fatalf("ecdsa.Sign: %v", signErr)
+		}
+		if s.Cmp(half) <= 0 {
+			continue
+		}
+		var raw [64]byte
+		r.FillBytes(raw[:32])
+		s.FillBytes(raw[32:])
+		if _, verr := verifier.Verify(input + "." + b64.EncodeToString(raw[:])); verr != nil {
+			t.Fatalf("Verify(a third party's high-S token) = %v, want it accepted", verr)
+		}
+		return
+	}
+	t.Fatal("64 draws produced no high-S signature")
 }
 
 // TestCritHeaderIsRefused covers RFC 7515 §4.1.11: the parameters "crit" names

@@ -872,10 +872,6 @@ sequences:
       - bind: s
         eval: new(big.Int).SetBytes(sig[p256CoordLen:])
         to: new(big.Int).SetBytes
-      - opt:
-          do:
-            - return: "false"
-          when: s.Cmp(p256HalfOrder) > 0
       - return: ecdsa.Verify(b.key, digest[:], r, s)
         to: ecdsa
   - of: hs256Binding.algorithm
