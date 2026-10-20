@@ -125,7 +125,7 @@ func Marshal(f Format, v any) (encoded []byte, err error) {
 	//: slow path — only the constrained codecs have a promotion strategy;
 	//: gating on hasPromotionStrategy keeps a value-rich codec's genuine
 	//: fault routable instead of masking it as PROMOTE_FAILED (V75).
-	if err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err) {
+	if err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(f, err) {
 		//: promotion handles its own error wrapping.
 		return promoteMarshal(f, c, v)
 	}
@@ -150,7 +150,7 @@ func Unmarshal(f Format, data []byte, v any) error {
 	//: slow path — only the constrained codecs have a promotion strategy;
 	//: gating on hasPromotionStrategy lets a value-rich codec's corrupt-
 	//: bytes UNMARSHAL_FAILED survive instead of being masked (V75).
-	if uErr != nil && hasPromotionStrategy(f) && isValueShapeMismatch(uErr) {
+	if uErr != nil && hasPromotionStrategy(f) && isValueShapeMismatch(f, uErr) {
 		//: promotion handles its own error wrapping.
 		return promoteUnmarshal(f, c, data, v)
 	}
@@ -229,7 +229,7 @@ func encodeWithPromotion(f Format, c corecodec.Codec, v any) (encoded []byte, er
 	//: slow path — gate on hasPromotionStrategy so MarshalMany matches
 	//: Marshal: only the constrained codecs retry; value-rich codecs
 	//: forward their genuine fault instead of masking it (V75).
-	if err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err) {
+	if err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(f, err) {
 		//: promotion handles its own error wrapping.
 		return promoteMarshal(f, c, v)
 	}

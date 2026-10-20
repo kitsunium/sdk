@@ -33,10 +33,12 @@ go_test(
         "codec_integration_test.go",
         "codec_internal_test.go",
         "gen_api_test.go",
+        "raw_external_test.go",
     ],
     embed = [":ndjson"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/ndjson",
         "//internal/kernel/errs",
     ],
 )

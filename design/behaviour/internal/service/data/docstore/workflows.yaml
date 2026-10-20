@@ -130,3 +130,15 @@ workflows:
       - return: |-
           coredocstore.VersionValue{}, kerrs.Wrap(coredocstore.VersionNotFound, kerrs.WrapParams{},
           		kerrs.String("store", store), kerrs.String("number", strconv.FormatUint(number, 10)))
+  - of: validKeys
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!utf8.ValidString(k)"
+          key: _
+          range: keys
+          value: k
+      - return: "true"

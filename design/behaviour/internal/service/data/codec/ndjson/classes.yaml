@@ -23,6 +23,7 @@ files:
       - encodeSliceInto
       - marshalRawSliceTo
       - rawMessageView
+      - asRawMessages
       - appendNDJSONRaw
       - (*ndjsonCodec).Unmarshal
       - decodeLines
@@ -71,6 +72,16 @@ functions:
     name: rawMessageView
     params: rows []stdjson.RawMessage
     results: "[][]byte"
+  - doc: |-
+      asRawMessages re-types pre-encoded [][]byte rows as []json.RawMessage
+      for the slow path, and returns any other v as it is. A row the fast path
+      refused — one carrying a '\n', any pretty-printed document — reaches
+      encoding/json, which writes a []byte as a base64 STRING but a RawMessage
+      as the JSON it holds, validated and compacted onto one line. Without the
+      re-typing the output's format changed with the rows' content (#462).
+    name: asRawMessages
+    params: v any
+    results: any
   - doc: |-
       appendNDJSONRaw appends rows + '\n' separators onto dst. Refuses any
       row carrying an embedded '\n' (returns ok=false) so the slow path

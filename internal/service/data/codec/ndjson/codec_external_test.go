@@ -199,7 +199,9 @@ func TestStdlibSliceParity(t *testing.T) {
 		}},
 		{"scalars", []int{1, -2, 0}},
 		{"strings needing escapes", []string{"a\nb", `"q"`, "\\", "\u2028"}},
-		{"byte slices", [][]byte{[]byte("embedded\nnewline")}},
+		//: [][]byte is NOT a parity shape: it is the documented pre-encoded
+		//: one, each row JSON written as JSON — never the stdlib's base64,
+		//: newline or not (#462, raw_external_test.go).
 		{"non-addressable array value", [2]payload{{Name: "a", Age: 1}, {Name: "b", Age: 2}}},
 	}
 	runCase := func(t *testing.T, tc tc) {

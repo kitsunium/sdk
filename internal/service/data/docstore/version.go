@@ -611,8 +611,22 @@ func (s *Store[T]) preparedDocument(key string, versions []coredocstore.VersionV
 		//: VersionsInvalid, naming the problem.
 		return givenDocument{}, versionsInvalid(s.path, problemOtherKey)
 	}
+	//: a key JSON would rewrite, as Put refuses it (#459).
+	if !validKeys([]string{key}) {
+		//: DocumentUnencodable, naming no key.
+		return givenDocument{}, invalidKey(s.path, "")
+	}
+	keys := s.indexKeys(v)
+	//: an index key JSON would rewrite, which the reopened store files elsewhere.
+	for i, indexKeys := range keys {
+		//: refused before any lock.
+		if !validKeys(indexKeys) {
+			//: DocumentUnencodable, naming the index.
+			return givenDocument{}, invalidKey(s.path, s.indexes[i].name)
+		}
+	}
 	//: ready to be checked against the store and written.
-	return givenDocument{raw: raw, given: given, keys: s.indexKeys(v)}, nil
+	return givenDocument{raw: raw, given: given, keys: keys}, nil
 }
 
 // persistDocument makes PutDocument's write durable: the document and its

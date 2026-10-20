@@ -25,7 +25,7 @@ allocated. This package declares no code.
 | `memory.go` | `NewMemory` + `memoryStore[V]` — the store, its lock discipline, and `Load` |
 | `record.go` | `record[V]` — what the primitive actually stores, and why `expireAt` is duplicated |
 | `tagindex.go` | `tagIndex` — `byKey` / `byTag`, and why both exist |
-| `chain.go` | `NewChain` + `chainStore[V]` — promotion, write order, delete order |
+| `chain.go` | `NewChain` + `chainStore[V]` — promotion, write order, delete order, and the guard that keeps a promotion from undoing a write (`announce` / `finish`, #460) |
 | `tier.go` | `tier[V]` — one level, with its three capabilities resolved once |
 | `refuse.go` | `validateEntry` / `primitiveTTL` / the `CACHE_ENTRY_REJECTED` and fill-error wrapping |
 | `cache_compliance.go` | the compile-time assertions that both stores still answer all four contracts |
@@ -123,6 +123,23 @@ whether the window exists but which side of it is safer:
 | `Fetch` | near → far, promote on a far hit | a broken tier **stops the walk**: continuing would serve a staler answer from behind it and call that a hit |
 | promotion failure | reported, never fatal | the caller already has the value; failing the read turns a degraded cache into a degraded service |
 | `InvalidateTag` | far → near, attempt every tier | a near tier cleared first would repopulate itself from the far tier on the very next read |
+
+### A promotion never writes back what a write replaced (#460)
+
+A promotion copies into the nearer tiers an entry it read from a farther one
+**before** it writes it. A `Set`, `Delete` or `InvalidateTag` that ran to
+completion in between would see its effect overwritten by that older copy —
+served for the near TTL, forever under `NoExpiry`. So every write
+**announces itself** before it touches a tier (`announce`): it counts itself
+in `writing`, then moves `generation` under `promoting`'s write lock, which
+waits out every promotion already past its check; `finish` moves
+`generation` again when the write ends. A promotion reads `generation` before
+its walk and, under `promoting`'s read lock, writes only when no write is
+running and none began or ended since — so a write already running when the
+walk began, and finished before the check, is caught too. A skipped promotion costs one
+later fall-through, never a stale hit; with no write around it, it promotes as
+before. `chain_race_external_test.go` places each write inside the far read of
+a `Fetch` and of a `Load`, on two and three tiers, with gated tiers — no sleep.
 
 `InvalidateTag`'s total counts **removals, not distinct keys** — an entry in
 two tiers counts twice. Deduplicating would need each tier to return the keys

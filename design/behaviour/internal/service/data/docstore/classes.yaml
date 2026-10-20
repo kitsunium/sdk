@@ -604,6 +604,8 @@ files:
       - (*Store).store
       - (*Store).prepare
       - encodeAs
+      - validKeys
+      - invalidKey
       - (*Store).commit
       - (*Store).modify
       - (*Store).persistAndApply
@@ -1036,6 +1038,20 @@ functions:
     results: key string, raw json.RawMessage, err error
     typeParams: T any
   - doc: |-
+      validKeys reports whether every key is valid UTF-8. encoding/json writes
+      an invalid byte as U+FFFD, so a key that is not would be another key once
+      the document is read back — after a reopen, after a reindex — and two keys
+      differing only there would become one.
+    name: validKeys
+    params: keys []string
+    results: bool
+  - doc: |-
+      invalidKey refuses a key that is not valid UTF-8: DocumentUnencodable,
+      naming the store and, for an index key, the index — never the key.
+    name: invalidKey
+    params: store, index string
+    results: error
+  - doc: |-
       encodeCause describes an encoding failure without the value that failed:
       an unsupported value's text and a MarshalJSON's own error can both quote
       what the document held.
@@ -1067,6 +1083,7 @@ imports:
   svcsql: github.com/kitsunium/sdk/internal/service/data/sql
   sync: sync
   time: time
+  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/docstore

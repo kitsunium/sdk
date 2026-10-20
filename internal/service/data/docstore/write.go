@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -106,8 +107,17 @@ func (s *Store[T]) prepare(v T) (prepared, error) {
 		//: nothing to store.
 		return prepared{}, err
 	}
+	keys := s.indexKeys(v)
+	//: an index key JSON would rewrite, which the reopened store files elsewhere.
+	for i, indexKeys := range keys {
+		//: refused before any lock.
+		if !validKeys(indexKeys) {
+			//: DocumentUnencodable, naming the index.
+			return prepared{}, invalidKey(s.path, s.indexes[i].name)
+		}
+	}
 	//: ready to be checked and stored.
-	return prepared{raw: raw, keys: s.indexKeys(v), key: key}, nil
+	return prepared{raw: raw, keys: keys, key: key}, nil
 }
 
 // encodeAs computes v's key and JSON, or refuses v naming store and never a
@@ -120,6 +130,11 @@ func encodeAs[T any](store string, keyOf func(T) string, v T) (key string, raw j
 		//: DocumentKeyEmpty.
 		return "", nil, kerrs.Wrap(coredocstore.DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", store))
 	}
+	//: a key JSON would rewrite: the document read back has another key.
+	if !utf8.ValidString(key) {
+		//: DocumentUnencodable, naming no key.
+		return "", nil, invalidKey(store, "")
+	}
 	raw, err = json.Marshal(v)
 	//: a channel, a function, a cycle, a failing MarshalJSON.
 	if err != nil {
@@ -129,6 +144,35 @@ func encodeAs[T any](store string, keyOf func(T) string, v T) (key string, raw j
 	}
 	//: the key and the document as written.
 	return key, raw, nil
+}
+
+// validKeys reports whether every key is valid UTF-8. encoding/json writes
+// an invalid byte as U+FFFD, so a key that is not would be another key once
+// the document is read back — after a reopen, after a reindex — and two keys
+// differing only there would become one.
+func validKeys(keys []string) bool {
+	//: each key, as the function gave it.
+	for _, k := range keys {
+		//: one invalid byte is enough.
+		if !utf8.ValidString(k) {
+			//: refused.
+			return false
+		}
+	}
+	//: every key survives the JSON round trip.
+	return true
+}
+
+// invalidKey refuses a key that is not valid UTF-8: DocumentUnencodable,
+// naming the store and, for an index key, the index — never the key.
+func invalidKey(store, index string) error {
+	fields := []kerrs.FieldValue{kerrs.String("store", store), kerrs.String("cause", "a key is not valid UTF-8")}
+	//: an index key names its index.
+	if index != "" {
+		fields = append(fields, kerrs.String("index", index))
+	}
+	//: DocumentUnencodable.
+	return kerrs.Wrap(coredocstore.DocumentUnencodable, kerrs.WrapParams{}, fields...)
 }
 
 // commit checks a prepared write against the store and stores it. It reports

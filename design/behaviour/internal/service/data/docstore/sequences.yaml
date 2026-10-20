@@ -4582,6 +4582,8 @@ sequences:
         kind: actor
       - id: (*SQLStore).indexRows
         kind: self
+      - id: fileableKeys
+        kind: internal
       - id: s.fileKey
         kind: internal
     steps:
@@ -4590,6 +4592,13 @@ sequences:
           type: "[]indexRow"
       - loop:
           do:
+            - bind: keys
+              eval: fileableKeys(spec.Keys(v))
+              to: fileableKeys
+            - opt:
+                do:
+                  - return: nil, invalidKey(s.table, spec.Name)
+                when: "!validKeys(keys)"
             - loop:
                 do:
                   - bind: filed
@@ -4609,7 +4618,7 @@ sequences:
                   - set: rows
                     value: "append(rows, indexRow{name: spec.Name, key: filed, unique: spec.Unique})"
                 key: _
-                range: fileableKeys(spec.Keys(v))
+                range: keys
                 value: k
           key: _
           range: s.indexes
@@ -6192,6 +6201,8 @@ sequences:
         kind: internal
       - id: s.decode
         kind: internal
+      - id: s.indexKeys
+        kind: internal
     steps:
       - opt:
           do:
@@ -6217,7 +6228,23 @@ sequences:
           do:
             - return: givenDocument{}, versionsInvalid(s.path, problemOtherKey)
           when: s.key(v) != key
-      - return: "givenDocument{raw: raw, given: given, keys: s.indexKeys(v)}, nil"
+      - opt:
+          do:
+            - return: givenDocument{}, invalidKey(s.path, "")
+          when: "!validKeys([]string{key})"
+      - bind: keys
+        eval: s.indexKeys(v)
+        to: s.indexKeys
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: givenDocument{}, invalidKey(s.path, s.indexes[i].name)
+                when: "!validKeys(indexKeys)"
+          key: i
+          range: keys
+          value: indexKeys
+      - return: "givenDocument{raw: raw, given: given, keys: keys}, nil"
   - of: (*Store).persistDocument
     participants:
       - id: caller
@@ -6455,6 +6482,8 @@ sequences:
         kind: self
       - id: encodeAs
         kind: internal
+      - id: s.indexKeys
+        kind: internal
     steps:
       - bind: key, raw, err
         eval: encodeAs(s.path, s.key, v)
@@ -6463,7 +6492,19 @@ sequences:
           do:
             - return: prepared{}, err
           when: err != nil
-      - return: "prepared{raw: raw, keys: s.indexKeys(v), key: key}, nil"
+      - bind: keys
+        eval: s.indexKeys(v)
+        to: s.indexKeys
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: prepared{}, invalidKey(s.path, s.indexes[i].name)
+                when: "!validKeys(indexKeys)"
+          key: i
+          range: keys
+          value: indexKeys
+      - return: "prepared{raw: raw, keys: keys, key: key}, nil"
   - of: encodeAs
     participants:
       - id: caller
@@ -6479,6 +6520,10 @@ sequences:
           do:
             - return: "\"\", nil, kerrs.Wrap(coredocstore.DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String(\"store\", store))"
           when: key == ""
+      - opt:
+          do:
+            - return: "\"\", nil, invalidKey(store, \"\")"
+          when: "!utf8.ValidString(key)"
       - set: raw, err
         to: json
         value: json.Marshal(v)
@@ -6489,6 +6534,24 @@ sequences:
                 			kerrs.String("store", store), kerrs.String("cause", encodeCause(err)))
           when: err != nil
       - return: key, raw, nil
+  - of: invalidKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidKey
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: fields
+        eval: "[]kerrs.FieldValue{kerrs.String(\"store\", store), kerrs.String(\"cause\", \"a key is not valid UTF-8\")}"
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, kerrs.String("index", index))
+          when: index != ""
+      - return: kerrs.Wrap(coredocstore.DocumentUnencodable, kerrs.WrapParams{}, fields...)
+        to: kerrs
   - of: (*Store).commit
     participants:
       - id: caller

@@ -269,8 +269,14 @@ func (s *SQLStore[T]) indexRows(v T) ([]indexRow, error) {
 	var rows []indexRow
 	//: every index, with its own keys.
 	for _, spec := range s.indexes {
+		keys := fileableKeys(spec.Keys(v))
+		//: an index key JSON would rewrite, which Reindex files elsewhere.
+		if !validKeys(keys) {
+			//: DocumentUnencodable, naming the index.
+			return nil, invalidKey(s.table, spec.Name)
+		}
 		//: the rule every engine files by.
-		for _, k := range fileableKeys(spec.Keys(v)) {
+		for _, k := range keys {
 			filed := s.fileKey(spec.Name, k)
 			//: an empty transform files nothing, as an empty key does; two
 			//: keys one transform maps together are filed once.

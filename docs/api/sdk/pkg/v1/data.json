@@ -739,7 +739,7 @@
       "code": {
         "value": "1.2.0.4"
       },
-      "doc": "CodePromoteFailed fires when the facade's JSON-bridge promotion path\ncannot serve the request (unknown Format with no promotion strategy,\nor a malformed container after the codec populated it).\n",
+      "doc": "CodePromoteFailed fires when the facade's JSON-bridge promotion path\ncannot serve the request (unknown Format with no promotion strategy,\na malformed container after the codec populated it, or\nencoding/json failing on the bridge itself).\n",
       "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
@@ -1122,7 +1122,7 @@
         "reason": "PROMOTE_FAILED",
         "public": "codec promotion failed"
       },
-      "doc": "PromoteFailed is returned when the facade's JSON-bridge promotion\ncannot serve the request — either the Format has no promotion\nstrategy registered, or the codec populated a container whose\nshape no longer matches what the wrap stage produced.\n",
+      "doc": "PromoteFailed is returned when the facade's JSON-bridge promotion\ncannot serve the request — the Format has no promotion strategy\nregistered, the codec populated a container whose shape no longer\nmatches what the wrap stage produced (an NDJSON stream of more than\none record included), or encoding/json refused the value or the\ntarget on the bridge, its error kept as the cause.\n",
       "file": "codec/gen_codes.go",
       "layer": "public",
       "family": "data"
@@ -5396,7 +5396,7 @@
         "reason": "DOCUMENT_UNENCODABLE",
         "public": "The document cannot be encoded"
       },
-      "doc": "DocumentUnencodable refuses a value encoding/json cannot encode.\n",
+      "doc": "DocumentUnencodable refuses a value encoding/json cannot encode, or a key that is not valid UTF-8.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"

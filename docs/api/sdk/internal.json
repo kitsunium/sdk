@@ -20121,7 +20121,7 @@
         "reason": "DOCUMENT_UNENCODABLE",
         "public": "The document cannot be encoded"
       },
-      "doc": "DocumentUnencodable refuses a value encoding/json cannot encode — a\nchannel, a function, a cycle. Nothing changed.\n",
+      "doc": "DocumentUnencodable refuses a value encoding/json cannot encode — a\nchannel, a function, a cycle — or cannot encode unchanged: a store\nkey or an index key that is not valid UTF-8, which JSON would\nrewrite into another key. Nothing changed.\n",
       "file": "core/data/docstore/gen_codes.go",
       "layer": "core",
       "family": "data"

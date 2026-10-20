@@ -33,6 +33,7 @@ package always emitted; only the declaration moved.
 
 - **Slices and arrays only**: NDJSON models a stream of records, so `Marshal` / `Append` take a slice or an array (or a non-nil pointer to one) and `Unmarshal` a non-nil pointer to a slice; anything else is a programming error caught by the `asSlice` / `asSlicePointer` reflect helpers.
 - **Line-length cap**: max single-line length 10 MiB (`scannerMaxCapacity`) enforced by the hand-rolled splitter — bigger records likely indicate a consumer bug or corrupt stream.
+- **Pre-encoded rows stay JSON** (`[]json.RawMessage`, `[][]byte`, and a non-nil `*[][]byte`): written as they are, **unvalidated**, when no row carries a `'\n'` — the caller vouches for them; otherwise they take the encoder path, `[][]byte` re-typed as `[]json.RawMessage` first (`asRawMessages`, zero-copy), so every row is validated and compacted onto one line — never written as a base64 string, which `encoding/json` does for a `[]byte` (#462). On that path only, a row that is not JSON is `MarshalFailed`.
 - **Append rollback**: on per-record failure `Append` returns `dst[:origLen]` so callers never see a torn buffer (Appender contract).
 - Empty / whitespace-only lines are skipped silently to match the de-facto NDJSON dialect.
 - **Per-record encoding passes the element's ADDRESS**, not a copy (`elemForMarshal`), whenever the element is addressable — i.e. always for a `[]T`, never for a bare `[N]T` array value, and deliberately never for an interface element. Two measured reasons:
