@@ -94,6 +94,19 @@ Delay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1
 
 [RetryConfig](#RetryConfig).Clock is the time source the retry backs off on, [HedgeConfig](#HedgeConfig).Clock the one the hedge measures its delay on, and [TimeoutConfig](#TimeoutConfig).Clock the one [NewTimeoutWith](#NewTimeoutWith) measures its deadline on. Leave them nil in production; in a test, hand them a ManualClock from pkg/v1/clock and move it past each backoff, the hedge delay or the deadline, instead of sleeping through it.
 
+### Waiting as long as the other side asked
+
+A collector shedding load, an HTTP server answering 429, a rate limiter refusing a call: each knows when the next attempt may succeed, and a retry that ignores it either hammers too early or waits too long. [RetryConfig](#RetryConfig).Delay lets the failure decide the wait, and [RetryAfter](#RetryAfter) reads the delay the SDK's own producers attach to their errors:
+
+```
+r := resilience.NewRetry(resilience.RetryConfig{
+    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,
+    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },
+})
+```
+
+A failure that names no delay waits the backoff curve, and the named one is held at MaxDelay.
+
 ### A caller who leaves is not a failing dependency
 
 A call that ends in context.Canceled once the caller's own context is closed is neutral to the circuit breaker — a wave of disconnecting clients cannot open it on a healthy dependency — and the timeout reports the caller's own context error rather than TimeoutExceeded when the caller's context finished first. A context.DeadlineExceeded from the dependency stays a failure.
@@ -110,6 +123,7 @@ A call that ends in context.Canceled once the caller's own context is closed is 
 - [func NewRetry\(cfg RetryConfig\) Runner](<#NewRetry>)
 - [func NewTimeout\(d time.Duration\) Runner](<#NewTimeout>)
 - [func NewTimeoutWith\(cfg TimeoutConfig\) Runner](<#NewTimeoutWith>)
+- [func RetryAfter\(err error\) \(time.Duration, bool\)](<#RetryAfter>)
 - [type Backoff](<#Backoff>)
   - [func \(Backoff\) Delay\(attempt int\) time.Duration](<#Backoff.Delay>)
 - [type BreakerConfig](<#BreakerConfig>)
@@ -174,7 +188,7 @@ Code `0.2.8.6` · reason `POLICY_MISCONFIGURED` · public "The reliability polic
 var RateLimited *errs.Error
 ```
 
-RateLimited is returned when no rate-limit token is available. It carries HTTP 429: the client should slow down.
+RateLimited is returned when no rate-limit token is available. It carries HTTP 429: the client should slow down. A rejection by NewRateLimiter or NewKeyedRateLimiter also says by how much: RetryAfter reads the time the bucket needs to earn its next token.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.RateLimited`.
 
@@ -284,6 +298,15 @@ func NewTimeoutWith(cfg TimeoutConfig) Runner
 ```
 
 NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so a test expires it by advancing a ManualClock instead of sleeping. A nil cfg.Clock is NewTimeout(cfg.Duration) exactly; a non-positive cfg.Duration is refused.
+
+<a name="RetryAfter"></a>
+## func [RetryAfter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+```go
+func RetryAfter(err error) (time.Duration, bool)
+```
+
+RetryAfter reports the delay err says to wait before the next attempt — the retry\_after\_seconds field an OTLP exporter, the guarded HTTP client on a 429 or 503, and RateLimited set — and whether it says one. Its shape is RetryConfig.Delay's.
 
 <a name="Backoff"></a>
 ## type [Backoff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -652,6 +675,24 @@ type RetryConfig struct {
 	// rate limiter have taken a clock since they shipped; the retry, which is
 	// the one policy here that actually WAITS, did not.
 	Clock       clock.Timed
+	// Delay decides the wait before a retry when the failure itself says how
+	// long to wait. It is called once per retry, with the retry's number —
+	// 1 before the second attempt — and the error of the attempt that just
+	// failed; a true second result makes its duration the wait, in place of
+	// the backoff curve and without Jitter. A false one, and a nil Delay,
+	// wait the curve, which is the behaviour before the field existed.
+	//
+	// The wait it returns is held at MaxDelay when one is set, and a
+	// negative one is no wait. A server's hint longer than the caller is
+	// prepared to wait is therefore cut to MaxDelay, never followed past
+	// it; a caller who would rather give up classifies that error as not
+	// retryable instead.
+	//
+	// RetryAfter has its shape, so honouring a Retry-After, an OTLP
+	// collector's throttling or a RateLimited rejection is one line:
+	//
+	//	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
+	Delay       func(attempt int, err error) (time.Duration, bool)
 }
 ```
 

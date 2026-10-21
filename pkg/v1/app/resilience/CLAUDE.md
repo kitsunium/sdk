@@ -6,7 +6,7 @@ Public facade for the SDK reliability policies (ADR 0026). Aliases the
 `Operation`/`Runner` port + `*Config` types and `Backoff`, re-exports the eight
 constructors (`NewRetry`/`NewCircuitBreaker`/`NewRateLimiter`/
 `NewKeyedRateLimiter`/`NewBulkhead`/`NewTimeout`/`NewFallback`/`NewHedge`),
-`NewTimeoutWith`, and the outcome sentinels. Stdlib-only → dep-light;
+`NewTimeoutWith`, `RetryAfter`, and the outcome sentinels. Stdlib-only → dep-light;
 cross-OS portable.
 
 ## Surface
@@ -20,6 +20,7 @@ cross-OS portable.
 | `HedgeConfig.Idempotent` | **mandatory** `bool` — the caller's in-code assertion that duplicating the operation is safe; false refuses the policy |
 | `RetryConfig.Clock` | `clock.Timed` the backoff waits on — nil is the wall clock; a `ManualClock` from `pkg/v1/clock` drives a retry without sleeping (ADR 0103) |
 | `HedgeConfig.Clock` | `clock.Timed` the hedge delay is measured on — nil is the wall clock; a `ManualClock` issues the duplicate when it is advanced past `Delay` |
+| `RetryConfig.Delay` / `RetryAfter` | `func(attempt, err) (time.Duration, bool)` — the failure imposes the wait (held at `MaxDelay`, no jitter); nil = the curve. `RetryAfter(err)` has that shape and reads `retry_after_seconds`, set by the OTLP exporters, `net/client` on 429/503 and `RateLimited` (#476) |
 | `TimeoutConfig` / `NewTimeoutWith` | the deadline (`Duration`, refused when not positive) and the `clock.Timed` it is measured on; nil or `clock.System` is `NewTimeout` exactly, a `ManualClock` expires it when advanced (ADR 0090, #477) |
 | `KeyedRateLimiterConfig` | alias onto `service/app/resilience` — `Rate`/`Burst` per key, `Key func(ctx) string`, `MaxKeys`, `IdleTimeout`, `Clock`; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0103) |
 | `Backoff` | alias onto `kernel/backoff.Value`, the layer that owns the curve (ADR 0074) — `BaseDelay`/`MaxDelay`/`Multiplier`/`Jitter` + `Delay(attempt)`, the curve `NewRetry` waits, never negative (ADR 0103) |

@@ -42,7 +42,9 @@ const (
 
 // The two errs Field keys every verdict may carry; the third, the rejected
 // count's, is the signal's (SignalSpec.RejectedField). None of them carries
-// remote-controlled text or the endpoint.
+// remote-controlled text or the endpoint. retry_after_seconds is the key
+// app/resilience.RetryAfter reads, so a RetryConfig.Delay honours the
+// collector's hint as written; the suite pins the two spellings together.
 const (
 	retryAfterFieldKey string = "retry_after_seconds"
 	statusFieldKey     string = "http_status"

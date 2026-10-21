@@ -51,5 +51,6 @@ go_test(
         ":otlp",
         "//internal/core/observe/otel",
         "//internal/kernel/errs",
+        "//internal/service/app/resilience",
     ],
 )

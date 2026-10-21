@@ -96,9 +96,10 @@ func NewKeyedRateLimiter(cfg KeyedRateLimiterConfig) coreres.Runner {
 // bucket is empty.
 func (l *keyedLimiter) Run(ctx context.Context, op coreres.Operation) error {
 	//: the key is resolved on the caller's context, once.
-	if !l.bucketOf(l.key(ctx)).take() {
-		//: this key's bucket is empty; the others are untouched.
-		return wrapAs(coreres.RateLimited, nil)
+	if admitted, wait := l.bucketOf(l.key(ctx)).take(); !admitted {
+		//: this key's bucket is empty; the others are untouched. The delay is
+		//: this key's, so a client is told when IT may come back.
+		return rateLimited(wait)
 	}
 	//: token consumed — run the operation.
 	return op(ctx)

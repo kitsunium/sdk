@@ -78,6 +78,22 @@ constants:
         type: int
         value: "1"
     name: minAttempts
+  - doc: |-
+      retryAfterField is the errs field a failure carries to say how many seconds
+      to wait before the next attempt. The OTLP sender and the guarded HTTP client
+      write the same key, each spelled in its own package; their suites pin that
+      RetryAfter reads what they write.
+    items:
+      - name: retryAfterField
+        type: string
+        value: "\"retry_after_seconds\""
+    name: retryAfterField
+  - doc: floatBits is the width strconv parses a field's rendering at.
+    items:
+      - name: floatBits
+        type: int
+        value: "64"
+    name: floatBits
 files:
   - decls:
       - BackoffValue
@@ -173,6 +189,7 @@ files:
       - bucketSize
       - newTokenBucket
       - (*tokenBucket).Run
+      - rateLimited
       - (*tokenBucket).take
     name: ratelimit.go
   - decls:
@@ -184,10 +201,18 @@ files:
       - NewRetry
       - (*retryRunner).Run
       - (*retryRunner).wait
+      - (*retryRunner).delay
+      - capDelay
       - (*retryRunner).backoff
       - (*retryRunner).jittered
       - timedOrSystem
     name: retry.go
+  - decls:
+      - retryAfterField
+      - floatBits
+      - RetryAfter
+      - secondsToDuration
+    name: retry_after.go
   - decls:
       - RetryConfig
     name: retry_config.go
@@ -264,13 +289,33 @@ functions:
     name: newTokenBucket
     params: clk clock.Clock, rate, burst float64
     results: "*tokenBucket"
+  - doc: |-
+      rateLimited is the RateLimited rejection carrying, as retryAfterField, the
+      seconds the bucket needs to earn its next token — the delay RetryAfter reads.
+    name: rateLimited
+    params: waitSeconds float64
+    results: error
   - name: NewRetry
     params: cfg RetryConfig
     results: coreres.Runner
+  - doc: capDelay holds d into [0, ceiling], a non-positive ceiling being no cap.
+    name: capDelay
+    params: d, ceiling time.Duration
+    results: time.Duration
   - doc: timedOrSystem resolves a nil clock to the wall clock.
     name: timedOrSystem
     params: clk clock.Timed
     results: clock.Timed
+  - name: RetryAfter
+    params: err error
+    results: time.Duration, bool
+  - doc: |-
+      secondsToDuration parses a field's rendering as a number of seconds and
+      converts it to a Duration, reporting false for anything that is not a
+      finite positive number.
+    name: secondsToDuration
+    params: rendered string
+    results: time.Duration, bool
   - doc: |-
       isRetryable reports whether err is a transient failure the policy may act on
       (replay it, or count it against a dependency's health). A nil predicate keeps
@@ -318,6 +363,7 @@ imports:
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
   math: math
+  strconv: strconv
   sync: sync
   time: time
 package:
@@ -947,10 +993,13 @@ types:
         params: ctx context.Context, op coreres.Operation
         recv: t *tokenBucket
         results: error
-      - doc: take refills by elapsed time then consumes one token if available. Holds mu.
+      - doc: |-
+          take refills by elapsed time then consumes one token if available. Holds mu.
+          A refusal also reports how many seconds the bucket needs, at its rate, to
+          hold a whole token again: (1 − tokens) / rate.
         name: take
         recv: t *tokenBucket
-        results: bool
+        results: admitted bool, waitSeconds float64
     name: tokenBucket
   - fields:
       - doc: |-
@@ -984,12 +1033,20 @@ types:
         recv: r *retryRunner
         results: error
       - doc: |-
-          wait sleeps the backoff for the given attempt on the configured clock,
-          returning ctx.Err on cancel.
+          wait sleeps the delay before the given attempt on the configured clock,
+          returning ctx.Err on cancel. failed is the error of the attempt before it.
         name: wait
-        params: ctx context.Context, attempt int
+        params: ctx context.Context, attempt int, failed error
         recv: r *retryRunner
         results: error
+      - doc: |-
+          delay is the wait before attempt: the one cfg.Delay reads from the failure
+          when it reads one, held at MaxDelay and never negative, else the jittered
+          backoff curve.
+        name: delay
+        params: attempt int, failed error
+        recv: r *retryRunner
+        results: time.Duration
       - doc: |-
           backoff computes the capped exponential delay for attempt (1-based growth).
           It is the deterministic half of the kernel curve (kernel/backoff.Grow — the
@@ -1065,6 +1122,26 @@ types:
           the one policy here that actually WAITS, did not.
         name: Clock
         type: clock.Timed
+      - doc: |-
+          Delay decides the wait before a retry when the failure itself says how
+          long to wait. It is called once per retry, with the retry's number —
+          1 before the second attempt — and the error of the attempt that just
+          failed; a true second result makes its duration the wait, in place of
+          the backoff curve and without Jitter. A false one, and a nil Delay,
+          wait the curve, which is the behaviour before the field existed.
+
+          The wait it returns is held at MaxDelay when one is set, and a
+          negative one is no wait. A server's hint longer than the caller is
+          prepared to wait is therefore cut to MaxDelay, never followed past
+          it; a caller who would rather give up classifies that error as not
+          retryable instead.
+
+          RetryAfter has its shape, so honouring a Retry-After, an OTLP
+          collector's throttling or a RateLimited rejection is one line:
+
+          	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
+        name: Delay
+        type: func(attempt int, err error) (time.Duration, bool)
     kind: struct
     name: RetryConfig
   - doc: |-

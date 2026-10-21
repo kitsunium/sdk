@@ -107,7 +107,10 @@ packages:
             public: The circuit breaker is open; the call was rejected
             reason: CIRCUIT_OPEN
           - code: CodeRateLimited
-            doc: RateLimited is returned when no token was available (or the wait was cancelled).
+            doc: |-
+              RateLimited is returned when no token was available (or the wait was cancelled).
+              A rejection by the SDK's limiters carries, as the field
+              retry_after_seconds, how long the bucket needs to earn the next token.
             exit: TEMPFAIL
             http: 429
             name: RateLimited
@@ -407,7 +410,9 @@ packages:
           early on ctx cancellation. The final attempt's error wraps as RetryExhausted.
           An error rejected by cfg.Retryable ends the loop at once and is returned
           verbatim, so a deterministic failure neither spends the budget nor hides
-          behind RetryExhausted.
+          behind RetryExhausted. When cfg.Delay reads a wait from the failure — a
+          Retry-After, a RateLimited rejection — that wait replaces the backoff,
+          held at cfg.MaxDelay.
         in:
           - name: cfg
             type: RetryConfig
@@ -454,6 +459,34 @@ packages:
         name: NewTimeoutWith
         out:
           - type: coreres.Runner
+      - doc: |-
+          RetryAfter reports the delay err says to wait before the next attempt,
+          and whether it says one. It reads the retry_after_seconds field of the
+          outermost *errs.Error in err's chain — a number of seconds, whole or
+          fractional — and reports false when there is none, or when it is not a
+          finite positive number.
+
+          Three producers in the SDK set it: the OTLP/HTTP exporters on a
+          retryable answer whose Retry-After header holds delta-seconds, the
+          guarded HTTP client (net/client) on a 429 or a 503 whose Retry-After
+          does the same, and RateLimited from NewRateLimiter and
+          NewKeyedRateLimiter, with the time the bucket needs to earn its next
+          token. An HTTP-date Retry-After is not read: converting it compares the
+          peer's clock to ours. Any other error sets the same field with
+          errs.Int or errs.Float to take part.
+
+          Its shape is RetryConfig.Delay's, so honouring the delay is one line:
+
+          	Delay: func(_ int, err error) (time.Duration, bool) { return RetryAfter(err) }
+
+          A delay too long for a time.Duration reports the longest one.
+        in:
+          - name: err
+            type: error
+        name: RetryAfter
+        out:
+          - type: time.Duration
+          - type: bool
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coreres: github.com/kitsunium/sdk/internal/core/app/resilience
@@ -713,7 +746,8 @@ packages:
           RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
           Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
           cap; a nil Retryable replays every error; a zero Jitter backs off
-          deterministically; a nil Clock waits on the wall clock.
+          deterministically; a nil Clock waits on the wall clock; a nil Delay
+          always waits the backoff curve.
 
           BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
           BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
@@ -774,6 +808,26 @@ packages:
                 the one policy here that actually WAITS, did not.
               name: Clock
               type: clock.Timed
+            - doc: |-
+                Delay decides the wait before a retry when the failure itself says how
+                long to wait. It is called once per retry, with the retry's number —
+                1 before the second attempt — and the error of the attempt that just
+                failed; a true second result makes its duration the wait, in place of
+                the backoff curve and without Jitter. A false one, and a nil Delay,
+                wait the curve, which is the behaviour before the field existed.
+
+                The wait it returns is held at MaxDelay when one is set, and a
+                negative one is no wait. A server's hint longer than the caller is
+                prepared to wait is therefore cut to MaxDelay, never followed past
+                it; a caller who would rather give up classifies that error as not
+                retryable instead.
+
+                RetryAfter has its shape, so honouring a Retry-After, an OTLP
+                collector's throttling or a RateLimited rejection is one line:
+
+                	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
+              name: Delay
+              type: func(attempt int, err error) (time.Duration, bool)
       - doc: |-
           TimeoutConfig parameterises NewTimeoutWith: the deadline and the clock it
           is measured on. Duration has no default and is refused when not positive
@@ -936,6 +990,22 @@ packages:
       pkg/v1/clock and move it past each backoff, the hedge delay or the
       deadline, instead of sleeping through it.
 
+      # Waiting as long as the other side asked
+
+      A collector shedding load, an HTTP server answering 429, a rate limiter
+      refusing a call: each knows when the next attempt may succeed, and a retry
+      that ignores it either hammers too early or waits too long.
+      [RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads
+      the delay the SDK's own producers attach to their errors:
+
+      	r := resilience.NewRetry(resilience.RetryConfig{
+      	    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,
+      	    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },
+      	})
+
+      A failure that names no delay waits the backoff curve, and the named one is
+      held at MaxDelay.
+
       # A caller who leaves is not a failing dependency
 
       A call that ends in context.Canceled once the caller's own context is
@@ -1005,7 +1075,9 @@ packages:
             type: "*errs.Error"
           - doc: |-
               RateLimited is returned when no rate-limit token is available. It
-              carries HTTP 429: the client should slow down.
+              carries HTTP 429: the client should slow down. A rejection by
+              NewRateLimiter or NewKeyedRateLimiter also says by how much:
+              RetryAfter reads the time the bucket needs to earn its next token.
             name: RateLimited
             reexport: coreres.RateLimited
             type: "*errs.Error"
@@ -1133,6 +1205,20 @@ packages:
           name: NewTimeoutWith
           out:
             - type: Runner
+      - func:
+          doc: |-
+            RetryAfter reports the delay err says to wait before the next attempt — the
+            retry_after_seconds field an OTLP exporter, the guarded HTTP client on a 429
+            or 503, and RateLimited set — and whether it says one. Its shape is
+            RetryConfig.Delay's.
+          forward: svcres.RetryAfter
+          in:
+            - name: err
+              type: error
+          name: RetryAfter
+          out:
+            - type: time.Duration
+            - type: bool
       - func:
           doc: |-
             NewFallback returns a Runner that runs cfg.Fallback when the guarded

@@ -140,6 +140,22 @@
 // pkg/v1/clock and move it past each backoff, the hedge delay or the
 // deadline, instead of sleeping through it.
 //
+// # Waiting as long as the other side asked
+//
+// A collector shedding load, an HTTP server answering 429, a rate limiter
+// refusing a call: each knows when the next attempt may succeed, and a retry
+// that ignores it either hammers too early or waits too long.
+// [RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads
+// the delay the SDK's own producers attach to their errors:
+//
+//	r := resilience.NewRetry(resilience.RetryConfig{
+//	    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,
+//	    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },
+//	})
+//
+// A failure that names no delay waits the backoff curve, and the named one is
+// held at MaxDelay.
+//
 // # A caller who leaves is not a failing dependency
 //
 // A call that ends in context.Canceled once the caller's own context is

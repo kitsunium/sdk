@@ -8,6 +8,7 @@ import (
 
 	coreres "github.com/kitsunium/sdk/internal/core/app/resilience"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // oneToken is the cost of a single admitted call.
@@ -99,17 +100,26 @@ func newTokenBucket(clk clock.Clock, rate, burst float64) *tokenBucket {
 
 // Run admits op if a token is available, else rejects with RateLimited.
 func (t *tokenBucket) Run(ctx context.Context, op coreres.Operation) error {
-	//: a refused token rejects the call fast.
-	if !t.take() {
+	//: a refused token rejects the call fast, saying when the next one is due.
+	if admitted, wait := t.take(); !admitted {
 		//: bucket empty for this instant.
-		return wrapAs(coreres.RateLimited, nil)
+		return rateLimited(wait)
 	}
 	//: token consumed — run the operation.
 	return op(ctx)
 }
 
+// rateLimited is the RateLimited rejection carrying, as retryAfterField, the
+// seconds the bucket needs to earn its next token — the delay RetryAfter reads.
+func rateLimited(waitSeconds float64) error {
+	//: the sentinel stays the origin; the delay travels as a field.
+	return wrapAsFields(coreres.RateLimited, kerrs.Float(retryAfterField, waitSeconds))
+}
+
 // take refills by elapsed time then consumes one token if available. Holds mu.
-func (t *tokenBucket) take() bool {
+// A refusal also reports how many seconds the bucket needs, at its rate, to
+// hold a whole token again: (1 − tokens) / rate.
+func (t *tokenBucket) take() (admitted bool, waitSeconds float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	//: refill proportional to the elapsed time since the last call.
@@ -126,8 +136,8 @@ func (t *tokenBucket) take() bool {
 		//: consume it.
 		t.tokens -= oneToken
 		//: admitted.
-		return true
+		return true, 0
 	}
-	//: not enough credit this instant.
-	return false
+	//: not enough credit this instant; the rest of a token, earned at rate.
+	return false, (oneToken - t.tokens) / t.rate
 }

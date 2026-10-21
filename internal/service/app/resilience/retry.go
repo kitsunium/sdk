@@ -22,7 +22,9 @@ type retryRunner struct {
 // early on ctx cancellation. The final attempt's error wraps as RetryExhausted.
 // An error rejected by cfg.Retryable ends the loop at once and is returned
 // verbatim, so a deterministic failure neither spends the budget nor hides
-// behind RetryExhausted.
+// behind RetryExhausted. When cfg.Delay reads a wait from the failure — a
+// Retry-After, a RateLimited rejection — that wait replaces the backoff,
+// held at cfg.MaxDelay.
 func NewRetry(cfg RetryConfig) coreres.Runner {
 	//: clamp the attempt budget to at least one.
 	if cfg.MaxAttempts < minAttempts {
@@ -55,7 +57,7 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 		//: a non-first attempt waits the backoff (or aborts on ctx).
 		if attempt > 0 {
 			//: a cancelled wait propagates ctx.Err immediately.
-			if waitErr := r.wait(ctx, attempt); waitErr != nil {
+			if waitErr := r.wait(ctx, attempt, lastErr); waitErr != nil {
 				//: ctx cancelled mid-backoff.
 				return waitErr
 			}
@@ -82,12 +84,12 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 	return wrapAs(coreres.RetryExhausted, lastErr)
 }
 
-// wait sleeps the backoff for the given attempt on the configured clock,
-// returning ctx.Err on cancel.
-func (r *retryRunner) wait(ctx context.Context, attempt int) error {
+// wait sleeps the delay before the given attempt on the configured clock,
+// returning ctx.Err on cancel. failed is the error of the attempt before it.
+func (r *retryRunner) wait(ctx context.Context, attempt int, failed error) error {
 	//: a deadline-aware sleep on the injected clock, so a test drives the
 	//: whole backoff with a ManualClock instead of sleeping through it.
-	timer := timedOrSystem(r.cfg.Clock).NewTimer(r.jittered(r.backoff(attempt)))
+	timer := timedOrSystem(r.cfg.Clock).NewTimer(r.delay(attempt, failed))
 	//: always release the timer.
 	defer timer.Stop()
 	//: race the backoff timer against context cancellation.
@@ -99,6 +101,38 @@ func (r *retryRunner) wait(ctx context.Context, attempt int) error {
 		//: the backoff elapsed normally.
 		return nil
 	}
+}
+
+// delay is the wait before attempt: the one cfg.Delay reads from the failure
+// when it reads one, held at MaxDelay and never negative, else the jittered
+// backoff curve.
+func (r *retryRunner) delay(attempt int, failed error) time.Duration {
+	//: the failure decides first, when the caller asked it to.
+	if r.cfg.Delay != nil {
+		//: a delay the failure named replaces the curve, jitter included.
+		if imposed, ok := r.cfg.Delay(attempt, failed); ok {
+			//: held into [0, MaxDelay]; a zero MaxDelay is no cap.
+			return capDelay(imposed, r.cfg.MaxDelay)
+		}
+	}
+	//: the curve, as before the field existed.
+	return r.jittered(r.backoff(attempt))
+}
+
+// capDelay holds d into [0, ceiling], a non-positive ceiling being no cap.
+func capDelay(d, ceiling time.Duration) time.Duration {
+	//: a negative wait is no wait.
+	if d < 0 {
+		//: retry at once.
+		return 0
+	}
+	//: the caller's ceiling bounds what the other side may impose.
+	if ceiling > 0 && d > ceiling {
+		//: cut to the ceiling.
+		return ceiling
+	}
+	//: within bounds.
+	return d
 }
 
 // backoff computes the capped exponential delay for attempt (1-based growth).

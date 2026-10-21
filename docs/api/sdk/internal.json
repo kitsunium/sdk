@@ -11671,7 +11671,7 @@
         "reason": "RATE_LIMITED",
         "public": "The call was rejected by the rate limiter"
       },
-      "doc": "RateLimited is returned when no token was available (or the wait was cancelled).\n",
+      "doc": "RateLimited is returned when no token was available (or the wait was cancelled).\nA rejection by the SDK's limiters carries, as the field\nretry_after_seconds, how long the bucket needs to earn the next token.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -50918,7 +50918,7 @@
       "name": "NewRetry",
       "spelled": "func(cfg RetryConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.RetryConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,\nsleeping an exponentially-growing (capped) delay between attempts and aborting\nearly on ctx cancellation. The final attempt's error wraps as RetryExhausted.\nAn error rejected by cfg.Retryable ends the loop at once and is returned\nverbatim, so a deterministic failure neither spends the budget nor hides\nbehind RetryExhausted.\n",
+      "doc": "NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,\nsleeping an exponentially-growing (capped) delay between attempts and aborting\nearly on ctx cancellation. The final attempt's error wraps as RetryExhausted.\nAn error rejected by cfg.Retryable ends the loop at once and is returned\nverbatim, so a deterministic failure neither spends the budget nor hides\nbehind RetryExhausted. When cfg.Delay reads a wait from the failure — a\nRetry-After, a RateLimited rejection — that wait replaces the backoff,\nheld at cfg.MaxDelay.\n",
       "file": "service/app/resilience/retry.go",
       "layer": "service",
       "family": "app"
@@ -50975,12 +50975,24 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RetryAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "RetryAfter",
+      "spelled": "func(err error) (time.Duration, bool)",
+      "canonical": "func(err error) (time.Duration, bool)",
+      "doc": "RetryAfter reports the delay err says to wait before the next attempt,\nand whether it says one. It reads the retry_after_seconds field of the\noutermost *errs.Error in err's chain — a number of seconds, whole or\nfractional — and reports false when there is none, or when it is not a\nfinite positive number.\n\nThree producers in the SDK set it: the OTLP/HTTP exporters on a\nretryable answer whose Retry-After header holds delta-seconds, the\nguarded HTTP client (net/client) on a 429 or a 503 whose Retry-After\ndoes the same, and RateLimited from NewRateLimiter and\nNewKeyedRateLimiter, with the time the bucket needs to earn its next\ntoken. An HTTP-date Retry-After is not read: converting it compares the\npeer's clock to ours. Any other error sets the same field with\nerrs.Int or errs.Float to take part.\n\nIts shape is RetryConfig.Delay's, so honouring the delay is one line:\n\n\tDelay: func(_ int, err error) (time.Duration, bool) { return RetryAfter(err) }\n\nA delay too long for a time.Duration reports the longest one.\n",
+      "file": "service/app/resilience/retry_after.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RetryConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "RetryConfig",
-      "spelled": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock clock.Timed}",
-      "canonical": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "spelled": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock clock.Timed; Delay func(attempt int, err error) (time.Duration, bool)}",
+      "canonical": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Delay func(attempt int, err error) (time.Duration, bool)}",
       "fields": [
         {
           "name": "MaxAttempts",
@@ -51012,9 +51024,14 @@
           "name": "Clock",
           "type": "clock.Timed",
           "doc": "Clock is what the backoff waits on. Nil means clock.System.\n\nIt exists so a test drives the whole retry loop with a ManualClock —\nadvancing past each backoff instead of sleeping through it, and asserting\nthe exact wait rather than a wall-clock tolerance. The breaker and the\nrate limiter have taken a clock since they shipped; the retry, which is\nthe one policy here that actually WAITS, did not.\n"
+        },
+        {
+          "name": "Delay",
+          "type": "func(attempt int, err error) (time.Duration, bool)",
+          "doc": "Delay decides the wait before a retry when the failure itself says how\nlong to wait. It is called once per retry, with the retry's number —\n1 before the second attempt — and the error of the attempt that just\nfailed; a true second result makes its duration the wait, in place of\nthe backoff curve and without Jitter. A false one, and a nil Delay,\nwait the curve, which is the behaviour before the field existed.\n\nThe wait it returns is held at MaxDelay when one is set, and a\nnegative one is no wait. A server's hint longer than the caller is\nprepared to wait is therefore cut to MaxDelay, never followed past\nit; a caller who would rather give up classifies that error as not\nretryable instead.\n\nRetryAfter has its shape, so honouring a Retry-After, an OTLP\ncollector's throttling or a RateLimited rejection is one line:\n\n\tDelay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }\n"
         }
       ],
-      "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
+      "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock; a nil Delay\nalways waits the backoff curve.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
       "file": "service/app/resilience/retry_config.go",
       "layer": "service",
       "family": "app"

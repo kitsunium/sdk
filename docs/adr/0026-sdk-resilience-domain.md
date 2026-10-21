@@ -168,6 +168,38 @@ Two behaviour changes, admitted in v0 by ADR 0040, and one new constructor:
   and whose `Deadline` reports the caller's, since a time on a ManualClock is
   not one a socket can be given. `NewTimeout` is unchanged.
 
+## Amendment — 2026-10-21: a retry waits as long as the failure asks ([issue 476](https://github.com/kitsunium/sdk/issues/476))
+
+`RetryConfig.Delay func(attempt int, err error) (time.Duration, bool)` lets
+the failure decide the wait before a retry. Its zero value is the curve, so
+every existing caller's timing is unchanged (ADR 0040 admits the field). Three
+things the implementation decides:
+
+- **An imposed delay replaces the curve, jitter included, and is held into
+  `[0, MaxDelay]`.** A server's hint is the floor it asked for, so widening it
+  is the caller's choice inside `Delay`, not the policy's; and a hint longer
+  than the caller is prepared to wait is cut to `MaxDelay` rather than
+  followed — the caller who would rather give up classifies the error as not
+  retryable. Polly's `DelayGenerator` and failsafe-go's `DelayFunc` make the
+  same split between the computed and the imposed delay.
+- **One field, read by one helper.** `RetryAfter(err)` reads
+  `retry_after_seconds` — whole or fractional seconds — from the outermost
+  `*errs.Error`. The OTLP sender already wrote it on a retryable answer;
+  `net/client` now writes it on a 429 or a 503 whose `Retry-After` holds
+  delta-seconds; `RateLimited` from both limiters carries
+  `(1 − tokens) / rate`, the time its bucket needs to earn the next token,
+  which the bucket always knew. An HTTP-date `Retry-After` is read by none of
+  them: converting it compares the peer's clock to ours. Each producer
+  spells the key in its own package and its suite pins it against
+  `RetryAfter`.
+- **A `RateLimited` rejection now allocates** (the field rides a wrap of the
+  sentinel); before, it was the bare sentinel. The admitted path is
+  unchanged. Callers matching it by identity (`err == RateLimited`) must use
+  `errors.Is` / `errs.HasCode`, which the package doc has always prescribed.
+
+AWS's `x-amz-retry-after` and gRPC's `grpc-retry-pushback-ms` are the same
+mechanism in other wires.
+
 ## Extension — `fallback` and `hedging` (Decision 2 now names seven policies)
 
 Two compositions landed after the original five, in the same shape (concrete

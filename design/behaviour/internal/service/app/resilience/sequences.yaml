@@ -537,14 +537,20 @@ sequences:
         kind: actor
       - id: (*keyedLimiter).Run
         kind: self
-      - id: wrapAs
+      - id: l.bucketOf(l.key(ctx)).take
+        kind: internal
+      - id: rateLimited
         kind: internal
     steps:
       - opt:
           do:
-            - return: wrapAs(coreres.RateLimited, nil)
-              to: wrapAs
-          when: "!l.bucketOf(l.key(ctx)).take()"
+            - return: rateLimited(wait)
+              to: rateLimited
+          init:
+            bind: admitted, wait
+            eval: l.bucketOf(l.key(ctx)).take()
+            to: l.bucketOf(l.key(ctx)).take
+          when: "!admitted"
       - return: op(ctx)
   - of: (*keyedLimiter).bucketOf
     participants:
@@ -742,15 +748,32 @@ sequences:
         kind: actor
       - id: (*tokenBucket).Run
         kind: self
-      - id: wrapAs
+      - id: t.take
+        kind: internal
+      - id: rateLimited
         kind: internal
     steps:
       - opt:
           do:
-            - return: wrapAs(coreres.RateLimited, nil)
-              to: wrapAs
-          when: "!t.take()"
+            - return: rateLimited(wait)
+              to: rateLimited
+          init:
+            bind: admitted, wait
+            eval: t.take()
+            to: t.take
+          when: "!admitted"
       - return: op(ctx)
+  - of: rateLimited
+    participants:
+      - id: caller
+        kind: actor
+      - id: rateLimited
+        kind: self
+      - id: wrapAsFields
+        kind: internal
+    steps:
+      - return: wrapAsFields(coreres.RateLimited, kerrs.Float(retryAfterField, waitSeconds))
+        to: wrapAsFields
   - of: (*tokenBucket).take
     participants:
       - id: caller
@@ -780,9 +803,9 @@ sequences:
             - op: "-="
               set: t.tokens
               value: oneToken
-            - return: "true"
+            - return: true, 0
           when: t.tokens >= oneToken
-      - return: "false"
+      - return: false, (oneToken - t.tokens) / t.rate
   - of: NewRetry
     participants:
       - id: caller
@@ -834,7 +857,7 @@ sequences:
                         - return: waitErr
                       init:
                         bind: waitErr
-                        eval: r.wait(ctx, attempt)
+                        eval: r.wait(ctx, attempt, lastErr)
                         to: r.wait
                       when: waitErr != nil
                 when: attempt > 0
@@ -871,7 +894,7 @@ sequences:
         kind: value
     steps:
       - bind: timer
-        eval: timedOrSystem(r.cfg.Clock).NewTimer(r.jittered(r.backoff(attempt)))
+        eval: timedOrSystem(r.cfg.Clock).NewTimer(r.delay(attempt, failed))
         to: timedOrSystem(r.cfg.Clock).NewTimer
       - defer: timer.Stop()
         to: timer.Stop
@@ -884,6 +907,41 @@ sequences:
             - comm: <-timer.C()
               do:
                 - return: nil
+  - of: (*retryRunner).delay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).delay
+        kind: self
+      - id: capDelay
+        kind: internal
+      - id: r.jittered
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: capDelay(imposed, r.cfg.MaxDelay)
+                    to: capDelay
+                init:
+                  bind: imposed, ok
+                  eval: r.cfg.Delay(attempt, failed)
+                when: ok
+          when: r.cfg.Delay != nil
+      - return: r.jittered(r.backoff(attempt))
+        to: r.jittered
+  - of: capDelay
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: d < 0
+      - opt:
+          do:
+            - return: ceiling
+          when: ceiling > 0 && d > ceiling
+      - return: d
   - of: (*retryRunner).backoff
     participants:
       - id: caller
@@ -913,6 +971,59 @@ sequences:
             - return: clock.System
           when: clk == nil
       - return: clk
+  - of: RetryAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: RetryAfter
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: secondsToDuration
+        kind: internal
+    steps:
+      - bind: fields
+        eval: kerrs.FieldsOf(err)
+        to: kerrs
+      - loop:
+          cond: i >= 0
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: fields[i].Key() != retryAfterField
+            - return: secondsToDuration(fields[i].StringValue())
+              to: secondsToDuration
+          init: i := len(fields) - 1
+          post: i--
+      - return: 0, false
+  - of: secondsToDuration
+    participants:
+      - id: caller
+        kind: actor
+      - id: secondsToDuration
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: seconds, err
+        eval: strconv.ParseFloat(rendered, floatBits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0
+      - bind: nanos
+        eval: seconds * float64(time.Second)
+      - opt:
+          do:
+            - return: time.Duration(math.MaxInt64), true
+              to: time
+          when: nanos >= math.MaxInt64
+      - return: time.Duration(max(math.Round(nanos), 1)), true
+        to: time
   - of: isRetryable
     steps:
       - opt:

@@ -9,7 +9,8 @@ import (
 // RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
 // Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
 // cap; a nil Retryable replays every error; a zero Jitter backs off
-// deterministically; a nil Clock waits on the wall clock.
+// deterministically; a nil Clock waits on the wall clock; a nil Delay
+// always waits the backoff curve.
 //
 // BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
 // BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
@@ -58,4 +59,22 @@ type RetryConfig struct {
 	// rate limiter have taken a clock since they shipped; the retry, which is
 	// the one policy here that actually WAITS, did not.
 	Clock clock.Timed
+	// Delay decides the wait before a retry when the failure itself says how
+	// long to wait. It is called once per retry, with the retry's number —
+	// 1 before the second attempt — and the error of the attempt that just
+	// failed; a true second result makes its duration the wait, in place of
+	// the backoff curve and without Jitter. A false one, and a nil Delay,
+	// wait the curve, which is the behaviour before the field existed.
+	//
+	// The wait it returns is held at MaxDelay when one is set, and a
+	// negative one is no wait. A server's hint longer than the caller is
+	// prepared to wait is therefore cut to MaxDelay, never followed past
+	// it; a caller who would rather give up classifies that error as not
+	// retryable instead.
+	//
+	// RetryAfter has its shape, so honouring a Retry-After, an OTLP
+	// collector's throttling or a RateLimited rejection is one line:
+	//
+	//	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
+	Delay func(attempt int, err error) (time.Duration, bool)
 }

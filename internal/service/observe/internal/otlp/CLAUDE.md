@@ -56,7 +56,7 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | `stream.go` | `Stream` + `NewStream` + `Emit` — one terminated document per write, a writer fault under the caller's wrap |
 | `signal_spec.go` | `SignalSpec` — the per-signal vocabulary: four sentinels, three wraps of a foreign cause, the rejected field key, the response decoder |
 | `http_config.go` | `HTTPConfig` — each field documented once; each signal publishes it as a DEFINED type of its own |
-| `sender.go` | `Sender` + `NewSender` + `Post`, and everything behind them: `checkEndpoint`, `newClient`, `newTransport`, `closeResponse`, `swallowTeardown`, `classify`, `isRetryableStatus`, `retryAfterSeconds`, `partialSuccessOf` |
+| `sender.go` | `Sender` + `NewSender` + `Post`, and everything behind them: `checkEndpoint`, `newClient`, `newTransport`, `closeResponse`, `swallowTeardown`, `classify`, `isRetryableStatus`, `retryAfterSeconds`, `partialSuccessOf`; the `retry_after_seconds` field is the key `app/resilience.RetryAfter` reads, pinned by `TestTheRetryPolicyReadsTheCollectorsDelay` (#476) |
 | `response.go` | `LenientInt64` (number OR decimal string) + `RejectedCounter` + `DecodeRejected` |
 | `wire_external_test.go` | scalars, attributes, messages, the marshal, the caller's code on a fault, the unset instant, the stream under concurrency |
 | `sender_external_test.go` | the three verdicts for two stand-in signals, every success shape, every endpoint refusal, the transport fault, header precedence, the defaults |

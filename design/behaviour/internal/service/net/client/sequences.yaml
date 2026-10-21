@@ -334,9 +334,7 @@ sequences:
           when: cerr != nil
       - opt:
           do:
-            - return: |-
-                out, errs.Wrap(corenet.CallFailed, errs.WrapParams{},
-                			errs.Int("status", raw.StatusCode))
+            - return: out, statusError(raw)
           when: raw.StatusCode < http.StatusOK || raw.StatusCode >= http.StatusMultipleChoices
       - return: out, nil
   - of: readBody
@@ -976,3 +974,47 @@ sequences:
           range: patterns
           value: raw
       - return: out, nil
+  - of: statusError
+    participants:
+      - id: caller
+        kind: actor
+      - id: statusError
+        kind: self
+      - id: retryAfterSeconds
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.CallFailed, errs.WrapParams{},
+                      				errs.Int(statusFieldKey, raw.StatusCode), errs.Int(retryAfterFieldKey, seconds))
+                    to: errs
+                init:
+                  bind: seconds, ok
+                  eval: retryAfterSeconds(raw.Header)
+                  to: retryAfterSeconds
+                when: ok
+          when: raw.StatusCode == http.StatusTooManyRequests || raw.StatusCode == http.StatusServiceUnavailable
+      - return: errs.Wrap(corenet.CallFailed, errs.WrapParams{}, errs.Int(statusFieldKey, raw.StatusCode))
+        to: errs
+  - of: retryAfterSeconds
+    participants:
+      - id: caller
+        kind: actor
+      - id: retryAfterSeconds
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: seconds, err
+        eval: strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || seconds <= 0
+      - return: seconds, true

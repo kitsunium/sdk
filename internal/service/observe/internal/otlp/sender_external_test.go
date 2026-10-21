@@ -12,8 +12,10 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcres "github.com/kitsunium/sdk/internal/service/app/resilience"
 	"github.com/kitsunium/sdk/internal/service/observe/internal/otlp"
 )
 
@@ -155,6 +157,39 @@ func TestEveryVerdictCarriesTheCallersCode(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+// TestTheRetryPolicyReadsTheCollectorsDelay pins #476's OTLP half: the
+// retry_after_seconds field the sender writes is the one resilience.RetryAfter
+// reads, so a RetryConfig.Delay honours the collector's throttling with no
+// adapter — and the "0" the sender writes for no usable hint reads as none.
+func TestTheRetryPolicyReadsTheCollectorsDelay(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		header map[string]string
+		want   time.Duration
+		wantOK bool
+	}
+	tests := []tc{
+		{name: "delta-seconds", header: map[string]string{"Retry-After": "30"}, want: 30 * time.Second, wantOK: true},
+		{name: "an HTTP-date", header: map[string]string{"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}},
+		{name: "no header"},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			server := collector(t, http.StatusTooManyRequests, c.header, "")
+			sender, err := otlp.NewSender(&otlp.HTTPConfig{Endpoint: server.URL + testPath}, specFor(0xF1))
+			if err != nil {
+				t.Fatalf("NewSender: %v", err)
+			}
+			got, ok := svcres.RetryAfter(sender.Post([]byte(`{}`)))
+			if ok != c.wantOK || got != c.want {
+				t.Fatalf("RetryAfter = %v, %v; want %v, %v", got, ok, c.want, c.wantOK)
+			}
 		})
 	}
 }

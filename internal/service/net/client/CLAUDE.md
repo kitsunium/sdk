@@ -19,6 +19,7 @@ Public façade: `pkg/v1/net/client`.
 | `deny_policy.go` | `denyPolicy` — anchored deny patterns, final |
 | `conjunction.go` | `conjunction` — every member must allow |
 | `client.go` | `Client`, `New`, `Get`, `Do`, `HTTP` — per-phase timeouts, redirect cap and origin check (`redirectLimiter`, `parseOrigins`, `sameOrigin`, `stripDefaults`), `readBody`'s bounded use of the peer's `Content-Length`, `canonicalHeaders` |
+| `status.go` | `statusError` — the `CallFailed` of a non-2xx response: its `status` field, and on a 429 or a 503 whose `Retry-After` holds positive delta-seconds the `retry_after_seconds` field `app/resilience.RetryAfter` reads (#476); an HTTP-date is not read (it would compare the server's clock to ours). `retry_after_external_test.go` pins the key against `RetryAfter` |
 | `guard.go` | the policy-enforcing `http.RoundTripper` |
 | `capped_body.go` | the response ceiling; fails rather than truncating |
 | `policies.go` | `AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies` |
