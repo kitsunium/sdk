@@ -85,6 +85,7 @@ func breakerApp(t *testing.T, dir string, s *app.Service) *app.App {
 // breaker guards, a product in memory and a word the command does not know
 // are refused.
 func TestTheBreakerCommandMarksAPort(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	mark := filepath.Join(dir, "orders", "ports", "quote.isolated")
 	a := breakerApp(t, dir, guardedService(newDependency(), app.Breaker(2, time.Second)))
@@ -137,6 +138,7 @@ func answersWith(t *testing.T, a *app.App, status int) {
 // product applies a mark taken off or put back once it read the marks again
 // on the app's clock.
 func TestAnIsolatedBreakerRefusesUntilItIsReset(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	mark := filepath.Join(dir, "orders", "ports", "quote.isolated")
 	if err := os.MkdirAll(filepath.Dir(mark), 0o700); err != nil {

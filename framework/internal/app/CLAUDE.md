@@ -745,7 +745,7 @@ hedge's duplicate after its delay answering. `port_breaker_test.go`: a breaker
 opening after its failures, refusing without reaching the dependency, the
 readiness degraded and the opening logged, closing on its trial; a 5 ns window
 the SDK refuses stopping the start with its knob; `breaker isolate`, `list`,
-`reset` and their refusals through `Main`; an isolation applied at the start,
+`reset` and their refusals through `Main`; an isolation applied at the start (both skipped, after asserting the refusal, where the SDK's file store refuses the platform — `needsFileStore`: Windows, illumos, Solaris),
 taken off and put back on a running product at the marks' next read
 (`answersWith` polls the answer with `runtime.Gosched`, no sleep); no
 `breaker` command without a breaker. `port_policy_internal_test.go`:
