@@ -93,6 +93,40 @@ func (b *fileBroker) Reject(ctx context.Context, receipt corequeue.ReceiptValue,
 	return b.bury(name, held, describeCause(cause), failedAt)
 }
 
+// Release hands the leased message back, visible now, with the delivery its
+// lease counted given back (core/data/queue.Releaser): one rename from the
+// in-flight name to a queued name carrying the instant read now and the count
+// one lower — the name a PutMessage of a message never tried writes, at zero.
+func (b *fileBroker) Release(ctx context.Context, receipt corequeue.ReceiptValue) error {
+	held := string(receipt)
+	name, resolveErr := b.resolve(ctx, held)
+	//: the same refusals Ack makes, and nothing moves.
+	if resolveErr != nil {
+		//: UnknownReceipt or LeaseExpired.
+		return resolveErr
+	}
+	requeued := nameValue{
+		At: b.clk.Now().UnixNano(), EnqueuedAt: name.EnqueuedAt,
+		Entropy: name.Entropy, Deliveries: max(name.Deliveries-1, 0),
+	}
+	renameErr := b.root.Rename(
+		path.Join(dirInflight, held), path.Join(dirReady, requeued.readyName()))
+	//: a lease that lapsed between resolve and here is the ordinary race.
+	if renameErr != nil {
+		//: LeaseExpired or QueueBackendFailed.
+		return b.classifyMissing("rename", held, renameErr)
+	}
+	//: the lease's name must be gone with the rename, as for a nack.
+	if dropErr := b.dropStale(path.Join(dirInflight, held)); dropErr != nil {
+		//: QueueBackendFailed.
+		return dropErr
+	}
+	//: AFTER the rename, so a woken consumer finds it.
+	b.wake.fire()
+	//: queued again, receivable at once.
+	return nil
+}
+
 // nackDead buries a message that has run out of attempts.
 func (b *fileBroker) nackDead(
 	name nameValue, receipt string, cause error, now int64,

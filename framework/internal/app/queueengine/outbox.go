@@ -27,6 +27,7 @@ type sealedOutbox struct {
 	renew   queue.LeaseExtender
 	dead    queue.DeadLetterReader
 	reject  queue.Rejecter
+	release queue.Releaser
 	manager queue.DeadLetterManager
 	seal    func(ctx context.Context, payload []byte) ([]byte, error)
 	unseal  func(ctx context.Context, box []byte) []byte
@@ -41,12 +42,13 @@ type sealedOutbox struct {
 // would lose what it relies on.
 func newSealedOutbox(inner queue.Broker, cfg *plug.QueueConfig) (*sealedOutbox, error) {
 	o := &sealedOutbox{Broker: inner, seal: cfg.Seal, unseal: cfg.Unseal, node: cfg.Name, max: cfg.MaxPayload}
-	var ok [5]bool
+	var ok [6]bool
 	o.waker, ok[0] = inner.(queue.Waker)
 	o.renew, ok[1] = inner.(queue.LeaseExtender)
 	o.dead, ok[2] = inner.(queue.DeadLetterReader)
 	o.reject, ok[3] = inner.(queue.Rejecter)
 	o.manager, ok[4] = inner.(queue.DeadLetterManager)
+	o.release, ok[5] = inner.(queue.Releaser)
 	for _, has := range ok {
 		if !has {
 			return nil, errs.Wrap(queue.QueueMisconfigured, errs.WrapParams{},
@@ -96,6 +98,12 @@ func (o *sealedOutbox) Extend(ctx context.Context, receipt queue.Receipt, by tim
 // Reject is the SQL broker's.
 func (o *sealedOutbox) Reject(ctx context.Context, receipt queue.Receipt, cause error) error {
 	return o.reject.Reject(ctx, receipt, cause)
+}
+
+// Release is the SQL broker's: a mail the spool did not finish goes back
+// as it lies, its attempt not counted.
+func (o *sealedOutbox) Release(ctx context.Context, receipt queue.Receipt) error {
+	return o.release.Release(ctx, receipt)
 }
 
 // DeadLetters returns up to maxLetters dead mails, oldest first, each

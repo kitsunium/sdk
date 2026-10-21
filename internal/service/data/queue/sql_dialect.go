@@ -56,6 +56,9 @@ type sqlStatements struct {
 	// receipt's identifier, lease and delivery count, and a deadline still
 	// ahead.
 	ack, retry, bury, extend string
+	// release hands one lease back as retry does, visible at once, with the
+	// delivery count it moved on moved back, under the same condition.
+	release string
 	// deadList reads the dead letters, in the order they died.
 	deadList string
 	// replay and deleteDead act on one dead letter.
@@ -98,6 +101,7 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
 		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, 5),
 		extend:     "UPDATE " + q + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
+		release:    "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
 		deadList:   "SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
 		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, reason = NULL, cause = NULL, code = NULL WHERE id = " + p(2) + " AND dead = 1",
 		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",

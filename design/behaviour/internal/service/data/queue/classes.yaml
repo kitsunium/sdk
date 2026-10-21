@@ -21,6 +21,41 @@ constants:
         type: time.Duration
         value: 100 * time.Millisecond
     name: DefaultPollInterval
+  - doc: |-
+      DefaultSettleTimeout bounds one acknowledgement, nack, rejection or release
+      [Consume] sends once its context has ended, and one lease renewal, when
+      [ConsumerConfig.SettleTimeout] is left at zero.
+
+      It is a CLAMP and not a refusal (ADR 0031): its zero has one reading — "you
+      did not think about how long the medium may take to record an outcome" —
+      and five seconds is far above what a flush-free rename or one indexed
+      statement costs while still letting a stop end when the medium has stopped
+      answering. It is also the most a handler is stopped early by: the margin
+      kept before a lease ends is a tenth of the lease, at most the
+      SettleTimeout in force.
+    items:
+      - name: DefaultSettleTimeout
+        type: time.Duration
+        value: 5 * time.Second
+    name: DefaultSettleTimeout
+  - doc: |-
+      leaseMarginDivisor sets the margin a handler is stopped by before its lease
+      ends: a tenth of the lease, capped at SettleTimeout — room for the nack of a
+      handler that ran out of time to land while the lease still holds.
+    items:
+      - name: leaseMarginDivisor
+        type: time.Duration
+        value: "10"
+    name: leaseMarginDivisor
+  - doc: |-
+      renewDivisor sets AutoExtend's cadence: a renewal every third of the lease,
+      which leaves room for two consecutive failures before it lapses — the
+      cadence lock's Keepalive recommends for the same reason.
+    items:
+      - name: renewDivisor
+        type: time.Duration
+        value: "3"
+    name: renewDivisor
   - doc: worldWritable is the other-write bit.
     items:
       - name: worldWritable
@@ -364,21 +399,47 @@ constants:
 files:
   - decls:
       - Consume
-      - pump
+      - consumer
+      - newConsumer
+      - (*consumer).pump
       - idleFor
       - idle
-      - settleBatch
-      - settle
+      - (*consumer).settleBatch
+      - (*consumer).prepare
+      - (*consumer).process
+      - (*consumer).settle
+      - (*consumer).handBackAll
+      - (*consumer).handBack
+      - (*consumer).nack
       - guard
       - ignoreLapsed
       - ignoreCancelled
     name: consume.go
   - decls:
       - DefaultPollInterval
+      - DefaultSettleTimeout
       - ConsumerConfig
       - ConsumerConfig.validate
       - ConsumerConfig.normalized
     name: consume_config.go
+  - decls:
+      - leaseMarginDivisor
+      - renewDivisor
+      - leasePlan
+      - (*consumer).planFor
+      - watched
+      - (*consumer).watch
+      - (*consumer).oversee
+      - (*consumer).renewWatched
+      - (*watched).halt
+      - (*watched).finish
+      - timerC
+      - tickerC
+      - stopTimer
+      - (*consumer).renew
+      - (*consumer).bounded
+      - (*consumer).bound
+    name: consume_lease.go
   - decls:
       - worldWritable
       - rootWritableByAnyone
@@ -419,6 +480,7 @@ files:
       - publicMaxRunes
       - (*fileBroker).Nack
       - (*fileBroker).Reject
+      - (*fileBroker).Release
       - (*fileBroker).nackDead
       - (*fileBroker).Extend
       - (*fileBroker).renameLease
@@ -507,6 +569,7 @@ files:
       - (*memoryBroker).Ack
       - (*memoryBroker).Nack
       - (*memoryBroker).Reject
+      - (*memoryBroker).Release
       - (*memoryBroker).ReplayDeadLetter
       - (*memoryBroker).DeleteDeadLetter
       - (*memoryBroker).PutDeadLetter
@@ -561,6 +624,7 @@ files:
       - (*sqlBroker).Publish
       - (*sqlBroker).Ack
       - (*sqlBroker).Nack
+      - (*sqlBroker).Release
       - (*sqlBroker).Extend
       - (*sqlBroker).Wake
       - (*sqlBroker).run
@@ -652,19 +716,17 @@ functions:
   - name: Consume
     params: ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig
     results: error
-  - doc: |-
-      pump is one worker: lease, process, acknowledge, repeat. It returns only
-      when its context ends or the storage refuses.
-    name: pump
-    params: ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig
-    results: error
+  - doc: newConsumer asks broker for its siblings once, for every worker.
+    name: newConsumer
+    params: broker corequeue.Broker, cfg ConsumerConfig
+    results: "*consumer"
   - doc: |-
       idleFor returns how long a worker that just found the queue empty may
       sleep: the poll interval, shortened to the moment the broker says a message
       it already holds becomes receivable — read AFTER the empty Receive, so it
       reflects what that Receive saw.
     name: idleFor
-    params: poll time.Duration, waker corequeue.Waker, wakes bool
+    params: poll time.Duration, waker corequeue.Waker
     results: time.Duration
   - doc: |-
       idle waits for the first of: the caller's cancellation, the broker's wake
@@ -676,46 +738,6 @@ functions:
     name: idle
     params: ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait time.Duration
     results: bool
-  - doc: |-
-      settleBatch runs the handler over each delivery and reports each outcome to
-      the broker, stopping only if the STORAGE refuses.
-    name: settleBatch
-    params: |2
-
-      	ctx context.Context, broker corequeue.Broker,
-      	handler corequeue.Handler, batch []corequeue.DeliveryValue,
-    results: error
-  - doc: |-
-      settle runs the handler and reports the outcome to the broker.
-
-      A LeaseExpired from the acknowledgement is swallowed on purpose and it is
-      the only thing that is: this consumer took too long, the message is already
-      queued again or dead-lettered, and there is nothing it can do about that
-      except keep working. Anything else is the storage refusing, which the
-      worker must not poll its way past.
-
-      A failure the handler marked with core/data/queue.DoNotRetry is rejected rather
-      than nacked when the broker is a core/data/queue.Rejecter: dead-lettered at once,
-      with the handler's cause, instead of retried until MaxDeliveries. A broker
-      without the sibling is nacked as before — the shortcut is lost, never the
-      message — and a panic is never the mark, because guard carries the recovered
-      value as a field of HANDLER_PANICKED and never as its origin.
-
-      A handler that returned nil is acknowledged on ctx WITHOUT its cancellation:
-      the work is done, and a stop that lands between the handler's return and
-      the acknowledgement — the consumer's context cancelled by Close or a
-      lifecycle's Stop — must not abandon it. Abandoned, the message stayed
-      leased and came back after the visibility timeout, a duplicate a graceful
-      stop caused, on every broker whose Ack honours its context
-      (kitsunium/sdk#472). The acknowledgement is one statement or one unlink;
-      what bounds it is the medium's own, and the caller's stop budget, which
-      waits for Consume to return.
-    name: settle
-    params: |2
-
-      	ctx context.Context, broker corequeue.Broker,
-      	handler corequeue.Handler, delivery corequeue.DeliveryValue,
-    results: error
   - doc: |-
       guard invokes the handler with its panic recovered.
 
@@ -744,6 +766,19 @@ functions:
     name: ignoreCancelled
     params: ctx context.Context, cause error
     results: error
+  - doc: |-
+      timerC is timer's channel, or nil — which blocks forever in a select — when
+      there is no timer.
+    name: timerC
+    params: timer clock.Timer
+    results: <-chan time.Time
+  - doc: tickerC is ticker's channel, or nil when there is no ticker.
+    name: tickerC
+    params: ticker clock.Ticker
+    results: <-chan time.Time
+  - doc: stopTimer stops timer when it was armed at all.
+    name: stopTimer
+    params: timer clock.Timer
   - doc: |-
       rootWritableByAnyone reports whether an account outside the owner and group
       can REPLACE an entry of the queue directory.
@@ -1314,15 +1349,208 @@ package:
   name: queue
   purpose: "Package queue — the consumer engine: the pull loop that runs a Handler on a CONSUMER'S goroutine, which is the third axis of ADR 0053's frontier."
 types:
+  - doc: |-
+      consumer is what every worker of one Consume call shares: the broker, the
+      resolved configuration and the broker's siblings, asked once. Nothing in it
+      changes after newConsumer, so the workers read it without a lock.
+    fields:
+      - doc: |-
+          broker is the queue; the four siblings below are its, nil each where
+          it lacks one — and extender nil too unless AutoExtend asked for it.
+        name: broker
+        type: corequeue.Broker
+      - name: waker
+        type: corequeue.Waker
+      - name: releaser
+        type: corequeue.Releaser
+      - name: rejecter
+        type: corequeue.Rejecter
+      - name: extender
+        type: corequeue.LeaseExtender
+      - name: cfg
+        type: ConsumerConfig
+    kind: struct
+    methods:
+      - doc: |-
+          pump is one worker: lease, process, acknowledge, repeat. It returns only
+          when its context ends or the storage refuses.
+        name: pump
+        params: ctx context.Context
+        recv: c *consumer
+        results: error
+      - doc: |-
+          settleBatch runs the handler over each delivery and reports each outcome to
+          the broker, stopping only if the STORAGE refuses.
+
+          A stop that lands in the middle of the batch hands every message not yet
+          started back at once, uncounted (kitsunium/sdk#474): before, each was handed
+          to the handler under a dead context and nacked on it, and every durable
+          broker refused that nack, so the message stayed leased for a whole
+          visibility timeout and came back one delivery closer to the dead-letter
+          store — a deployment burnt a delivery of work nobody had tried. A message
+          whose lease has run down to the margin before its turn comes is handed back
+          the same way, or renewed first under AutoExtend.
+        name: settleBatch
+        params: ctx context.Context, batch []corequeue.DeliveryValue, receivedAt time.Time
+        recv: c *consumer
+        results: error
+      - doc: |-
+          prepare decides, just before a message's turn, whether its lease still
+          leaves the handler room: renewed first under AutoExtend once a third of it
+          is spent, handed back when it is down to the margin, as it is otherwise. It
+          reports whether to run the handler, and the delivery to run it on.
+        name: prepare
+        params: |2
+
+          	ctx context.Context, delivery corequeue.DeliveryValue, plan leasePlan,
+        recv: c *consumer
+        results: ready bool, prepared corequeue.DeliveryValue, err error
+      - doc: process runs the handler on one delivery, watched, and reports its outcome.
+        name: process
+        params: ctx context.Context, delivery corequeue.DeliveryValue, plan leasePlan
+        recv: c *consumer
+        results: error
+      - doc: |-
+          settle reports a handler's outcome to the broker.
+
+          A LeaseExpired from the broker is swallowed on purpose and it is the only
+          thing that is: this consumer took too long, the message is already queued
+          again or dead-lettered, and there is nothing it can do about that except
+          keep working. Anything else is the storage refusing, which the worker must
+          not poll its way past.
+
+          A failure the handler marked with core/data/queue.DoNotRetry is rejected
+          rather than nacked when the broker is a core/data/queue.Rejecter:
+          dead-lettered at once, with the handler's cause, instead of retried until
+          MaxDeliveries. A broker without the sibling is nacked as before — the
+          shortcut is lost, never the message — and a panic is never the mark,
+          because guard carries the recovered value as a field of HANDLER_PANICKED and
+          never as its origin.
+
+          A failure that follows the consumer's stop cancelling the handler is not the
+          message's: it is handed back uncounted, unless it is a panic, which is.
+
+          Every outcome is sent on ctx WITHOUT its cancellation, bounded by
+          SettleTimeout: the work is done, or was stopped, and a stop that lands
+          between the handler's return and the report — the consumer's context
+          cancelled by Close or a lifecycle's Stop — must not abandon it. Abandoned,
+          the message stayed leased and came back after the visibility timeout, a
+          duplicate a graceful stop caused, on every broker whose verbs honour their
+          context (kitsunium/sdk#472, #474).
+        name: settle
+        params: ctx context.Context, receipt corequeue.ReceiptValue, failure error, stopped bool
+        recv: c *consumer
+        results: error
+      - doc: |-
+          handBackAll hands back, in order, every delivery of a batch the handler
+          never started, stopping at the first the medium refuses.
+        name: handBackAll
+        params: ctx context.Context, rest []corequeue.DeliveryValue
+        recv: c *consumer
+        results: error
+      - doc: |-
+          handBack returns a message this consumer did not finish: released — at
+          once, its delivery not counted — by a broker that can, nacked by one that
+          cannot, which retries it after its delay with the delivery counted, so the
+          courtesy is lost and never the message. The nack carries no cause: nothing
+          failed, and a message that runs out of attempts this way is recorded as an
+          unreported failure.
+        name: handBack
+        params: ctx context.Context, receipt corequeue.ReceiptValue
+        recv: c *consumer
+        results: error
+      - doc: nack hands a message back as a failure, bounded as every outcome is.
+        name: nack
+        params: ctx context.Context, receipt corequeue.ReceiptValue, cause error
+        recv: c *consumer
+        results: error
+      - doc: planFor measures delivery's lease from the instant its batch arrived.
+        name: planFor
+        params: delivery corequeue.DeliveryValue, receivedAt time.Time
+        recv: c *consumer
+        results: leasePlan
+      - doc: |-
+          watch prepares the handler's context for delivery. When there is nothing
+          to watch — no lease to bound, no drain, so no renewal either — it is the
+          consumer's own, as it always was; otherwise one goroutine watches the stop,
+          the drain, the lease's margin and AutoExtend's cadence.
+
+          Goroutine lifecycle: at most one, started here and joined by finish, which
+          process calls on every path once the handler has returned. Its timers are
+          armed HERE, before the handler starts, so a test driving a ManualClock
+          finds them armed once the handler runs; finish stops every one.
+        name: watch
+        params: ctx context.Context, delivery corequeue.DeliveryValue, plan leasePlan
+        recv: c *consumer
+        results: "*watched"
+      - doc: |-
+          oversee is one turn of the watcher: it ends the handler's context on the
+          consumer's stop — at once, or once DrainTimeout has passed — and a margin
+          before the lease ends, and renews the lease under AutoExtend, moving that
+          margin with it. It reports whether to keep watching.
+        name: oversee
+        params: ctx context.Context, w *watched
+        recv: c *consumer
+        results: bool
+      - doc: |-
+          renewWatched renews the lease a watched handler runs under and moves its
+          margin with it, or cancels the handler with the refusal: its work is
+          becoming a duplicate, and it hears so through its context.
+        name: renewWatched
+        params: ctx context.Context, w *watched
+        recv: c *consumer
+        results: bool
+      - doc: renew extends the lease receipt names by by, bounded as every outcome is.
+        name: renew
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, by time.Duration,
+        recv: c *consumer
+        results: lease corequeue.LeaseValue, err error
+      - doc: |-
+          bounded runs call on ctx WITHOUT its cancellation, bounded by SettleTimeout
+          on the consumer's clock from the instant the consumer stops — at once when
+          it already has, or when always is set, as a renewal's is. A call the bound
+          cut short is QUEUE_BACKEND_FAILED naming op — the medium did not answer in
+          time — and any other answer is call's own.
+
+          While the consumer runs, an outcome is not timed: nothing waits on it but
+          the worker, which the medium's own failure reaches, and an idle worker's
+          clock then holds no wait but its poll — what a test driving a ManualClock
+          counts on with BlockUntil.
+
+          Goroutine lifecycle: one per call waits for the stop and then the bound's
+          timer. It ends when call returns (done closes) or when the timer fires and
+          cancels call's context, and bounded joins it before returning, so none
+          outlives the call.
+        name: bounded
+        params: ctx context.Context, op string, always bool, call func(context.Context) error
+        recv: c *consumer
+        results: error
+      - doc: |-
+          bound is bounded's goroutine: it arms the bound when the consumer stops,
+          unless armed already is, and calls expire when the bound elapses before
+          done closes. It stops the timer it waited on, whichever way it returns.
+        name: bound
+        params: ctx context.Context, armed clock.Timer, done <-chan struct{}, exited chan<- struct{}, expire func()
+        recv: c *consumer
+    name: consumer
   - fields:
       - doc: Handler processes one delivery. It must be non-nil.
         name: Handler
         type: corequeue.Handler
       - doc: |-
-          Clock drives the idle wait. Nil means clock.System.
+          Clock drives the idle wait, the handler's lease bound, the drain, the
+          bound on each outcome and the lease renewals. Nil means clock.System.
 
           Nothing in this package calls time.Sleep; an idle worker waits through
           Waiter.After and a cancelled context wakes it immediately.
+
+          A lease's end is the broker's instant and is read on this clock, so it
+          must be the broker's: a test drives both with one ManualClock. A lease
+          that already looks ended on this clock the moment it is received —
+          two clocks that disagree — is not bounded at all, as before the bound
+          existed, rather than never run.
         name: Clock
         type: clock.Timed
       - doc: |-
@@ -1361,8 +1589,68 @@ types:
           30 seconds minus the other 49's processing time. Batch for throughput
           against a durable broker, where one poll is a directory read; do not
           batch to get parallelism, which is what Parallelism is.
+
+          A message whose lease has run down to the margin [Consume] keeps
+          before its turn comes is not started: it is handed back uncounted
+          and leased again by a later poll — or, with AutoExtend, renewed
+          before it starts.
         name: BatchSize
         type: int
+      - doc: |-
+          SettleTimeout bounds each outcome a worker reports once ctx has
+          ended — an acknowledgement, a nack, a rejection or a release — and
+          each lease renewal AutoExtend sends. Zero means
+          [DefaultSettleTimeout]; negative is read as zero.
+
+          Every outcome is sent on the consumer's context WITHOUT its
+          cancellation, so a stop landing between a handler's return and its
+          acknowledgement does not abandon it (kitsunium/sdk#472) and a batch a
+          stop interrupts is still handed back. That is what needs a bound: a
+          medium that stopped answering would otherwise hold the stop forever.
+          It runs on Clock, from the instant ctx ends — while the consumer
+          runs an outcome is not timed, and nothing but the worker waits on
+          it. An outcome the bound cut short is QueueBackendFailed, which a
+          stopping consumer reads as its stop, not as a failure.
+
+          It also caps the margin a handler is stopped by before its lease
+          ends: a tenth of the lease, at most this.
+        name: SettleTimeout
+        type: time.Duration
+      - doc: |-
+          DrainTimeout is how long the message a worker is handling when ctx
+          ends may still run before its handler's context is cancelled — River's
+          SoftStopTimeout. Zero cancels it at once, which is what a stop always
+          did; negative is read as zero.
+
+          A handler that finishes inside it is acknowledged; one the drain cut
+          short is handed back uncounted, through the broker's
+          [corequeue.Releaser]. No new message is leased once ctx has ended,
+          and the lease bound still applies: a drain never keeps a handler past
+          the margin before its lease ends. Measured on Clock. A caller's stop
+          budget — a lifecycle component's — must cover it plus SettleTimeout.
+        name: DrainTimeout
+        type: time.Duration
+      - doc: |-
+          AutoExtend renews the lease of the message a handler is running, a
+          third of the lease after it was granted or last renewed, for as long
+          as the handler runs — the heartbeat of SQS, JetStream's in-progress
+          acknowledgement, Temporal's activity heartbeat. A message of a batch
+          whose lease is a third spent when its turn comes is renewed before
+          its handler starts. Each renewal is as long as the lease the broker
+          first granted, and is bounded by SettleTimeout.
+
+          It needs the broker's [corequeue.LeaseExtender]; without it, or when
+          false, the lease is never renewed and the handler is stopped a margin
+          before it ends. A renewal the broker refuses — the lease lapsed, the
+          medium failed — cancels the handler's context with that refusal as
+          its cause: its work is now a duplicate in the making.
+
+          A renewal replaces the receipt, and the engine acknowledges with the
+          newest one. So a handler that extends its own lease — parking its
+          message, as the mail spool does — must leave AutoExtend false: the
+          receipt it holds is void after the first renewal.
+        name: AutoExtend
+        type: bool
       - doc: |-
           HandlerIsIdempotent asserts, IN CODE, that Handler is safe to run more
           than once for the same message.
@@ -1400,6 +1688,100 @@ types:
         recv: c ConsumerConfig
         results: ConsumerConfig
     name: ConsumerConfig
+  - doc: |-
+      leasePlan is how one delivery's lease is judged: how long the broker
+      granted it, the margin the handler is stopped by, and how often AutoExtend
+      renews it.
+    fields:
+      - doc: |-
+          granted is the lease's length as the broker granted it, read on the
+          consumer's clock when the batch arrived; it is also what a renewal
+          asks for.
+        name: granted
+        type: time.Duration
+      - doc: margin is how long before the lease ends the handler is stopped.
+        name: margin
+        type: time.Duration
+      - doc: renewEvery is AutoExtend's cadence.
+        name: renewEvery
+        type: time.Duration
+      - doc: |-
+          bounded is false when the lease already looked ended on the consumer's
+          clock as it arrived — two clocks that disagree — and is then not judged.
+        name: bounded
+        type: bool
+    kind: struct
+    name: leasePlan
+  - doc: |-
+      watched is one handler run under watch: the context the handler gets, and
+      what watches it.
+    fields:
+      - doc: ctx is the handler's context.
+        name: ctx
+        type: context.Context
+      - doc: cancel ends ctx with a cause; nil when ctx is the consumer's own.
+        name: cancel
+        type: context.CancelCauseFunc
+      - doc: |-
+          handled ends when the handler returns; markHandled ends it, and may be
+          called more than once.
+        name: handled
+        type: context.Context
+      - name: markHandled
+        type: context.CancelFunc
+      - doc: |-
+          deadline fires a margin before the lease ends; renewal ticks
+          AutoExtend; drain fires DrainTimeout after the stop. Each is nil when
+          unused, and every one is stopped by finish.
+        name: deadline
+        type: clock.Timer
+      - name: renewal
+        type: clock.Ticker
+      - name: drain
+        type: clock.Timer
+      - doc: |-
+          stop is the consumer's stop until it is seen, nil after; drained is
+          the drain's channel once it is armed. The watcher's alone.
+        name: stop
+        type: <-chan struct{}
+      - name: drained
+        type: <-chan time.Time
+      - doc: id names the message in a cause.
+        name: id
+        type: string
+      - doc: |-
+          lease is the lease the handler runs under, renewed by the watcher.
+          The watcher owns it, and stopped, until watcher.Wait returns.
+        name: lease
+        type: corequeue.LeaseValue
+      - doc: plan is how the lease is judged.
+        name: plan
+        type: leasePlan
+      - doc: watcher is the watching goroutine.
+        name: watcher
+        type: sync.WaitGroup
+      - doc: stopped reports that the consumer's stop cancelled the handler.
+        name: stopped
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          halt cancels the handler's context with cause, recording whether the
+          consumer's stop did it, and ends the watch.
+        name: halt
+        params: cause error, byStop bool
+        recv: w *watched
+        results: bool
+      - doc: |-
+          finish ends the watch once the handler has returned with failure: it joins
+          the watcher, stops every timer it armed and releases the context. It
+          returns the lease the handler ended under — renewed or not — and whether
+          the consumer's stop cut the handler short.
+        name: finish
+        params: ctx context.Context, failure error
+        recv: w *watched
+        results: lease corequeue.LeaseValue, stopped bool
+    name: watched
   - doc: |-
       fileBroker is a queue whose entire state is a directory.
 
@@ -1546,6 +1928,15 @@ types:
           attempt makes, reached sooner.
         name: Reject
         params: ctx context.Context, receipt corequeue.ReceiptValue, cause error
+        recv: b *fileBroker
+        results: error
+      - doc: |-
+          Release hands the leased message back, visible now, with the delivery its
+          lease counted given back (core/data/queue.Releaser): one rename from the
+          in-flight name to a queued name carrying the instant read now and the count
+          one lower — the name a PutMessage of a message never tried writes, at zero.
+        name: Release
+        params: ctx context.Context, receipt corequeue.ReceiptValue
         recv: b *fileBroker
         results: error
       - doc: nackDead buries a message that has run out of attempts.
@@ -2079,6 +2470,13 @@ types:
         recv: b *memoryBroker
         results: error
       - doc: |-
+          Release hands the leased message back, visible now, with the delivery its
+          lease counted given back (core/data/queue.Releaser).
+        name: Release
+        params: ctx context.Context, receipt corequeue.ReceiptValue
+        recv: b *memoryBroker
+        results: error
+      - doc: |-
           ReplayDeadLetter queues the dead letter id again, visible now, with its
           delivery count reset (core/data/queue.DeadLetterManager). It keeps its ID, its
           payload and its enqueue instant.
@@ -2321,6 +2719,14 @@ types:
           	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
         recv: b *sqlBroker
         results: verdict corequeue.NackValue, err error
+      - doc: |-
+          Release hands the leased message back, visible now, with the delivery its
+          lease counted given back (core/data/queue.Releaser): one statement, under
+          the condition every lease-ending statement carries.
+        name: Release
+        params: ctx context.Context, receipt corequeue.ReceiptValue
+        recv: b *sqlBroker
+        results: error
       - doc: |-
           Extend renews a lease and mints the receipt that replaces it.
 
@@ -2709,6 +3115,11 @@ types:
           receipt's identifier, lease and delivery count, and a deadline still
           ahead.
         name: extend
+        type: string
+      - doc: |-
+          release hands one lease back as retry does, visible at once, with the
+          delivery count it moved on moved back, under the same condition.
+        name: release
         type: string
       - doc: deadList reads the dead letters, in the order they died.
         name: deadList

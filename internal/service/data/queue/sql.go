@@ -265,6 +265,37 @@ func (b *sqlBroker) Nack(
 	return corequeue.NackValue{Deliveries: held.deliveries, VisibleAt: time.Unix(0, visibleAt.UnixNano())}, nil
 }
 
+// Release hands the leased message back, visible now, with the delivery its
+// lease counted given back (core/data/queue.Releaser): one statement, under
+// the condition every lease-ending statement carries.
+func (b *sqlBroker) Release(ctx context.Context, receipt corequeue.ReceiptValue) error {
+	held, err := b.receiptOf(ctx, receipt)
+	//: an unknown receipt and a lapsed one are different bugs.
+	if err != nil {
+		//: UnknownReceipt, or the caller's deadline.
+		return err
+	}
+	now := b.clk.Now()
+	//: the instant becomes the row's due, so the table must hold it.
+	if !nameable(now) {
+		//: QueueMisconfigured, naming the clock.
+		return clockRefused(now)
+	}
+	releaseErr := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+		result, execErr := ex.ExecContext(txCtx, b.stmts.release, append([]any{now.UnixNano()}, held.args(now.UnixNano())...)...)
+		//: queued again, LeaseExpired, or QueueBackendFailed.
+		return b.leased(result, execErr, "release a message")
+	})
+	//: nothing moved.
+	if releaseErr != nil {
+		//: LeaseExpired or QueueBackendFailed.
+		return releaseErr
+	}
+	b.announce(ctx)
+	//: queued again, receivable at once.
+	return nil
+}
+
 // Extend renews a lease and mints the receipt that replaces it.
 //
 // A by whose deadline 64-bit Unix nanoseconds cannot carry — one that reaches

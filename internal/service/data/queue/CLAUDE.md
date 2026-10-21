@@ -11,7 +11,7 @@ on goroutines it owns).
 
 All three implement every capability sibling: `DeadLetterReader`,
 `LeaseExtender`, `Waker`, since ADR 0151 `Rejecter` and
-`DeadLetterManager`, and since ADR 0178 `DeadLetterWriter`, `MessageReader` and `MessageWriter`; and all three wait the same growing retry delay when the
+`DeadLetterManager`, since ADR 0178 `DeadLetterWriter`, `MessageReader` and `MessageWriter`, and since kitsunium/sdk#474 `Releaser`; and all three wait the same growing retry delay when the
 policy's `MaxRetryDelay` asks for one (`retry.go`).
 
 Code range: `0.3.53.*` (ADR 0054) — `QUEUE_BACKEND_FAILED`,
@@ -27,22 +27,23 @@ package declares no code.
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the shared guards (`checkBatch`, `checkSize`, `checkDeadLetter` and `checkLiveMessage` — the refusals of `PutDeadLetter` and `PutMessage`, identical on the three brokers, ADR 0178), `deadLetterNotFound` |
 | `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
-| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
+| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `Release`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
 | `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through the kernel's reader, `internal/kernel/fs/winacl` |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
-| `file_dead.go` | `Nack`, `Reject`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
+| `file_dead.go` | `Nack`, `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
 | `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (a burial's record, published atomically and durably), `Messages` (`liveFiles`, `parseLive`: the two state directories' names, sorted by identifier) and `PutMessage` (a `ready/` file, as a retry leaves one), `deadRecordsOf` — every record of one message by its ID |
-| `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
+| `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Release`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
 | `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
 | `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (one INSERT of a dead row, in the caller's transaction when its context carries one), `Messages` (one unlocked read of the live rows after an identifier) and `PutMessage` (one INSERT of a live row with its count) on the table |
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
 | `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/data/sql` migration the caller numbers |
-| `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group), the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
+| `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group) and `consumer`, the siblings asked once; the pull loop, the batch (`settleBatch`, `prepare`: a message whose lease ran down is handed back or renewed before it starts), the outcomes (`settle`, `handBack` — `Release`, or `Nack` without the sibling — `nack`), the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
+| `consume_lease.go` | the handler's watch (kitsunium/sdk#474): `leasePlan` (the lease as granted, its margin — a tenth, at most `SettleTimeout` — and AutoExtend's third), `watch`/`oversee`/`finish` (one goroutine per handled message that ends its context on the stop, after `DrainTimeout`, and a margin before the lease ends, and renews it under AutoExtend), `renew`, and `bounded`/`bound` — every outcome on its context without the cancellation, bounded by `SettleTimeout` from the stop on, a renewal always |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
 
@@ -264,7 +265,7 @@ exists if and only if that transaction commits** — the transactional outbox.
   locked read skipped is invisible to it; one that did records now. The
   probe keeps NULL apart from an instant of zero. No sweeper, as for the
   other two.
-- **Ack, Nack, Extend and Reject are ONE statement each**, matching the
+- **Ack, Nack, Extend, Reject and Release are ONE statement each**, matching the
   receipt's identifier, lease and delivery count, a live row, and a deadline
   still ahead of the instant the call read — so a lapsed lease is refused
   whether or not anybody reclaimed it, as ADR 0054 §D2 requires, and zero rows
@@ -375,18 +376,80 @@ handler's own is recovered into a nack — is re-raised in `Consume`'s goroutine
 after its siblings have stopped. `TestAStorageFailureStopsEveryWorkerAndIsReturned`
 pins the report.
 
-A handler that returned nil is acknowledged on its context WITHOUT the
-cancellation (`settle`): a stop landing between the handler's return and the
-`Ack` used to abandon the acknowledgement on every broker — each one's `Ack`
-honours its context — so the message stayed leased and came back after the
-visibility timeout, a duplicate a graceful stop caused (kitsunium/sdk#472, a
-kept letter the framework's re-seal test found still at rest after `Stop`).
-The acknowledgement is one statement or one unlink, bounded by the medium and
-by the caller's stop budget, which waits for `Consume` to return. A nack and a
-reject keep the cancellable context: a handler that failed because it was
-stopped is redelivered after its lease, as before.
-`TestAHandledMessageIsAcknowledgedWhenTheStopLandsBeforeItsAck` cancels from
-inside the handler, so it is that interleaving every time, on every broker.
+Every outcome — an acknowledgement, a nack, a rejection, a release — is sent
+on the consumer's context WITHOUT its cancellation (`bounded`): a stop landing
+between the handler's return and the `Ack` used to abandon the acknowledgement
+on every broker — each one's `Ack` honours its context — so the message stayed
+leased and came back after the visibility timeout, a duplicate a graceful stop
+caused (kitsunium/sdk#472, a kept letter the framework's re-seal test found
+still at rest after `Stop`). `TestAHandledMessageIsAcknowledgedWhenTheStopLandsBeforeItsAck`
+cancels from inside the handler, so it is that interleaving every time, on
+every broker.
+
+## A stop, a drain and a lease (kitsunium/sdk#474)
+
+A stop used to reach the handler as its context and nothing else, and a batch
+was handled whatever its leases had left. Reproduced first, on every broker,
+by `consume_lease_external_test.go` — each case failed before the change:
+
+- **A stop in the middle of a batch hands the rest back, uncounted.** Before,
+  the rest of the batch went to the handler under a dead context and was
+  nacked on it; every broker refused that nack, so each message stayed leased
+  for a whole visibility timeout and came back one delivery closer to the
+  dead-letter store — a deployment burnt a delivery of work nobody tried.
+  Now `settleBatch` starts nothing once the context is done and `handBackAll`
+  releases what is left (`TestAStopInTheMiddleOfABatchHandsTheUnstartedMessagesBackUncounted`).
+- **Handed back is `Releaser.Release`**: receivable at once, the delivery
+  count put back, never dead-lettered — SQS's `ChangeMessageVisibility(0)`.
+  Each broker does it in one move: the memory broker re-queues the record with
+  its count one lower, the file broker renames `inflight/` back to `ready/`
+  under a name visible now with the count one lower (a `ready/` name at zero
+  is the one `PutMessage` writes for a message never tried), the SQL broker
+  sends one `UPDATE … SET due = now, lease = NULL, deliveries = deliveries - 1`
+  under the condition every lease-ending statement carries. A broker without
+  the sibling is nacked instead, with no cause: retried after its delay, the
+  delivery counted (`TestAStopFallsBackToANackWithoutReleaser`).
+- **The message in hand drains.** `DrainTimeout` (River's `SoftStopTimeout`)
+  keeps the stop from the handler that long; what finishes is acknowledged,
+  what the drain cuts short is released, and a failure that follows the
+  stop's cancellation is the stop's, not the message's — released, unless it
+  is a panic. Zero cancels at once, as a stop always did — and that handler's
+  message is released too, where its nack used to be refused on the dead
+  context (`TestADrain…`, `TestAStopWithNoDrainHandsTheInterruptedMessageBack`).
+- **Every outcome past the stop is bounded by `SettleTimeout`** (zero is five
+  seconds), on the consumer's clock, from the instant the consumer stops — a
+  medium that stopped answering cannot hold a stop forever. The cut is
+  `QUEUE_BACKEND_FAILED` naming the operation, which the pump reads as the
+  stop it happened during (`TestAnOutcomeSentPastTheStopIsBoundedBySettleTimeout`).
+  While the consumer runs an outcome is NOT timed, deliberately: nothing waits
+  on it but the worker, which the medium's own failure reaches, and an idle
+  worker's clock then holds no wait but its poll — what a test driving a
+  `ManualClock` with `BlockUntil(1)` counts on. A renewal is always bounded.
+- **A handler ends a margin before its lease.** Its context is cancelled with
+  `LEASE_EXPIRED` as the cause at `ExpiresAt − margin`, the margin a tenth of
+  the lease as granted, at most `SettleTimeout` — room for the nack to land
+  while the lease holds. The lease is the broker's instant read on the
+  consumer's clock: they must be one clock, and a lease that already looks
+  ended on arrival — two clocks that disagree — is not bounded at all rather
+  than never run (`TestAHandlerIsStoppedBeforeItsLeaseEnds`). A message of a
+  batch whose lease is down to the margin when its turn comes is released, not
+  started (`TestAMessageWhoseLeaseRanOutInItsBatchIsNotHandedToTheHandler`).
+- **`AutoExtend` renews instead** (the heartbeat of SQS, JetStream's `+WPI`,
+  Temporal's): every third of the lease while the handler runs, by the length
+  the broker granted, moving the margin with it, and before a batch message
+  starts once a third of its lease is spent. A refused renewal cancels the
+  handler with the refusal as its cause. The engine acknowledges on the
+  newest receipt (`TestAutoExtend…`, `TestARefusedRenewalStopsTheHandler`).
+
+The watch is one goroutine per handled message (`oversee`), joined before the
+outcome is sent; its timers — the margin, AutoExtend's ticker — are armed
+before the handler starts, so a test sees them armed once it runs, and every
+one is stopped before the outcome. When there is nothing to watch — no lease
+to bound, no drain — the handler gets the consumer's own context, as before.
+A test that waits for an idle consumer with `BlockUntil(1)` must therefore do
+so once the handler has RETURNED: while it runs, its margin timer is armed
+(`TestARetryIsDeliveredWhenItsDelayEndsNotAtTheNextPoll` waits for the nack's
+wake first).
 
 ## Waking an idle consumer (ADR 0104)
 
@@ -471,8 +534,8 @@ the code.
   `integration` tag — see its CLAUDE.md.
 - **`TestSQLAPublicationExistsIfAndOnlyIfItsTransactionCommits`** is the SQL
   broker's reason to exist, and **`TestSQLStatementsPerCall`** what each call
-  costs: one read for an idle Receive, one statement per Ack, Nack, Extend or
-  Reject.
+  costs: one read for an idle Receive, one statement per Ack, Nack, Extend,
+  Reject or Release.
 - **`TestAStrayFileInTheQueueDirectoryIsNeverDelivered`** plants a
   `.vfs-<hex>.tmp` in `ready/` — the temporary a CONCURRENT atomic publication
   is genuinely writing there — and asserts the scan skips it. Delivering it
@@ -488,7 +551,9 @@ extension replaces the receipt, so `Consume`'s acknowledgement of the old one
 is refused `LEASE_EXPIRED` by EVERY broker and ignored by `settle` like every
 lapsed acknowledgement; the message comes back when the new lease lapses, its
 delivery count incremented. That is a contract now: a broker that answered
-`UNKNOWN_RECEIPT` for a replaced receipt would stop `Consume` instead.
+`UNKNOWN_RECEIPT` for a replaced receipt would stop `Consume` instead. Such a
+handler leaves `AutoExtend` false: the engine's renewal replaces the receipt
+the handler holds, and its own `Extend` would then be refused.
 
 ## Do NOT
 
@@ -541,6 +606,7 @@ delivery count incremented. That is a contract now: a broker that answered
 - ADR 0139 — docstore over SQL, whose transaction rules the SQL broker follows
 - ADR 0151 — the SQL broker, the growing retry delay, `Rejecter`, `DeadLetterManager`
 - ADR 0178 — `DeadLetterWriter`, `MessageReader` and `MessageWriter`, for kit's `data copy`
+- kitsunium/sdk#474 — `Releaser`, the drain, the bound on each outcome, the handler's lease bound and `AutoExtend`
 - `internal/core/data/queue/CLAUDE.md` — the port and the five decisions
 - `e2e/integration/sql/CLAUDE.md` — the SQL broker on the three real engines
 - `BENCH.md` — the cost of durability, and the two defects the numbers found

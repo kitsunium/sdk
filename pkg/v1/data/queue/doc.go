@@ -205,6 +205,29 @@
 // Two durable brokers over one directory — or one database and table — in one
 // process share their wake, as they share everything else: they are one queue.
 //
+// # A stop hands back what it did not do, and a handler ends before its lease
+//
+// When the consumer's context ends, [Consume] leases nothing more. The message a
+// handler is running gets [ConsumerConfig].DrainTimeout to finish; what the stop
+// cut short, and every message of the batch never started, is handed back through
+// [Releaser] — receivable at once, its delivery not counted — so a deployment
+// no longer moves work toward the dead-letter store. Every outcome is sent past
+// the stop, bounded by [ConsumerConfig].SettleTimeout, so give the consumer a
+// stop budget that covers both.
+//
+// A handler's context ends a margin before its lease does — a tenth of it, at
+// most SettleTimeout — with LEASE_EXPIRED as its cause, since past that instant
+// another consumer may hold the same message. A handler that legitimately runs
+// longer than a lease sets [ConsumerConfig].AutoExtend, and its lease is renewed
+// every third of it while it runs:
+//
+//	queue.Consume(ctx, broker, queue.ConsumerConfig{
+//		Handler:             handle,
+//		HandlerIsIdempotent: true,
+//		DrainTimeout:        10 * time.Second, // let the message in hand finish
+//		AutoExtend:          true,             // renew the lease while it runs
+//	})
+//
 // # A queue in your own database, joined to your transaction
 //
 // [NewSQL] keeps the queue in one table of the PostgreSQL, MySQL or SQLite

@@ -7,7 +7,7 @@ workflows:
         eval: "&sealedOutbox{Broker: inner, seal: cfg.Seal, unseal: cfg.Unseal, node: cfg.Name, max: cfg.MaxPayload}"
       - var:
           name: ok
-          type: "[5]bool"
+          type: "[6]bool"
       - set: o.waker, ok[0]
         value: inner.(queue.Waker)
       - set: o.renew, ok[1]
@@ -18,6 +18,8 @@ workflows:
         value: inner.(queue.Rejecter)
       - set: o.manager, ok[4]
         value: inner.(queue.DeadLetterManager)
+      - set: o.release, ok[5]
+        value: inner.(queue.Releaser)
       - loop:
           do:
             - opt:

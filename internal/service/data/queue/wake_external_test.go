@@ -105,9 +105,12 @@ func TestARetryIsDeliveredWhenItsDelayEndsNotAtTheNextPoll(t *testing.T) {
 			clk := clock.NewManualClock(epoch)
 			broker := factory.make(t, clk, defaultPolicy())
 			var calls atomic.Int32
+			nacked := make(chan (<-chan struct{}), 1)
 			seen := consumer(t, broker, clk, func(context.Context, corequeue.DeliveryValue) error {
 				//: the first delivery fails and is nacked; the second succeeds.
 				if calls.Add(1) == 1 {
+					//: the signal the nack closes, taken before it can.
+					nacked <- broker.(corequeue.Waker).Wake().Signal
 					return errors.New("transient")
 				}
 				return nil
@@ -116,7 +119,9 @@ func TestARetryIsDeliveredWhenItsDelayEndsNotAtTheNextPoll(t *testing.T) {
 			if first := next(t, seen); first.Deliveries != 1 {
 				t.Fatalf("first delivery counted %d, want 1", first.Deliveries)
 			}
-			//: nacked, and the consumer is asleep until the retry is due.
+			//: nacked — the handler's lease bound is no longer armed, so the
+			//: one wait left is the consumer's sleep until the retry is due.
+			<-<-nacked
 			clk.BlockUntil(1)
 			clk.Advance(testRetryDelay)
 

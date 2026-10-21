@@ -25,19 +25,41 @@ import (
 // always meant for a broker that cannot wake anyone.
 const DefaultPollInterval time.Duration = 100 * time.Millisecond
 
+// DefaultSettleTimeout bounds one acknowledgement, nack, rejection or release
+// [Consume] sends once its context has ended, and one lease renewal, when
+// [ConsumerConfig.SettleTimeout] is left at zero.
+//
+// It is a CLAMP and not a refusal (ADR 0031): its zero has one reading — "you
+// did not think about how long the medium may take to record an outcome" —
+// and five seconds is far above what a flush-free rename or one indexed
+// statement costs while still letting a stop end when the medium has stopped
+// answering. It is also the most a handler is stopped early by: the margin
+// kept before a lease ends is a tenth of the lease, at most the
+// SettleTimeout in force.
+const DefaultSettleTimeout time.Duration = 5 * time.Second
+
 // ConsumerConfig configures [Consume]: what to run, how many of it, how often
 // to look, and the one thing about the handler the SDK cannot check for
 // itself.
 //
 // Every field except Handler and HandlerIsIdempotent is CLAMPED, so a caller
-// with no opinion writes two fields and gets a correct consumer.
+// with no opinion writes two fields and gets a correct consumer. The zero of
+// each field added since — DrainTimeout, AutoExtend — is what Consume did
+// before it existed.
 type ConsumerConfig struct {
 	// Handler processes one delivery. It must be non-nil.
 	Handler corequeue.Handler
-	// Clock drives the idle wait. Nil means clock.System.
+	// Clock drives the idle wait, the handler's lease bound, the drain, the
+	// bound on each outcome and the lease renewals. Nil means clock.System.
 	//
 	// Nothing in this package calls time.Sleep; an idle worker waits through
 	// Waiter.After and a cancelled context wakes it immediately.
+	//
+	// A lease's end is the broker's instant and is read on this clock, so it
+	// must be the broker's: a test drives both with one ManualClock. A lease
+	// that already looks ended on this clock the moment it is received —
+	// two clocks that disagree — is not bounded at all, as before the bound
+	// existed, rather than never run.
 	Clock clock.Timed
 	// PollInterval is how long a worker waits after finding the queue empty.
 	// Zero means [DefaultPollInterval]; negative is read as zero.
@@ -70,7 +92,61 @@ type ConsumerConfig struct {
 	// 30 seconds minus the other 49's processing time. Batch for throughput
 	// against a durable broker, where one poll is a directory read; do not
 	// batch to get parallelism, which is what Parallelism is.
+	//
+	// A message whose lease has run down to the margin [Consume] keeps
+	// before its turn comes is not started: it is handed back uncounted
+	// and leased again by a later poll — or, with AutoExtend, renewed
+	// before it starts.
 	BatchSize int
+	// SettleTimeout bounds each outcome a worker reports once ctx has
+	// ended — an acknowledgement, a nack, a rejection or a release — and
+	// each lease renewal AutoExtend sends. Zero means
+	// [DefaultSettleTimeout]; negative is read as zero.
+	//
+	// Every outcome is sent on the consumer's context WITHOUT its
+	// cancellation, so a stop landing between a handler's return and its
+	// acknowledgement does not abandon it (kitsunium/sdk#472) and a batch a
+	// stop interrupts is still handed back. That is what needs a bound: a
+	// medium that stopped answering would otherwise hold the stop forever.
+	// It runs on Clock, from the instant ctx ends — while the consumer
+	// runs an outcome is not timed, and nothing but the worker waits on
+	// it. An outcome the bound cut short is QueueBackendFailed, which a
+	// stopping consumer reads as its stop, not as a failure.
+	//
+	// It also caps the margin a handler is stopped by before its lease
+	// ends: a tenth of the lease, at most this.
+	SettleTimeout time.Duration
+	// DrainTimeout is how long the message a worker is handling when ctx
+	// ends may still run before its handler's context is cancelled — River's
+	// SoftStopTimeout. Zero cancels it at once, which is what a stop always
+	// did; negative is read as zero.
+	//
+	// A handler that finishes inside it is acknowledged; one the drain cut
+	// short is handed back uncounted, through the broker's
+	// [corequeue.Releaser]. No new message is leased once ctx has ended,
+	// and the lease bound still applies: a drain never keeps a handler past
+	// the margin before its lease ends. Measured on Clock. A caller's stop
+	// budget — a lifecycle component's — must cover it plus SettleTimeout.
+	DrainTimeout time.Duration
+	// AutoExtend renews the lease of the message a handler is running, a
+	// third of the lease after it was granted or last renewed, for as long
+	// as the handler runs — the heartbeat of SQS, JetStream's in-progress
+	// acknowledgement, Temporal's activity heartbeat. A message of a batch
+	// whose lease is a third spent when its turn comes is renewed before
+	// its handler starts. Each renewal is as long as the lease the broker
+	// first granted, and is bounded by SettleTimeout.
+	//
+	// It needs the broker's [corequeue.LeaseExtender]; without it, or when
+	// false, the lease is never renewed and the handler is stopped a margin
+	// before it ends. A renewal the broker refuses — the lease lapsed, the
+	// medium failed — cancels the handler's context with that refusal as
+	// its cause: its work is now a duplicate in the making.
+	//
+	// A renewal replaces the receipt, and the engine acknowledges with the
+	// newest one. So a handler that extends its own lease — parking its
+	// message, as the mail spool does — must leave AutoExtend false: the
+	// receipt it holds is void after the first renewal.
+	AutoExtend bool
 	// HandlerIsIdempotent asserts, IN CODE, that Handler is safe to run more
 	// than once for the same message.
 	//
@@ -124,6 +200,12 @@ func (c ConsumerConfig) normalized() ConsumerConfig {
 	if c.PollInterval <= 0 {
 		c.PollInterval = DefaultPollInterval
 	}
+	//: zero asks for the default bound; an outcome is never sent unbounded.
+	if c.SettleTimeout <= 0 {
+		c.SettleTimeout = DefaultSettleTimeout
+	}
+	//: negative is no drain, which is what a stop always was.
+	c.DrainTimeout = max(c.DrainTimeout, 0)
 	//: nil is the caller with no opinion.
 	if c.Clock == nil {
 		c.Clock = clock.System

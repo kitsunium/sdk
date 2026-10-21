@@ -21126,7 +21126,7 @@
       "name": "Broker",
       "spelled": "interface{Ack(ctx context.Context, receipt ReceiptValue) error; Nack(ctx context.Context, receipt ReceiptValue, cause error) (NackValue, error); Publish(ctx context.Context, payload []byte) (MessageValue, error); Receive(ctx context.Context, max int) ([]DeliveryValue, error)}",
       "canonical": "interface{Ack(ctx context.Context, receipt github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue) error; Nack(ctx context.Context, receipt github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue, cause error) (github.com/kitsunium/sdk/internal/core/data/queue.NackValue, error); Publish(ctx context.Context, payload []byte) (github.com/kitsunium/sdk/internal/core/data/queue.MessageValue, error); Receive(ctx context.Context, max int) ([]github.com/kitsunium/sdk/internal/core/data/queue.DeliveryValue, error)}",
-      "doc": "Broker is one named queue: producers publish into it, consumers lease from\nit, and it — not the consumer — owns the delivery count and the decision to\ndead-letter. Implementations MUST be safe for concurrent use by multiple\ngoroutines AND, where the implementation is durable, by multiple processes.\n\nIFACE-PLUGIN: the concrete brokers stay unexported behind their\nconstructors in internal/service/data/queue.\n\nThe interface is FROZEN at these four methods. pkg/v1/data/queue aliases it, Go\ninterfaces are structural, and a fifth method would break every downstream\nimplementation at compile time with no deprecation window (ADR 0039). A new\ncapability arrives as a sibling interface reached by type assertion —\n[DeadLetterReader], [LeaseExtender], [Waker], [Rejecter],\n[DeadLetterManager], [DeadLetterWriter], [MessageReader] and\n[MessageWriter] are the ones that ship.\n\n# Why the BROKER owns the delivery count\n\nBecause the consumer is the thing that dies. A count held by the consumer\nengine is lost by exactly the event the count exists to survive, so a\nprocess that crashes on every third message would retry forever and never\ndead-letter. The count travels with the message, in whatever the\nimplementation's durable representation is, and the broker compares it\nagainst [PolicyValue.MaxDeliveries] on every [Broker.Nack] and on every\nlapsed lease.\n",
+      "doc": "Broker is one named queue: producers publish into it, consumers lease from\nit, and it — not the consumer — owns the delivery count and the decision to\ndead-letter. Implementations MUST be safe for concurrent use by multiple\ngoroutines AND, where the implementation is durable, by multiple processes.\n\nIFACE-PLUGIN: the concrete brokers stay unexported behind their\nconstructors in internal/service/data/queue.\n\nThe interface is FROZEN at these four methods. pkg/v1/data/queue aliases it, Go\ninterfaces are structural, and a fifth method would break every downstream\nimplementation at compile time with no deprecation window (ADR 0039). A new\ncapability arrives as a sibling interface reached by type assertion —\n[DeadLetterReader], [LeaseExtender], [Waker], [Rejecter], [Releaser],\n[DeadLetterManager], [DeadLetterWriter], [MessageReader] and\n[MessageWriter] are the ones that ship.\n\n# Why the BROKER owns the delivery count\n\nBecause the consumer is the thing that dies. A count held by the consumer\nengine is lost by exactly the event the count exists to survive, so a\nprocess that crashes on every third message would retry forever and never\ndead-letter. The count travels with the message, in whatever the\nimplementation's durable representation is, and the broker compares it\nagainst [PolicyValue.MaxDeliveries] on every [Broker.Nack] and on every\nlapsed lease.\n",
       "file": "core/data/queue/gen_ports.go",
       "layer": "core",
       "family": "data"
@@ -21634,7 +21634,7 @@
       "name": "Handler",
       "spelled": "func(ctx context.Context, delivery DeliveryValue) error",
       "canonical": "func(ctx context.Context, delivery github.com/kitsunium/sdk/internal/core/data/queue.DeliveryValue) error",
-      "doc": "Handler processes one delivery. It is the port a consumer implements, and\nit is a FUNCTION type rather than an interface — the shape\ninternal/core/CLAUDE.md already admits for resilience.Operation,\nscheduler.Job, lifecycle.Start and events.Listener. ADR 0039's rule is that\na published port must not grow a method; a func type satisfies it\nstructurally, because it cannot grow one at all.\n\nIt receives the whole [DeliveryValue] and not just the payload, so that\n[DeliveryValue.Deliveries] is in front of whoever writes the handler. A\nhandler WILL be called more than once for the same message — that is the\nguarantee, not a malfunction — and the count is the only thing that lets it\nsay so in a log.\n\nReturning nil acknowledges. Returning an error nacks: the message is\nretried, or dead-lettered once it has exhausted\n[PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can\nfix it, and the message is dead-lettered at once, with err, through a\nbroker's [Rejecter]. ctx is the consumer's and IS honoured: unlike\nevents.Listener, a handler that outlives its context is holding a lease it\nis about to lose, so abandoning the work is the correct response and the\nmessage will simply be redelivered.\n",
+      "doc": "Handler processes one delivery. It is the port a consumer implements, and\nit is a FUNCTION type rather than an interface — the shape\ninternal/core/CLAUDE.md already admits for resilience.Operation,\nscheduler.Job, lifecycle.Start and events.Listener. ADR 0039's rule is that\na published port must not grow a method; a func type satisfies it\nstructurally, because it cannot grow one at all.\n\nIt receives the whole [DeliveryValue] and not just the payload, so that\n[DeliveryValue.Deliveries] is in front of whoever writes the handler. A\nhandler WILL be called more than once for the same message — that is the\nguarantee, not a malfunction — and the count is the only thing that lets it\nsay so in a log.\n\nReturning nil acknowledges. Returning an error nacks: the message is\nretried, or dead-lettered once it has exhausted\n[PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can\nfix it, and the message is dead-lettered at once, with err, through a\nbroker's [Rejecter]. ctx is the consumer's and IS honoured: unlike\nevents.Listener, a handler that outlives its context is holding a lease it\nis about to lose, so abandoning the work is the correct response and the\nmessage will simply be redelivered. internal/service/data/queue.Consume\nends it a margin before the lease does, with [LeaseExpired] as its\ncontext.Cause, and when the consumer stops.\n",
       "file": "core/data/queue/queue.go",
       "layer": "core",
       "family": "data"
@@ -22111,6 +22111,31 @@
       "spelled": "func(ctx context.Context, receipt ReceiptValue, cause error) error",
       "canonical": "func(ctx context.Context, receipt github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue, cause error) error",
       "doc": "Reject moves the leased message named by receipt to the dead-letter\nstore with cause, recorded as [Broker.Nack] records the cause of a\nmessage that ran out of attempts: its Reason, its dotted-quad Code and\nits wire-safe Public half, never the Private one. The dead letter's\nDeliveries is the count the message had, which may be below\n[PolicyValue.MaxDeliveries].\n\nA lapsed receipt is [LeaseExpired] and one this broker cannot read is\n[UnknownReceipt], exactly as [Broker.Ack] refuses them; neither moves\nanything.\n",
+      "file": "core/data/queue/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/queue.Releaser",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/queue",
+      "name": "Releaser",
+      "spelled": "interface{Release(ctx context.Context, receipt ReceiptValue) error}",
+      "canonical": "interface{Release(ctx context.Context, receipt github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue) error}",
+      "doc": "Releaser hands a leased message back at once, without counting the\ndelivery it was leased under.\n\nIt is the broker's half of a consumer saying \"I never started this\" — a\nworker stopped in the middle of its batch, or a message whose lease ran\nout before its turn came — and internal/service/data/queue.Consume uses it\nfor exactly those: a message the handler never ran is not a failure, so it\nmust not wait out a retry delay, nor move one delivery closer to the\ndead-letter store, as a [Broker.Nack] would make it (kitsunium/sdk#474).\nIt is what SQS's ChangeMessageVisibility to zero does.\n\nIt is a sibling of [Broker] for the reason [DeadLetterReader] is: a\nconnector onto a system whose delivery count cannot be given back cannot\nimplement it, and the engine falls back to Nack for such a broker — the\nmessage then comes back after its retry delay with the delivery counted,\nso the courtesy is lost and never the message. The three brokers in\ninternal/service/data/queue implement it.\n",
+      "file": "core/data/queue/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/queue.Releaser.Release",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/queue",
+      "name": "Release",
+      "recv": "Releaser",
+      "spelled": "func(ctx context.Context, receipt ReceiptValue) error",
+      "canonical": "func(ctx context.Context, receipt github.com/kitsunium/sdk/internal/core/data/queue.ReceiptValue) error",
+      "doc": "Release makes the leased message named by receipt receivable again\nnow, by any consumer, with its delivery count put back to what it was\nbefore this lease: its next delivery carries the [DeliveryValue]\n.Deliveries this one did. It is never dead-lettered, whatever that\ncount, and no retry delay applies. It wakes an idle consumer, as a\nNack that hands a message back does.\n\nA lapsed receipt is [LeaseExpired] and one this broker cannot read is\n[UnknownReceipt], exactly as [Broker.Ack] refuses them; neither moves\nanything. The receipt is void once Release returns nil.\n",
       "file": "core/data/queue/gen_ports.go",
       "layer": "core",
       "family": "data"
@@ -56572,7 +56597,7 @@
       "name": "Consume",
       "spelled": "func(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) error",
       "canonical": "func(ctx context.Context, broker github.com/kitsunium/sdk/internal/core/data/queue.Broker, cfg github.com/kitsunium/sdk/internal/service/data/queue.ConsumerConfig) error",
-      "doc": "Consume runs cfg.Handler against broker until ctx is done.\n\nIt is the third column of ADR 0053's frontier made concrete: the handler\nruns on a goroutine this function owns, not on the publisher's, and it runs\nin a different process from the publisher whenever the broker is a durable\none. Publish returned long ago and knows nothing about any of this.\n\nIt returns nil when ctx ends — a cancelled consumer is a stopped consumer,\nnot a failed one — and returns the broker's error when the BROKER fails,\nbecause a queue whose storage has stopped answering is not something a\nconsumer can poll its way out of. A HANDLER's error is never returned: it\nis nacked, retried, and eventually dead-lettered, which is the entire point\nof the domain.\n\nEvery worker returns before Consume does, so a caller that cancels and\nwaits knows no handler is still running.\n",
+      "doc": "Consume runs cfg.Handler against broker until ctx is done.\n\nIt is the third column of ADR 0053's frontier made concrete: the handler\nruns on a goroutine this function owns, not on the publisher's, and it runs\nin a different process from the publisher whenever the broker is a durable\none. Publish returned long ago and knows nothing about any of this.\n\nIt returns nil when ctx ends — a cancelled consumer is a stopped consumer,\nnot a failed one — and returns the broker's error when the BROKER fails,\nbecause a queue whose storage has stopped answering is not something a\nconsumer can poll its way out of. A HANDLER's error is never returned: it\nis nacked, retried, and eventually dead-lettered, which is the entire point\nof the domain.\n\nEvery worker returns before Consume does, so a caller that cancels and\nwaits knows no handler is still running.\n\n# A stop hands back what it did not do (kitsunium/sdk#474)\n\nWhen ctx ends, a worker leases nothing more. The message its handler is\nrunning gets [ConsumerConfig.DrainTimeout] to finish before the handler's\ncontext is cancelled; what finishes is acknowledged, and what the stop cut\nshort is handed back through the broker's [corequeue.Releaser] — receivable\nat once, its delivery not counted — as is every message of the batch the\nhandler never started. A broker without the sibling is nacked instead. Each\nof those outcomes is sent past the stop, on ctx without its cancellation,\nbounded by [ConsumerConfig.SettleTimeout] on the consumer's clock, so a\ncaller's stop budget must cover DrainTimeout plus SettleTimeout.\n\n# A handler ends before its lease does\n\nThe handler's context is cancelled a margin before the lease it runs under\nends — a tenth of the lease, at most SettleTimeout, read on the consumer's\nclock, which must be the broker's — with [corequeue.LeaseExpired] as its\ncontext.Cause: past that instant the broker may hand the message to\nanother consumer. A message of a batch whose lease is already within that\nmargin when its turn comes is never started; it is handed back like the\nbatch a stop interrupts. With [ConsumerConfig.AutoExtend] the lease is\nrenewed instead, through the broker's [corequeue.LeaseExtender].\n",
       "file": "service/data/queue/consume.go",
       "layer": "service",
       "family": "data"
@@ -56582,8 +56607,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/data/queue",
       "name": "ConsumerConfig",
-      "spelled": "struct{Handler corequeue.Handler; Clock clock.Timed; PollInterval time.Duration; Parallelism int; BatchSize int; HandlerIsIdempotent bool}",
-      "canonical": "struct{Handler github.com/kitsunium/sdk/internal/core/data/queue.Handler; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; PollInterval time.Duration; Parallelism int; BatchSize int; HandlerIsIdempotent bool}",
+      "spelled": "struct{Handler corequeue.Handler; Clock clock.Timed; PollInterval time.Duration; Parallelism int; BatchSize int; SettleTimeout time.Duration; DrainTimeout time.Duration; AutoExtend bool; HandlerIsIdempotent bool}",
+      "canonical": "struct{Handler github.com/kitsunium/sdk/internal/core/data/queue.Handler; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; PollInterval time.Duration; Parallelism int; BatchSize int; SettleTimeout time.Duration; DrainTimeout time.Duration; AutoExtend bool; HandlerIsIdempotent bool}",
       "fields": [
         {
           "name": "Handler",
@@ -56593,7 +56618,7 @@
         {
           "name": "Clock",
           "type": "clock.Timed",
-          "doc": "Clock drives the idle wait. Nil means clock.System.\n\nNothing in this package calls time.Sleep; an idle worker waits through\nWaiter.After and a cancelled context wakes it immediately.\n"
+          "doc": "Clock drives the idle wait, the handler's lease bound, the drain, the\nbound on each outcome and the lease renewals. Nil means clock.System.\n\nNothing in this package calls time.Sleep; an idle worker waits through\nWaiter.After and a cancelled context wakes it immediately.\n\nA lease's end is the broker's instant and is read on this clock, so it\nmust be the broker's: a test drives both with one ManualClock. A lease\nthat already looks ended on this clock the moment it is received —\ntwo clocks that disagree — is not bounded at all, as before the bound\nexisted, rather than never run.\n"
         },
         {
           "name": "PollInterval",
@@ -56608,7 +56633,22 @@
         {
           "name": "BatchSize",
           "type": "int",
-          "doc": "BatchSize is how many messages one worker leases per poll. Non-positive\nis clamped to 1.\n\nAbove 1 a worker processes its batch SEQUENTIALLY, so the extra\nmessages are held under a lease they are not yet being worked on: a\nbatch of 50 with a 30-second visibility timeout gives the last message\n30 seconds minus the other 49's processing time. Batch for throughput\nagainst a durable broker, where one poll is a directory read; do not\nbatch to get parallelism, which is what Parallelism is.\n"
+          "doc": "BatchSize is how many messages one worker leases per poll. Non-positive\nis clamped to 1.\n\nAbove 1 a worker processes its batch SEQUENTIALLY, so the extra\nmessages are held under a lease they are not yet being worked on: a\nbatch of 50 with a 30-second visibility timeout gives the last message\n30 seconds minus the other 49's processing time. Batch for throughput\nagainst a durable broker, where one poll is a directory read; do not\nbatch to get parallelism, which is what Parallelism is.\n\nA message whose lease has run down to the margin [Consume] keeps\nbefore its turn comes is not started: it is handed back uncounted\nand leased again by a later poll — or, with AutoExtend, renewed\nbefore it starts.\n"
+        },
+        {
+          "name": "SettleTimeout",
+          "type": "time.Duration",
+          "doc": "SettleTimeout bounds each outcome a worker reports once ctx has\nended — an acknowledgement, a nack, a rejection or a release — and\neach lease renewal AutoExtend sends. Zero means\n[DefaultSettleTimeout]; negative is read as zero.\n\nEvery outcome is sent on the consumer's context WITHOUT its\ncancellation, so a stop landing between a handler's return and its\nacknowledgement does not abandon it (kitsunium/sdk#472) and a batch a\nstop interrupts is still handed back. That is what needs a bound: a\nmedium that stopped answering would otherwise hold the stop forever.\nIt runs on Clock, from the instant ctx ends — while the consumer\nruns an outcome is not timed, and nothing but the worker waits on\nit. An outcome the bound cut short is QueueBackendFailed, which a\nstopping consumer reads as its stop, not as a failure.\n\nIt also caps the margin a handler is stopped by before its lease\nends: a tenth of the lease, at most this.\n"
+        },
+        {
+          "name": "DrainTimeout",
+          "type": "time.Duration",
+          "doc": "DrainTimeout is how long the message a worker is handling when ctx\nends may still run before its handler's context is cancelled — River's\nSoftStopTimeout. Zero cancels it at once, which is what a stop always\ndid; negative is read as zero.\n\nA handler that finishes inside it is acknowledged; one the drain cut\nshort is handed back uncounted, through the broker's\n[corequeue.Releaser]. No new message is leased once ctx has ended,\nand the lease bound still applies: a drain never keeps a handler past\nthe margin before its lease ends. Measured on Clock. A caller's stop\nbudget — a lifecycle component's — must cover it plus SettleTimeout.\n"
+        },
+        {
+          "name": "AutoExtend",
+          "type": "bool",
+          "doc": "AutoExtend renews the lease of the message a handler is running, a\nthird of the lease after it was granted or last renewed, for as long\nas the handler runs — the heartbeat of SQS, JetStream's in-progress\nacknowledgement, Temporal's activity heartbeat. A message of a batch\nwhose lease is a third spent when its turn comes is renewed before\nits handler starts. Each renewal is as long as the lease the broker\nfirst granted, and is bounded by SettleTimeout.\n\nIt needs the broker's [corequeue.LeaseExtender]; without it, or when\nfalse, the lease is never renewed and the handler is stopped a margin\nbefore it ends. A renewal the broker refuses — the lease lapsed, the\nmedium failed — cancels the handler's context with that refusal as\nits cause: its work is now a duplicate in the making.\n\nA renewal replaces the receipt, and the engine acknowledges with the\nnewest one. So a handler that extends its own lease — parking its\nmessage, as the mail spool does — must leave AutoExtend false: the\nreceipt it holds is void after the first renewal.\n"
         },
         {
           "name": "HandlerIsIdempotent",
@@ -56616,7 +56656,7 @@
           "doc": "HandlerIsIdempotent asserts, IN CODE, that Handler is safe to run more\nthan once for the same message.\n\nIt must be true. Its zero value is false and is REFUSED\n([corequeue.ConsumerMisconfigured]), and that refusal is the domain's\none piece of deliberate ceremony.\n\nThe reason is that this queue delivers AT LEAST ONCE and cannot do\notherwise. A consumer that dies between finishing the work and\nacknowledging it has done the work and not said so, and the message\ncomes back — that is not a bug to be fixed, it is the only honest\nbehaviour available to a queue whose consumers can die. Exactly-once\ndelivery does not exist over a transport; what exists is at-least-once\nplus an idempotent consumer, and the second half is the caller's.\n\nThe SDK cannot check it, so it makes the caller assert it where a\nreviewer will see it. It is precisely\nresilience.HedgeConfig.Idempotent's instrument, for precisely its\nreason, and it has the same useful side effect:\n`grep -rn HandlerIsIdempotent` enumerates every place in a codebase\nwhere somebody promised this.\n"
         }
       ],
-      "doc": "ConsumerConfig configures [Consume]: what to run, how many of it, how often\nto look, and the one thing about the handler the SDK cannot check for\nitself.\n\nEvery field except Handler and HandlerIsIdempotent is CLAMPED, so a caller\nwith no opinion writes two fields and gets a correct consumer.\n",
+      "doc": "ConsumerConfig configures [Consume]: what to run, how many of it, how often\nto look, and the one thing about the handler the SDK cannot check for\nitself.\n\nEvery field except Handler and HandlerIsIdempotent is CLAMPED, so a caller\nwith no opinion writes two fields and gets a correct consumer. The zero of\neach field added since — DrainTimeout, AutoExtend — is what Consume did\nbefore it existed.\n",
       "file": "service/data/queue/consume_config.go",
       "layer": "service",
       "family": "data"
@@ -56630,6 +56670,19 @@
       "canonical": "time.Duration",
       "value": "100000000",
       "doc": "DefaultPollInterval is how long an idle worker waits before asking again,\nwhen [ConsumerConfig.PollInterval] is left at zero.\n\nIt is a CLAMP and not a refusal (ADR 0031): its zero has one reading — \"you\ndid not think about polling\" — and 100 ms is defensible for every queue,\nbecause it bounds idle latency at a tenth of a second while costing one\ndirectory read per worker per tenth of a second. A caller who cares picks\ntheir own.\n\nEvery broker in this package is a [corequeue.Waker], so for them it bounds\nonly what a wake cannot see — a publication made by ANOTHER process into a\ndurable queue — and a caller that has no such producer can raise it a\nhundredfold. It stays at 100 ms because a zero must keep meaning what it\nalways meant for a broker that cannot wake anyone.\n",
+      "file": "service/data/queue/consume_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/queue.DefaultSettleTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/data/queue",
+      "name": "DefaultSettleTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "5000000000",
+      "doc": "DefaultSettleTimeout bounds one acknowledgement, nack, rejection or release\n[Consume] sends once its context has ended, and one lease renewal, when\n[ConsumerConfig.SettleTimeout] is left at zero.\n\nIt is a CLAMP and not a refusal (ADR 0031): its zero has one reading — \"you\ndid not think about how long the medium may take to record an outcome\" —\nand five seconds is far above what a flush-free rename or one indexed\nstatement costs while still letting a stop end when the medium has stopped\nanswering. It is also the most a handler is stopped early by: the margin\nkept before a lease ends is a tenth of the lease, at most the\nSettleTimeout in force.\n",
       "file": "service/data/queue/consume_config.go",
       "layer": "service",
       "family": "data"

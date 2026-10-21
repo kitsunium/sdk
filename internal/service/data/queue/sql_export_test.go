@@ -22,7 +22,7 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 	s := renderSQLStatements(dialect, table)
 	fixed := map[string]string{
 		s.insert: "insert", s.probe: "probe", s.pick: "pick", s.next: "next",
-		s.ack: "ack", s.retry: "retry", s.bury: "bury", s.extend: "extend",
+		s.ack: "ack", s.retry: "retry", s.bury: "bury", s.extend: "extend", s.release: "release",
 		s.deadList: "deadList", s.replay: "replay", s.deleteDead: "deleteDead", s.putDead: "putDead",
 		s.liveList: "liveList", s.putLive: "putLive",
 	}

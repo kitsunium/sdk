@@ -181,6 +181,36 @@ func TestAnExtendedLeaseAndAnEmptyPayloadOnEveryEngine(t *testing.T) {
 	})
 }
 
+// TestAReleasedLeaseGivesItsDeliveryBackOnEveryEngine pins Release on a real
+// engine (kitsunium/sdk#474): one UPDATE that matches the receipt's count in
+// its WHERE and moves it back in its SET, so the message is receivable at once
+// as the delivery it was — never dead-lettered, even on its last attempt —
+// and the released receipt acknowledges nothing.
+func TestAReleasedLeaseGivesItsDeliveryBackOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		clk := clock.NewManualClock(queueEpoch)
+		policy := queuePolicy()
+		policy.MaxDeliveries = 1
+		fx := openQueue(t, e, queue.SQLConfig{Clock: clk, Policy: policy})
+		ctx := t.Context()
+		_, err := fx.broker.Publish(ctx, []byte("released"))
+		must(t, err)
+		for range 2 {
+			delivery := leaseOne(t, fx.broker)
+			if delivery.Deliveries != 1 {
+				t.Fatalf("Deliveries = %d, want 1 — a released lease gives its delivery back", delivery.Deliveries)
+			}
+			must(t, fx.broker.(queue.Releaser).Release(ctx, delivery.Lease.Receipt))
+			if ackErr := fx.broker.Ack(ctx, delivery.Lease.Receipt); !errors.Is(ackErr, queue.LeaseExpired) {
+				t.Fatalf("Ack(the released receipt) = %v, want LEASE_EXPIRED", ackErr)
+			}
+		}
+		must(t, fx.broker.Ack(ctx, leaseOne(t, fx.broker).Lease.Receipt))
+		leaseNone(t, fx.broker)
+	})
+}
+
 // TestAPublicationJoinsTheCallersTransactionOnEveryEngine is the reason the
 // SQL broker exists: published inside the caller's transaction, the message
 // exists if and only if that transaction commits.

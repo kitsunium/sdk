@@ -34,6 +34,7 @@ files:
       - (*sealedOutbox).Wake
       - (*sealedOutbox).Extend
       - (*sealedOutbox).Reject
+      - (*sealedOutbox).Release
       - (*sealedOutbox).DeadLetters
       - (*sealedOutbox).Messages
       - (*sealedOutbox).PutMessage
@@ -243,6 +244,8 @@ types:
         type: queue.DeadLetterReader
       - name: reject
         type: queue.Rejecter
+      - name: release
+        type: queue.Releaser
       - name: manager
         type: queue.DeadLetterManager
       - name: seal
@@ -289,6 +292,13 @@ types:
       - doc: Reject is the SQL broker's.
         name: Reject
         params: ctx context.Context, receipt queue.Receipt, cause error
+        recv: o *sealedOutbox
+        results: error
+      - doc: |-
+          Release is the SQL broker's: a mail the spool did not finish goes back
+          as it lies, its attempt not counted.
+        name: Release
+        params: ctx context.Context, receipt queue.Receipt
         recv: o *sealedOutbox
         results: error
       - doc: |-
@@ -371,6 +381,9 @@ vars:
         value: (*sealedOutbox)(nil)
       - name: _
         type: queue.Rejecter
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.Releaser
         value: (*sealedOutbox)(nil)
       - name: _
         type: queue.DeadLetterManager

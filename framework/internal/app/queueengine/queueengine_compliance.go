@@ -20,6 +20,7 @@ var (
 	_ queue.LeaseExtender     = (*sealedOutbox)(nil)
 	_ queue.DeadLetterReader  = (*sealedOutbox)(nil)
 	_ queue.Rejecter          = (*sealedOutbox)(nil)
+	_ queue.Releaser          = (*sealedOutbox)(nil)
 	_ queue.DeadLetterManager = (*sealedOutbox)(nil)
 	_ queue.MessageReader     = (*sealedOutbox)(nil)
 	_ queue.MessageWriter     = (*sealedOutbox)(nil)

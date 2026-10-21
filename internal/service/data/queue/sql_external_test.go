@@ -207,6 +207,13 @@ func TestSQLStatementsPerCall(t *testing.T) {
 				t.Fatalf("Ack() = %v", err)
 			}
 		})
+		publish(t, fx.broker, "m")
+		delivery = receiveOne(t, fx.broker)
+		expect("a Release", []string{"release"}, func() {
+			if err := fx.broker.(corequeue.Releaser).Release(t.Context(), delivery.Lease.Receipt); err != nil {
+				t.Fatalf("Release() = %v", err)
+			}
+		})
 		expect("a Publish inside the caller's transaction", []string{"BEGIN", "SAVEPOINT ktn_sp_1", "insert", "RELEASE SAVEPOINT ktn_sp_1", "COMMIT"},
 			func() {
 				if err := inTransaction(t, fx, func(ctx context.Context) error {

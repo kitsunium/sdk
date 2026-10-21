@@ -432,6 +432,13 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 			row.due, row.lease = visibleAt, nil
 			return true
 		}), nil
+	case "release":
+		visibleAt := args[0].(int64)
+		return ifHeld(work, args[1:], func(row *queueRow) bool {
+			row.due, row.lease = visibleAt, nil
+			row.count--
+			return true
+		}), nil
 	case "bury":
 		return ifHeld(work, args[4:], func(row *queueRow) bool {
 			buryRow(row, args[:4])
