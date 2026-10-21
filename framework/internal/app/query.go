@@ -56,6 +56,7 @@ func (s *Service) Query[Q, R any](name string, handler func(context.Context, Q) 
 	q.pipe = pipeline[Q, R]{handler: handler, policies: q.opts.policies}
 	q.body = bodyOf(handler)
 	s.add(q, true)
+	declarePolicies(s, &q.nodeBase, q.opts.policies)
 	if handler == nil {
 		s.problem(q.decl, q.id, "query.nil", "query", q.id)
 	}
@@ -160,9 +161,7 @@ func (q *Query[Q, R]) describe(a *App, out *model.Node) []model.Edge {
 	if q.pipe.check != nil {
 		info.Pipeline = append(info.Pipeline, validateMechanic())
 	}
-	for _, p := range q.opts.policies {
-		info.Pipeline = append(info.Pipeline, p.mech)
-	}
+	info.Pipeline = append(info.Pipeline, mechanicsOf(q.opts.policies)...)
 	info.Pipeline = append(info.Pipeline, q.mechanics()...)
 	if q.ruleAt != nil && a != nil {
 		info.Authorize = a.source(q.ruleAt)

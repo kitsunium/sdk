@@ -120,6 +120,7 @@ func (s *Service) Command[C, R any](name string, handler func(context.Context, C
 	c.pipe = pipeline[C, R]{handler: handler, policies: c.opts.policies}
 	c.body = bodyOf(handler)
 	s.add(c, true)
+	declarePolicies(s, &c.nodeBase, c.opts.policies)
 	if handler == nil {
 		s.problem(c.decl, c.id, "command.nil", "command", c.id)
 	}
@@ -366,10 +367,7 @@ func (c *Command[C, R]) drawn(a *App) []model.Mechanic {
 	if c.pipe.check != nil {
 		out = append(out, validateMechanic())
 	}
-	policies := make([]model.Mechanic, len(c.opts.policies))
-	for i, p := range c.opts.policies {
-		policies[i] = p.mech
-	}
+	policies := mechanicsOf(c.opts.policies)
 	if c.opts.queued {
 		return append(out, c.drawnQueued(a, policies)...)
 	}

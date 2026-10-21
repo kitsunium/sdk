@@ -39,18 +39,31 @@ func MaxBody(bytes int64) EndpointOption {
 }
 
 // RateLimit puts a token bucket in front of the handler: perSecond tokens a
-// second, up to burst at once. An empty bucket answers 429 at once. It is the
+// second, up to burst at once. An empty bucket answers 429 at once — with
+// Retry-After, the seconds the bucket needs to earn its next token —, or,
+// given [MaxWait], once the token due within it did not come. It is the
 // SDK's resilience rate limiter.
+//
+// The values are the defaults of the operation's settings
+// <service>-<kind>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
+// <PRODUCT>_<NAME> override; a rate that is not above zero or a burst below
+// one stops the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func RateLimit(perSecond float64, burst int) OperationOption {
+func RateLimit(perSecond float64, burst int, opts ...RateLimitOption) OperationOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
-	return iapp.RateLimit(perSecond, burst)
+	return iapp.RateLimit(perSecond, burst, opts...)
 }
 
-// Timeout cancels the handler's context after d and answers 504. It is the
-// SDK's resilience timeout.
+// Timeout cancels the handler's context after d and answers 504. A caller
+// that leaves first is no timeout: its request is recorded as 499, logged as
+// information, and nothing it could read is written. It is the SDK's
+// resilience timeout, on the app's clock.
+//
+// d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
+// which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
+// positive stops the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
@@ -60,11 +73,17 @@ func Timeout(d time.Duration) OperationOption {
 }
 
 // Bulkhead caps how many requests the handler serves at once; the overflow
-// answers 503. It is the SDK's resilience bulkhead.
+// answers 503 — at once, or, given [BulkheadQueue] and [MaxWait], once the
+// queue is full or the wait ran out. It is the SDK's resilience bulkhead.
+//
+// The values are the defaults of the operation's settings
+// <service>-<kind>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
+// config/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops
+// the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func Bulkhead(maxConcurrent int) OperationOption {
+func Bulkhead(maxConcurrent int, opts ...BulkheadOption) OperationOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
-	return iapp.Bulkhead(maxConcurrent)
+	return iapp.Bulkhead(maxConcurrent, opts...)
 }

@@ -6549,6 +6549,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: declarePolicies
+        kind: internal
       - id: s.problem
         kind: internal
       - id: c.pipe.ready
@@ -6580,6 +6582,8 @@ sequences:
         value: bodyOf(handler)
       - eval: s.add(c, true)
         to: s.add
+      - eval: declarePolicies(s, &c.nodeBase, c.opts.policies)
+        to: declarePolicies
       - opt:
           do:
             - eval: s.problem(c.decl, c.id, "command.nil", "command", c.id)
@@ -6915,6 +6919,8 @@ sequences:
         kind: self
       - id: c.authMode
         kind: internal
+      - id: mechanicsOf
+        kind: internal
     steps:
       - var:
           name: out
@@ -6934,14 +6940,8 @@ sequences:
               value: append(out, validateMechanic())
           when: c.pipe.check != nil
       - bind: policies
-        eval: make([]model.Mechanic, len(c.opts.policies))
-      - loop:
-          do:
-            - set: policies[i]
-              value: p.mech
-          key: i
-          range: c.opts.policies
-          value: p
+        eval: mechanicsOf(c.opts.policies)
+        to: mechanicsOf
       - opt:
           do:
             - return: append(out, c.drawnQueued(a, policies)...)
@@ -13689,47 +13689,38 @@ sequences:
     steps:
       - return: endpointOption(func(o *endpointOptions) { o.maxBody = bytes })
   - of: RateLimit
+    participants:
+      - id: caller
+        kind: actor
+      - id: RateLimit
+        kind: self
+      - id: policyOption
+        kind: internal
     steps:
-      - return: |-
-          callOption(func(o *callOptions) {
-          		o.policies = append(o.policies, policy{
-          			mech: model.Mechanic{
-          				Kind:    "ratelimit",
-          				Label:   fmt.Sprintf("%s/s burst %d", strconv.FormatFloat(perSecond, 'f', -1, 64), burst),
-          				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-          				Config:  map[string]string{"rate": strconv.FormatFloat(perSecond, 'f', -1, 64), "burst": strconv.Itoa(burst)},
-          			},
-          			runner: resilience.NewRateLimiter(resilience.RateLimiterConfig{Rate: perSecond, Burst: burst}),
-          		})
-          	})
+      - return: policyOption(func() policyGuard { return newRateLimitGuard(perSecond, burst, opts) })
+        to: policyOption
   - of: Timeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: Timeout
+        kind: self
+      - id: policyOption
+        kind: internal
     steps:
-      - return: |-
-          callOption(func(o *callOptions) {
-          		o.policies = append(o.policies, policy{
-          			mech: model.Mechanic{
-          				Kind:    "timeout",
-          				Label:   d.String(),
-          				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-          				Config:  map[string]string{"after": d.String()},
-          			},
-          			runner: resilience.NewTimeout(d),
-          		})
-          	})
+      - return: "policyOption(func() policyGuard { return &timeoutGuard{after: d} })"
+        to: policyOption
   - of: Bulkhead
+    participants:
+      - id: caller
+        kind: actor
+      - id: Bulkhead
+        kind: self
+      - id: policyOption
+        kind: internal
     steps:
-      - return: |-
-          callOption(func(o *callOptions) {
-          		o.policies = append(o.policies, policy{
-          			mech: model.Mechanic{
-          				Kind:    "bulkhead",
-          				Label:   fmt.Sprintf("%d at once", maxConcurrent),
-          				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-          				Config:  map[string]string{"max": strconv.Itoa(maxConcurrent)},
-          			},
-          			runner: resilience.NewBulkhead(maxConcurrent),
-          		})
-          	})
+      - return: policyOption(func() policyGuard { return newBulkheadGuard(maxConcurrent, opts) })
+        to: policyOption
   - of: parseRoute
     participants:
       - id: caller
@@ -13784,6 +13775,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: declarePolicies
+        kind: internal
       - id: s.problemSaid
         kind: internal
       - id: s.problem
@@ -13829,6 +13822,8 @@ sequences:
         value: method, path
       - eval: s.add(e, e.opts.name != "" || short != "")
         to: s.add
+      - eval: declarePolicies(s, &e.nodeBase, e.opts.policies)
+        to: declarePolicies
       - opt:
           do:
             - eval: s.problemSaid(decl, e.id, problem)
@@ -13887,6 +13882,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: declarePolicies
+        kind: internal
       - id: s.problem
         kind: internal
       - id: e.pipe.ready
@@ -13930,6 +13927,8 @@ sequences:
         value: firstNonEmpty(e.opts.name, short, portName)
       - eval: s.add(e, e.opts.name != "" || short != "")
         to: s.add
+      - eval: declarePolicies(s, &e.nodeBase, e.opts.policies)
+        to: declarePolicies
       - opt:
           do:
             - eval: s.problem(decl, e.id, "implement.nil", "service", s.name)
@@ -14110,6 +14109,7 @@ sequences:
           		ctx, sp := e.requestSpan(a, w, r, name)
           		ctx, rs := withResponseState(ctx, a, r)
           		ctx, out := e.handle(ctx, a, w, r, sp)
+          		out.err = callerLeft(ctx, out.err)
           		// Cookies go out before the status line, errors included.
           		rs.write(ctx, w, a)
           		sp.attr("http.status", strconv.Itoa(e.answer(ctx, a, w, out)))
@@ -14238,6 +14238,8 @@ sequences:
         kind: internal
       - id: logger
         kind: package
+      - id: retryAfter
+        kind: internal
       - id: writeJSON
         kind: internal
       - id: w.WriteHeader
@@ -14255,11 +14257,18 @@ sequences:
             - bind: status, body
               eval: describe(err)
               to: describe
-            - opt:
-                do:
-                  - eval: logger.Error(ctx, a.log, "request failed", logger.Int("status", status), logger.String("error", err.Error()))
-                    to: logger
-                when: status >= http.StatusInternalServerError
+            - switch:
+                cases:
+                  - case: status >= http.StatusInternalServerError
+                    do:
+                      - eval: logger.Error(ctx, a.log, "request failed", logger.Int("status", status), logger.String("error", err.Error()))
+                        to: logger
+                  - case: status == statusCallerLeft
+                    do:
+                      - eval: logger.Info(context.WithoutCancel(ctx), a.log, "the caller left before the answer", logger.Int("status", status))
+                        to: logger
+            - eval: retryAfter(h, status, err)
+              to: retryAfter
             - return: "writeJSON(w, status, wireError{Error: body})"
               to: writeJSON
           when: err != nil
@@ -14271,6 +14280,55 @@ sequences:
           when: noBody
       - return: writeJSON(w, http.StatusOK, resp)
         to: writeJSON
+  - of: callerLeft
+    participants:
+      - id: caller
+        kind: actor
+      - id: callerLeft
+        kind: self
+      - id: NewError(statusCallerLeft, WireCanceled, "the caller left before the answer").Wrap
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          when: err == nil || ctx.Err() == nil || !errors.Is(err, context.Canceled)
+      - return: NewError(statusCallerLeft, WireCanceled, "the caller left before the answer").Wrap(err)
+        to: NewError(statusCallerLeft, WireCanceled, "the caller left before the answer").Wrap
+  - of: retryAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: retryAfter
+        kind: self
+      - id: resilience
+        kind: package
+      - id: h.Set
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable
+      - opt:
+          do:
+            - eval: h.Set("Retry-After", strconv.FormatInt(ceilSeconds(d), 10))
+              to: h.Set
+          init:
+            bind: d, ok
+            eval: resilience.RetryAfter(err)
+            to: resilience
+          when: ok
+  - of: ceilSeconds
+    steps:
+      - bind: s
+        eval: int64(d / time.Second)
+      - opt:
+          do:
+            - op: ++
+              set: s
+          when: d%time.Second > 0
+      - return: s
   - of: (*App).replyError
     participants:
       - id: caller
@@ -14436,14 +14494,7 @@ sequences:
             - set: out
               value: append(out, validateMechanic())
           when: e.pipe.check != nil
-      - loop:
-          do:
-            - set: out
-              value: append(out, p.mech)
-          key: _
-          range: e.opts.policies
-          value: p
-      - return: out
+      - return: append(out, mechanicsOf(e.opts.policies)...)
   - of: humanBytes
     steps:
       - switch:
@@ -14710,6 +14761,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: declarePolicies
+        kind: internal
       - id: s.problemSaid
         kind: internal
       - id: s.problem
@@ -14750,6 +14803,8 @@ sequences:
         value: method, path
       - eval: s.add(e, true)
         to: s.add
+      - eval: declarePolicies(s, &e.nodeBase, e.opts.policies)
+        to: declarePolicies
       - opt:
           do:
             - eval: s.problemSaid(decl, e.id, problem)
@@ -26384,8 +26439,8 @@ sequences:
         kind: self
       - id: p.call
         kind: internal
-      - id: runner.Run
-        kind: value
+      - id: pol.run
+        kind: internal
     steps:
       - bind: handle
         eval:
@@ -26416,16 +26471,16 @@ sequences:
               - return: kind(ctx, req, handle)
       - loop:
           do:
-            - bind: runner, next
-              eval: pol.runner, op
+            - bind: next
+              eval: op
             - set: op
               value:
                 closure:
                   params: ctx context.Context
                   results: error
                   steps:
-                    - return: runner.Run(ctx, next)
-                      to: runner.Run
+                    - return: pol.run(ctx, a, next)
+                      to: pol.run
           key: _
           range: slices.Backward(p.policies)
           value: pol
@@ -27364,6 +27419,597 @@ sequences:
           when: n == nil || n.Kind != model.KindEndpoint || n.Endpoint == nil
       - return: "!slices.ContainsFunc(n.Endpoint.Pipeline, func(m model.Mechanic) bool { return m.Kind == \"ratelimit\" })"
         to: slices
+  - of: (*policy).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*policy).run
+        kind: self
+      - id: p.runnerFor(a).Run
+        kind: value
+    steps:
+      - return: p.runnerFor(a).Run(ctx, op)
+        to: p.runnerFor(a).Run
+  - of: (*policy).runnerFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*policy).runnerFor
+        kind: self
+      - id: startOf
+        kind: internal
+      - id: p.built.Load
+        kind: value
+    steps:
+      - bind: values, clk
+        eval: startOf(a)
+        to: startOf
+      - loop:
+          do:
+            - bind: b
+              eval: p.built.Load()
+              to: p.built.Load
+            - opt:
+                do:
+                  - return: b.runner
+                when: b != nil && b.values == values
+            - bind: next
+              eval: "&builtRunner{values: values, runner: p.guard.runner(clk)}"
+            - opt:
+                do:
+                  - return: next.runner
+                when: p.built.CompareAndSwap(b, next)
+          forever: true
+  - of: startOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: startOf
+        kind: self
+      - id: a.settingValues.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, clock.System
+          when: a == nil
+      - bind: clk
+        eval: a.clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: a.settingValues.Load(), clk
+        to: a.settingValues.Load
+  - of: declarePolicies
+    participants:
+      - id: caller
+        kind: actor
+      - id: declarePolicies
+        kind: self
+      - id: p.guard.declare
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: p.guard.declare(svc, n)
+              to: p.guard.declare
+          key: _
+          range: policies
+          value: p
+  - of: mechanicsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: mechanicsOf
+        kind: self
+      - id: p.guard.mechanic
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]model.Mechanic, len(policies))
+      - loop:
+          do:
+            - set: out[i]
+              to: p.guard.mechanic
+              value: p.guard.mechanic()
+          key: i
+          range: policies
+          value: p
+      - return: out
+  - of: policyOption
+    steps:
+      - return: |-
+          callOption(func(o *callOptions) {
+          		o.policies = append(o.policies, &policy{guard: guard()})
+          	})
+  - of: waitOption.rateLimitConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: waitOption.rateLimitConfigure
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - set: o.wait
+        to: time
+        value: time.Duration(w)
+  - of: waitOption.bulkheadConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: waitOption.bulkheadConfigure
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - set: o.wait
+        to: time
+        value: time.Duration(w)
+  - of: bulkheadOption.bulkheadConfigure
+    steps:
+      - eval: f(o)
+  - of: MaxWait
+    steps:
+      - return: waitOption(d)
+  - of: BulkheadQueue
+    steps:
+      - return: bulkheadOption(func(o *bulkheadGuard) { o.queue = n })
+  - of: newRateLimitGuard
+    participants:
+      - id: caller
+        kind: actor
+      - id: newRateLimitGuard
+        kind: self
+      - id: o.rateLimitConfigure
+        kind: internal
+    steps:
+      - bind: g
+        eval: "&rateLimitGuard{rate: perSecond, burst: burst}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: o.rateLimitConfigure(g)
+                    to: o.rateLimitConfigure
+                when: o != nil
+          key: _
+          range: opts
+          value: o
+      - return: g
+  - of: (*rateLimitGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rateLimitGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.rateFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRate, g.rate, checkRate())
+      - set: g.burstFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBurst, g.burst, checkAtLeastOne())
+      - set: g.waitFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRateWait, g.wait, checkWait())
+  - of: (*rateLimitGuard).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rateLimitGuard).mechanic
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: knobValue
+        kind: internal
+      - id: wait.String
+        kind: value
+    steps:
+      - bind: rate, burst
+        eval: formatRate(knobValue(g.rateFor, g.rate)), knobValue(g.burstFor, g.burst)
+      - bind: config
+        eval: "map[string]string{\"rate\": rate, \"burst\": strconv.Itoa(burst)}"
+      - bind: label
+        eval: fmt.Sprintf("%s/s burst %d", rate, burst)
+        to: fmt
+      - opt:
+          do:
+            - set: config["maxWait"]
+              to: wait.String
+              value: wait.String()
+            - op: +=
+              set: label
+              value: "\" wait \" + wait.String()"
+          init:
+            bind: wait
+            eval: knobValue(g.waitFor, g.wait)
+            to: knobValue
+          when: wait > 0
+      - return: "model.Mechanic{Kind: \"ratelimit\", Label: label, Package: resiliencePackage, Config: config}"
+  - of: (*rateLimitGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rateLimitGuard).runner
+        kind: self
+      - id: resilience
+        kind: package
+    steps:
+      - return: |-
+          resilience.NewRateLimiter(resilience.RateLimiterConfig{
+          		Rate: knobValue(g.rateFor, g.rate), Burst: knobValue(g.burstFor, g.burst),
+          		MaxWait: knobValue(g.waitFor, g.wait), Clock: clk,
+          	})
+        to: resilience
+  - of: (*clientLimitGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientLimitGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.rateFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobClientRate, g.rate, checkRate())
+      - set: g.burstFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobClientBurst, g.burst, checkAtLeastOne())
+  - of: (*clientLimitGuard).mechanic
+    steps:
+      - bind: rate, burst
+        eval: formatRate(knobValue(g.rateFor, g.rate)), knobValue(g.burstFor, g.burst)
+      - return: |-
+          model.Mechanic{
+          		Kind: "ratelimit", Label: fmt.Sprintf("%s/s burst %d per client", rate, burst), Package: resiliencePackage,
+          		Config: map[string]string{"rate": rate, "burst": strconv.Itoa(burst), "per": "client"},
+          	}
+  - of: (*clientLimitGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientLimitGuard).runner
+        kind: self
+      - id: newClientLimiter
+        kind: internal
+    steps:
+      - return: newClientLimiter(knobValue(g.rateFor, g.rate), knobValue(g.burstFor, g.burst), maxClientBuckets, clientBucketIdle, clk)
+        to: newClientLimiter
+  - of: (*timeoutGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*timeoutGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.afterFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobTimeout, g.after, checkPositive())
+  - of: (*timeoutGuard).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*timeoutGuard).mechanic
+        kind: self
+      - id: knobValue
+        kind: internal
+    steps:
+      - bind: after
+        eval: knobValue(g.afterFor, g.after)
+        to: knobValue
+      - return: "model.Mechanic{Kind: \"timeout\", Label: after.String(), Package: resiliencePackage, Config: map[string]string{\"after\": after.String()}}"
+  - of: (*timeoutGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*timeoutGuard).runner
+        kind: self
+      - id: resilience
+        kind: package
+    steps:
+      - return: "resilience.NewTimeoutWith(resilience.TimeoutConfig{Duration: knobValue(g.afterFor, g.after), Clock: clk})"
+        to: resilience
+  - of: newBulkheadGuard
+    participants:
+      - id: caller
+        kind: actor
+      - id: newBulkheadGuard
+        kind: self
+      - id: o.bulkheadConfigure
+        kind: internal
+    steps:
+      - bind: g
+        eval: "&bulkheadGuard{limit: maxConcurrent}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: o.bulkheadConfigure(g)
+                    to: o.bulkheadConfigure
+                when: o != nil
+          key: _
+          range: opts
+          value: o
+      - return: g
+  - of: (*bulkheadGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bulkheadGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.limitFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBulkhead, g.limit, checkAtLeastOne())
+      - set: g.queueFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBulkheadQueue, g.queue, checkNotNegative())
+      - set: g.waitFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBulkheadWait, g.wait, checkWait())
+  - of: (*bulkheadGuard).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bulkheadGuard).mechanic
+        kind: self
+      - id: knobValue
+        kind: internal
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: limit
+        eval: knobValue(g.limitFor, g.limit)
+        to: knobValue
+      - bind: config
+        eval: "map[string]string{\"max\": strconv.Itoa(limit)}"
+      - bind: label
+        eval: fmt.Sprintf("%d at once", limit)
+        to: fmt
+      - bind: queue, wait
+        eval: knobValue(g.queueFor, g.queue), knobValue(g.waitFor, g.wait)
+      - opt:
+          do:
+            - set: config["queue"], config["maxWait"]
+              value: strconv.Itoa(queue), wait.String()
+            - op: +=
+              set: label
+              to: fmt
+              value: fmt.Sprintf(", %d waiting %s", queue, wait)
+          when: queue > 0 && wait > 0
+      - return: "model.Mechanic{Kind: \"bulkhead\", Label: label, Package: resiliencePackage, Config: config}"
+  - of: (*bulkheadGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bulkheadGuard).runner
+        kind: self
+      - id: resilience
+        kind: package
+    steps:
+      - return: |-
+          resilience.NewBulkheadWait(resilience.BulkheadWaitConfig{
+          		Max: knobValue(g.limitFor, g.limit), Queue: knobValue(g.queueFor, g.queue),
+          		MaxWait: knobValue(g.waitFor, g.wait), Clock: clk,
+          	})
+        to: resilience
+  - of: knobValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: knobValue
+        kind: self
+      - id: st.Get
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: st == nil
+      - return: st.Get()
+        to: st.Get
+  - of: formatRate
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatRate
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - return: strconv.FormatFloat(rate, 'f', -1, 64)
+        to: strconv
+  - of: declarePolicySetting
+    participants:
+      - id: caller
+        kind: actor
+      - id: declarePolicySetting
+        kind: self
+      - id: policySettingName
+        kind: internal
+      - id: svc.warn
+        kind: internal
+      - id: NewSettingService
+        kind: internal
+    steps:
+      - bind: name
+        eval: policySettingName(svc.name, string(n.kind), n.name, knob)
+        to: policySettingName
+      - opt:
+          do:
+            - eval: svc.warn(n.decl, n.id, "policy.setting-name", "node", n.id, "setting", name, "max", secret.MaxNameLen)
+              to: svc.warn
+            - return: nil
+          when: secret.ValidateName(name) != nil
+      - lock:
+          mutex: svc.mu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: svc.diags
+                    value: |-
+                      append(svc.diags, diagnostic{
+                      				severity: "error", node: n.id, at: n.decl,
+                      				message: say("policy.setting-twice", "node", n.id, "setting", name),
+                      			})
+                  - return: nil
+                when: d.base().name == name
+          key: _
+          range: svc.settings
+          value: d
+      - bind: st
+        eval: NewSettingService(def)
+        to: NewSettingService
+      - set: st.svc, st.name, st.decl, st.check
+        value: svc, name, n.decl, check
+      - set: st.id
+        value: svc.name + "/setting/" + name
+      - set: svc.settings
+        value: append(svc.settings, st)
+      - return: st
+  - of: policySettingName
+    steps:
+      - return: settingWords(service) + "-" + kind + "-" + settingWords(operation) + "-" + knob
+  - of: settingWords
+    participants:
+      - id: caller
+        kind: actor
+      - id: settingWords
+        kind: self
+      - id: wordRune
+        kind: internal
+      - id: b.WriteByte
+        kind: value
+      - id: b.WriteRune
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - bind: dash, prevLower
+        eval: false, false
+      - loop:
+          do:
+            - bind: lower, keep, starts
+              eval: wordRune(r, prevLower)
+              to: wordRune
+            - opt:
+                do:
+                  - set: dash, prevLower
+                    value: true, false
+                  - continue: true
+                when: "!keep"
+            - opt:
+                do:
+                  - eval: b.WriteByte('-')
+                    to: b.WriteByte
+                when: (dash || starts) && b.Len() > 0
+            - set: dash, prevLower
+              value: false, lower == r
+            - eval: b.WriteRune(lower)
+              to: b.WriteRune
+          key: _
+          range: name
+          value: r
+      - return: b.String()
+        to: b.String
+  - of: wordRune
+    steps:
+      - switch:
+          cases:
+            - case: r >= 'A' && r <= 'Z'
+              do:
+                - return: r + ('a' - 'A'), true, prevLower
+            - case: isLowerOrDigit(r)
+              do:
+                - return: r, true, false
+      - return: r, false, false
+  - of: isLowerOrDigit
+    steps:
+      - return: r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+  - of: checkRate
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkRate
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) && f > 0 }, func() phrase { return say("policy.rate") })
+        to: judged
+  - of: checkAtLeastOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkAtLeastOne
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(n int) bool { return n >= 1 }, func() phrase { return say("policy.at-least-one") })
+        to: judged
+  - of: checkNotNegative
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkNotNegative
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(n int) bool { return n >= 0 }, func() phrase { return say("policy.not-negative") })
+        to: judged
+  - of: checkPositive
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkPositive
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(d time.Duration) bool { return d > 0 }, func() phrase { return say("policy.positive") })
+        to: judged
+  - of: checkWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkWait
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(d time.Duration) bool { return d >= 0 }, func() phrase { return say("policy.wait") })
+        to: judged
+  - of: judged
+    steps:
+      - return:
+          closure:
+            params: v any
+            results: phrase
+            steps:
+              - opt:
+                  do:
+                    - return: refused()
+                  init:
+                    bind: t, isT
+                    eval: v.(T)
+                  when: isT && !ok(t)
+              - return: phrase{}
   - of: portOption.portConfigure
     steps:
       - eval: f(p)
@@ -31334,6 +31980,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: declarePolicies
+        kind: internal
       - id: s.problem
         kind: internal
       - id: q.pipe.ready
@@ -31360,6 +32008,8 @@ sequences:
         value: bodyOf(handler)
       - eval: s.add(q, true)
         to: s.add
+      - eval: declarePolicies(s, &q.nodeBase, q.opts.policies)
+        to: declarePolicies
       - opt:
           do:
             - eval: s.problem(q.decl, q.id, "query.nil", "query", q.id)
@@ -31507,13 +32157,8 @@ sequences:
             - set: info.Pipeline
               value: append(info.Pipeline, validateMechanic())
           when: q.pipe.check != nil
-      - loop:
-          do:
-            - set: info.Pipeline
-              value: append(info.Pipeline, p.mech)
-          key: _
-          range: q.opts.policies
-          value: p
+      - set: info.Pipeline
+        value: append(info.Pipeline, mechanicsOf(q.opts.policies)...)
       - set: info.Pipeline
         value: append(info.Pipeline, q.mechanics()...)
       - opt:
@@ -32200,24 +32845,11 @@ sequences:
         kind: actor
       - id: RateLimitPerClient
         kind: self
-      - id: strconv
-        kind: stdlib
+      - id: policyOption
+        kind: internal
     steps:
-      - bind: rate
-        eval: strconv.FormatFloat(perSecond, 'f', -1, 64)
-        to: strconv
-      - return: |-
-          callOption(func(o *callOptions) {
-          		o.policies = append(o.policies, policy{
-          			mech: model.Mechanic{
-          				Kind:    "ratelimit",
-          				Label:   fmt.Sprintf("%s/s burst %d per client", rate, burst),
-          				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-          				Config:  map[string]string{"rate": rate, "burst": strconv.Itoa(burst), "per": "client"},
-          			},
-          			runner: newClientLimiter(perSecond, burst, maxClientBuckets, clientBucketIdle, nil),
-          		})
-          	})
+      - return: "policyOption(func() policyGuard { return &clientLimitGuard{rate: perSecond, burst: burst} })"
+        to: policyOption
   - of: newClientLimiter
     participants:
       - id: caller

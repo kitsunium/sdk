@@ -42,7 +42,7 @@ type Operation[Req, Resp any] interface {
 type pipeline[Req, Resp any] struct {
 	handler  func(context.Context, Req) (Resp, error)
 	check    validation.Constraint[Req]
-	policies []policy
+	policies []*policy
 	// noBody is set when the response is Empty: there is nothing to answer.
 	noBody bool
 }
@@ -130,8 +130,8 @@ func (p *pipeline[Req, Resp]) around(ctx context.Context, a *App, n node, req Re
 		return kind(ctx, req, handle)
 	}
 	for _, pol := range slices.Backward(p.policies) {
-		runner, next := pol.runner, op
-		op = func(ctx context.Context) error { return runner.Run(ctx, next) }
+		next := op
+		op = func(ctx context.Context) error { return pol.run(ctx, a, next) }
 	}
 	err = op(ctx)
 	return resp, err

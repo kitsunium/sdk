@@ -2,11 +2,8 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 	"time"
 
-	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/resilience"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
@@ -23,28 +20,22 @@ const (
 // own: perSecond tokens a second, up to burst at once. A client is the
 // authenticated user when there is one, and the client's address otherwise
 // ([ClientIP]); in-process calls through [EndpointService.Call] share one bucket. One
-// client emptying its bucket is answered 429; the others are not — which is
-// what a sign-in endpoint needs, where one shared bucket would let a single
-// client lock everybody out.
+// client emptying its bucket is answered 429, with Retry-After; the others
+// are not — which is what a sign-in endpoint needs, where one shared bucket
+// would let a single client lock everybody out.
 //
 // Buckets unused for ten minutes are forgotten, and at most 10 000 are kept:
 // the least recently used goes first. It is the SDK's keyed rate limiter.
 //
+// The values are the defaults of the operation's settings
+// <service>-<kind>-<operation>-client-rate and -client-burst, which config/<env>.*
+// and <PRODUCT>_<NAME> override; a rate that is not above zero or a burst
+// below one stops the start.
+//
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
 func RateLimitPerClient(perSecond float64, burst int) OperationOption {
-	rate := strconv.FormatFloat(perSecond, 'f', -1, 64)
-	return callOption(func(o *callOptions) {
-		o.policies = append(o.policies, policy{
-			mech: model.Mechanic{
-				Kind:    "ratelimit",
-				Label:   fmt.Sprintf("%s/s burst %d per client", rate, burst),
-				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-				Config:  map[string]string{"rate": rate, "burst": strconv.Itoa(burst), "per": "client"},
-			},
-			runner: newClientLimiter(perSecond, burst, maxClientBuckets, clientBucketIdle, nil),
-		})
-	})
+	return policyOption(func() policyGuard { return &clientLimitGuard{rate: perSecond, burst: burst} })
 }
 
 // newClientLimiter is a bucket per client, at most keys of them, each

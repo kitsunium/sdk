@@ -293,7 +293,8 @@ Package app — the ports the workflow engine reaches a store through.
 - [func AuthData\[D any\]\(ctx context.Context\) \(D, bool\)](<#AuthData>)
 - [func AuthOptional\(\) OperationOption](<#AuthOptional>)
 - [func Bind\[Req, Resp any\]\(port \*PortService\[Req, Resp\], op Operation\[Req, Resp\]\) interface{AppConfigurer; MountConfigurer}](<#Bind>)
-- [func Bulkhead\(maxConcurrent int\) OperationOption](<#Bulkhead>)
+- [func Bulkhead\(maxConcurrent int, opts ...BulkheadConfigurer\) OperationOption](<#Bulkhead>)
+- [func BulkheadQueue\(n int\) BulkheadConfigurer](<#BulkheadQueue>)
 - [func Catalog\(\) \[\]model.Mechanic](<#Catalog>)
 - [func ClearCookie\(ctx context.Context, name string\)](<#ClearCookie>)
 - [func ClientIP\(ctx context.Context\) string](<#ClientIP>)
@@ -336,6 +337,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func MailMaxAge\(d time.Duration\) MailerConfigurer](<#MailMaxAge>)
 - [func MaxBody\(bytes int64\) EndpointConfigurer](<#MaxBody>)
 - [func MaxDeliveries\(n int\) DeliveryOption](<#MaxDeliveries>)
+- [func MaxWait\(d time.Duration\) WaitConfigurer](<#MaxWait>)
 - [func Migrations\(m ...MigrationValue\) interface{DatabaseConfigurer; ModuleConfigurer}](<#Migrations>)
 - [func MinLength\(n int\) PasswordConfigurer](<#MinLength>)
 - [func Mount\(m \*Module, opts ...MountConfigurer\) AppConfigurer](<#Mount>)
@@ -375,7 +377,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Profile\(p string\) AppConfigurer](<#Profile>)
 - [func Purpose\(text string\) StoreConfigurer](<#Purpose>)
 - [func Queued\(\) CommandConfigurer](<#Queued>)
-- [func RateLimit\(perSecond float64, burst int\) OperationOption](<#RateLimit>)
+- [func RateLimit\(perSecond float64, burst int, opts ...RateLimitConfigurer\) OperationOption](<#RateLimit>)
 - [func RateLimitPerClient\(perSecond float64, burst int\) OperationOption](<#RateLimitPerClient>)
 - [func ReadModel\(\) StoreConfigurer](<#ReadModel>)
 - [func RecordsOf\(ctx context.Context, store string\) \(RecordsService, error\)](<#RecordsOf>)
@@ -434,6 +436,7 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*Binary\) Role\(name string, app \*App, args ...string\) \*Binary](<#Binary.Role>)
   - [func \(\*Binary\) Talks\(from string, to string, contractName string\) \*Binary](<#Binary.Talks>)
 - [type BounceEvent](<#BounceEvent>)
+- [type BulkheadConfigurer](<#BulkheadConfigurer>)
 - [type CLI](<#CLI>)
 - [type CLIFunc](<#CLIFunc>)
 - [type ChangeEvent](<#ChangeEvent>)
@@ -518,6 +521,7 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*Query\) Authorize\(fn func\(context.Context, Q\) error\) \*Query\[Q, R\]](<#Query.Authorize>)
   - [func \(\*Query\) Expose\(route string, opts ...ExposeConfigurer\) \*Query\[Q, R\]](<#Query.Expose>)
 - [type QueryConfigurer](<#QueryConfigurer>)
+- [type RateLimitConfigurer](<#RateLimitConfigurer>)
 - [type RecordsService](<#RecordsService>)
   - [func \(RecordsService\) Delete\(ctx context.Context, key string, reason string\) error](<#RecordsService.Delete>)
   - [func \(RecordsService\) EraseFields\(ctx context.Context, key string, reason string, paths ...string\) error](<#RecordsService.EraseFields>)
@@ -595,6 +599,7 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*TopicService\) Publish\(ctx context.Context, msg T\) error](<#TopicService.Publish>)
 - [type UID](<#UID>)
 - [type ViolationMessage](<#ViolationMessage>)
+- [type WaitConfigurer](<#WaitConfigurer>)
 - [type WakeEvent](<#WakeEvent>)
 - [type Watch](<#Watch>)
 - [type WorkflowService](<#WorkflowService>)
@@ -1704,10 +1709,23 @@ a := app.NewApp("shop", posts.Service).With(app.Mount(moderation.Module, app.Bin
 ## func [Bulkhead](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/endpoint.go>)
 
 ```go
-func Bulkhead(maxConcurrent int) OperationOption
+func Bulkhead(maxConcurrent int, opts ...BulkheadConfigurer) OperationOption
 ```
 
-Bulkhead caps how many requests the handler serves at once; the overflow answers 503. It is the SDK's resilience bulkhead.
+Bulkhead caps how many requests the handler serves at once; the overflow answers 503 — at once, or, given [BulkheadQueue](#BulkheadQueue) and [MaxWait](#MaxWait), once the queue is full or the wait ran out. It is the SDK's resilience bulkhead.
+
+The values are the defaults of the operation's settings \<service>-\<kind>-\<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a bulkhead below one stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="BulkheadQueue"></a>
+## func [BulkheadQueue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/policy.go>)
+
+```go
+func BulkheadQueue(n int) BulkheadConfigurer
+```
+
+BulkheadQueue lets up to n calls beyond those a [Bulkhead](#Bulkhead) runs wait for a slot, each for its [MaxWait](#MaxWait): without a wait, or with n at 0, the overflow is refused at once, and a negative n stops the start. A call that finds the queue full answers 503. It is the default of the operation's setting \<service>-\<kind>-\<operation>-bulkhead-queue, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2138,6 +2156,17 @@ MaxDeliveries is how many attempts a message gets before it is dead-lettered —
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="MaxWait"></a>
+## func [MaxWait](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/policy.go>)
+
+```go
+func MaxWait(d time.Duration) WaitConfigurer
+```
+
+MaxWait lets a call wait, at most d on the app's clock, instead of being refused at once: given to [RateLimit](#RateLimit), for a token due within d — the calls after it queue behind it —; given to [Bulkhead](#Bulkhead), for a slot to free, in the queue [BulkheadQueue](#BulkheadQueue) sizes. A call still refused answers 429 or 503 as before; a caller that leaves while it waits leaves the queue. Its default is no wait, and a negative one stops the start. It is the default of the operation's setting \<service>-\<kind>-\<operation>-rate-wait or -bulkhead-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its methods are unexported — so a caller only hands it to the declaration it configures.
+
 <a name="Migrations"></a>
 ## func [Migrations](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database.go>)
 
@@ -2531,10 +2560,12 @@ Delivery is at least once: Queued is the product's promise that the handler tole
 ## func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/endpoint.go>)
 
 ```go
-func RateLimit(perSecond float64, burst int) OperationOption
+func RateLimit(perSecond float64, burst int, opts ...RateLimitConfigurer) OperationOption
 ```
 
-RateLimit puts a token bucket in front of the handler: perSecond tokens a second, up to burst at once. An empty bucket answers 429 at once. It is the SDK's resilience rate limiter.
+RateLimit puts a token bucket in front of the handler: perSecond tokens a second, up to burst at once. An empty bucket answers 429 at once — with Retry-After, the seconds the bucket needs to earn its next token —, or, given [MaxWait](#MaxWait), once the token due within it did not come. It is the SDK's resilience rate limiter.
+
+The values are the defaults of the operation's settings \<service>-\<kind>-\<operation>-rate, -burst and -rate-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a rate that is not above zero or a burst below one stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2545,9 +2576,11 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func RateLimitPerClient(perSecond float64, burst int) OperationOption
 ```
 
-RateLimitPerClient gives every client of an endpoint a token bucket of its own: perSecond tokens a second, up to burst at once. A client is the authenticated user when there is one, and the client's address otherwise ([ClientIP](#ClientIP)); in-process calls through [EndpointService.Call](#EndpointService.Call) share one bucket. One client emptying its bucket is answered 429; the others are not — which is what a sign-in endpoint needs, where one shared bucket would let a single client lock everybody out.
+RateLimitPerClient gives every client of an endpoint a token bucket of its own: perSecond tokens a second, up to burst at once. A client is the authenticated user when there is one, and the client's address otherwise ([ClientIP](#ClientIP)); in-process calls through [EndpointService.Call](#EndpointService.Call) share one bucket. One client emptying its bucket is answered 429, with Retry-After; the others are not — which is what a sign-in endpoint needs, where one shared bucket would let a single client lock everybody out.
 
 Buckets unused for ten minutes are forgotten, and at most 10 000 are kept: the least recently used goes first. It is the SDK's keyed rate limiter.
+
+The values are the defaults of the operation's settings \<service>-\<kind>-\<operation>-client-rate and -client-burst, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a rate that is not above zero or a burst below one stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2809,7 +2842,9 @@ Telemetry exports the app's telemetry on the private socket at path — absolute
 func Timeout(d time.Duration) OperationOption
 ```
 
-Timeout cancels the handler's context after d and answers 504. It is the SDK's resilience timeout.
+Timeout cancels the handler's context after d and answers 504. A caller that leaves first is no timeout: its request is recorded as 499, logged as information, and nothing it could read is written. It is the SDK's resilience timeout, on the app's clock.
+
+d is the default of the operation's setting \<service>-\<kind>-\<operation>-timeout, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; one that is not positive stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -3211,6 +3246,17 @@ type BounceEvent struct {
 	GivenUp  string
 	// Attempts is how many deliveries it got.
 	Attempts int
+}
+```
+
+<a name="BulkheadConfigurer"></a>
+## type [BulkheadConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/policy_interface.go>)
+
+BulkheadConfigurer configures a [Bulkhead](#Bulkhead).
+
+```go
+type BulkheadConfigurer interface {
+	bulkheadConfigure(o *bulkheadGuard)
 }
 ```
 
@@ -4190,6 +4236,17 @@ type QueryConfigurer interface {
 }
 ```
 
+<a name="RateLimitConfigurer"></a>
+## type [RateLimitConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/policy_interface.go>)
+
+RateLimitConfigurer configures a [RateLimit](#RateLimit).
+
+```go
+type RateLimitConfigurer interface {
+	rateLimitConfigure(o *rateLimitGuard)
+}
+```
+
 <a name="RecordsService"></a>
 ## type [RecordsService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/records.go>)
 
@@ -4979,6 +5036,18 @@ type ViolationMessage struct {
 	Rule    string `json:"rule"`
 	// Message explains it without echoing the value.
 	Message string `json:"message"`
+}
+```
+
+<a name="WaitConfigurer"></a>
+## type [WaitConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/policy_interface.go>)
+
+WaitConfigurer configures a [RateLimit](#RateLimit) and a [Bulkhead](#Bulkhead) alike.
+
+```go
+type WaitConfigurer interface {
+	RateLimitConfigurer
+	BulkheadConfigurer
 }
 ```
 

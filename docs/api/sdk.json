@@ -481,10 +481,33 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
       "name": "Bulkhead",
-      "spelled": "func(maxConcurrent int) OperationOption",
-      "canonical": "func(maxConcurrent int) github.com/kitsunium/sdk/framework/app.OperationOption",
-      "doc": "Bulkhead caps how many requests the handler serves at once; the overflow\nanswers 503. It is the SDK's resilience bulkhead.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "spelled": "func(maxConcurrent int, opts ...BulkheadOption) OperationOption",
+      "canonical": "func(maxConcurrent int, opts ...github.com/kitsunium/sdk/framework/app.BulkheadOption) github.com/kitsunium/sdk/framework/app.OperationOption",
+      "doc": "Bulkhead caps how many requests the handler serves at once; the overflow\nanswers 503 — at once, or, given [BulkheadQueue] and [MaxWait], once the\nqueue is full or the wait ran out. It is the SDK's resilience bulkhead.\n\nThe values are the defaults of the operation's settings\n<service>-<kind>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which\nconfig/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops\nthe start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.BulkheadOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "BulkheadOption",
+      "spelled": "iapp.BulkheadConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.BulkheadConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.BulkheadConfigurer",
+      "doc": "BulkheadOption configures a [Bulkhead].\n",
+      "file": "framework/app/policy_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.BulkheadQueue",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "BulkheadQueue",
+      "spelled": "func(n int) BulkheadOption",
+      "canonical": "func(n int) github.com/kitsunium/sdk/framework/app.BulkheadOption",
+      "doc": "BulkheadQueue lets up to n calls beyond those a [Bulkhead] runs wait for a\nslot, each for its [MaxWait]: without a wait, or with n at 0, the overflow\nis refused at once, and a negative n stops the start. A call that finds the\nqueue full answers 503. It is the default of the operation's setting\n<service>-<kind>-<operation>-bulkhead-queue, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/policy.go",
       "layer": "framework"
     },
     {
@@ -2795,6 +2818,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.MaxWait",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "MaxWait",
+      "spelled": "func(d time.Duration) WaitOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.WaitOption",
+      "doc": "MaxWait lets a call wait, at most d on the app's clock, instead of being\nrefused at once: given to [RateLimit], for a token due within d — the\ncalls after it queue behind it —; given to [Bulkhead], for a slot to free,\nin the queue [BulkheadQueue] sizes. A call still refused answers 429 or\n503 as before; a caller that leaves while it waits leaves the queue. Its\ndefault is no wait, and a negative one stops the start. It is the default\nof the operation's setting <service>-<kind>-<operation>-rate-wait or\n-bulkhead-wait, which config/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its methods are unexported — so a\ncaller only hands it to the declaration it configures.\n",
+      "file": "framework/app/policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Migration",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3340,10 +3374,22 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
       "name": "RateLimit",
-      "spelled": "func(perSecond float64, burst int) OperationOption",
-      "canonical": "func(perSecond float64, burst int) github.com/kitsunium/sdk/framework/app.OperationOption",
-      "doc": "RateLimit puts a token bucket in front of the handler: perSecond tokens a\nsecond, up to burst at once. An empty bucket answers 429 at once. It is the\nSDK's resilience rate limiter.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "spelled": "func(perSecond float64, burst int, opts ...RateLimitOption) OperationOption",
+      "canonical": "func(perSecond float64, burst int, opts ...github.com/kitsunium/sdk/framework/app.RateLimitOption) github.com/kitsunium/sdk/framework/app.OperationOption",
+      "doc": "RateLimit puts a token bucket in front of the handler: perSecond tokens a\nsecond, up to burst at once. An empty bucket answers 429 at once — with\nRetry-After, the seconds the bucket needs to earn its next token —, or,\ngiven [MaxWait], once the token due within it did not come. It is the\nSDK's resilience rate limiter.\n\nThe values are the defaults of the operation's settings\n<service>-<kind>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and\n<PRODUCT>_<NAME> override; a rate that is not above zero or a burst below\none stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.RateLimitOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "RateLimitOption",
+      "spelled": "iapp.RateLimitConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.RateLimitConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.RateLimitConfigurer",
+      "doc": "RateLimitOption configures a [RateLimit].\n",
+      "file": "framework/app/policy_interface.go",
       "layer": "framework"
     },
     {
@@ -3353,7 +3399,7 @@
       "name": "RateLimitPerClient",
       "spelled": "func(perSecond float64, burst int) OperationOption",
       "canonical": "func(perSecond float64, burst int) github.com/kitsunium/sdk/framework/app.OperationOption",
-      "doc": "RateLimitPerClient gives every client of an endpoint a token bucket of its\nown: perSecond tokens a second, up to burst at once. A client is the\nauthenticated user when there is one, and the client's address otherwise\n([ClientIP]); in-process calls through [Endpoint].Call share one bucket. One\nclient emptying its bucket is answered 429; the others are not — which is\nwhat a sign-in endpoint needs, where one shared bucket would let a single\nclient lock everybody out.\n\nBuckets unused for ten minutes are forgotten, and at most 10 000 are kept:\nthe least recently used goes first. It is the SDK's keyed rate limiter.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "doc": "RateLimitPerClient gives every client of an endpoint a token bucket of its\nown: perSecond tokens a second, up to burst at once. A client is the\nauthenticated user when there is one, and the client's address otherwise\n([ClientIP]); in-process calls through [Endpoint].Call share one bucket. One\nclient emptying its bucket is answered 429, with Retry-After; the others\nare not — which is what a sign-in endpoint needs, where one shared bucket\nwould let a single client lock everybody out.\n\nBuckets unused for ten minutes are forgotten, and at most 10 000 are kept:\nthe least recently used goes first. It is the SDK's keyed rate limiter.\n\nThe values are the defaults of the operation's settings\n<service>-<kind>-<operation>-client-rate and -client-burst, which config/<env>.*\nand <PRODUCT>_<NAME> override; a rate that is not above zero or a burst\nbelow one stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/ratelimit.go",
       "layer": "framework"
     },
@@ -3811,7 +3857,7 @@
       "name": "Timeout",
       "spelled": "func(d time.Duration) OperationOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.OperationOption",
-      "doc": "Timeout cancels the handler's context after d and answers 504. It is the\nSDK's resilience timeout.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "doc": "Timeout cancels the handler's context after d and answers 504. A caller\nthat leaves first is no timeout: its request is recorded as 499, logged as\ninformation, and nothing it could read is written. It is the SDK's\nresilience timeout, on the app's clock.\n\nd is the default of the operation's setting <service>-<kind>-<operation>-timeout,\nwhich config/<env>.* and <PRODUCT>_<NAME> override; one that is not\npositive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/endpoint.go",
       "layer": "framework"
     },
@@ -3927,6 +3973,18 @@
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.ViolationMessage",
       "doc": "Violation is one validation rule a request failed: where, which rule, and\nwhy — never the value.\n",
       "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.WaitOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "WaitOption",
+      "spelled": "iapp.WaitConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.WaitConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.WaitConfigurer",
+      "doc": "WaitOption configures a [RateLimit] and a [Bulkhead] alike.\n",
+      "file": "framework/app/policy_interface.go",
       "layer": "framework"
     },
     {
@@ -5756,10 +5814,32 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "Bulkhead",
-      "spelled": "func(maxConcurrent int) OperationOption",
-      "canonical": "func(maxConcurrent int) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
-      "doc": "Bulkhead caps how many requests the handler serves at once; the overflow\nanswers 503. It is the SDK's resilience bulkhead.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "spelled": "func(maxConcurrent int, opts ...BulkheadConfigurer) OperationOption",
+      "canonical": "func(maxConcurrent int, opts ...github.com/kitsunium/sdk/framework/internal/app.BulkheadConfigurer) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
+      "doc": "Bulkhead caps how many requests the handler serves at once; the overflow\nanswers 503 — at once, or, given [BulkheadQueue] and [MaxWait], once the\nqueue is full or the wait ran out. It is the SDK's resilience bulkhead.\n\nThe values are the defaults of the operation's settings\n<service>-<kind>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which\nconfig/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops\nthe start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.BulkheadConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "BulkheadConfigurer",
+      "spelled": "interface{bulkheadConfigure(o *bulkheadGuard)}",
+      "canonical": "interface{bulkheadConfigure(o *github.com/kitsunium/sdk/framework/internal/app.bulkheadGuard)}",
+      "doc": "BulkheadConfigurer configures a [Bulkhead].\n",
+      "file": "framework/internal/app/policy_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.BulkheadQueue",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "BulkheadQueue",
+      "spelled": "func(n int) BulkheadConfigurer",
+      "canonical": "func(n int) github.com/kitsunium/sdk/framework/internal/app.BulkheadConfigurer",
+      "doc": "BulkheadQueue lets up to n calls beyond those a [Bulkhead] runs wait for a\nslot, each for its [MaxWait]: without a wait, or with n at 0, the overflow\nis refused at once, and a negative n stops the start. A call that finds the\nqueue full answers 503. It is the default of the operation's setting\n<service>-<kind>-<operation>-bulkhead-queue, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/policy.go",
       "layer": "framework"
     },
     {
@@ -8381,6 +8461,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.MaxWait",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "MaxWait",
+      "spelled": "func(d time.Duration) WaitConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.WaitConfigurer",
+      "doc": "MaxWait lets a call wait, at most d on the app's clock, instead of being\nrefused at once: given to [RateLimit], for a token due within d — the\ncalls after it queue behind it —; given to [Bulkhead], for a slot to free,\nin the queue [BulkheadQueue] sizes. A call still refused answers 429 or\n503 as before; a caller that leaves while it waits leaves the queue. Its\ndefault is no wait, and a negative one stops the start. It is the default\nof the operation's setting <service>-<kind>-<operation>-rate-wait or\n-bulkhead-wait, which config/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its methods are unexported — so a\ncaller only hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.MigrationExecutor",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -9226,10 +9317,21 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "RateLimit",
-      "spelled": "func(perSecond float64, burst int) OperationOption",
-      "canonical": "func(perSecond float64, burst int) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
-      "doc": "RateLimit puts a token bucket in front of the handler: perSecond tokens a\nsecond, up to burst at once. An empty bucket answers 429 at once. It is the\nSDK's resilience rate limiter.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "spelled": "func(perSecond float64, burst int, opts ...RateLimitConfigurer) OperationOption",
+      "canonical": "func(perSecond float64, burst int, opts ...github.com/kitsunium/sdk/framework/internal/app.RateLimitConfigurer) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
+      "doc": "RateLimit puts a token bucket in front of the handler: perSecond tokens a\nsecond, up to burst at once. An empty bucket answers 429 at once — with\nRetry-After, the seconds the bucket needs to earn its next token —, or,\ngiven [MaxWait], once the token due within it did not come. It is the\nSDK's resilience rate limiter.\n\nThe values are the defaults of the operation's settings\n<service>-<kind>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and\n<PRODUCT>_<NAME> override; a rate that is not above zero or a burst below\none stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.RateLimitConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "RateLimitConfigurer",
+      "spelled": "interface{rateLimitConfigure(o *rateLimitGuard)}",
+      "canonical": "interface{rateLimitConfigure(o *github.com/kitsunium/sdk/framework/internal/app.rateLimitGuard)}",
+      "doc": "RateLimitConfigurer configures a [RateLimit].\n",
+      "file": "framework/internal/app/policy_interface.go",
       "layer": "framework"
     },
     {
@@ -9239,7 +9341,7 @@
       "name": "RateLimitPerClient",
       "spelled": "func(perSecond float64, burst int) OperationOption",
       "canonical": "func(perSecond float64, burst int) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
-      "doc": "RateLimitPerClient gives every client of an endpoint a token bucket of its\nown: perSecond tokens a second, up to burst at once. A client is the\nauthenticated user when there is one, and the client's address otherwise\n([ClientIP]); in-process calls through [EndpointService.Call] share one bucket. One\nclient emptying its bucket is answered 429; the others are not — which is\nwhat a sign-in endpoint needs, where one shared bucket would let a single\nclient lock everybody out.\n\nBuckets unused for ten minutes are forgotten, and at most 10 000 are kept:\nthe least recently used goes first. It is the SDK's keyed rate limiter.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "doc": "RateLimitPerClient gives every client of an endpoint a token bucket of its\nown: perSecond tokens a second, up to burst at once. A client is the\nauthenticated user when there is one, and the client's address otherwise\n([ClientIP]); in-process calls through [EndpointService.Call] share one bucket. One\nclient emptying its bucket is answered 429, with Retry-After; the others\nare not — which is what a sign-in endpoint needs, where one shared bucket\nwould let a single client lock everybody out.\n\nBuckets unused for ten minutes are forgotten, and at most 10 000 are kept:\nthe least recently used goes first. It is the SDK's keyed rate limiter.\n\nThe values are the defaults of the operation's settings\n<service>-<kind>-<operation>-client-rate and -client-burst, which config/<env>.*\nand <PRODUCT>_<NAME> override; a rate that is not above zero or a burst\nbelow one stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/ratelimit.go",
       "layer": "framework"
     },
@@ -10407,7 +10509,7 @@
       "name": "Timeout",
       "spelled": "func(d time.Duration) OperationOption",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
-      "doc": "Timeout cancels the handler's context after d and answers 504. It is the\nSDK's resilience timeout.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "doc": "Timeout cancels the handler's context after d and answers 504. A caller\nthat leaves first is no timeout: its request is recorded as 499, logged as\ninformation, and nothing it could read is written. It is the SDK's\nresilience timeout, on the app's clock.\n\nd is the default of the operation's setting <service>-<kind>-<operation>-timeout,\nwhich config/<env>.* and <PRODUCT>_<NAME> override; one that is not\npositive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/endpoint.go",
       "layer": "framework"
     },
@@ -10565,6 +10667,17 @@
       ],
       "doc": "ViolationMessage is one validation rule a request failed: where, which rule, and\nwhy — never the value.\n",
       "file": "framework/internal/app/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.WaitConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "WaitConfigurer",
+      "spelled": "interface{RateLimitConfigurer; BulkheadConfigurer}",
+      "canonical": "interface{github.com/kitsunium/sdk/framework/internal/app.RateLimitConfigurer; github.com/kitsunium/sdk/framework/internal/app.BulkheadConfigurer}",
+      "doc": "WaitConfigurer configures a [RateLimit] and a [Bulkhead] alike.\n",
+      "file": "framework/internal/app/policy_interface.go",
       "layer": "framework"
     },
     {

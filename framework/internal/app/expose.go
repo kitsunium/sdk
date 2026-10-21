@@ -88,6 +88,7 @@ func expose[Req, Resp any](s *Service, decl pos, op authModeSource[Req, Resp], r
 	method, path, wildcards, problem := parseRoute(route)
 	e.method, e.path = method, path
 	s.add(e, true)
+	declarePolicies(s, &e.nodeBase, e.opts.policies)
 	if !problem.empty() {
 		s.problemSaid(decl, e.id, problem)
 		return

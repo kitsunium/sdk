@@ -14,6 +14,16 @@ import (
 // quotes.
 const clipLimit int = 64
 
+// statusCallerLeft is the status a request is recorded with when its
+// caller left before the answer — nginx's 499, Client Closed Request: the
+// request's context was cancelled while the operation ran, and the
+// cancellation, or a policy's ([Timeout]) giving way to it, is what the
+// operation returned. It is no failure of the product — no 503, no 504, no
+// error logged, the span not in error —: it is logged as information, and
+// the status line the server writes reaches nobody, the connection gone, as
+// writeJSON already lets a write to a client that went away fail.
+const statusCallerLeft int = 499
+
 // The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
 // byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
 // not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
