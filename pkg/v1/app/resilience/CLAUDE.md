@@ -6,7 +6,9 @@ Public facade for the SDK reliability policies (ADR 0026). Aliases the
 `Operation`/`Runner` port + `*Config` types and `Backoff`, re-exports the eight
 constructors (`NewRetry`/`NewCircuitBreaker`/`NewRateLimiter`/
 `NewKeyedRateLimiter`/`NewBulkhead`/`NewTimeout`/`NewFallback`/`NewHedge`),
-`NewTimeoutWith`, `RetryAfter`, `NewRetryBudget`, and the outcome sentinels. Stdlib-only → dep-light;
+`NewTimeoutWith`, `RetryAfter`, `NewRetryBudget`, the breaker's state (`BreakerState`,
+`BreakerStateValue`, `BreakerPhase` and its three constants, `BreakerWindowValue`)
+and the outcome sentinels. Stdlib-only → dep-light;
 cross-OS portable.
 
 ## Surface
@@ -17,6 +19,9 @@ cross-OS portable.
 | `RetryConfig` / `BreakerConfig` / `RateLimiterConfig` / `FallbackConfig` / `HedgeConfig` | aliases onto `service/app/resilience` |
 | `RetryConfig.Retryable` / `BreakerConfig.Retryable` / `FallbackConfig.Retryable` | `func(error) bool` — deterministic errors return verbatim (nil = replay/count/fall-back on everything) |
 | `RetryConfig.Jitter` | `float64` — widens each backoff by `[0, Jitter)` of itself, ADDED, clamped into `[0, 1]`. **0 is the deterministic backoff**, so an existing caller's timing is unchanged. Applied after the `MaxDelay` cap, so **when one is configured** a wait's ceiling is `MaxDelay * (1 + Jitter)`; a zero `MaxDelay` is no cap, so there is none to raise (ADR 0026) |
+| `BreakerConfig.Window` / `BreakerWindowValue` | `*BreakerWindowValue{Size, Buckets, MinCalls, FailureRatio, SlowAfter, SlowRatio}` — nil is the consecutive breaker, unchanged; set, the breaker opens on a rate of failures or of slow calls over a sliding time window on its clock once `MinCalls` were seen. Zero fields take Polly's / resilience4j's defaults (30 s, 10 slots, 100 calls, 0.1; 60 s, 1); out of range → `PolicyMisconfigured` naming the field (#480) |
+| `BreakerState` / `BreakerStateValue` / `BreakerPhase` + `BreakerClosed` / `BreakerOpen` / `BreakerHalfOpen` | aliases onto `core/app/resilience`: the breaker's Runner is a `BreakerState` (`State`, `Isolate` — open until `Reset` —, `Reset`), reached by a type assertion; a refused breaker is not one. The zero `BreakerPhase` is "unknown" (#480) |
+| `BreakerConfig.OnStateChange` / `BreakerConfig.OpenBackoff` | `func(from, to BreakerPhase)` called outside the lock, one at a time, in order; `*Backoff` lengthening each opening while trials fail, `BaseDelay` and `MaxDelay` required (#480) |
 | `HedgeConfig.Idempotent` | **mandatory** `bool` — the caller's in-code assertion that duplicating the operation is safe; false refuses the policy |
 | `RetryConfig.Clock` | `clock.Timed` the backoff waits on — nil is the wall clock; a `ManualClock` from `pkg/v1/clock` drives a retry without sleeping (ADR 0103) |
 | `HedgeConfig.Clock` | `clock.Timed` the hedge delay is measured on — nil is the wall clock; a `ManualClock` issues the duplicate when it is advanced past `Delay` |

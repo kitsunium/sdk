@@ -186,4 +186,28 @@
 // caller's own context error rather than TimeoutExceeded when the caller's
 // context finished first. A context.DeadlineExceeded from the dependency
 // stays a failure.
+//
+// # A breaker that opens on a rate, and says where it stands
+//
+// A breaker counting CONSECUTIVE failures never opens on a dependency that
+// fails every other call, nor on one that answers every call a minute late.
+// [BreakerConfig].Window opens it on a rate instead — of failures, or of slow
+// calls — over a sliding window on the breaker's clock, once enough calls
+// were seen for a rate to mean something:
+//
+//	b := resilience.NewCircuitBreaker(resilience.BreakerConfig{
+//	    Window: &resilience.BreakerWindowValue{
+//	        Size: 30 * time.Second, MinCalls: 20, FailureRatio: 0.5,
+//	        SlowAfter: 2 * time.Second, SlowRatio: 0.8,
+//	    },
+//	    OnStateChange: func(from, to resilience.BreakerPhase) { log.Info("breaker", "from", from, "to", to) },
+//	})
+//	state := b.(resilience.BreakerState)
+//	ready := state.State().Phase != resilience.BreakerOpen // a readiness check
+//
+// A nil Window is the consecutive-failure breaker, unchanged. The Runner is a
+// [BreakerState]: State reports the phase and its counts, Isolate opens it by
+// hand until Reset, and [BreakerConfig].OnStateChange hears each change of
+// phase in order, outside the breaker's lock. [BreakerConfig].OpenBackoff
+// lengthens each opening while the trials keep failing.
 package resilience

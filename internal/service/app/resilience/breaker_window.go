@@ -29,8 +29,6 @@ const (
 	// construction: a Buckets of math.MaxInt would otherwise be a make() that
 	// panics or eats the process.
 	maxWindowBuckets int = 1000
-	// windowPolicy names the breaker in a PolicyMisconfigured refusal.
-	windowPolicy string = "breaker"
 )
 
 // windowBucket is one slot of the window: the calls that ended in it.
@@ -43,8 +41,11 @@ type windowBucket struct {
 // slidingWindow holds the calls of the last len(buckets)×width on the
 // breaker's clock. Slot e%len(buckets) holds epoch e — the width-long slice of
 // time e×width after origin — for every epoch the window still reaches; head
-// is the latest epoch seen, and the totals are the sum of the live slots, kept
-// as slots are filled and emptied so that a record costs O(1).
+// is the latest epoch seen, headEnd the offset from origin where it ends, and
+// the totals are the sum of the live slots, kept as slots are filled and
+// emptied so that a record costs O(1). moved says slots left the window since
+// the ratios were last read: a ratio can rise without a new failure, when the
+// successes that diluted it leave.
 //
 // It is guarded by the breaker's mutex and allocates nothing after newWindow.
 type slidingWindow struct {
@@ -52,6 +53,8 @@ type slidingWindow struct {
 	width        time.Duration
 	origin       time.Time
 	head         int64
+	headEnd      time.Duration
+	moved        bool
 	calls        int
 	failures     int
 	slow         int
@@ -76,7 +79,7 @@ type windowSettings struct {
 // field it refuses, if any, spelt as the caller writes it.
 func resolveWindow(w BreakerWindowValue) (windowSettings, string) {
 	//: each zero takes its documented default.
-	s := windowSettings{
+	settings := windowSettings{
 		size:         orDuration(w.Size, defaultWindowSize),
 		buckets:      orInt(w.Buckets, defaultWindowBuckets),
 		minCalls:     orInt(w.MinCalls, defaultMinCalls),
@@ -84,40 +87,63 @@ func resolveWindow(w BreakerWindowValue) (windowSettings, string) {
 		slowAfter:    orDuration(w.SlowAfter, defaultSlowAfter),
 		slowRatio:    orRatio(w.SlowRatio, defaultSlowRatio),
 	}
+	//: the reach first: the thresholds read nothing without slots.
+	if knob, refused := reachRefusal(settings); refused {
+		//: refused.
+		return settings, knob
+	}
+	//: then the thresholds.
+	knob, _ := thresholdRefusal(settings)
+	//: the knob refused, or none.
+	return settings, knob
+}
+
+// reachRefusal names the field of the window's reach that cannot be honoured,
+// and reports whether there is one.
+func reachRefusal(settings windowSettings) (string, bool) {
 	//: the first field out of range is the one named.
 	switch {
-	//: a negative reach is no window.
-	case s.size < 0:
-		//: refused.
-		return s, "Window.Size"
 	//: no slot, or more slots than a breaker should hold.
-	case s.buckets < 0 || s.buckets > maxWindowBuckets:
+	case settings.buckets < 0 || settings.buckets > maxWindowBuckets:
 		//: refused.
-		return s, "Window.Buckets"
-	//: a slot narrower than a nanosecond cannot be told from the next.
-	case s.size/time.Duration(s.buckets) <= 0:
-		//: refused, naming the reach that cannot be split.
-		return s, "Window.Size"
-	//: a negative count.
-	case s.minCalls < 0:
-		//: refused.
-		return s, "Window.MinCalls"
-	//: outside (0, 1], or not a number.
-	case !validRatio(s.failureRatio):
-		//: refused.
-		return s, "Window.FailureRatio"
-	//: a negative duration.
-	case s.slowAfter < 0:
-		//: refused.
-		return s, "Window.SlowAfter"
-	//: outside (0, 1], or not a number.
-	case !validRatio(s.slowRatio):
-		//: refused.
-		return s, "Window.SlowRatio"
-	//: every field honoured.
+		return "Window.Buckets", true
+	//: a negative reach is no window, and a slot narrower than a nanosecond
+	//: cannot be told from the next.
+	case settings.size < 0 || settings.size/time.Duration(settings.buckets) <= 0:
+		//: refused, naming the reach.
+		return "Window.Size", true
+	//: a reach honoured.
 	default:
 		//: no refusal.
-		return s, ""
+		return "", false
+	}
+}
+
+// thresholdRefusal names the threshold of the window that cannot be honoured,
+// and reports whether there is one.
+func thresholdRefusal(settings windowSettings) (string, bool) {
+	//: the first field out of range is the one named.
+	switch {
+	//: a negative count.
+	case settings.minCalls < 0:
+		//: refused.
+		return "Window.MinCalls", true
+	//: outside (0, 1], or not a number.
+	case !validRatio(settings.failureRatio):
+		//: refused.
+		return "Window.FailureRatio", true
+	//: a negative duration.
+	case settings.slowAfter < 0:
+		//: refused.
+		return "Window.SlowAfter", true
+	//: outside (0, 1], or not a number.
+	case !validRatio(settings.slowRatio):
+		//: refused.
+		return "Window.SlowRatio", true
+	//: every threshold honoured.
+	default:
+		//: no refusal.
+		return "", false
 	}
 }
 
@@ -163,10 +189,12 @@ func validRatio(r float64) bool {
 // newWindow allocates the slots of a window starting at origin.
 func newWindow(s windowSettings, origin time.Time) *slidingWindow {
 	//: one allocation, at construction; nothing after it.
+	width := s.size / time.Duration(s.buckets)
 	return &slidingWindow{
 		buckets:      make([]windowBucket, s.buckets),
-		width:        s.size / time.Duration(s.buckets),
+		width:        width,
 		origin:       origin,
+		headEnd:      width,
 		minCalls:     s.minCalls,
 		failureRatio: s.failureRatio,
 		slowAfter:    s.slowAfter,
@@ -179,12 +207,15 @@ func newWindow(s windowSettings, origin time.Time) *slidingWindow {
 // seen — a clock set back — is counted in that latest slot.
 func (w *slidingWindow) advance(now time.Time) *windowBucket {
 	n := int64(len(w.buckets))
-	epoch := max(int64(now.Sub(w.origin)/w.width), w.head)
-	//: the same slot as the last record: nothing has expired.
-	if epoch == w.head {
+	elapsed := now.Sub(w.origin)
+	//: the same slot as the last record, or a clock set back: nothing has
+	//: expired, and no division is paid.
+	if elapsed < w.headEnd {
 		//: the current slot.
-		return &w.buckets[epoch%n]
+		return &w.buckets[w.head%n]
 	}
+	epoch := int64(elapsed / w.width)
+	w.moved = true
 	//: time moved past the whole window: every slot is stale.
 	if epoch-w.head >= n {
 		w.clear()
@@ -195,8 +226,21 @@ func (w *slidingWindow) advance(now time.Time) *windowBucket {
 		}
 	}
 	w.head = epoch
+	w.headEnd = epochEnd(epoch, w.width)
 	//: the slot the call lands in, emptied above if it held an older epoch.
 	return &w.buckets[epoch%n]
+}
+
+// epochEnd is the offset from the origin where epoch ends, saturated at the
+// longest duration rather than wrapped negative.
+func epochEnd(epoch int64, width time.Duration) time.Duration {
+	//: (epoch+1)×width would overflow: the slot reaches the end of time.
+	if epoch >= int64(math.MaxInt64/width)-1 {
+		//: saturated.
+		return math.MaxInt64
+	}
+	//: the next epoch's start.
+	return time.Duration(epoch+1) * width
 }
 
 // drop takes one slot out of the totals and empties it.
@@ -230,6 +274,13 @@ func (w *slidingWindow) add(now time.Time, failed, slow bool) bool {
 		b.slow++
 		w.slow++
 	}
+	//: a prompt success in place lowers both ratios: one read below its
+	//: thresholds stays below, unless this call is the one reaching MinCalls.
+	if !failed && !slow && !w.moved && w.calls != w.minCalls {
+		//: nothing could have risen.
+		return false
+	}
+	w.moved = false
 	//: the ratios are read once there are enough calls for them to mean one.
 	return w.tripped()
 }

@@ -111,6 +111,77 @@ BenchmarkRetry_WithBudget_FirstAttemptSucceeds-8   	131862070	         9.102 ns/
 BenchmarkRetryBudget_Contended-8                   	21669429	        49.33 ns/op	       0 B/op	       0 allocs/op
 ```
 
+## The breaker's window costs two clock reads, and allocates nothing ([issue 480](https://github.com/kitsunium/sdk/issues/480))
+
+A run of its own, `-count=5`, the median of each row; the consecutive rows were
+run the same way on `origin/main` (`0d4dcef6`, before the window) on the same
+machine, minutes apart:
+
+| breaker | before #480 | after #480 | B/op | allocs |
+|---|---:|---:|---:|---:|
+| consecutive (`Window: nil`), closed | 46.26 | 48.42 | 0 | **0** |
+| consecutive, open | 67.00 | 65.92 | 0 | **0** |
+| `Window` set, closed | — | 195.7 | 0 | **0** |
+| `Window` set, closed, with an `OnStateChange` | — | 194.8 | 0 | **0** |
+| `State()` (a readiness probe, a scrape) | — | 109.4 | 0 | **0** |
+
+**A nil Window costs 2 ns more than before, and nothing in allocations**: the
+closed path reads no clock and defers nothing — the trial and the window run
+on paths of their own, which also took the deferred release off it — and what
+remains is the check for a window and for a change of phase owed to a
+listener; the five runs of each column do not overlap (46.06–46.34 against
+48.26–48.56), so the 2 ns are real, and the open row moved 1 ns the other way.
+**A window allocates nothing per call**: its slots are allocated once, at
+construction.
+
+Its 147 ns over the consecutive breaker are, almost all, **two reads of the
+clock** — the start and the end of the call, which the slow-call criterion
+needs: `time.Now()` costs 70.8 ns on this VM, whose clock source is
+`kvm-clock` (`BenchmarkNow`, a three-line benchmark outside the tree, three
+runs at 70.6 to 70.9 ns), against about 20 ns on bare metal with a TSC. The
+window's own work — the slot, the totals, a ratio read only when one could
+have risen — is the few nanoseconds left. `State()` is one lock and one clock
+read (it moves the window to now). A listener costs nothing while the phase
+holds.
+
+| Dimension | Value |
+|---|---|
+| CPU                | AMD EPYC 7351P, 8 cores |
+| RAM                | 15 GiB |
+| OS / kernel        | Linux 6.12.101+deb13-amd64 |
+| Go toolchain       | go1.27.3 linux/amd64 |
+| Git branch         | feat/resilience-breaker-window |
+| Generated (UTC)    | 2026-10-21 |
+| Bench wall-clock   | `go test -run='^$' -bench='CircuitBreaker' -benchmem -benchtime=1s -count=5` |
+
+```
+BenchmarkCircuitBreaker_Closed-8                   	24787677	        48.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Closed-8                   	24748015	        48.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Closed-8                   	24836856	        48.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Closed-8                   	24900913	        48.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Closed-8                   	24787358	        48.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed-8            	 6203898	       195.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed-8            	 6216579	       196.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed-8            	 6213520	       195.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed-8            	 6144550	       195.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed-8            	 6184328	       194.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed_Listened-8   	 6026143	       200.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed_Listened-8   	 6189811	       194.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed_Listened-8   	 6190444	       194.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed_Listened-8   	 6171469	       194.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Window_Closed_Listened-8   	 6191280	       193.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_State-8                    	11068659	       109.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_State-8                    	11077640	       108.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_State-8                    	10500126	       111.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_State-8                    	10789452	       109.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_State-8                    	10969453	       110.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Open-8                     	18201648	        65.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Open-8                     	18205429	        66.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Open-8                     	18234022	        65.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Open-8                     	18210210	        65.92 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Open-8                     	18243685	        65.76 ns/op	       0 B/op	       0 allocs/op
+```
+
 ## What is NOT measured here
 
 `Hedge` has no benchmark. It duplicates the operation after a delay, so any

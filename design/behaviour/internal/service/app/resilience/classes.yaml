@@ -20,6 +20,21 @@ constants:
         type: time.Duration
         value: 30 * time.Second
     name: defaultOpenDuration
+  - doc: breakerPolicy names the breaker in a PolicyMisconfigured refusal.
+    items:
+      - name: breakerPolicy
+        type: string
+        value: "\"breaker\""
+    name: breakerPolicy
+  - doc: |-
+      changesCapacity is the room a breaker with an OnStateChange keeps for the
+      changes of phase not yet delivered: a trip, a trial and its outcome fit
+      without growing it.
+    items:
+      - name: changesCapacity
+        type: int
+        value: "4"
+    name: changesCapacity
   - grouped: true
     items:
       - doc: |-
@@ -33,17 +48,49 @@ constants:
       - doc: outcomeFailure is a call whose error the classifier counts.
         name: outcomeFailure
     name: outcomeNeutral
-  - grouped: true
+  - doc: |-
+      The window's defaults, each a published library's own (BreakerWindowValue's
+      doc names them): Polly v8's CircuitBreakerStrategyOptions — SamplingDuration
+      30 s, MinimumThroughput 100, FailureRatio 0.1, and the ten windows its
+      rolling health metrics split the sampling duration into — and resilience4j's
+      CircuitBreakerConfig — slowCallDurationThreshold 60 s, slowCallRateThreshold
+      100 %.
+    grouped: true
     items:
-      - doc: stateClosed passes calls through and counts failures.
-        name: stateClosed
-        type: breakerState
-        value: iota
-      - doc: stateOpen rejects calls fast until the cooldown elapses.
-        name: stateOpen
-      - doc: stateHalfOpen admits a single trial call to probe recovery.
-        name: stateHalfOpen
-    name: stateClosed
+      - doc: defaultWindowSize is Polly's SamplingDuration.
+        name: defaultWindowSize
+        type: time.Duration
+        value: 30 * time.Second
+      - doc: |-
+          defaultWindowBuckets is the number of windows Polly's rolling health
+          metrics divide the sampling duration into.
+        name: defaultWindowBuckets
+        type: int
+        value: "10"
+      - doc: defaultMinCalls is Polly's MinimumThroughput.
+        name: defaultMinCalls
+        type: int
+        value: "100"
+      - doc: defaultFailureRatio is Polly's FailureRatio.
+        name: defaultFailureRatio
+        type: float64
+        value: "0.1"
+      - doc: defaultSlowAfter is resilience4j's slowCallDurationThreshold.
+        name: defaultSlowAfter
+        type: time.Duration
+        value: 60 * time.Second
+      - doc: defaultSlowRatio is resilience4j's slowCallRateThreshold, 100 %.
+        name: defaultSlowRatio
+        type: float64
+        value: "1"
+      - doc: |-
+          maxWindowBuckets bounds the slots a breaker allocates once, at
+          construction: a Buckets of math.MaxInt would otherwise be a make() that
+          panics or eats the process.
+        name: maxWindowBuckets
+        type: int
+        value: "1000"
+    name: defaultWindowSize
   - doc: |-
       minHedges is the floor on the duplicate budget of a single call: a hedging
       policy that may issue no duplicate is not a hedging policy.
@@ -125,26 +172,72 @@ files:
   - decls:
       - defaultThreshold
       - defaultOpenDuration
+      - breakerPolicy
+      - changesCapacity
       - circuitBreaker
+      - phaseChange
       - admission
       - outcome
       - outcomeNeutral
       - NewCircuitBreaker
+      - (*circuitBreaker).configure
+    name: breaker.go
+  - decls:
+      - BreakerConfig
+      - BreakerWindowValue
+    name: breaker_config.go
+  - decls:
+      - (*circuitBreaker).State
+      - (*circuitBreaker).Isolate
+      - (*circuitBreaker).isolate
+      - (*circuitBreaker).Reset
+      - changeQueue
+      - (*changeQueue).push
+      - (*changeQueue).claim
+      - (*changeQueue).pop
+      - (*circuitBreaker).claimDelivery
+      - (*circuitBreaker).deliverIf
+      - (*circuitBreaker).deliver
+      - (*circuitBreaker).nextChange
+    name: breaker_control.go
+  - decls:
       - (*circuitBreaker).Run
+      - (*circuitBreaker).runTimed
+      - (*circuitBreaker).runTrial
       - (*circuitBreaker).classify
       - (*circuitBreaker).allow
       - (*circuitBreaker).release
       - (*circuitBreaker).record
+      - (*circuitBreaker).succeed
+      - (*circuitBreaker).settleTrial
       - (*circuitBreaker).fail
       - (*circuitBreaker).trip
-    name: breaker.go
-  - decls:
-      - BreakerConfig
-    name: breaker_config.go
+      - (*circuitBreaker).cooldownFor
+      - (*circuitBreaker).moveTo
+    name: breaker_run.go
   - decls:
       - breakerState
-      - stateClosed
     name: breaker_state.go
+  - decls:
+      - defaultWindowSize
+      - windowBucket
+      - slidingWindow
+      - windowSettings
+      - resolveWindow
+      - reachRefusal
+      - thresholdRefusal
+      - orDuration
+      - orInt
+      - orRatio
+      - validRatio
+      - newWindow
+      - (*slidingWindow).advance
+      - epochEnd
+      - (*slidingWindow).drop
+      - (*slidingWindow).clear
+      - (*slidingWindow).add
+      - (*slidingWindow).tripped
+    name: breaker_window.go
   - decls:
       - bulkhead
       - NewBulkhead
@@ -294,6 +387,50 @@ functions:
   - name: NewCircuitBreaker
     params: cfg BreakerConfig
     results: coreres.Runner
+  - doc: |-
+      resolveWindow applies the defaults of a BreakerWindowValue and returns the
+      field it refuses, if any, spelt as the caller writes it.
+    name: resolveWindow
+    params: w BreakerWindowValue
+    results: windowSettings, string
+  - doc: |-
+      reachRefusal names the field of the window's reach that cannot be honoured,
+      and reports whether there is one.
+    name: reachRefusal
+    params: settings windowSettings
+    results: string, bool
+  - doc: |-
+      thresholdRefusal names the threshold of the window that cannot be honoured,
+      and reports whether there is one.
+    name: thresholdRefusal
+    params: settings windowSettings
+    results: string, bool
+  - doc: orDuration is d, or def when d is zero.
+    name: orDuration
+    params: d, def time.Duration
+    results: time.Duration
+  - doc: orInt is n, or def when n is zero.
+    name: orInt
+    params: n, def int
+    results: int
+  - doc: orRatio is r, or def when r is zero.
+    name: orRatio
+    params: r, def float64
+    results: float64
+  - doc: validRatio reports whether r is a share in (0, 1].
+    name: validRatio
+    params: r float64
+    results: bool
+  - doc: newWindow allocates the slots of a window starting at origin.
+    name: newWindow
+    params: s windowSettings, origin time.Time
+    results: "*slidingWindow"
+  - doc: |-
+      epochEnd is the offset from the origin where epoch ends, saturated at the
+      longest duration rather than wrapped negative.
+    name: epochEnd
+    params: epoch int64, width time.Duration
+    results: time.Duration
   - name: NewBulkhead
     params: maxConcurrent int
     results: coreres.Runner
@@ -456,14 +593,21 @@ types:
     name: BackoffValue
     underlying: kbackoff.Value
   - doc: |-
-      circuitBreaker trips Open after FailureThreshold consecutive failures, rejects
-      for OpenDuration, then half-opens for ONE trial at a time.
+      circuitBreaker trips Open after FailureThreshold consecutive failures — or,
+      with a window, on a rate of failures or of slow calls —, rejects for its
+      cooldown, then half-opens for ONE trial at a time.
 
-      generation counts the trips. A call captures it on admission and its outcome
-      is folded in only while it is still current: a call admitted before the
-      breaker last opened is a straggler, and its result describes a dependency the
-      breaker has already judged — its success must not close an Open breaker and
-      its failure must not restart a cooldown it did not cause.
+      generation counts the trips, the isolations and the resets. A call captures
+      it on admission and its outcome is folded in only while it is still
+      current: a call admitted before the breaker last opened is a straggler, and
+      its result describes a dependency the breaker has already judged — its
+      success must not close an Open breaker and its failure must not restart a
+      cooldown it did not cause.
+
+      cooldown is the configured OpenDuration; openFor is the cooldown of the
+      current opening, which OpenBackoff lengthens with opens, the openings since
+      the breaker last closed. queue holds the changes of phase OnStateChange has
+      not heard yet, handed out outside mu, one at a time, in order.
     fields:
       - name: mu
         type: sync.Mutex
@@ -471,22 +615,89 @@ types:
         type: clock.Clock
       - name: retryable
         type: func(error) bool
+      - name: onChange
+        type: func(from coreres.BreakerPhase, to coreres.BreakerPhase)
+      - name: window
+        type: "*slidingWindow"
       - name: threshold
         type: int
-      - name: openFor
+      - name: cooldown
         type: time.Duration
+      - name: backoff
+        type: "*kbackoff.Value"
       - name: state
         type: breakerState
+      - name: isolated
+        type: bool
       - name: failures
         type: int
+      - name: opens
+        type: int
+      - name: trips
+        type: uint64
       - name: openedAt
         type: time.Time
+      - name: openFor
+        type: time.Duration
       - name: generation
         type: uint64
       - name: probing
         type: bool
+      - name: queue
+        type: changeQueue
     kind: struct
     methods:
+      - doc: |-
+          configure installs the open backoff, the window and the change queue cfg
+          asks for, and returns the field it refuses, if any.
+        name: configure
+        params: cfg BreakerConfig
+        recv: b *circuitBreaker
+        results: string
+      - doc: |-
+          State reports the breaker's phase and the counts it decides on. It moves
+          the window to the clock's now, so a count is never older than the window's
+          reach, and changes no phase.
+        name: State
+        recv: b *circuitBreaker
+        results: coreres.BreakerStateValue
+      - doc: Isolate opens the breaker until Reset. Calls in flight become stragglers.
+        name: Isolate
+        recv: b *circuitBreaker
+      - doc: |-
+          isolate opens the breaker by hand and reports whether the caller must
+          deliver the change it queued. Holds mu.
+        name: isolate
+        recv: b *circuitBreaker
+        results: bool
+      - doc: |-
+          Reset closes the breaker and clears its counts and its open backoff. Calls
+          in flight become stragglers.
+        name: Reset
+        recv: b *circuitBreaker
+      - doc: |-
+          claimDelivery reports whether the caller must deliver the queued changes.
+          Holds mu.
+        name: claimDelivery
+        recv: b *circuitBreaker
+        results: bool
+      - doc: deliverIf delivers the queued changes when the caller claimed them.
+        name: deliverIf
+        params: claimed bool
+        recv: b *circuitBreaker
+      - doc: |-
+          deliver hands every queued change to OnStateChange, outside mu, one at a
+          time and in the order they were queued, including those queued while it
+          runs — by another call or by the listener itself. A listener that panics
+          gives the queue back, so the next change claims and delivers what is left.
+        name: deliver
+        recv: b *circuitBreaker
+      - doc: |-
+          nextChange takes the oldest undelivered change, or, when there is none,
+          empties the queue and releases the claim.
+        name: nextChange
+        recv: b *circuitBreaker
+        results: phaseChange, bool
       - doc: |-
           Run rejects fast when Open — and when HalfOpen while its one trial is still
           running —, else runs op and records the outcome. A deterministic error (one
@@ -498,6 +709,22 @@ types:
         recv: b *circuitBreaker
         results: error
       - doc: |-
+          runTimed runs a call admitted while Closed under a window: timed on the
+          breaker's clock, its end and whether it was slow handed to record.
+        name: runTimed
+        params: ctx context.Context, op coreres.Operation, adm admission
+        recv: b *circuitBreaker
+        results: error
+      - doc: |-
+          runTrial runs the HalfOpen trial. A trial that panics must still free the
+          slot, or the breaker would stay HalfOpen and reject every call forever, so
+          its release is deferred; the change to HalfOpen this call made is heard
+          before the trial runs.
+        name: runTrial
+        params: ctx context.Context, op coreres.Operation, adm admission
+        recv: b *circuitBreaker
+        results: error
+      - doc: |-
           classify turns a finished call into a health signal. A deterministic error
           and a caller who left are no signal; a transient error is a failure.
         name: classify
@@ -506,7 +733,8 @@ types:
         results: outcome
       - doc: |-
           allow reports whether a call may proceed, transitioning Open→HalfOpen once the
-          cooldown elapses, and admits at most one HalfOpen trial at a time. Holds mu.
+          cooldown elapses, and admits at most one HalfOpen trial at a time. An
+          isolated breaker admits nothing. Holds mu.
         name: allow
         recv: b *circuitBreaker
         results: admission, bool
@@ -518,28 +746,69 @@ types:
         params: adm admission, settled *bool
         recv: b *circuitBreaker
       - doc: |-
-          record folds a call outcome into the state machine. An outcome from an
+          record folds a call outcome into the state machine and reports whether the
+          caller must deliver the changes of phase it queued. An outcome from an
           earlier generation is ignored, and a success closes the breaker only from
-          Closed or from its HalfOpen trial. Holds mu.
+          Closed or from its HalfOpen trial. end is when the call returned on the
+          breaker's clock and slow whether it lasted the window's SlowAfter; both are
+          read only with a window. Holds mu.
         name: record
-        params: adm admission, res outcome
+        params: adm admission, res outcome, end time.Time, slow bool
+        recv: b *circuitBreaker
+        results: bool
+      - doc: succeed folds one success into the state machine. Holds mu (via record).
+        name: succeed
+        params: adm admission, now time.Time, slow bool
+        recv: b *circuitBreaker
+      - doc: |-
+          settleTrial closes the breaker on a successful trial, or opens it again
+          when the trial was slow. Holds mu (via record).
+        name: settleTrial
+        params: adm admission, slow bool
         recv: b *circuitBreaker
       - doc: fail folds one counted failure into the state machine. Holds mu (via record).
         name: fail
+        params: now time.Time, slow bool
         recv: b *circuitBreaker
       - doc: |-
-          trip moves the breaker to Open, stamps the cooldown start and starts a new
-          generation, so every call still in flight becomes a straggler. Holds mu.
+          trip moves the breaker to Open, stamps the cooldown start, sizes the
+          cooldown and starts a new generation, so every call still in flight becomes
+          a straggler. Holds mu.
         name: trip
         recv: b *circuitBreaker
+      - doc: |-
+          cooldownFor is how long the n-th opening since the breaker last closed
+          lasts: OpenBackoff's curve when one is set, OpenDuration otherwise.
+        name: cooldownFor
+        params: opens int
+        recv: b *circuitBreaker
+        results: time.Duration
+      - doc: |-
+          moveTo enters phase to, empties the window — a rate read across two phases
+          would judge the dependency on calls the last decision already judged — and
+          queues the change for OnStateChange when there is one. Holds mu.
+        name: moveTo
+        params: to breakerState
+        recv: b *circuitBreaker
     name: circuitBreaker
+  - doc: phaseChange is one change of phase OnStateChange is owed.
+    fields:
+      - name: from
+        type: coreres.BreakerPhase
+      - name: to
+        type: coreres.BreakerPhase
+    kind: struct
+    name: phaseChange
   - doc: |-
-      admission is what allow hands Run: the generation the call was admitted in
-      and whether it is the HalfOpen trial, the one call that may close the breaker.
+      admission is what allow hands Run: the generation the call was admitted in,
+      whether it is the HalfOpen trial, the one call that may close the breaker,
+      and whether this goroutine must deliver the changes of phase allow queued.
     fields:
       - name: generation
         type: uint64
       - name: trial
+        type: bool
+      - name: deliver
         type: bool
     kind: struct
     name: admission
@@ -548,7 +817,11 @@ types:
     name: outcome
     underlying: int
   - fields:
-      - name: FailureThreshold
+      - doc: |-
+          FailureThreshold is how many consecutive failures open a breaker
+          without a Window. A non-positive value defaults to 5. It is not read
+          when Window is set.
+        name: FailureThreshold
         type: int
       - doc: |-
           OpenDuration is how long an Open breaker rejects calls before admitting
@@ -574,12 +847,223 @@ types:
           nested Retry(Breaker(op)) stack.
         name: Retryable
         type: func(error) bool
+      - doc: |-
+          Window, when set, opens the breaker on a RATE rather than a streak:
+          of failures, or of slow calls, among the calls a sliding time window
+          holds. Nil — the zero value — is the consecutive-failure breaker,
+          exactly as it was before the field existed.
+
+          A streak misses a dependency that fails every other call: S, F, S,
+          F never reaches a threshold of five, and neither does a dependency
+          that answers every call, eventually, a minute late. A rate over a
+          window sees both. The window's fields have defaults of their own,
+          taken from Polly and resilience4j — see BreakerWindowValue.
+        name: Window
+        type: "*BreakerWindowValue"
+      - doc: |-
+          OnStateChange, when set, is called on every change of phase, with the
+          phase left and the phase entered: Closed to Open on a trip, Open to
+          HalfOpen when a call is admitted as the trial, HalfOpen to Closed or
+          Open on its outcome, and whatever Isolate and Reset change.
+
+          It is called outside the breaker's lock, one call at a time and in
+          the order the changes happened, on the goroutine of the call that
+          made the change — or of one already delivering an earlier change,
+          which then delivers this one too. It may call State, Isolate or
+          Reset. It must not block: a call that changed the phase waits for
+          it. Nil hears nothing.
+        name: OnStateChange
+        type: func(from coreres.BreakerPhase, to coreres.BreakerPhase)
+      - doc: |-
+          OpenBackoff, when set, makes each opening last longer than the one
+          before while the dependency keeps failing its trials: the n-th
+          opening since the breaker last closed lasts OpenBackoff.Delay(n),
+          in place of OpenDuration. The count starts over when a trial closes
+          the breaker, and on Reset.
+
+          Its BaseDelay and its MaxDelay are both required — a zero base is
+          a cooldown of nothing, and a zero ceiling one that may grow to
+          centuries — and are refused when not positive, with
+          PolicyMisconfigured naming the field. Its Multiplier and Jitter
+          read as BackoffValue reads them. Nil keeps every opening at
+          OpenDuration.
+        name: OpenBackoff
+        type: "*BackoffValue"
     kind: struct
     name: BreakerConfig
-  - doc: breakerState is the circuit-breaker state machine value.
-    kind: named
+  - fields:
+      - doc: Size is how far back the window reaches. Zero is 30 seconds.
+        name: Size
+        type: time.Duration
+      - doc: |-
+          Buckets is how many slots the window is kept in: a slot leaves the
+          window whole, so the window reaches back between Size − Size/Buckets
+          and Size. Zero is 10; more than 1000 is refused, the memory of a
+          breaker being one slot each.
+        name: Buckets
+        type: int
+      - doc: |-
+          MinCalls is how many calls the window must hold before a ratio is
+          read at all: below it, a single failure would be a rate of 100%.
+          Zero is 100.
+        name: MinCalls
+        type: int
+      - doc: |-
+          FailureRatio is the share of failed calls, in (0, 1], at or above
+          which the breaker opens. Zero is 0.1.
+        name: FailureRatio
+        type: float64
+      - doc: |-
+          SlowAfter is the duration, measured on the breaker's clock from
+          admission to return, at or above which a call is slow, whether it
+          succeeded or failed. Zero is 60 seconds.
+        name: SlowAfter
+        type: time.Duration
+      - doc: |-
+          SlowRatio is the share of slow calls, in (0, 1], at or above which
+          the breaker opens. Zero is 1: only a window where every call was
+          slow opens it.
+        name: SlowRatio
+        type: float64
+    kind: struct
+    name: BreakerWindowValue
+  - doc: |-
+      changeQueue holds the changes of phase OnStateChange has not heard yet:
+      changes from next on, in the order they happened. delivering says a
+      goroutine is handing them out. It is guarded by the breaker's mu.
+    fields:
+      - name: changes
+        type: "[]phaseChange"
+      - name: next
+        type: int
+      - name: delivering
+        type: bool
+    kind: struct
+    methods:
+      - doc: push queues one change.
+        name: push
+        params: change phaseChange
+        recv: q *changeQueue
+      - doc: |-
+          claim reports whether the caller must deliver the queued changes: there are
+          some, and nobody is delivering them yet.
+        name: claim
+        recv: q *changeQueue
+        results: bool
+      - doc: |-
+          pop takes the oldest undelivered change, or, when there is none, empties
+          the queue — keeping its capacity — and releases the claim.
+        name: pop
+        recv: q *changeQueue
+        results: phaseChange, bool
+    name: changeQueue
+  - alias: true
+    doc: |-
+      breakerState is the circuit-breaker state machine value: the phase the core
+      publishes — coreres.BreakerClosed, BreakerOpen, BreakerHalfOpen —, so State
+      reports what the machine holds without a translation.
+    kind: alias
     name: breakerState
-    underlying: int
+    underlying: coreres.BreakerPhase
+  - doc: "windowBucket is one slot of the window: the calls that ended in it."
+    fields:
+      - name: calls
+        type: int
+      - name: failures
+        type: int
+      - name: slow
+        type: int
+    kind: struct
+    name: windowBucket
+  - doc: |-
+      slidingWindow holds the calls of the last len(buckets)×width on the
+      breaker's clock. Slot e%len(buckets) holds epoch e — the width-long slice of
+      time e×width after origin — for every epoch the window still reaches; head
+      is the latest epoch seen, headEnd the offset from origin where it ends, and
+      the totals are the sum of the live slots, kept as slots are filled and
+      emptied so that a record costs O(1). moved says slots left the window since
+      the ratios were last read: a ratio can rise without a new failure, when the
+      successes that diluted it leave.
+
+      It is guarded by the breaker's mutex and allocates nothing after newWindow.
+    fields:
+      - name: buckets
+        type: "[]windowBucket"
+      - name: width
+        type: time.Duration
+      - name: origin
+        type: time.Time
+      - name: head
+        type: int64
+      - name: headEnd
+        type: time.Duration
+      - name: moved
+        type: bool
+      - name: calls
+        type: int
+      - name: failures
+        type: int
+      - name: slow
+        type: int
+      - name: minCalls
+        type: int
+      - name: failureRatio
+        type: float64
+      - name: slowAfter
+        type: time.Duration
+      - name: slowRatio
+        type: float64
+    kind: struct
+    methods:
+      - doc: |-
+          advance moves the window to the epoch of now, emptying every slot time has
+          moved past, and returns the slot now falls in. A now before the latest epoch
+          seen — a clock set back — is counted in that latest slot.
+        name: advance
+        params: now time.Time
+        recv: w *slidingWindow
+        results: "*windowBucket"
+      - doc: drop takes one slot out of the totals and empties it.
+        name: drop
+        params: b *windowBucket
+        recv: w *slidingWindow
+      - doc: |-
+          clear empties every slot and the totals; head is kept, so the epochs only
+          move forward.
+        name: clear
+        recv: w *slidingWindow
+      - doc: |-
+          add records one call ending at now and reports whether the window now opens
+          the breaker.
+        name: add
+        params: now time.Time, failed, slow bool
+        recv: w *slidingWindow
+        results: bool
+      - doc: |-
+          tripped reports whether the window holds enough calls and either ratio is
+          reached.
+        name: tripped
+        recv: w *slidingWindow
+        results: bool
+    name: slidingWindow
+  - doc: |-
+      windowSettings is a BreakerWindowValue with every default applied, or the
+      name of the field that cannot be honoured.
+    fields:
+      - name: size
+        type: time.Duration
+      - name: buckets
+        type: int
+      - name: minCalls
+        type: int
+      - name: failureRatio
+        type: float64
+      - name: slowAfter
+        type: time.Duration
+      - name: slowRatio
+        type: float64
+    kind: struct
+    name: windowSettings
   - doc: |-
       bulkhead caps the number of in-flight operations via a buffered-channel
       semaphore; calls beyond the limit are rejected fast with BulkheadFull.

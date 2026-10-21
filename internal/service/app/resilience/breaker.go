@@ -41,9 +41,8 @@ const changesCapacity int = 4
 //
 // cooldown is the configured OpenDuration; openFor is the cooldown of the
 // current opening, which OpenBackoff lengthens with opens, the openings since
-// the breaker last closed. changes queues the changes of phase OnStateChange
-// has not heard yet, next is the first of them, and delivering says a
-// goroutine is handing them out — outside mu, one at a time, in order.
+// the breaker last closed. queue holds the changes of phase OnStateChange has
+// not heard yet, handed out outside mu, one at a time, in order.
 type circuitBreaker struct {
 	mu         sync.Mutex
 	clk        clock.Clock
@@ -52,8 +51,7 @@ type circuitBreaker struct {
 	window     *slidingWindow
 	threshold  int
 	cooldown   time.Duration
-	backoff    kbackoff.Value
-	backoffOn  bool
+	backoff    *kbackoff.Value
 	state      breakerState
 	isolated   bool
 	failures   int
@@ -63,9 +61,7 @@ type circuitBreaker struct {
 	openFor    time.Duration
 	generation uint64
 	probing    bool
-	changes    []phaseChange
-	next       int
-	delivering bool
+	queue      changeQueue
 }
 
 // phaseChange is one change of phase OnStateChange is owed.
@@ -97,7 +93,36 @@ const (
 )
 
 // NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen
-// breaker.
+// breaker. Open calls return CircuitOpen until OpenDuration elapses; a
+// non-positive OpenDuration clamps to defaultOpenDuration, because a breaker
+// whose cooldown is zero admits the next call immediately and therefore
+// protects nothing (ADR 0031). An error rejected by cfg.Retryable is returned
+// verbatim and left out of the state machine entirely, so deterministic
+// failures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen
+// trial runs at a time and every other call returns CircuitOpen until it
+// settles. The outcome of a call admitted before the breaker last opened
+// is ignored: its success cannot close the breaker and its failure cannot
+// restart the cooldown.
+//
+// A call that ends in context.Canceled once the caller's own context is
+// closed is neutral — neither a success nor a failure — because the caller
+// left, not the dependency: a wave of client disconnects cannot open the
+// breaker on a healthy dependency, and a HalfOpen trial abandoned that way
+// frees the slot for the next call. context.DeadlineExceeded stays a
+// failure: a dependency too slow for the caller's deadline is a slow
+// dependency.
+//
+// With a nil cfg.Window the breaker opens on FailureThreshold consecutive
+// failures. With one, it opens on the rate of failures, or of slow calls,
+// among the calls of a sliding time window on cfg.Clock, once that window
+// holds at least MinCalls of them; a HalfOpen trial that lasts SlowAfter
+// or longer counts as failed. A Window or an OpenBackoff with a value it
+// cannot honour is refused: every call returns PolicyMisconfigured,
+// naming the field, and the Runner returned is not a BreakerState.
+//
+// The Runner returned otherwise implements BreakerState: State reports
+// the phase and its counts, Isolate opens the breaker until Reset, and
+// Reset closes it. cfg.OnStateChange hears every change of phase.
 func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: default the clock to the system source.
 	clk := cfg.Clock
@@ -123,7 +148,7 @@ func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: a fresh breaker starts Closed.
 	b := &circuitBreaker{
 		clk: clk, retryable: cfg.Retryable, onChange: cfg.OnStateChange,
-		threshold: threshold, cooldown: openFor, openFor: openFor, state: stateClosed,
+		threshold: threshold, cooldown: openFor, openFor: openFor, state: coreres.BreakerClosed,
 	}
 	//: the two optional parts refuse what they cannot honour.
 	if knob := b.configure(cfg); knob != "" {
@@ -149,7 +174,9 @@ func (b *circuitBreaker) configure(cfg BreakerConfig) string {
 			//: refused.
 			return "OpenBackoff.MaxDelay"
 		}
-		b.backoff, b.backoffOn = *cfg.OpenBackoff, true
+		//: a copy: the caller's value may change after construction.
+		curve := *cfg.OpenBackoff
+		b.backoff = &curve
 	}
 	//: a window replaces the consecutive count.
 	if cfg.Window != nil {
@@ -163,7 +190,7 @@ func (b *circuitBreaker) configure(cfg BreakerConfig) string {
 	}
 	//: room for the changes a listener is owed, allocated once.
 	if b.onChange != nil {
-		b.changes = make([]phaseChange, 0, changesCapacity)
+		b.queue.changes = make([]phaseChange, 0, changesCapacity)
 	}
 	//: every field honoured.
 	return ""
