@@ -72,28 +72,43 @@ leave a call unguarded.
 `Fallback` with a failing primary is 12.59 ns, still allocation-free: the
 switch itself is ~5 ns, and everything above it is plan B's own cost.
 
-## The retry budget costs one compare-and-swap, and allocates nothing (#475)
+## The retry budget costs a few nanoseconds, and allocates nothing ([issue 475](https://github.com/kitsunium/sdk/issues/475))
 
-Measured on 2026-10-21 (go1.27.3, same machine class, `-benchtime=1s`, single
-run), beside a fresh baseline:
+A run of its own, beside a fresh baseline — its envelope is below, and the
+2026-09-10 envelope further down covers the table above, not this one:
 
 | policy | ns/op | B/op | allocs | over baseline |
 |---|---:|---:|---:|---:|
-| baseline (no policy) | 2.851 | 0 | 0 | — |
-| `Retry`, first attempt succeeds | 6.307 | 0 | **0** | +3.5 ns |
-| `Retry` with a `RetryBudget`, first attempt succeeds | 8.861 | 0 | **0** | +6.0 ns |
-| `RetryBudget` alone, 8 goroutines: failure + question + success | 42.91 | 0 | **0** | — |
+| baseline (no policy) | 2.821 | 0 | 0 | — |
+| `Retry`, first attempt succeeds | 6.882 | 0 | **0** | +4.1 ns |
+| `Retry` with a `RetryBudget`, first attempt succeeds | 9.102 | 0 | **0** | +6.3 ns |
+| `RetryBudget` alone, 8 goroutines: failure + question + success | 49.33 | 0 | **0** | — |
 
-A budget adds 2.5 ns to the happy path — the success it records is one
-compare-and-swap on a full bucket that writes nothing — and the bucket stays
-lock-free under contention: three operations on one shared counter from every
-core cost 43 ns together, with no allocation.
+A budget adds about 2 ns to the happy path — the success it records on a full
+bucket is one atomic load that writes nothing — and the bucket stays lock-free
+under contention: three operations on one shared counter from every core cost
+under 50 ns together, with no allocation.
+
+| Dimension | Value |
+|---|---|
+| CPU                | AMD EPYC 7351P, 8 cores |
+| RAM                | 15 GiB |
+| OS / kernel        | Linux 6.12.101+deb13-amd64 |
+| Go toolchain       | go1.27.3 linux/amd64 |
+| Git branch         | feat/resilience-budget-retryafter |
+| Git commit         | 95503e90 (the budget's code as merged; later commits touch docs only) |
+| Generated (UTC)    | 2026-10-21 |
+| Bench wall-clock   | `go test -run='^$' -bench='Baseline\|Retry_FirstAttempt\|WithBudget\|Budget_Contended' -benchmem -benchtime=1s`, single run |
 
 ```
-BenchmarkBaseline_NoPolicy-8                       	417023234	         2.851 ns/op	       0 B/op	       0 allocs/op
-BenchmarkRetry_FirstAttemptSucceeds-8              	187023308	         6.307 ns/op	       0 B/op	       0 allocs/op
-BenchmarkRetry_WithBudget_FirstAttemptSucceeds-8   	135465492	         8.861 ns/op	       0 B/op	       0 allocs/op
-BenchmarkRetryBudget_Contended-8                   	27014719	        42.91 ns/op	       0 B/op	       0 allocs/op
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/pkg/v1/app/resilience
+cpu: AMD EPYC 7351P 16-Core Processor
+BenchmarkBaseline_NoPolicy-8                       	420117145	         2.821 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRetry_FirstAttemptSucceeds-8              	174201987	         6.882 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRetry_WithBudget_FirstAttemptSucceeds-8   	131862070	         9.102 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRetryBudget_Contended-8                   	21669429	        49.33 ns/op	       0 B/op	       0 allocs/op
 ```
 
 ## What is NOT measured here

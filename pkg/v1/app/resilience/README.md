@@ -735,9 +735,9 @@ RetryBudgetConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/
 ```go
 type RetryBudgetConfig struct {
 	// MaxTokens is the bucket's size and its starting content. Retries are
-	// allowed while more than MaxTokens/2 remain, so it is also how many
-	// more failures than the successes pay for the budget absorbs before
-	// it starts refusing. A non-positive MaxTokens is refused; values above
+	// allowed while more than MaxTokens/2 remain, so the budget absorbs
+	// about MaxTokens/2 more failures than its successes repay before it
+	// starts refusing. A non-positive MaxTokens is refused; values above
 	// 2^40 are held there.
 	MaxTokens  int
 	// TokenRatio is what a recorded success puts back, in tokens, a

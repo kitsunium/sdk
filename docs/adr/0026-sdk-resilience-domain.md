@@ -146,7 +146,8 @@ Two behaviour changes, admitted in v0 by ADR 0040, and one new constructor:
 - **The breaker treats a caller's cancellation as neutral.** A call that ends
   in `context.Canceled` once the caller's own context is closed is neither a
   success nor a failure, whatever `BreakerConfig.Retryable` would have said:
-  it is folded in through the generation #467 introduced as `outcomeNeutral`,
+  it is folded in as `outcomeNeutral`, through the generation the HalfOpen
+  trial cap introduced ([issue 467](https://github.com/kitsunium/sdk/issues/467)),
   so it frees a HalfOpen trial and moves no count. Before, with a nil
   classifier, a wave of client disconnects opened the breaker on a healthy
   dependency. `context.DeadlineExceeded` stays a failure — a dependency too
