@@ -1427,8 +1427,9 @@ types:
           because guard carries the recovered value as a field of HANDLER_PANICKED and
           never as its origin.
 
-          A failure that follows the consumer's stop cancelling the handler is not the
-          message's: it is handed back uncounted, unless it is a panic, which is.
+          A failure once the consumer is stopping — its drain over, or the lease's
+          margin reached during it — is not the message's: it is handed back
+          uncounted, unless it is a panic, which is.
 
           Every outcome is sent on ctx WITHOUT its cancellation, bounded by
           SettleTimeout: the work is done, or was stopped, and a stop that lands
@@ -1760,16 +1761,17 @@ types:
       - doc: watcher is the watching goroutine.
         name: watcher
         type: sync.WaitGroup
-      - doc: stopped reports that the consumer's stop cancelled the handler.
+      - doc: |-
+          stopped reports that the consumer stopped while the handler ran: a
+          failure that follows is the stop's, whether the drain, the stop itself
+          or the lease's margin during the drain ended the handler.
         name: stopped
         type: bool
     kind: struct
     methods:
-      - doc: |-
-          halt cancels the handler's context with cause, recording whether the
-          consumer's stop did it, and ends the watch.
+      - doc: halt cancels the handler's context with cause and ends the watch.
         name: halt
-        params: cause error, byStop bool
+        params: cause error
         recv: w *watched
         results: bool
       - doc: |-

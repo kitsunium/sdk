@@ -110,6 +110,43 @@ func TestADrainThatRunsOutHandsTheMessageBackUncounted(t *testing.T) {
 	}
 }
 
+// TestALeaseThatEndsDuringADrainStillHandsTheMessageBackUncounted pins the
+// drain against the lease bound: a drain longer than what the lease has left
+// is cut by the lease's margin, and the message the stop interrupted is still
+// the stop's — released, uncounted, not nacked toward the dead-letter store.
+func TestALeaseThatEndsDuringADrainStillHandsTheMessageBackUncounted(t *testing.T) {
+	t.Parallel()
+	for _, factory := range everyBroker() {
+		t.Run(factory.name, func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewManualClock(epoch)
+			broker := factory.make(t, clk, defaultPolicy())
+			publish(t, broker, "outlasted")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			inside, ended := make(chan struct{}, 1), make(chan error, 1)
+			wait := consuming(ctx, broker, svcqueue.ConsumerConfig{
+				Handler: blockingHandler(inside, nil, ended), DrainTimeout: 2 * testVisibility,
+				HandlerIsIdempotent: true, PollInterval: fastPoll, Clock: clk,
+			})
+			<-inside
+			cancel()
+			clk.BlockUntil(2)
+			//: the lease's margin comes long before the drain ends.
+			clk.Advance(testVisibility - testMargin)
+			if cause := <-ended; !errs.HasCode(cause, corequeue.CodeLeaseExpired) {
+				t.Fatalf("the handler's context cause = %v, want the lease's LEASE_EXPIRED", cause)
+			}
+			if err := wait(); err != nil {
+				t.Fatalf("Consume() = %v, want nil", err)
+			}
+			if again := receiveOne(t, broker); again.Deliveries != 1 {
+				t.Fatalf("the message the stop interrupted came back as delivery %d, want 1", again.Deliveries)
+			}
+		})
+	}
+}
+
 // TestAStopWithNoDrainHandsTheInterruptedMessageBack is the zero DrainTimeout,
 // which is what a stop always was — the handler's context ends at once — and
 // the defect beside it: the nack of the interrupted message was sent on the

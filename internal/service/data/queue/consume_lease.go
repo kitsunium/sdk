@@ -84,7 +84,9 @@ type watched struct {
 	plan leasePlan
 	// watcher is the watching goroutine.
 	watcher sync.WaitGroup
-	// stopped reports that the consumer's stop cancelled the handler.
+	// stopped reports that the consumer stopped while the handler ran: a
+	// failure that follows is the stop's, whether the drain, the stop itself
+	// or the lease's margin during the drain ended the handler.
 	stopped bool
 }
 
@@ -135,6 +137,7 @@ func (c *consumer) oversee(ctx context.Context, w *watched) bool {
 		return false
 	case <-w.stop:
 		w.stop = nil
+		w.stopped = true
 		//: a drain lets the message in hand finish; armed now, stopped by finish.
 		if c.cfg.DrainTimeout > 0 {
 			w.drain = c.cfg.Clock.NewTimer(c.cfg.DrainTimeout)
@@ -143,14 +146,14 @@ func (c *consumer) oversee(ctx context.Context, w *watched) bool {
 			return true
 		}
 		//: no drain: the stop reaches the handler now, as it always did.
-		return w.halt(context.Cause(ctx), true)
+		return w.halt(context.Cause(ctx))
 	case <-w.drained:
 		//: the drain is over.
-		return w.halt(context.Cause(ctx), true)
+		return w.halt(context.Cause(ctx))
 	case <-timerC(w.deadline):
 		//: past this instant another consumer may hold the message.
 		return w.halt(kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{},
-			kerrs.String("message", w.id), kerrs.String("why", "the handler's lease ends within its margin")), false)
+			kerrs.String("message", w.id), kerrs.String("why", "the handler's lease ends within its margin")))
 	case <-tickerC(w.renewal):
 		//: renewed, or the handler told why not.
 		return c.renewWatched(ctx, w)
@@ -165,7 +168,7 @@ func (c *consumer) renewWatched(ctx context.Context, w *watched) bool {
 	//: the lease is lost, or the medium refused.
 	if renewErr != nil {
 		//: the refusal is the cause.
-		return w.halt(renewErr, false)
+		return w.halt(renewErr)
 	}
 	w.lease = lease
 	w.deadline.Reset(lease.ExpiresAt.Sub(c.cfg.Clock.Now()) - w.plan.margin)
@@ -173,10 +176,8 @@ func (c *consumer) renewWatched(ctx context.Context, w *watched) bool {
 	return true
 }
 
-// halt cancels the handler's context with cause, recording whether the
-// consumer's stop did it, and ends the watch.
-func (w *watched) halt(cause error, byStop bool) bool {
-	w.stopped = byStop
+// halt cancels the handler's context with cause and ends the watch.
+func (w *watched) halt(cause error) bool {
 	w.cancel(cause)
 	//: the handler is stopping; nothing more to watch.
 	return false

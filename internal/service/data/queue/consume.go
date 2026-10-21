@@ -51,6 +51,14 @@ import (
 // margin when its turn comes is never started; it is handed back like the
 // batch a stop interrupts. With [ConsumerConfig.AutoExtend] the lease is
 // renewed instead, through the broker's [corequeue.LeaseExtender].
+//
+// A renewal the handler makes itself is not one Consume sees: the bound
+// stays the lease the handler was handed, and the outcome is reported on
+// that lease's receipt, which the renewal voided. So a handler that
+// extends its own lease returns right after — parking its message, as
+// the mail spool does, which the void receipt's LEASE_EXPIRED leaves
+// parked — and a handler that must run longer than its lease sets
+// AutoExtend and does not extend it itself.
 func Consume(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) error {
 	//: the assertion the SDK cannot check, refused at the wiring site.
 	if invalid := cfg.validate(); invalid != nil {
@@ -303,8 +311,9 @@ func (c *consumer) process(ctx context.Context, delivery corequeue.DeliveryValue
 // because guard carries the recovered value as a field of HANDLER_PANICKED and
 // never as its origin.
 //
-// A failure that follows the consumer's stop cancelling the handler is not the
-// message's: it is handed back uncounted, unless it is a panic, which is.
+// A failure once the consumer is stopping — its drain over, or the lease's
+// margin reached during it — is not the message's: it is handed back
+// uncounted, unless it is a panic, which is.
 //
 // Every outcome is sent on ctx WITHOUT its cancellation, bounded by
 // SettleTimeout: the work is done, or was stopped, and a stop that lands

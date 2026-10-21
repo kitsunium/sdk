@@ -353,6 +353,12 @@ packages:
           transport with no renewal verb cannot implement it, and the assertion is
           how a caller finds that out. The three brokers in internal/service/data/queue
           implement it.
+
+          Under internal/service/data/queue.Consume, a handler that calls it on its
+          own delivery's receipt is renewing a lease the engine no longer tracks:
+          the engine still stops it a margin before the lease it handed over, so it
+          renews to park its message and returns. To keep working past a lease,
+          the handler asks the engine to renew (ConsumerConfig.AutoExtend).
         methods:
           - doc: |-
               Extend renews the lease named by receipt for a further by, measured
@@ -1694,6 +1700,14 @@ packages:
           margin when its turn comes is never started; it is handed back like the
           batch a stop interrupts. With [ConsumerConfig.AutoExtend] the lease is
           renewed instead, through the broker's [corequeue.LeaseExtender].
+
+          A renewal the handler makes itself is not one Consume sees: the bound
+          stays the lease the handler was handed, and the outcome is reported on
+          that lease's receipt, which the renewal voided. So a handler that
+          extends its own lease returns right after — parking its message, as
+          the mail spool does, which the void receipt's LEASE_EXPIRED leaves
+          parked — and a handler that must run longer than its lease sets
+          AutoExtend and does not extend it itself.
         in:
           - name: ctx
             type: context.Context

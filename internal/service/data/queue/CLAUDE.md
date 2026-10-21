@@ -411,11 +411,17 @@ by `consume_lease_external_test.go` — each case failed before the change:
   delivery counted (`TestAStopFallsBackToANackWithoutReleaser`).
 - **The message in hand drains.** `DrainTimeout` (River's `SoftStopTimeout`)
   keeps the stop from the handler that long; what finishes is acknowledged,
-  what the drain cuts short is released, and a failure that follows the
-  stop's cancellation is the stop's, not the message's — released, unless it
-  is a panic. Zero cancels at once, as a stop always did — and that handler's
-  message is released too, where its nack used to be refused on the dead
-  context (`TestADrain…`, `TestAStopWithNoDrainHandsTheInterruptedMessageBack`).
+  what the drain cuts short is released, and a failure once the consumer is
+  stopping is the stop's, not the message's — released, unless it is a panic
+  or `DoNotRetry`; that holds when the lease's margin ends the handler before
+  the drain does (`TestALeaseThatEndsDuringADrainStillHandsTheMessageBackUncounted`).
+  Zero cancels at once, as a stop always did — and that handler's message is
+  released too, where its nack used to be refused on the dead context
+  (`TestADrain…`, `TestAStopWithNoDrainHandsTheInterruptedMessageBack`).
+- **A handler that extends its own lease is not tracked.** The bound stays the
+  lease it was handed and the outcome goes on that lease's void receipt, so
+  such a handler parks its message and returns, as the mail spool does; one
+  that must outlive its lease sets `AutoExtend` instead.
 - **Every outcome past the stop is bounded by `SettleTimeout`** (zero is five
   seconds), on the consumer's clock, from the instant the consumer stops — a
   medium that stopped answering cannot hold a stop forever. The cut is

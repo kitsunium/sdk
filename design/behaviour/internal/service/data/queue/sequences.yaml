@@ -540,6 +540,8 @@ sequences:
               do:
                 - set: w.stop
                   value: nil
+                - set: w.stopped
+                  value: "true"
                 - opt:
                     do:
                       - set: w.drain
@@ -550,17 +552,17 @@ sequences:
                         value: w.drain.C()
                       - return: "true"
                     when: c.cfg.DrainTimeout > 0
-                - return: w.halt(context.Cause(ctx), true)
+                - return: w.halt(context.Cause(ctx))
                   to: w.halt
             - comm: <-w.drained
               do:
-                - return: w.halt(context.Cause(ctx), true)
+                - return: w.halt(context.Cause(ctx))
                   to: w.halt
             - comm: <-timerC(w.deadline)
               do:
                 - return: |-
                     w.halt(kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{},
-                    			kerrs.String("message", w.id), kerrs.String("why", "the handler's lease ends within its margin")), false)
+                    			kerrs.String("message", w.id), kerrs.String("why", "the handler's lease ends within its margin")))
                   to: w.halt
             - comm: <-tickerC(w.renewal)
               do:
@@ -584,7 +586,7 @@ sequences:
         to: c.renew
       - opt:
           do:
-            - return: w.halt(renewErr, false)
+            - return: w.halt(renewErr)
               to: w.halt
           when: renewErr != nil
       - set: w.lease
@@ -594,8 +596,6 @@ sequences:
       - return: "true"
   - of: (*watched).halt
     steps:
-      - set: w.stopped
-        value: byStop
       - eval: w.cancel(cause)
       - return: "false"
   - of: (*watched).finish
