@@ -28,8 +28,9 @@ packages:
       - const:
           - doc: |-
               CodeMessageUndecodable identifies a spooled record that does not decode —
-              written by another program, or edited — and is dead-lettered at its
-              first delivery, since no attempt can decode it.
+              written by another program, or edited — and is marked not retryable,
+              since no attempt can decode it: dead-lettered at its first delivery
+              where the queue can reject it, after its last attempt where it cannot.
             name: CodeMessageUndecodable
             value: "0x00_03_51_03"
         type: errs.Code

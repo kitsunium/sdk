@@ -14,6 +14,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // The mail a bounce test sends, and the words a refusing relay answers with,
@@ -216,6 +217,42 @@ func TestRetryPermanentRetriesARejectedMail(t *testing.T) {
 	}
 	if b := bounceOf(t, got); b.GivenUp != model.MailExhausted || b.Attempts != 2 {
 		t.Errorf("the bounce %+v", b)
+	}
+}
+
+// A hook may send mail: it runs out of the spool's observer, so the mail it
+// sends is queued — and, refused in turn, given up and told to the hook —
+// instead of waiting forever on the observer the bounce came from. Its context
+// is on the mailer's node.
+func TestABounceHookMaySendMail(t *testing.T) {
+	got := make(chan *app.BounceEvent, 4)
+	var logs syncBuffer
+	var m *app.Mailer
+	hook := app.OnBounce(func(ctx context.Context, b *app.BounceEvent) {
+		logger.Info(ctx, app.Log(ctx), "the hook heard of "+b.Message.Subject)
+		if b.Message.Subject == bounceSubject {
+			if _, err := m.Send(ctx, mail.Message{To: []mail.Address{{Addr: bounceTo}}, Subject: "Fallback", Text: "Hi again"}); err != nil {
+				panic(err)
+			}
+		}
+		got <- b
+	})
+	a, mailer := bounceApp(t, startRefusingRelay(t, "550 5.1.1 "+refusalWords), newBounceClock(), []app.MailerConfigurer{hook}, app.Logs(&logs))
+	m = mailer
+	stream := events(t, a)
+	id := sendBounce(t, m)
+	mailStatuses(t, stream, id, model.MailDead, model.MailSent)
+	first, second := bounceOf(t, got), bounceOf(t, got)
+	if first.Message.Subject != bounceSubject || second.Message.Subject != "Fallback" || second.GivenUp != model.MailRejected {
+		t.Errorf("the bounces %+v then %+v", first, second)
+	}
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, "the hook heard of") && !strings.Contains(line, `node="`+bounceMailer+`"`) {
+			t.Errorf("the hook's log is on no mailer's node: %s", line)
+		}
+	}
+	if n := strings.Count(logs.String(), "the hook heard of"); n != 2 {
+		t.Errorf("the hook logged %d lines through app.Log, want 2:\n%s", n, logs.String())
 	}
 }
 

@@ -72,11 +72,11 @@ type BounceEvent struct {
 
 // OnBounce replaces what the mailer does with a mail it gives up — by
 // default, it logs it as an error naming why — with fn: mark an address
-// undeliverable, tell an operator, retry it another way. fn runs on the
-// mailer's outbox loop, the mailbox already updated, with a context that
-// continues the trace of the Send and ends when the mailer stops; the next
-// mail waits for it, so it should not block. A panic in fn is logged and
-// changes nothing else. A nil fn keeps the framework's own.
+// undeliverable, tell an operator, send it another way. fn runs on a
+// goroutine of its own once the mailbox is updated — the outbox goes on
+// meanwhile, and fn may send mail —, with a context on the mailer's node that
+// continues the trace of the Send; the mailer's stop waits for it. A panic in
+// fn is logged and changes nothing else. A nil fn keeps the framework's own.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
@@ -145,13 +145,13 @@ func (m *Mailer) retriesPermanent() bool {
 	return m.retryPermanentFor != nil && m.retryPermanentFor.Get()
 }
 
-// bounced hands the mail e reports given up to the mailer's bounce hook, in
-// runCtx — the outbox's — continuing the trace of the Send.
-func (m *Mailer) bounced(runCtx context.Context, a *App, e *plug.MailEventValue) {
-	if runCtx == nil {
-		runCtx = context.WithoutCancel(a.baseCtx)
-	}
-	ctx := runCtx
+// bounced hands the mail e reports given up to the mailer's bounce hook, in a
+// context of the app's on the mailer's node — app.Log and every API that reads
+// the running app find it there —, continuing the trace of the Send. The
+// mailer's stop waits for the hook rather than cancel it, so that a mail it
+// sends still reaches the outbox.
+func (m *Mailer) bounced(a *App, e *plug.MailEventValue) {
+	ctx := withNode(context.WithoutCancel(a.baseCtx), m.id, a)
 	if sc, err := trace.ParseTraceParent(e.Meta[metaTrace]); err == nil {
 		ctx = trace.ContextWithSpanContext(ctx, sc)
 	}

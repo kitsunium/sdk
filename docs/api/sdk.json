@@ -3051,7 +3051,7 @@
       "name": "OnBounce",
       "spelled": "func(fn func(ctx context.Context, b *Bounce)) MailerOption",
       "canonical": "func(fn func(ctx context.Context, b *github.com/kitsunium/sdk/framework/app.Bounce)) github.com/kitsunium/sdk/framework/app.MailerOption",
-      "doc": "OnBounce replaces what the mailer does with a mail it gives up — by\ndefault, it logs it as an error naming why — with fn: mark an address\nundeliverable, tell an operator, retry it another way. fn runs on the\nmailer's outbox loop, the mailbox already updated, with a context that\ncontinues the trace of the Send and ends when the mailer stops; the next\nmail waits for it, so it should not block. A panic in fn is logged and\nchanges nothing else. A nil fn keeps the framework's own.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "doc": "OnBounce replaces what the mailer does with a mail it gives up — by\ndefault, it logs it as an error naming why — with fn: mark an address\nundeliverable, tell an operator, send it another way. fn runs on a\ngoroutine of its own once the mailbox is updated — the outbox goes on\nmeanwhile, and fn may send mail —, with a context on the mailer's node that\ncontinues the trace of the Send; the mailer's stop waits for it. A panic in\nfn is logged and changes nothing else. A nil fn keeps the framework's own.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/mailer.go",
       "layer": "framework"
     },
@@ -8866,7 +8866,7 @@
       "name": "OnBounce",
       "spelled": "func(fn func(ctx context.Context, b *BounceEvent)) MailerConfigurer",
       "canonical": "func(fn func(ctx context.Context, b *github.com/kitsunium/sdk/framework/internal/app.BounceEvent)) github.com/kitsunium/sdk/framework/internal/app.MailerConfigurer",
-      "doc": "OnBounce replaces what the mailer does with a mail it gives up — by\ndefault, it logs it as an error naming why — with fn: mark an address\nundeliverable, tell an operator, retry it another way. fn runs on the\nmailer's outbox loop, the mailbox already updated, with a context that\ncontinues the trace of the Send and ends when the mailer stops; the next\nmail waits for it, so it should not block. A panic in fn is logged and\nchanges nothing else. A nil fn keeps the framework's own.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "doc": "OnBounce replaces what the mailer does with a mail it gives up — by\ndefault, it logs it as an error naming why — with fn: mark an address\nundeliverable, tell an operator, send it another way. fn runs on a\ngoroutine of its own once the mailbox is updated — the outbox goes on\nmeanwhile, and fn may send mail —, with a context on the mailer's node that\ncontinues the trace of the Send; the mailer's stop waits for it. A panic in\nfn is logged and changes nothing else. A nil fn keeps the framework's own.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/mailer_bounce.go",
       "layer": "framework"
     },

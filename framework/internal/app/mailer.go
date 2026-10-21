@@ -114,9 +114,10 @@ type Mailer struct {
 	// composed holds what the capture transport composed for a mail, from
 	// the attempt that sent it to the spool's report that it was sent.
 	composed map[string][]byte
-	// runCtx is the outbox's own context while it runs, which a bounce hook
-	// is handed: the mailer's stop cancels it.
-	runCtx context.Context
+	// hooks are the bounce hooks running, each on its own goroutine, out of
+	// the spool's observer — which a hook's Send would re-enter: the
+	// mailer's stop waits for them.
+	hooks sync.WaitGroup
 	// maxAgeFor and retryPermanentFor are the mailer's settings
 	// <mailer>-max-age and <mailer>-retry-permanent (mailer_bounce.go),
 	// declared with it; nil for a mailer no service declares.
@@ -528,7 +529,7 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	done := make(chan struct{})
 	m.mu.Lock()
 	m.transport, m.capture, m.spool, m.cancel, m.done, m.loop = transport, capture, spool, cancel, done, loop
-	m.relay, m.problem, m.composed, m.outboxDB, m.runCtx = relay, "", map[string][]byte{}, db, ctx
+	m.relay, m.problem, m.composed, m.outboxDB = relay, "", map[string][]byte{}, db
 	m.ring.reset(capture != nil)
 	m.ring.dead, m.ring.deadKnown = dead, deadErr == nil
 	m.mu.Unlock()
@@ -545,7 +546,12 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	return nil
 }
 
-// stop ends the outbox's loop and closes its spool, waiting until ctx ends.
+// stop ends the outbox's loop, waits for the bounce hooks still running, and
+// closes its spool, waiting until ctx ends.
+//
+// Goroutine lifecycle: one goroutine waits for the bounce hooks and closes
+// hooksDone; it ends when the last hook returns, which stop waits for unless
+// ctx ends first.
 func (m *Mailer) stop(ctx context.Context, a *App) error {
 	m.mu.Lock()
 	cancel, done, spool, loop := m.cancel, m.done, m.spool, m.loop
@@ -556,6 +562,18 @@ func (m *Mailer) stop(ctx context.Context, a *App) error {
 	cancel()
 	select {
 	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	// No mail is given up once the loop returned: the bounce hooks still
+	// running are the last, and a mail one sends still reaches the outbox.
+	hooksDone := make(chan struct{})
+	go func() {
+		m.hooks.Wait()
+		close(hooksDone)
+	}()
+	select {
+	case <-hooksDone:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -738,6 +756,10 @@ func (m *Mailer) transmit(ctx context.Context, a *App, msg *mail.Message) ([]byt
 // observe keeps the mailbox in step with what the spool reports — each
 // mail's status and the counts — and streams the mail's new status. The
 // spool reports a mail an earlier run queued too: the mailbox learns it then.
+// A mail given up is handed to the bounce hook (bounced).
+//
+// Goroutine lifecycle: one goroutine per mail given up runs the bounce hook
+// and ends with it; m.hooks counts it, and stop waits for it.
 func (m *Mailer) observe(a *App, e *plug.MailEventValue) {
 	if e.Kind == plug.MailEventDuplicate {
 		// A redelivery of a mail already sent, dropped: nothing changed.
@@ -773,12 +795,13 @@ func (m *Mailer) observe(a *App, e *plug.MailEventValue) {
 		// Every other event changes nothing the mailbox shows.
 	}
 	summary := summaryOf(rec)
-	runCtx := m.runCtx
 	m.mu.Unlock()
 	a.hub.publish(model.Event{Type: model.EventMail, Mail: summary})
 	if e.Kind == plug.MailEventDeadLettered {
-		// Outside the lock: the hook is the product's, and may take its time.
-		m.bounced(runCtx, a, e)
+		// Out of the lock and of the spool's observer, which holds its own
+		// while it tells: the hook is the product's, may take its time, and
+		// may send a mail — whose Queued event that observer reports.
+		m.hooks.Go(func() { m.bounced(a, e) })
 	}
 }
 

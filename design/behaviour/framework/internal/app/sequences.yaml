@@ -21687,8 +21687,8 @@ sequences:
         to: m.mu.Lock
       - set: m.transport, m.capture, m.spool, m.cancel, m.done, m.loop
         value: transport, capture, spool, cancel, done, loop
-      - set: m.relay, m.problem, m.composed, m.outboxDB, m.runCtx
-        value: relay, "", map[string][]byte{}, db, ctx
+      - set: m.relay, m.problem, m.composed, m.outboxDB
+        value: relay, "", map[string][]byte{}, db
       - eval: m.ring.reset(capture != nil)
         to: m.ring.reset
       - set: m.ring.dead, m.ring.deadKnown
@@ -21738,6 +21738,20 @@ sequences:
       - select:
           cases:
             - comm: <-done
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+      - bind: hooksDone
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		m.hooks.Wait()
+          		close(hooksDone)
+          	}()
+      - select:
+          cases:
+            - comm: <-hooksDone
             - comm: <-ctx.Done()
               do:
                 - return: ctx.Err()
@@ -22096,8 +22110,8 @@ sequences:
         kind: value
       - id: a.hub.publish
         kind: internal
-      - id: m.bounced
-        kind: internal
+      - id: m.hooks.Go
+        kind: value
     steps:
       - opt:
           do:
@@ -22157,16 +22171,14 @@ sequences:
       - bind: summary
         eval: summaryOf(rec)
         to: summaryOf
-      - bind: runCtx
-        eval: m.runCtx
       - eval: m.mu.Unlock()
         to: m.mu.Unlock
       - eval: "a.hub.publish(model.Event{Type: model.EventMail, Mail: summary})"
         to: a.hub.publish
       - opt:
           do:
-            - eval: m.bounced(runCtx, a, e)
-              to: m.bounced
+            - eval: m.hooks.Go(func() { m.bounced(a, e) })
+              to: m.hooks.Go
           when: e.Kind == plug.MailEventDeadLettered
   - of: (*Mailer).messageOf
     participants:
@@ -22722,21 +22734,16 @@ sequences:
         kind: actor
       - id: (*Mailer).bounced
         kind: self
-      - id: context
-        kind: stdlib
+      - id: withNode
+        kind: internal
       - id: trace
         kind: package
       - id: m.logBounce
         kind: internal
     steps:
-      - opt:
-          do:
-            - set: runCtx
-              to: context
-              value: context.WithoutCancel(a.baseCtx)
-          when: runCtx == nil
       - bind: ctx
-        eval: runCtx
+        eval: withNode(context.WithoutCancel(a.baseCtx), m.id, a)
+        to: withNode
       - opt:
           do:
             - set: ctx

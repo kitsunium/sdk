@@ -2380,7 +2380,7 @@ Now returns the app's time: the system clock, or the clock a test gave with [Clo
 func OnBounce(fn func(ctx context.Context, b *Bounce)) MailerOption
 ```
 
-OnBounce replaces what the mailer does with a mail it gives up — by default, it logs it as an error naming why — with fn: mark an address undeliverable, tell an operator, retry it another way. fn runs on the mailer's outbox loop, the mailbox already updated, with a context that continues the trace of the Send and ends when the mailer stops; the next mail waits for it, so it should not block. A panic in fn is logged and changes nothing else. A nil fn keeps the framework's own.
+OnBounce replaces what the mailer does with a mail it gives up — by default, it logs it as an error naming why — with fn: mark an address undeliverable, tell an operator, send it another way. fn runs on a goroutine of its own once the mailbox is updated — the outbox goes on meanwhile, and fn may send mail —, with a context on the mailer's node that continues the trace of the Send; the mailer's stop waits for it. A panic in fn is logged and changes nothing else. A nil fn keeps the framework's own.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 

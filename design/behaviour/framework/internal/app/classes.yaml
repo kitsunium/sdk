@@ -16015,10 +16015,11 @@ types:
         name: composed
         type: map[string][]byte
       - doc: |-
-          runCtx is the outbox's own context while it runs, which a bounce hook
-          is handed: the mailer's stop cancels it.
-        name: runCtx
-        type: context.Context
+          hooks are the bounce hooks running, each on its own goroutine, out of
+          the spool's observer — which a hook's Send would re-enter: the
+          mailer's stop waits for them.
+        name: hooks
+        type: sync.WaitGroup
       - doc: |-
           maxAgeFor and retryPermanentFor are the mailer's settings
           <mailer>-max-age and <mailer>-retry-permanent (mailer_bounce.go),
@@ -16112,7 +16113,13 @@ types:
         params: ctx context.Context, a *App
         recv: m *Mailer
         results: error
-      - doc: stop ends the outbox's loop and closes its spool, waiting until ctx ends.
+      - doc: |-
+          stop ends the outbox's loop, waits for the bounce hooks still running, and
+          closes its spool, waiting until ctx ends.
+
+          Goroutine lifecycle: one goroutine waits for the bounce hooks and closes
+          hooksDone; it ends when the last hook returns, which stop waits for unless
+          ctx ends first.
         name: stop
         params: ctx context.Context, a *App
         recv: m *Mailer
@@ -16152,6 +16159,10 @@ types:
           observe keeps the mailbox in step with what the spool reports — each
           mail's status and the counts — and streams the mail's new status. The
           spool reports a mail an earlier run queued too: the mailbox learns it then.
+          A mail given up is handed to the bounce hook (bounced).
+
+          Goroutine lifecycle: one goroutine per mail given up runs the bounce hook
+          and ends with it; m.hooks counts it, and stop waits for it.
         name: observe
         params: a *App, e *plug.MailEventValue
         recv: m *Mailer
@@ -16188,10 +16199,13 @@ types:
         recv: m *Mailer
         results: bool
       - doc: |-
-          bounced hands the mail e reports given up to the mailer's bounce hook, in
-          runCtx — the outbox's — continuing the trace of the Send.
+          bounced hands the mail e reports given up to the mailer's bounce hook, in a
+          context of the app's on the mailer's node — app.Log and every API that reads
+          the running app find it there —, continuing the trace of the Send. The
+          mailer's stop waits for the hook rather than cancel it, so that a mail it
+          sends still reaches the outbox.
         name: bounced
-        params: runCtx context.Context, a *App, e *plug.MailEventValue
+        params: a *App, e *plug.MailEventValue
         recv: m *Mailer
       - doc: |-
           logBounce is the framework's bounce hook: an error naming the mail, why it
