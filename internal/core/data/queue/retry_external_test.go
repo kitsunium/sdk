@@ -125,6 +125,77 @@ func TestDoNotRetryMarksTheFailureAndKeepsTheCauseItsOrigin(t *testing.T) {
 	}
 }
 
+// TestRetryAfterMarksTheFailureWithItsDelayAndKeepsTheCauseItsOrigin pins the
+// handler half of a delayed retry (ADR 0183), as DoNotRetry's is pinned: the
+// mark and its delay are what the consumer engine reads back, an SDK cause
+// keeps its own reason, code and public words, and a cause with none of its
+// own, or none at all, is recorded as RETRY_REQUESTED.
+func TestRetryAfterMarksTheFailureWithItsDelayAndKeepsTheCauseItsOrigin(t *testing.T) {
+	t.Parallel()
+	sdkCause := errs.Define(0x00_02_17_FD, "DOWNSTREAM_THROTTLED", "the downstream asked to slow down", "private half")
+	cases := []struct {
+		cause      error
+		name       string
+		wantReason string
+		wantCode   errs.Code
+	}{
+		{sdkCause, "an SDK cause", "DOWNSTREAM_THROTTLED", 0x00_02_17_FD},
+		{errors.New("429 Too Many Requests"), "a stdlib cause", "RETRY_REQUESTED", corequeue.CodeRetryRequested}, //nolint:err113 // a foreign error is the case
+		{nil, "no cause", "RETRY_REQUESTED", corequeue.CodeRetryRequested},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			marked := corequeue.RetryAfter(testCase.cause, 90*time.Second)
+			if delay, ok := corequeue.RetryAfterOf(marked); !ok || delay != 90*time.Second {
+				t.Fatalf("RetryAfterOf(RetryAfter(cause, 90s)) = (%v, %v), want (1m30s, true)", delay, ok)
+			}
+			if reason, _ := errs.ReasonOf(marked); reason != testCase.wantReason {
+				t.Errorf("reason = %q, want %q", reason, testCase.wantReason)
+			}
+			if code, _ := errs.CodeOf(marked); code != testCase.wantCode {
+				t.Errorf("code = %v, want %v", code, testCase.wantCode)
+			}
+			if testCase.cause != nil && !errors.Is(marked, testCase.cause) {
+				t.Errorf("errors.Is(RetryAfter(cause), cause) = false; the cause must stay in the chain")
+			}
+		})
+	}
+	if code, _ := errs.CodeOf(corequeue.RetryAfter(nil, 0)); errs.ExitCodeOf(corequeue.RetryAfter(nil, 0)) != corequeue.RetryRequested.ExitCode() || code != corequeue.RetryRequested.Code() {
+		t.Error("RetryAfter(nil) is not recorded as RetryRequested, its code and exit code")
+	}
+}
+
+// TestRetryAfterReadsItsDelayBack pins the readings RetryAfterOf gives: no mark
+// is no delay, a negative delay is now, one past MaxDeadlineOffset is held
+// there, the outermost of two marks wins, and a mark wrapped further — by
+// errs.Wrap or by DoNotRetry — still carries its delay.
+func TestRetryAfterReadsItsDelayBack(t *testing.T) {
+	t.Parallel()
+	if _, ok := corequeue.RetryAfterOf(errors.New("plain")); ok { //nolint:err113 // a foreign error is the case
+		t.Fatal("RetryAfterOf(an unmarked error) reported a mark")
+	}
+	if _, ok := corequeue.RetryAfterOf(nil); ok {
+		t.Fatal("RetryAfterOf(nil) reported a mark")
+	}
+	cases := []struct {
+		err  error
+		name string
+		want time.Duration
+	}{
+		{corequeue.RetryAfter(nil, -time.Minute), "a negative delay", 0},
+		{corequeue.RetryAfter(nil, time.Duration(1<<62)), "past MaxDeadlineOffset", corequeue.MaxDeadlineOffset},
+		{corequeue.RetryAfter(corequeue.RetryAfter(nil, time.Second), time.Hour), "two marks", time.Hour},
+		{errs.Wrap(corequeue.RetryAfter(nil, time.Minute), errs.WrapParams{}, errs.String("step", "send")), "wrapped further", time.Minute},
+		{corequeue.DoNotRetry(corequeue.RetryAfter(nil, time.Minute)), "under DoNotRetry", time.Minute},
+	}
+	for _, testCase := range cases {
+		if got, ok := corequeue.RetryAfterOf(testCase.err); !ok || got != testCase.want {
+			t.Errorf("%s: RetryAfterOf = (%v, %v), want (%v, true)", testCase.name, got, ok, testCase.want)
+		}
+	}
+}
+
 // TestTheQueueSiblingsKeepTheirMethodCounts pins the shapes ADR 0039 freezes
 // once published: Broker at four methods, and each capability sibling at the
 // count it shipped with. A method added to any of them breaks every downstream
@@ -141,6 +212,9 @@ func TestTheQueueSiblingsKeepTheirMethodCounts(t *testing.T) {
 		{reflect.TypeFor[corequeue.Waker](), 1},
 		{reflect.TypeFor[corequeue.Rejecter](), 1},
 		{reflect.TypeFor[corequeue.Releaser](), 1},
+		{reflect.TypeFor[corequeue.DelayedNacker](), 1},
+		{reflect.TypeFor[corequeue.DelayedPublisher](), 1},
+		{reflect.TypeFor[corequeue.OncePublisher](), 1},
 		{reflect.TypeFor[corequeue.DeadLetterManager](), 2},
 		{reflect.TypeFor[corequeue.DeadLetterWriter](), 1},
 		{reflect.TypeFor[corequeue.MessageReader](), 1},

@@ -82,6 +82,20 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 			` ORDER BY due, id LIMIT ?`},
 		{dialect: coresql.DialectSQLite, role: "replay", text: `UPDATE "app__jobs" SET dead = 0, due = ?, deliveries = 0, reason = NULL, cause = NULL, code = NULL` +
 			` WHERE id = ? AND dead = 1`},
+		//: ADR 0183: a PublishOnce reservation is a row of state 2, claimed by an
+		//: insertion that affects no row over a taken key on every engine.
+		{dialect: coresql.DialectPostgres, role: "onceDrop", text: `DELETE FROM "app__jobs" WHERE id = $1 AND dead = 2 AND due <= $2`},
+		{dialect: coresql.DialectPostgres, role: "onceClaim", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries)` +
+			` VALUES ($1, 2, $2, $3, 0) ON CONFLICT (id) DO NOTHING`},
+		{dialect: coresql.DialectMySQL, role: "onceClaim", text: "INSERT IGNORE INTO `app__jobs` (id, dead, due, enqueued_at, deliveries)" +
+			" VALUES (?, 2, ?, ?, 0)"},
+		{dialect: coresql.DialectSQLite, role: "onceClaim", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries)` +
+			` VALUES (?, 2, ?, ?, 0) ON CONFLICT (id) DO NOTHING`},
+		{dialect: coresql.DialectPostgres, role: "oncePick", text: `SELECT id FROM "app__jobs" WHERE dead = 2 AND due <= $1` +
+			` ORDER BY due, id LIMIT $2 FOR UPDATE SKIP LOCKED`},
+		{dialect: coresql.DialectMySQL, role: "oncePick", text: "SELECT id FROM `app__jobs` WHERE dead = 2 AND due <= ?" +
+			" ORDER BY due, id LIMIT ? FOR UPDATE SKIP LOCKED"},
+		{dialect: coresql.DialectSQLite, role: "oncePick", text: `SELECT id FROM "app__jobs" WHERE dead = 2 AND due <= ? ORDER BY due, id LIMIT ?`},
 	} {
 		rendered := svcqueue.RenderSQLForTest(want.dialect, jobsTable)
 		if got := statementFor(t, rendered, want.role); got != want.text {
@@ -103,6 +117,9 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 	if got, want := postgres.BuryRows(2), `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4`+
 		` WHERE dead = 0 AND id IN ($5, $6)`; got != want {
 		t.Errorf("the burial of two lapsed leases =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := postgres.OnceSweepRows(2), `DELETE FROM "app__jobs" WHERE dead = 2 AND due <= $1 AND id IN ($2, $3)`; got != want {
+		t.Errorf("the removal of two passed reservations =\n%s\nwant\n%s", got, want)
 	}
 	mysql := svcqueue.RenderSQLForTest(coresql.DialectMySQL, jobsTable)
 	if got, want := mysql.LeaseRows(3), "UPDATE `app__jobs` SET due = ?, lease = ?, deliveries = deliveries + 1"+

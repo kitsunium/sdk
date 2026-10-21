@@ -308,7 +308,7 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 // writes reports whether an autocommit statement of role takes the writer.
 func writes(role string) bool {
 	switch role {
-	case "probe", "next", "pick", "deadList", "liveList":
+	case "probe", "next", "pick", "deadList", "liveList", "oncePick":
 		return false
 	default:
 		return true
@@ -364,6 +364,8 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 		return "leaseRows"
 	case nargs > 4 && query == e.stmts.BuryRows(nargs-4):
 		return "buryRows"
+	case nargs > 1 && query == e.stmts.OnceSweepRows(nargs-1):
+		return "onceSweepRows"
 	}
 	return query
 }
@@ -409,6 +411,21 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 		}
 		work[id] = queueRow{id: id, due: args[1].(int64), enqueued: args[2].(int64), count: args[3].(int64), payload: blob(args[4])}
 		return answer{affected: 1}, nil
+	case "onceClaim":
+		id := str(args[0])
+		if _, taken := work[id]; taken {
+			return answer{}, nil
+		}
+		work[id] = queueRow{id: id, dead: 2, due: args[1].(int64), enqueued: args[2].(int64)}
+		return answer{affected: 1}, nil
+	case "oncePick":
+		now, limit := args[0].(int64), int(args[1].(int64))
+		passed := ordered(work, func(row queueRow) bool { return row.dead == 2 && row.due <= now })
+		rows := make([][]driver.Value, 0, min(limit, len(passed)))
+		for _, row := range passed[:min(limit, len(passed))] {
+			rows = append(rows, []driver.Value{[]byte(row.id)})
+		}
+		return answer{cols: []string{"id"}, rows: rows}, nil
 	}
 	return e.write(role, query, args, work)
 }
@@ -458,8 +475,40 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 		}), nil
 	case "deleteDead":
 		return ifDead(work, str(args[0]), func(*queueRow) bool { return false }), nil
+	case "onceDrop":
+		return dropPassedReservations(work, args[1].(int64), args[:1]), nil
+	case "onceSweepRows":
+		return dropPassedReservations(work, args[0].(int64), args[1:]), nil
 	}
 	return answer{}, errors.New("the fake engine does not speak: " + query)
+}
+
+// dropPassedReservations deletes, among the identifiers ids, every
+// reservation whose window has passed by now, and counts them.
+func dropPassedReservations(work queueTable, now int64, ids []driver.Value) answer {
+	n := int64(0)
+	for _, id := range ids {
+		row, found := work[str(id)]
+		if !found || row.dead != 2 || row.due > now {
+			continue
+		}
+		delete(work, row.id)
+		n++
+	}
+	return answer{affected: n}
+}
+
+// reservations counts the PublishOnce reservations the committed table holds.
+func (e *sqlEngine) reservations() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	n := 0
+	for _, row := range e.committed {
+		if row.dead == 2 {
+			n++
+		}
+	}
+	return n
 }
 
 // buryRow makes row a dead letter with the instant and cause in args: the

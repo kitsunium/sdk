@@ -1,12 +1,12 @@
-<!-- updated: 2026-10-21T00:00:00Z -->
+<!-- updated: 2026-10-21T12:00:00Z -->
 # pkg/v1/data/queue/
 
 ## Purpose
 
 The public facade for the SDK's asynchronous, durable message queue (ADR 0054):
 type aliases onto `internal/core/data/queue`, the three broker constructors — file,
-SQL (ADR 0151) and memory — the SQL broker's migration, the `DoNotRetry` mark,
-and the consumer engine.
+SQL (ADR 0151) and memory — the SQL broker's migration, the `DoNotRetry` and
+`RetryAfter` marks, and the consumer engine.
 
 ## Surface
 
@@ -14,13 +14,13 @@ and the consumer engine.
 |---|---|
 | Ports | `Broker` (frozen at four methods), `Handler` (func port) |
 | Values | `Message`, `LiveMessage` (ADR 0178), `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` |
-| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter`, `MessageReader`, `MessageWriter` (ADR 0178), `Releaser` (kitsunium/sdk#474) — reached by type assertion |
+| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter`, `MessageReader`, `MessageWriter` (ADR 0178), `Releaser` (kitsunium/sdk#474), `DelayedNacker`, `DelayedPublisher`, `OncePublisher` (ADR 0183) — reached by type assertion |
 | Configs | `FileConfig`, `SQLConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile` (its broker also answers `io.Closer` by type assertion, releasing its two directory descriptors; the messages stay on disk), `NewSQL`, `NewMemory` |
-| Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `DoNotRetry` (a failure no retry can fix) |
+| Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `DoNotRetry` (a failure no retry can fix), `RetryAfter` (a failure to retry after the handler's delay, ADR 0183) |
 | Engine | `Consume` |
-| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `DefaultSettleTimeout`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter`, `CodeInvalidMessage` |
-| Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `InvalidMessage`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
+| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `DefaultSettleTimeout`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter`, `CodeInvalidMessage`, `CodeRetryRequested` |
+| Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `InvalidMessage`, `RetryRequested`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
 
 ## Why this shape
 
@@ -54,6 +54,14 @@ and the consumer engine.
   both — and `AutoExtend` for a handler that outlives its lease, whose context
   otherwise ends a margin before the lease does.
 
+- **A message for later, a retry when the handler says, a publication once**
+  (ADR 0183). The package doc says where `PublishAt` stops — one instant,
+  durably; anything recurring is `pkg/v1/app/scheduler`'s, whose job may
+  publish here — and why `PublishOnce` answers a duplicate with a boolean and
+  not an error: it is what the retry was looking for. `CodeRetryRequested` is
+  published because `RetryAfter` puts it on the wrap trail of an SDK cause,
+  where only `errs.HasCode` sees it, as `CodeNotRetryable` is.
+
 - **Three codes are published beside their sentinels** — the three ADR 0151
   added. `CodeNotRetryable` is the one a caller NEEDS: `DoNotRetry` puts it on
   the wrap trail of an SDK cause, whose own code stays the origin, so
@@ -63,7 +71,7 @@ and the consumer engine.
   test's own making, `SQLMigration`, `DoNotRetry`, both new siblings on the
   memory and file brokers — and ADR 0178's `DeadLetterWriter`,
   `InvalidDeadLetter` and `CodeInvalidDeadLetter` (`queue_external_test.go`,
-  `TestTheFacadeWritesADeadLetterAsItLies`), and `MessageReader`, `MessageWriter`, `LiveMessage`, `InvalidMessage` and `CodeInvalidMessage` (`TestTheFacadeMovesALiveMessage`), and kitsunium/sdk#474's `Releaser`, `DefaultSettleTimeout` and `ConsumerConfig`'s `SettleTimeout`, `DrainTimeout` and `AutoExtend` (`TestTheFacadeHandsBackWhatAStopInterrupts`). Issue #259 was a public API a downstream module
+  `TestTheFacadeWritesADeadLetterAsItLies`), and `MessageReader`, `MessageWriter`, `LiveMessage`, `InvalidMessage` and `CodeInvalidMessage` (`TestTheFacadeMovesALiveMessage`), and kitsunium/sdk#474's `Releaser`, `DefaultSettleTimeout` and `ConsumerConfig`'s `SettleTimeout`, `DrainTimeout` and `AutoExtend` (`TestTheFacadeHandsBackWhatAStopInterrupts`), and ADR 0183's `DelayedPublisher`, `OncePublisher`, `DelayedNacker`, `RetryAfter`, `RetryRequested` and `CodeRetryRequested` (`TestTheFacadeSpellsTheSiblingsADR0183Added`). Issue #259 was a public API a downstream module
   could not spell; this is the check that it can.
 
 ## Generated
@@ -89,6 +97,7 @@ and the consumer engine.
 - ADR 0054 — `docs/adr/0054-sdk-queue-domain.md`
 - ADR 0151 — the SQL broker, the growing retry delay, `DoNotRetry`, `Rejecter`, `DeadLetterManager`
 - ADR 0178 — `DeadLetterWriter`, `MessageReader`, `MessageWriter`: a dead letter and a live message moved as they lie, for kit's `data copy`
+- ADR 0183 — `PublishAt`, `NackAfter` and `RetryAfter`, `PublishOnce`; the frontier with the scheduler
 - ADR 0053 — `events`, the other column of the frontier table
 - ADR 0008 — README generation from Go doc comments
 - `internal/core/data/queue/CLAUDE.md` — the port and the five decisions

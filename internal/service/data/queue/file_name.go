@@ -17,6 +17,13 @@ const (
 	dirDead     string = "dead"
 )
 
+// dirOnce holds the PublishOnce reservations, one file per key still
+// reserved (core/data/queue.OncePublisher). It is no state of a message —
+// nothing in it is ever delivered — but it is held to the states' rule: an
+// account that could plant a file there could hold any key reserved, and drop
+// every publication under it.
+const dirOnce string = "once"
+
 // The two suffixes distinguish a message from anything else that may appear
 // in one of those directories — notably the `.vfs-*.tmp` temporary an atomic
 // publication creates beside its target, which a scan MUST skip rather than
@@ -87,9 +94,9 @@ const (
 	posDeadDeliveries
 )
 
-// stateDirs is the three state directories, hoisted so preparing a queue
-// directory does not allocate a slice literal every time.
-var stateDirs = []string{dirReady, dirInflight, dirDead}
+// stateDirs is the three state directories and the reservations', hoisted so
+// preparing a queue directory does not allocate a slice literal every time.
+var stateDirs = []string{dirReady, dirInflight, dirDead, dirOnce}
 
 // nameValue is a message's identity and state, as encoded in its filename.
 //

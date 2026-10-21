@@ -63,6 +63,11 @@ type memoryBroker struct {
 	// O(1) and bounds the heap by the leases taken within one visibility
 	// timeout rather than by the queue's depth.
 	expiry *heap.Heap[leaseExpiry]
+	// once holds each PublishOnce key still reserved, by the end of its
+	// window; onceEnds orders those ends so a passed one is dropped at the
+	// next PublishOnce without a scan (core/data/queue.OncePublisher).
+	once     map[string]time.Time
+	onceEnds *heap.Heap[onceEnd]
 	// wake is what an idle consumer of this broker waits on: closed by a
 	// Publish and by a Nack that hands a message back.
 	wake *wakeSignal
@@ -109,6 +114,9 @@ func NewMemory(cfg MemoryConfig) (broker corequeue.Broker, err error) {
 		//: earliest deadline first, so the reclaim scan meets the most
 		//: overdue lease and stops at the first one still held.
 		expiry: heap.New(func(a, b leaseExpiry) int { return a.at.Compare(b.at) }),
+		//: the earliest window's end first, for the same early stop.
+		once:     map[string]time.Time{},
+		onceEnds: heap.New(func(a, b onceEnd) int { return a.at.Compare(b.at) }),
 	}, nil
 }
 
@@ -131,26 +139,118 @@ func (b *memoryBroker) Publish(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	now := b.clk.Now()
+	//: accepted; in this broker "accepted" means "in a map", which is the
+	//: whole difference from NewFile.
+	return b.enqueue(payload, now, now), nil
+}
+
+// enqueue queues payload, enqueued at now and visible at visibleAt, wakes
+// every idle consumer, and returns the message it minted. The caller holds the
+// write lock and has checked the payload's size.
+func (b *memoryBroker) enqueue(payload []byte, now, visibleAt time.Time) corequeue.MessageValue {
 	b.seq++
 	record := &memRecord{
 		//: the caller's slice is copied, so a producer that reuses its buffer
 		//: cannot rewrite a message the queue has already accepted.
 		payload: slices.Clone(payload), id: memID(now, b.seq),
-		enqueuedAt: now, visibleAt: now, seq: b.seq,
+		enqueuedAt: now, visibleAt: visibleAt, seq: b.seq,
 	}
 	b.insertReady(record)
 	//: every idle consumer of this broker looks again now, rather than at its
-	//: next poll.
+	//: next poll — and one whose message lies ahead learns when.
 	b.wake.fire()
-	//: accepted; in this broker "accepted" means "in a map", which is the
-	//: whole difference from NewFile.
-	//
 	//: the returned Payload is the CALLER'S slice, not a second copy. The
 	//: caller already holds those bytes — they just passed them — so cloning
 	//: again would have doubled the verb's allocation for no reader: measured
 	//: at 131 284 B/op for a 64 KiB payload before, 65 762 B/op after, with
 	//: slices.Clone accounting for 99.78 % of the bytes in the profile.
-	return corequeue.MessageValue{ID: record.id, Payload: payload, EnqueuedAt: now}, nil
+	return corequeue.MessageValue{ID: record.id, Payload: payload, EnqueuedAt: now}
+}
+
+// PublishAt queues payload, received by no consumer before at
+// (core/data/queue.DelayedPublisher): a record whose visibility is at, in the
+// ready list's visibility order.
+func (b *memoryBroker) PublishAt(
+	ctx context.Context, payload []byte, at time.Time,
+) (message corequeue.MessageValue, err error) {
+	//: a cancelled producer.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return corequeue.MessageValue{}, ctx.Err()
+	}
+	//: the bound Publish enforces.
+	if tooLarge := checkSize(len(payload), b.policy.MaxMessageBytes); tooLarge != nil {
+		//: MessageTooLarge, carrying the two sizes and never the bytes.
+		return corequeue.MessageValue{}, tooLarge
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.clk.Now()
+	visibleAt, invalid := publishVisibleAt(now, at)
+	//: an instant the durable brokers could not record.
+	if invalid != nil {
+		//: QueueMisconfigured, and nothing is queued.
+		return corequeue.MessageValue{}, invalid
+	}
+	//: queued, held back until visibleAt.
+	return b.enqueue(payload, now, visibleAt), nil
+}
+
+// PublishOnce queues payload unless key is still reserved, and reserves it
+// for window (core/data/queue.OncePublisher). The reservations are a map from
+// key to the end of its window, and a heap of those ends drops the passed ones
+// at the next PublishOnce — the lazy purge the durable brokers make too.
+func (b *memoryBroker) PublishOnce(
+	ctx context.Context, key string, payload []byte, window time.Duration,
+) (message corequeue.MessageValue, published bool, err error) {
+	//: a cancelled producer.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return corequeue.MessageValue{}, false, ctx.Err()
+	}
+	//: the bound Publish enforces.
+	if tooLarge := checkSize(len(payload), b.policy.MaxMessageBytes); tooLarge != nil {
+		//: MessageTooLarge, carrying the two sizes and never the bytes.
+		return corequeue.MessageValue{}, false, tooLarge
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.clk.Now()
+	until, invalid := onceUntil(now, key, window)
+	//: a key or a window no broker honours.
+	if invalid != nil {
+		//: QueueMisconfigured, and nothing is queued.
+		return corequeue.MessageValue{}, false, invalid
+	}
+	b.dropPassedOnce(now)
+	//: an earlier publication's window still holds the key.
+	if held, reserved := b.once[key]; reserved && held.After(now) {
+		//: a duplicate: nothing is queued, and that is the answer.
+		return corequeue.MessageValue{}, false, nil
+	}
+	b.once[key] = until
+	b.onceEnds.Push(onceEnd{at: until, key: key})
+	//: queued, and the key reserved until the window ends.
+	return b.enqueue(payload, now, now), true, nil
+}
+
+// dropPassedOnce removes every reservation whose window has ended by now. The
+// caller holds the write lock.
+func (b *memoryBroker) dropPassedOnce(now time.Time) {
+	//: until the heap is empty or its earliest end is still ahead.
+	for {
+		end, pending := b.onceEnds.Peek()
+		//: nothing left, or every remaining window still runs.
+		if !pending || end.at.After(now) {
+			//: every passed reservation is gone.
+			return
+		}
+		b.onceEnds.Pop() //nolint:errcheck // Peek already reported the entry is there.
+		//: a key reserved again since names a later end; that entry is stale.
+		if held, reserved := b.once[end.key]; reserved && held.Equal(end.at) {
+			delete(b.once, end.key)
+		}
+	}
 }
 
 // Receive leases up to max messages.
@@ -251,6 +351,37 @@ func (b *memoryBroker) Ack(ctx context.Context, receipt corequeue.ReceiptValue) 
 func (b *memoryBroker) Nack(
 	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
 ) (verdict corequeue.NackValue, err error) {
+	//: the policy's delay, grown with the deliveries when it asks for that.
+	return b.nackWith(ctx, receipt, cause, func(deliveries int) time.Duration {
+		//: the curve every broker waits on.
+		return retryDelay(b.policy, deliveries)
+	})
+}
+
+// NackAfter hands the message back as Nack does, receivable delay after now
+// instead of after the policy's retry delay (core/data/queue.DelayedNacker).
+func (b *memoryBroker) NackAfter(
+	ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration,
+) (verdict corequeue.NackValue, err error) {
+	//: an instant the durable brokers could not record is refused here too:
+	//: a double more permissive than production lets a handler pass its tests
+	//: and strand messages.
+	if _, invalid := nackDeadline(b.clk.Now(), delay); invalid != nil {
+		//: QueueMisconfigured, naming the argument; the lease stays held.
+		return corequeue.NackValue{}, invalid
+	}
+	//: the caller's delay, whatever the delivery.
+	return b.nackWith(ctx, receipt, cause, func(int) time.Duration {
+		//: a negative delay is now.
+		return max(delay, 0)
+	})
+}
+
+// nackWith is Nack and NackAfter: the message handed back after wait, or
+// dead-lettered with cause when it has no attempt left.
+func (b *memoryBroker) nackWith(
+	ctx context.Context, receipt corequeue.ReceiptValue, cause error, wait func(deliveries int) time.Duration,
+) (verdict corequeue.NackValue, err error) {
 	//: a cancelled caller.
 	if ctx.Err() != nil {
 		//: the caller's deadline.
@@ -273,7 +404,7 @@ func (b *memoryBroker) Nack(
 		//: abandoned, with its cause, and never delivered again.
 		return corequeue.NackValue{Deliveries: record.deliveries, DeadLettered: true}, nil
 	}
-	record.visibleAt = now.Add(retryDelay(b.policy, record.deliveries))
+	record.visibleAt = now.Add(wait(record.deliveries))
 	b.insertReady(record)
 	//: an idle consumer re-reads when to look, which now includes VisibleAt.
 	b.wake.fire()

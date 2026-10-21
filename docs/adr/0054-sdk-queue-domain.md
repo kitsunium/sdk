@@ -559,7 +559,10 @@ and the documentation the change is obliged to keep in step (rule 11).
 - **Delayed/scheduled publication** (`PublishAt`). The visibility instant is
   already in the durable representation, so the mechanism exists; the decision
   about whether a queue should also be a scheduler does not, and ADR 0041 is
-  where scheduling decisions live.
+  where scheduling decisions live. *Resolved on 2026-10-21 by
+  [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md):
+  a queue holds a message until one instant, durably (`DelayedPublisher`), and
+  recurrence stays the scheduler's.*
 - **Priority queues.** The name grammar sorts on one instant; a priority would
   be a second sort key and a starvation policy, and starvation policies are not
   something to add silently.

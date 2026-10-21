@@ -789,6 +789,10 @@ codes:
     const: CodeInvalidMessage
     hex: "0x00_02_17_09"
     package: internal/core/data/queue
+  - code: "0.2.23.10"
+    const: CodeRetryRequested
+    hex: "0x00_02_17_0A"
+    package: internal/core/data/queue
   - code: "0.2.24.1"
     const: CodeUnknownDialect
     hex: "0x00_02_18_01"

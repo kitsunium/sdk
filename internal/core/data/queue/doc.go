@@ -104,7 +104,12 @@
 // internal/service/data/queue. This package owns the contract, the domain values,
 // the policy and its guard, and the typed sentinels a refusal carries.
 //
-// Package queue — the failure a handler reports when no retry can fix it.
+// Package queue — the failure a handler reports when no retry can fix it, and
+// the one it reports when a retry must wait a delay of its own choosing.
+//
+// Package queue — the three ADR 0039 siblings ADR 0183 added: a nack that
+// names its own delay, a message held back until an instant, and a
+// publication made at most once per key over a window.
 //
 // Package queue — the ADR 0039 sibling that lets a consumer sleep until there
 // may be work, and the value it answers with (ADR 0104).

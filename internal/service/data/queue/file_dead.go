@@ -37,6 +37,37 @@ const publicMaxRunes int = 120
 func (b *fileBroker) Nack(
 	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
 ) (verdict corequeue.NackValue, err error) {
+	//: the policy's delay, grown with the deliveries when it asks for that.
+	return b.nackWith(ctx, receipt, cause, func(deliveries int) time.Duration {
+		//: the curve every broker waits on.
+		return retryDelay(b.policy, deliveries)
+	})
+}
+
+// NackAfter hands the message back as Nack does, under a queued name visible
+// delay after now instead of after the policy's retry delay
+// (core/data/queue.DelayedNacker).
+func (b *fileBroker) NackAfter(
+	ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration,
+) (verdict corequeue.NackValue, err error) {
+	//: an instant no name carries back is refused before anything is renamed,
+	//: so the lease the caller holds is untouched.
+	if _, invalid := nackDeadline(b.clk.Now(), delay); invalid != nil {
+		//: QueueMisconfigured, naming the argument.
+		return corequeue.NackValue{}, invalid
+	}
+	//: the caller's delay, whatever the delivery.
+	return b.nackWith(ctx, receipt, cause, func(int) time.Duration {
+		//: a negative delay is now.
+		return max(delay, 0)
+	})
+}
+
+// nackWith is Nack and NackAfter: the message renamed back into the queue,
+// visible after wait, or buried with cause when it has no attempt left.
+func (b *fileBroker) nackWith(
+	ctx context.Context, receipt corequeue.ReceiptValue, cause error, wait func(deliveries int) time.Duration,
+) (verdict corequeue.NackValue, err error) {
 	held := string(receipt)
 	name, resolveErr := b.resolve(ctx, held)
 	//: an unknown receipt and a lapsed one are different bugs.
@@ -52,7 +83,7 @@ func (b *fileBroker) Nack(
 		return b.nackDead(name, held, cause, now.UnixNano())
 	}
 	requeued := nameValue{
-		At: now.Add(retryDelay(b.policy, name.Deliveries)).UnixNano(), EnqueuedAt: name.EnqueuedAt,
+		At: now.Add(wait(name.Deliveries)).UnixNano(), EnqueuedAt: name.EnqueuedAt,
 		Entropy: name.Entropy, Deliveries: name.Deliveries,
 	}
 	renameErr := b.root.Rename(

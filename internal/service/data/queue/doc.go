@@ -152,6 +152,10 @@
 // Package queue — the SQL broker's read path: leasing what is due, and
 // burying the leases whose consumers died with no attempt left.
 //
+// Package queue — a message held back until an instant, a publication made at
+// most once per key over a window, and a nack that names its own delay, the
+// same way in all three brokers (ADR 0183).
+//
 // Package queue — waking an idle consumer: the broadcast every broker closes on
 // a publication, and the table that lets two durable brokers over one queue —
 // one directory, or one database and table — in one process wake each other's

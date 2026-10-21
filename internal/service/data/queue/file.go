@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
@@ -66,6 +67,9 @@ type fileBroker struct {
 	// nothing; the consumer's poll finds it.
 	wake   *wakeSignal
 	policy corequeue.PolicyValue
+	// onceSwept is when this broker last swept the passed PublishOnce
+	// reservations, in Unix nanoseconds on its clock; zero before the first.
+	onceSwept atomic.Int64
 }
 
 // NewFile returns a broker whose messages survive the process that published
@@ -197,28 +201,77 @@ func (b *fileBroker) Publish(
 		//: MessageTooLarge, carrying the two sizes and never the bytes.
 		return corequeue.MessageValue{}, tooLarge
 	}
-	entropy, entropyErr := randomHex(idEntropyBytes)
-	//: two processes publishing in the same nanosecond have no shared counter
-	//: to break the tie with, so the tie is broken by randomness.
-	if entropyErr != nil {
-		//: QueueBackendFailed — nothing was written.
-		return corequeue.MessageValue{}, backendFailed("rand", "", entropyErr)
-	}
 	now := b.clk.Now()
-	name := nameValue{At: now.UnixNano(), EnqueuedAt: now.UnixNano(), Entropy: entropy}
-	//: THE durable step: temporary beside the target, write, fsync the file,
-	//: rename, fsync the directory. Five steps, one call, tested in ADR 0056.
-	if writeErr := b.publisher.WriteAtomic(
-		path.Join(dirReady, name.readyName()), payload, messageMode,
-	); writeErr != nil {
-		//: QueueBackendFailed — vfs guarantees nothing was published.
-		return corequeue.MessageValue{}, backendFailed("publish", dirReady, writeErr)
+	name, writeErr := b.write(payload, now, now)
+	//: nothing was published.
+	if writeErr != nil {
+		//: QueueBackendFailed.
+		return corequeue.MessageValue{}, writeErr
 	}
 	//: every idle consumer over this directory in this process looks again
 	//: now, rather than at its next poll.
 	b.wake.fire()
 	//: accepted, and on the device. The returned Payload is the CALLER'S
 	//: slice: they already hold those bytes, and a copy would serve no reader.
+	return corequeue.MessageValue{ID: name.ID(), Payload: payload, EnqueuedAt: now}, nil
+}
+
+// write publishes payload durably as a queued message enqueued at now and
+// visible at visibleAt, and returns its name. It wakes nobody: the caller
+// does, once the message is one it keeps.
+func (b *fileBroker) write(payload []byte, now, visibleAt time.Time) (nameValue, error) {
+	entropy, entropyErr := randomHex(idEntropyBytes)
+	//: two processes publishing in the same nanosecond have no shared counter
+	//: to break the tie with, so the tie is broken by randomness.
+	if entropyErr != nil {
+		//: QueueBackendFailed — nothing was written.
+		return nameValue{}, backendFailed("rand", "", entropyErr)
+	}
+	name := nameValue{At: visibleAt.UnixNano(), EnqueuedAt: now.UnixNano(), Entropy: entropy}
+	//: THE durable step: temporary beside the target, write, fsync the file,
+	//: rename, fsync the directory. Five steps, one call, tested in ADR 0056.
+	if writeErr := b.publisher.WriteAtomic(
+		path.Join(dirReady, name.readyName()), payload, messageMode,
+	); writeErr != nil {
+		//: QueueBackendFailed — vfs guarantees nothing was published.
+		return nameValue{}, backendFailed("publish", dirReady, writeErr)
+	}
+	//: on the device, under its queued name.
+	return name, nil
+}
+
+// PublishAt publishes payload as Publish does, under a queued name whose
+// visibility instant is at (core/data/queue.DelayedPublisher): the directory
+// sorts by that instant, so a Receive meets it at its turn and not before.
+func (b *fileBroker) PublishAt(
+	ctx context.Context, payload []byte, at time.Time,
+) (message corequeue.MessageValue, err error) {
+	//: a cancelled producer.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return corequeue.MessageValue{}, ctx.Err()
+	}
+	//: the bound Publish enforces, before a byte reaches the device.
+	if tooLarge := checkSize(len(payload), b.policy.MaxMessageBytes); tooLarge != nil {
+		//: MessageTooLarge, carrying the two sizes and never the bytes.
+		return corequeue.MessageValue{}, tooLarge
+	}
+	now := b.clk.Now()
+	visibleAt, invalid := publishVisibleAt(now, at)
+	//: an instant no name carries back.
+	if invalid != nil {
+		//: QueueMisconfigured, and nothing is written.
+		return corequeue.MessageValue{}, invalid
+	}
+	name, writeErr := b.write(payload, now, visibleAt)
+	//: nothing was published.
+	if writeErr != nil {
+		//: QueueBackendFailed.
+		return corequeue.MessageValue{}, writeErr
+	}
+	//: an idle consumer reads the directory again and learns when it is due.
+	b.wake.fire()
+	//: accepted, on the device, held back until visibleAt.
 	return corequeue.MessageValue{ID: name.ID(), Payload: payload, EnqueuedAt: now}, nil
 }
 

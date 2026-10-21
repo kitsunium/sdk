@@ -211,6 +211,110 @@ func TestAReleasedLeaseGivesItsDeliveryBackOnEveryEngine(t *testing.T) {
 	})
 }
 
+// TestADeferredPublicationAndADelayedNackOnEveryEngine pins ADR 0183's two
+// instants on a real engine: a message published for later is a row due then,
+// leased by no Receive before it, and a NackAfter dues the row at the delay it
+// names — past the policy's RetryDelay — with the delivery counted.
+func TestADeferredPublicationAndADelayedNackOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		clk := clock.NewManualClock(queueEpoch)
+		fx := openQueue(t, e, queue.SQLConfig{Clock: clk, Policy: queuePolicy()})
+		ctx := t.Context()
+		deferred, err := fx.broker.(queue.DelayedPublisher).PublishAt(ctx, []byte("later"), queueEpoch.Add(time.Hour))
+		must(t, err)
+		leaseNone(t, fx.broker)
+		clk.Advance(time.Hour)
+		first := leaseOne(t, fx.broker)
+		if first.Message.ID != deferred.ID || first.Deliveries != 1 || !first.Message.EnqueuedAt.Equal(queueEpoch) {
+			t.Fatalf("delivery = %+v, want the deferred message, enqueued at its publication", first)
+		}
+		verdict, err := fx.broker.(queue.DelayedNacker).NackAfter(ctx, first.Lease.Receipt, queue.RetryAfter(nil, time.Minute), time.Minute)
+		must(t, err)
+		if verdict.DeadLettered || verdict.VisibleAt.Sub(clk.Now()) != time.Minute {
+			t.Fatalf("NackAfter() = %+v, want visible in a minute", verdict)
+		}
+		clk.Advance(3 * time.Second) // the policy's longest retry delay
+		leaseNone(t, fx.broker)
+		clk.Advance(time.Minute)
+		if second := leaseOne(t, fx.broker); second.Deliveries != 2 {
+			t.Fatalf("the retry counted %d, want 2", second.Deliveries)
+		}
+	})
+}
+
+// TestAKeyIsPublishedOncePerWindowOnEveryEngine pins PublishOnce on a real
+// engine (ADR 0183): the claim that affects no row over a taken key — ON
+// CONFLICT DO NOTHING, or MySQL's INSERT IGNORE —, sixteen producers racing on
+// one key publishing one message between them, the reservation rolled back
+// with the caller's transaction, and the passed reservations of other keys
+// removed by a later publication.
+func TestAKeyIsPublishedOncePerWindowOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	const producers int = 16
+	eachEngine(t, func(t *testing.T, e *engine) {
+		clk := clock.NewManualClock(queueEpoch)
+		fx := openQueue(t, e, queue.SQLConfig{Clock: clk, Policy: queuePolicy()})
+		once := fx.broker.(queue.OncePublisher)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		published := 0
+		for range producers {
+			wg.Go(func() {
+				_, ok, err := once.PublishOnce(t.Context(), "order-1", []byte("paid"), time.Minute)
+				if err != nil {
+					t.Errorf("PublishOnce() = %v", err)
+					return
+				}
+				if ok {
+					mu.Lock()
+					published++
+					mu.Unlock()
+				}
+			})
+		}
+		wg.Wait()
+		if published != 1 {
+			t.Fatalf("%d producers published, want exactly 1", published)
+		}
+		leaseOne(t, fx.broker)
+		leaseNone(t, fx.broker)
+		errRolledBack := errors.New("the business write failed")
+		err := sql.Transact(t.Context(), fx.tm, func(ctx context.Context, _ sql.Executor) error {
+			_, ok, pubErr := once.PublishOnce(ctx, "order-2", []byte("paid"), time.Minute)
+			if pubErr != nil || !ok {
+				t.Errorf("PublishOnce() inside the transaction = (%v, %v)", ok, pubErr)
+			}
+			return errRolledBack
+		})
+		if !errors.Is(err, errRolledBack) {
+			t.Fatalf("Transact() = %v, want the function's error", err)
+		}
+		if _, ok, err := once.PublishOnce(t.Context(), "order-2", []byte("paid"), time.Minute); err != nil || !ok {
+			t.Fatalf("PublishOnce() after the rollback = (%v, %v), want a publication", ok, err)
+		}
+		if reservations := countReservations(t, e, fx.table); reservations != 2 {
+			t.Fatalf("the table holds %d reservations, want 2", reservations)
+		}
+		clk.Advance(2 * time.Minute)
+		if _, ok, err := once.PublishOnce(t.Context(), "order-1", []byte("again"), time.Minute); err != nil || !ok {
+			t.Fatalf("PublishOnce() after the window = (%v, %v), want a publication", ok, err)
+		}
+		if reservations := countReservations(t, e, fx.table); reservations != 1 {
+			t.Fatalf("after the sweep the table holds %d reservations, want order-1's new one", reservations)
+		}
+	})
+}
+
+// countReservations counts the PublishOnce reservations table holds: its rows
+// of state 2.
+func countReservations(t *testing.T, e *engine, table string) int {
+	t.Helper()
+	var n int
+	must(t, e.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table+" WHERE dead = 2").Scan(&n))
+	return n
+}
+
 // TestAPublicationJoinsTheCallersTransactionOnEveryEngine is the reason the
 // SQL broker exists: published inside the caller's transaction, the message
 // exists if and only if that transaction commits.

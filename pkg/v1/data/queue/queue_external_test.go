@@ -222,6 +222,55 @@ func TestTheFacadeHandsBackWhatAStopInterrupts(t *testing.T) {
 	}
 }
 
+// TestTheFacadeSpellsTheSiblingsADR0183Added spells the three siblings and the
+// mark through the public surface alone, on both brokers: a message published
+// for later, a publication made once per key, and a nack after the delay a
+// RetryAfter names.
+func TestTheFacadeSpellsTheSiblingsADR0183Added(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"memory", "file"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			broker := facadeBroker(t, name)
+			deferred, ok := broker.(queue.DelayedPublisher)
+			if !ok {
+				t.Fatalf("%T does not implement queue.DelayedPublisher", broker)
+			}
+			if _, err := deferred.PublishAt(t.Context(), []byte("later"), time.Now().Add(time.Hour)); err != nil {
+				t.Fatalf("PublishAt() = %v, want nil", err)
+			}
+			if batch, err := broker.Receive(t.Context(), 10); err != nil || len(batch) != 0 {
+				t.Fatalf("Receive() = (%d, %v), want nothing before its instant", len(batch), err)
+			}
+			once, ok := broker.(queue.OncePublisher)
+			if !ok {
+				t.Fatalf("%T does not implement queue.OncePublisher", broker)
+			}
+			for attempt, want := range []bool{true, false} {
+				if _, published, err := once.PublishOnce(t.Context(), "k", []byte("now"), time.Minute); err != nil || published != want {
+					t.Fatalf("PublishOnce() #%d = (%v, %v), want (%v, nil)", attempt+1, published, err, want)
+				}
+			}
+			batch, err := broker.Receive(t.Context(), 10)
+			if err != nil || len(batch) != 1 {
+				t.Fatalf("Receive() = (%d, %v), want the one publication", len(batch), err)
+			}
+			marked := queue.RetryAfter(nil, time.Hour)
+			if !errs.HasCode(marked, queue.CodeRetryRequested) || !errors.Is(marked, queue.RetryRequested) {
+				t.Fatalf("RetryAfter(nil) = %v, want RETRY_REQUESTED", marked)
+			}
+			nacker, ok := broker.(queue.DelayedNacker)
+			if !ok {
+				t.Fatalf("%T does not implement queue.DelayedNacker", broker)
+			}
+			verdict, err := nacker.NackAfter(t.Context(), batch[0].Lease.Receipt, marked, time.Hour)
+			if err != nil || verdict.DeadLettered || verdict.VisibleAt.Before(time.Now().Add(59*time.Minute)) {
+				t.Fatalf("NackAfter() = (%+v, %v), want visible in an hour", verdict, err)
+			}
+		})
+	}
+}
+
 // facadeBroker builds one of the two public brokers.
 func facadeBroker(t *testing.T, kind string) queue.Broker {
 	t.Helper()

@@ -41,6 +41,15 @@ import (
 // bounded by [ConsumerConfig.SettleTimeout] on the consumer's clock, so a
 // caller's stop budget must cover DrainTimeout plus SettleTimeout.
 //
+// # A handler says when to try again (ADR 0183)
+//
+// A failure the handler marked with [corequeue.RetryAfter] is handed back
+// through the broker's [corequeue.DelayedNacker] with the delay it names,
+// its delivery counted as a nack counts it; a broker without the sibling is
+// nacked, and the message waits the policy's retry delay instead.
+// [corequeue.DoNotRetry] wins over it, and a failure a stop cut short is
+// handed back uncounted, as any other is.
+//
 // # A handler ends before its lease does
 //
 // The handler's context is cancelled a margin before the lease it runs under
@@ -98,6 +107,7 @@ type consumer struct {
 	waker    corequeue.Waker
 	releaser corequeue.Releaser
 	rejecter corequeue.Rejecter
+	delayer  corequeue.DelayedNacker
 	extender corequeue.LeaseExtender
 	cfg      ConsumerConfig
 }
@@ -108,6 +118,7 @@ func newConsumer(broker corequeue.Broker, cfg ConsumerConfig) *consumer {
 	engine.waker, _ = broker.(corequeue.Waker)
 	engine.releaser, _ = broker.(corequeue.Releaser)
 	engine.rejecter, _ = broker.(corequeue.Rejecter)
+	engine.delayer, _ = broker.(corequeue.DelayedNacker)
 	//: renewing is the caller's choice, and a capability the broker may lack.
 	if cfg.AutoExtend {
 		engine.extender, _ = broker.(corequeue.LeaseExtender)
@@ -315,6 +326,13 @@ func (c *consumer) process(ctx context.Context, delivery corequeue.DeliveryValue
 // margin reached during it — is not the message's: it is handed back
 // uncounted, unless it is a panic, which is.
 //
+// A failure the handler marked with core/data/queue.RetryAfter is nacked
+// with the delay it names when the broker is a core/data/queue.DelayedNacker
+// (ADR 0183), its delivery counted, and nacked as any other failure — after
+// the policy's delay — when it is not. DoNotRetry and a stop are read first,
+// so a failure marked both ways is rejected, and one a stop cut short is
+// handed back.
+//
 // Every outcome is sent on ctx WITHOUT its cancellation, bounded by
 // SettleTimeout: the work is done, or was stopped, and a stop that lands
 // between the handler's return and the report — the consumer's context
@@ -343,6 +361,15 @@ func (c *consumer) settle(ctx context.Context, receipt corequeue.ReceiptValue, f
 	if stopped && !kerrs.HasCode(failure, corequeue.CodeHandlerPanicked) {
 		//: uncounted, receivable at once.
 		return c.handBack(ctx, receipt)
+	}
+	//: the handler said when to try again, and the broker can wait that long.
+	if delay, marked := corequeue.RetryAfterOf(failure); marked && c.delayer != nil {
+		//: same rule as the acknowledgement.
+		return ignoreLapsed(c.bounded(ctx, "nack", false, func(settleCtx context.Context) error {
+			_, nackErr := c.delayer.NackAfter(settleCtx, receipt, failure, delay)
+			//: retried after the handler's delay, or dead-lettered with its cause.
+			return nackErr
+		}))
 	}
 	//: the broker decides: retried, or abandoned with its cause.
 	return c.nack(ctx, receipt, failure)

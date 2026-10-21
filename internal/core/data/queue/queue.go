@@ -22,7 +22,9 @@ import (
 // retried, or dead-lettered once it has exhausted
 // [PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can
 // fix it, and the message is dead-lettered at once, with err, through a
-// broker's [Rejecter]. ctx is the consumer's and IS honoured: unlike
+// broker's [Rejecter]; returning [RetryAfter](err, delay) says when to try
+// again, and the message is nacked with that delay through a broker's
+// [DelayedNacker]. ctx is the consumer's and IS honoured: unlike
 // events.Listener, a handler that outlives its context is holding a lease it
 // is about to lose, so abandoning the work is the correct response and the
 // message will simply be redelivered. internal/service/data/queue.Consume
