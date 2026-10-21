@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"math"
+	"slices"
 	"strconv"
 	"time"
 
@@ -38,16 +39,15 @@ const floatBits int = 64
 //
 // A delay too long for a time.Duration reports the longest one.
 func RetryAfter(err error) (time.Duration, bool) {
-	fields := kerrs.FieldsOf(err)
 	//: inner first, outer last: the newest word on the delay is the last one.
-	for i := len(fields) - 1; i >= 0; i-- {
+	for _, field := range slices.Backward(kerrs.FieldsOf(err)) {
 		//: only the one key means a delay.
-		if fields[i].Key() != retryAfterField {
+		if field.Key() != retryAfterField {
 			//: another field.
 			continue
 		}
 		//: the first one found from the outside decides, usable or not.
-		return secondsToDuration(fields[i].StringValue())
+		return secondsToDuration(field.StringValue())
 	}
 	//: the error names no delay.
 	return 0, false

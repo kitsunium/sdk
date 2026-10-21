@@ -22,10 +22,11 @@ import (
 // Deadline reports the caller's deadline, never this one: a time on a
 // ManualClock is not a time a socket can be given.
 type clockDeadline struct {
-	parent context.Context
-	done   chan struct{}
-	mu     sync.Mutex
-	err    error
+	parent    context.Context
+	done      chan struct{}
+	closeDone sync.Once
+	mu        sync.Mutex
+	err       error
 }
 
 // newClockDeadline returns a context that expires after d on clk, or when
@@ -78,7 +79,9 @@ func (c *clockDeadline) finish(err error) {
 		return
 	}
 	c.err = err
-	close(c.done)
+	//: under the lock, so Done is closed by the time another reader sees err;
+	//: the Once states what the err check above already guarantees.
+	c.closeDone.Do(func() { close(c.done) })
 }
 
 // Deadline reports the caller's deadline: this context's own runs on a clock

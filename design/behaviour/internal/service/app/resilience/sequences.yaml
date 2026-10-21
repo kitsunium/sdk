@@ -1113,25 +1113,20 @@ sequences:
         kind: actor
       - id: RetryAfter
         kind: self
-      - id: kerrs
-        kind: package
       - id: secondsToDuration
         kind: internal
     steps:
-      - bind: fields
-        eval: kerrs.FieldsOf(err)
-        to: kerrs
       - loop:
-          cond: i >= 0
           do:
             - opt:
                 do:
                   - continue: true
-                when: fields[i].Key() != retryAfterField
-            - return: secondsToDuration(fields[i].StringValue())
+                when: field.Key() != retryAfterField
+            - return: secondsToDuration(field.StringValue())
               to: secondsToDuration
-          init: i := len(fields) - 1
-          post: i--
+          key: _
+          range: slices.Backward(kerrs.FieldsOf(err))
+          value: field
       - return: 0, false
   - of: secondsToDuration
     participants:
@@ -1405,6 +1400,13 @@ sequences:
                 - eval: c.finish(context.Canceled)
                   to: c.finish
   - of: (*clockDeadline).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).finish
+        kind: self
+      - id: c.closeDone.Do
+        kind: value
     steps:
       - lock:
           mutex: c.mu
@@ -1414,7 +1416,8 @@ sequences:
           when: c.err != nil
       - set: c.err
         value: err
-      - eval: close(c.done)
+      - eval: c.closeDone.Do(func() { close(c.done) })
+        to: c.closeDone.Do
   - of: (*clockDeadline).Deadline
     participants:
       - id: caller

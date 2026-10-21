@@ -402,4 +402,3 @@ func TestHedge_WhatTheBudgetHears(t *testing.T) {
 		}
 	}
 }
-
