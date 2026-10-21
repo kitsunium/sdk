@@ -182,6 +182,16 @@ func settleBatch(
 // without the sibling is nacked as before — the shortcut is lost, never the
 // message — and a panic is never the mark, because guard carries the recovered
 // value as a field of HANDLER_PANICKED and never as its origin.
+//
+// A handler that returned nil is acknowledged on ctx WITHOUT its cancellation:
+// the work is done, and a stop that lands between the handler's return and
+// the acknowledgement — the consumer's context cancelled by Close or a
+// lifecycle's Stop — must not abandon it. Abandoned, the message stayed
+// leased and came back after the visibility timeout, a duplicate a graceful
+// stop caused, on every broker whose Ack honours its context
+// (kitsunium/sdk#472). The acknowledgement is one statement or one unlink;
+// what bounds it is the medium's own, and the caller's stop budget, which
+// waits for Consume to return.
 func settle(
 	ctx context.Context, broker corequeue.Broker,
 	handler corequeue.Handler, delivery corequeue.DeliveryValue,
@@ -189,8 +199,8 @@ func settle(
 	failure := guard(ctx, handler, delivery)
 	//: the ordinary path, and the overwhelmingly common one.
 	if failure == nil {
-		//: the only call in the domain that removes a message.
-		return ignoreLapsed(broker.Ack(ctx, delivery.Lease.Receipt))
+		//: the only call in the domain that removes a message, past a stop.
+		return ignoreLapsed(broker.Ack(context.WithoutCancel(ctx), delivery.Lease.Receipt))
 	}
 	rejecter, rejects := broker.(corequeue.Rejecter)
 	//: no retry can fix it, and the broker can say so at once.

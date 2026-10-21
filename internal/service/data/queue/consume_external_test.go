@@ -341,3 +341,52 @@ func TestAStorageFailureStopsEveryWorkerAndIsReturned(t *testing.T) {
 		})
 	}
 }
+
+// TestAHandledMessageIsAcknowledgedWhenTheStopLandsBeforeItsAck is the
+// regression for kitsunium/sdk#472: a stop that cancels the consumer after
+// its handler returned nil, and before the acknowledgement, abandoned that
+// acknowledgement on a broker whose Ack honours the context — the SQL one —
+// and only there: the message stayed leased, then came back after the
+// visibility timeout, a duplicate a graceful stop caused. The handler here
+// cancels the consumer itself, which is that interleaving every time; once
+// Consume returned, the lease is made to lapse, and nothing may come back.
+//
+// GOROUTINE LIFECYCLE: one goroutine runs Consume; the handler's cancel ends
+// it and running.Wait joins it before anything is read.
+func TestAHandledMessageIsAcknowledgedWhenTheStopLandsBeforeItsAck(t *testing.T) {
+	t.Parallel()
+	for _, factory := range everyBroker() {
+		t.Run(factory.name, func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewManualClock(epoch)
+			broker := factory.make(t, clk, defaultPolicy())
+			publish(t, broker, "handled, then stopped")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var handled atomic.Int64
+			var running sync.WaitGroup
+			var result error
+			running.Go(func() {
+				result = svcqueue.Consume(ctx, broker, svcqueue.ConsumerConfig{
+					Handler: func(context.Context, corequeue.DeliveryValue) error {
+						handled.Add(1)
+						//: the stop lands after the work, before the ack.
+						cancel()
+						return nil
+					},
+					HandlerIsIdempotent: true, PollInterval: fastPoll, Clock: clk,
+				})
+			})
+			running.Wait()
+			if result != nil {
+				t.Fatalf("Consume() = %v, want nil for a stopped consumer", result)
+			}
+			if got := handled.Load(); got != 1 {
+				t.Fatalf("the handler ran %d times, want 1", got)
+			}
+			//: a lease left behind would be receivable again from here on.
+			clk.Advance(testVisibility * 2)
+			receiveNone(t, broker)
+		})
+	}
+}

@@ -375,6 +375,19 @@ handler's own is recovered into a nack — is re-raised in `Consume`'s goroutine
 after its siblings have stopped. `TestAStorageFailureStopsEveryWorkerAndIsReturned`
 pins the report.
 
+A handler that returned nil is acknowledged on its context WITHOUT the
+cancellation (`settle`): a stop landing between the handler's return and the
+`Ack` used to abandon the acknowledgement on every broker — each one's `Ack`
+honours its context — so the message stayed leased and came back after the
+visibility timeout, a duplicate a graceful stop caused (kitsunium/sdk#472, a
+kept letter the framework's re-seal test found still at rest after `Stop`).
+The acknowledgement is one statement or one unlink, bounded by the medium and
+by the caller's stop budget, which waits for `Consume` to return. A nack and a
+reject keep the cancellable context: a handler that failed because it was
+stopped is redelivered after its lease, as before.
+`TestAHandledMessageIsAcknowledgedWhenTheStopLandsBeforeItsAck` cancels from
+inside the handler, so it is that interleaving every time, on every broker.
+
 ## Waking an idle consumer (ADR 0104)
 
 `Consume` used to find work only by polling, so latency and idle cost were one
