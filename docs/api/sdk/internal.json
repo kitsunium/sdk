@@ -31133,6 +31133,30 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ContextExporter",
+      "spelled": "interface{ExportContext(ctx context.Context, snap SnapshotValue) error; Exporter}",
+      "canonical": "interface{ExportContext(ctx context.Context, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error; github.com/kitsunium/sdk/internal/core/observe/metrics.Exporter}",
+      "doc": "ContextExporter is an Exporter whose export can be bounded and cancelled:\nExportContext ships snap under ctx, and returns once ctx is done at the\nlatest. The OpenTelemetry metrics SDK specification bounds every export by\nexportTimeout; Export has no context to bound it with, and Exporter is a\npublished port, so the bound arrives as this sibling rather than as a widened\nmethod (ADR 0039). A caller holding an Exporter asks for it with a type\nassertion, as ExportContext does.\n\nImplementations MUST be safe for concurrent use, and Export keeps its\nmeaning: it is ExportContext under a context the exporter bounds itself.\n",
+      "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter.ExportContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ExportContext",
+      "recv": "ContextExporter",
+      "spelled": "func(ctx context.Context, snap SnapshotValue) error",
+      "canonical": "func(ctx context.Context, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error",
+      "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Counter",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
@@ -31167,6 +31191,19 @@
       "canonical": "func()",
       "doc": "Inc increments the counter by one (Add(1) shorthand).\n",
       "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "DefaultExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "doc": "DefaultExportTimeout bounds one export when the caller's context carries no\ndeadline of its own: 30 s, the OpenTelemetry metrics SDK specification's\ndefault exportTimeout for a periodic exporting reader\n(OTEL_METRIC_EXPORT_TIMEOUT). A context with no deadline is how an\nindefinite block is written; a caller who wants another bound puts it on the\ncontext.\n",
+      "file": "core/observe/metrics/exporter.go",
       "layer": "core",
       "family": "observe"
     },
@@ -31250,6 +31287,18 @@
       "spelled": "func(name ExporterName, snap SnapshotValue) error",
       "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error",
       "doc": "Export ships snap through the Exporter registered as name. A missing exporter\nreturns UnknownExporter; an exporter failure wraps as ExportFailed.\n",
+      "file": "core/observe/metrics/exporter.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ExportContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ExportContext",
+      "spelled": "func(ctx context.Context, name ExporterName, snap SnapshotValue) error",
+      "canonical": "func(ctx context.Context, name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error",
+      "doc": "ExportContext ships snap through the Exporter registered as name, bounded by\nctx. A missing exporter returns UnknownExporter; an exporter failure wraps as\nExportFailed.\n\nWhen ctx carries no deadline, DefaultExportTimeout is applied: the\nspecification bounds every export. An exporter that implements ContextExporter\nreceives the bounded context through ExportContext; one that implements only\nExporter is called through Export, which has no context to honour, and is\nbounded by nothing but itself — every exporter that touches a network in this\nSDK implements the sibling.\n",
       "file": "core/observe/metrics/exporter.go",
       "layer": "core",
       "family": "observe"
@@ -33526,6 +33575,30 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ContextSpanExporter",
+      "spelled": "interface{ExportContext(ctx context.Context, spans SpansValue) error; SpanExporter}",
+      "canonical": "interface{ExportContext(ctx context.Context, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error; github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter}",
+      "doc": "ContextSpanExporter is a SpanExporter whose export can be bounded and\ncancelled: ExportContext ships spans under ctx, and returns once ctx is done\nat the latest. The OpenTelemetry SDK specification says an export MUST NOT\nblock indefinitely; Export has no context to bound it with, and SpanExporter\nis a published port, so the bound arrives as this sibling rather than as a\nwidened method (ADR 0039). A caller holding a SpanExporter asks for it with a\ntype assertion, as ExportContext and the batch sink do.\n\nImplementations MUST be safe for concurrent use, and Export keeps its\nmeaning: it is ExportContext under a context the exporter bounds itself.\n",
+      "file": "core/observe/trace/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter.ExportContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ExportContext",
+      "recv": "ContextSpanExporter",
+      "spelled": "func(ctx context.Context, spans SpansValue) error",
+      "canonical": "func(ctx context.Context, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error",
+      "file": "core/observe/trace/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextWithSpanContext",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
@@ -33534,6 +33607,19 @@
       "canonical": "func(parent context.Context, context github.com/kitsunium/sdk/internal/core/observe/trace.SpanContextValue) context.Context",
       "doc": "ContextWithSpanContext returns a copy of parent carrying context.\n\nAn INVALID context is still stored rather than skipped. Storing it is what\nmakes \"this scope deliberately has no trace\" expressible: a handler that ran\nunder an unsampled or absent traceparent shadows any outer context instead of\nsilently re-parenting its children onto it.\n",
       "file": "core/observe/trace/context.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DefaultExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "DefaultExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "doc": "DefaultExportTimeout bounds one export when the caller's context carries no\ndeadline of its own: 30 s, the OpenTelemetry trace SDK specification's default\nfor a batch processor's exportTimeout (OTEL_BSP_EXPORT_TIMEOUT). The\nspecification says an export MUST NOT block indefinitely, and a context with\nno deadline is how an indefinite block is written; a caller who wants another\nbound puts it on the context.\n",
+      "file": "core/observe/trace/exporter.go",
       "layer": "core",
       "family": "observe"
     },
@@ -33686,6 +33772,18 @@
       "spelled": "func(name ExporterName, spans SpansValue) error",
       "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error",
       "doc": "Export ships spans through the SpanExporter registered as name. A missing\nexporter returns UnknownExporter; an exporter failure wraps as ExportFailed.\n",
+      "file": "core/observe/trace/exporter.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ExportContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ExportContext",
+      "spelled": "func(ctx context.Context, name ExporterName, spans SpansValue) error",
+      "canonical": "func(ctx context.Context, name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error",
+      "doc": "ExportContext ships spans through the SpanExporter registered as name, bounded\nby ctx. A missing exporter returns UnknownExporter; an exporter failure wraps\nas ExportFailed.\n\nWhen ctx carries no deadline, DefaultExportTimeout is applied: the\nspecification forbids an export that blocks indefinitely. An exporter that\nimplements ContextSpanExporter receives the bounded context through\nExportContext; one that implements only SpanExporter is called through Export,\nwhich has no context to honour, and is bounded by nothing but itself — every\nexporter that touches a network in this SDK implements the sibling.\n",
       "file": "core/observe/trace/exporter.go",
       "layer": "core",
       "family": "observe"
@@ -59558,7 +59656,7 @@
       "name": "Sender",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "Sender POSTs encoded OTLP/JSON documents to one collector and maps each\nanswer onto one of three verdicts, under the calling signal's codes.\n\nIt holds no mutable state, so it needs no mutex: http.Client is safe for\nconcurrent use, and every request builds its own body reader from its own\ndocument.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to honour Retry-After and otherwise back off\nexponentially; internal/service/app/resilience already ships that policy, and a\nbackoff hidden inside a send would be a second one a caller cannot see, tune\nor cancel — an exporter's Export has no context to cancel it with. What it\nsupplies instead is the CLASSIFICATION a retry policy needs: a transient\nverdict carries the signal's Unavailable code, which each signal's\nOTLPRetryable reads.\n",
+      "doc": "Sender POSTs encoded OTLP/JSON documents to one collector and maps each\nanswer onto one of three verdicts, under the calling signal's codes.\n\nIt holds no mutable state, so it needs no mutex: http.Client is safe for\nconcurrent use, and every request builds its own body reader from its own\ndocument.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to honour Retry-After and otherwise back off\nexponentially; internal/service/app/resilience already ships that policy, and a\nbackoff hidden inside a send would be a second one a caller cannot see, tune\nor cancel, and would spend the deadline PostContext is given. What it\nsupplies instead is the CLASSIFICATION a retry policy needs: a transient\nverdict carries the signal's Unavailable code, which each signal's\nOTLPRetryable reads.\n",
       "file": "service/observe/internal/otlp/sender.go",
       "layer": "service",
       "family": "observe"
@@ -59572,6 +59670,19 @@
       "spelled": "func(body []byte) error",
       "canonical": "func(body []byte) error",
       "doc": "Post sends body — one document Marshal returned — and returns a typed\nverdict under the signal's codes.\n\nNothing here panics and nothing blocks past the client's deadline: a\ntransport fault returns the transient verdict, and every response path\ndrains a BOUNDED remainder and closes the body, so the keep-alive connection\nreturns to the pool whenever the body ends within that bound.\n",
+      "file": "service/observe/internal/otlp/sender.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.(*Sender).PostContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "PostContext",
+      "recv": "Sender",
+      "spelled": "func(ctx context.Context, body []byte) error",
+      "canonical": "func(ctx context.Context, body []byte) error",
+      "doc": "PostContext is Post bounded by ctx: the request carries ctx, so a context\ndone before the collector answers aborts the round trip and returns the\ntransient verdict — a timeout is retryable, as a transport fault is. The\nclient's own deadline still applies; whichever ends first wins.\n",
       "file": "service/observe/internal/otlp/sender.go",
       "layer": "service",
       "family": "observe"
@@ -61150,9 +61261,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/metrics",
       "name": "NewOTLPHTTPExporter",
-      "spelled": "func(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exporter coremetrics.Exporter, err error)",
-      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/metrics.Exporter, err error)",
-      "doc": "NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint.\n\nIt is the EMITTER half of this package's OTLP support; EncodeOTLPJSON is the\nencoder half and this constructor adds nothing to it but transport. The split\nis why an encoding bug and a network bug are never the same investigation.\n\nIt is deliberately NOT registered. The registry is reached by importing a\npackage, and arming a network client from an import is strictly worse than\nthe stdout hazard ADR 0030 already refuses: there is no endpoint that could\nbe a correct default, and a wrong one turns every Export into a POST at\nwhatever answers on that address.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to back off exponentially on a retryable status,\nthis SDK already ships that policy in internal/service/app/resilience, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune\nor cancel. What this exporter provides instead is the CLASSIFICATION a retry\npolicy needs:\n\n\trunner := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   metrics.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into a Runner that\nalways fails: nothing here publishes a signature that forces the deferral,\nand refusing at wiring time is strictly earlier than refusing at the first\nscrape.\n",
+      "spelled": "func(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exporter coremetrics.ContextExporter, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter, err error)",
+      "doc": "NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint. ExportContext bounds the POST by its\ncontext — a done context aborts the request and returns the transient\nverdict — and Export is ExportContext under a context bounded by the client's\nown deadline.\n\nIt is the EMITTER half of this package's OTLP support; EncodeOTLPJSON is the\nencoder half and this constructor adds nothing to it but transport. The split\nis why an encoding bug and a network bug are never the same investigation.\n\nIt is deliberately NOT registered. The registry is reached by importing a\npackage, and arming a network client from an import is strictly worse than\nthe stdout hazard ADR 0030 already refuses: there is no endpoint that could\nbe a correct default, and a wrong one turns every Export into a POST at\nwhatever answers on that address.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to back off exponentially on a retryable status,\nthis SDK already ships that policy in internal/service/app/resilience, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune\nor cancel. What this exporter provides instead is the CLASSIFICATION a retry\npolicy needs:\n\n\trunner := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   metrics.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into a Runner that\nalways fails: nothing here publishes a signature that forces the deferral,\nand refusing at wiring time is strictly earlier than refusing at the first\nscrape.\n",
       "file": "service/observe/metrics/exporter_otlphttp.go",
       "layer": "service",
       "family": "observe"
@@ -61717,9 +61828,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
       "name": "NewOTLPHTTPExporter",
-      "spelled": "func(name coretrace.ExporterName, cfg OTLPHTTPConfig) (exporter coretrace.SpanExporter, err error)",
-      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter, err error)",
-      "doc": "NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP\ncollector as OTLP/JSON.\n\n# It is NOT registered, and that is a decision one step beyond ADR 0030\n\nADR 0030 refuses to arm a WRITER on stdout from an import. Arming a NETWORK\nCLIENT from an import is strictly worse, and for a reason that is structural\nrather than a matter of degree: there is no endpoint that could be a correct\ndefault. `localhost:4318` is a guess, and a wrong guess turns every export into\na POST at whatever answers on that address — inside a cluster, that is a real\nhost belonging to somebody else. So this exporter is constructed explicitly, by\na caller who names the collector, or not at all. A test pins its absence from\nAvailableExporters.\n\n# It does not retry\n\nThe specification asks a client to honour Retry-After and otherwise back off\nexponentially. `internal/service/app/resilience` already ships that policy, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune or\ncancel — Export has no context to cancel it with. What this exporter supplies\ninstead is the CLASSIFICATION a retry policy needs, in the exact shape\nresilience.RetryConfig.Retryable wants:\n\n\tresilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   trace.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into an always-failing\nexporter: refusing at wiring time is strictly earlier than refusing at the\nfirst export.\n",
+      "spelled": "func(name coretrace.ExporterName, cfg OTLPHTTPConfig) (exporter coretrace.ContextSpanExporter, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter, err error)",
+      "doc": "NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an\nOTLP collector as OTLP/JSON. ExportContext bounds the POST by its context —\na done context aborts the request and returns the transient verdict — and\nExport is ExportContext under a context bounded by the client's own deadline.\n\n# It is NOT registered, and that is a decision one step beyond ADR 0030\n\nADR 0030 refuses to arm a WRITER on stdout from an import. Arming a NETWORK\nCLIENT from an import is strictly worse, and for a reason that is structural\nrather than a matter of degree: there is no endpoint that could be a correct\ndefault. `localhost:4318` is a guess, and a wrong guess turns every export into\na POST at whatever answers on that address — inside a cluster, that is a real\nhost belonging to somebody else. So this exporter is constructed explicitly, by\na caller who names the collector, or not at all. A test pins its absence from\nAvailableExporters.\n\n# It does not retry\n\nThe specification asks a client to honour Retry-After and otherwise back off\nexponentially. `internal/service/app/resilience` already ships that policy, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune or\ncancel, and would spend the very deadline ExportContext is given. What this\nexporter supplies instead is the CLASSIFICATION a retry policy needs, in the\nexact shape resilience.RetryConfig.Retryable wants:\n\n\tresilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   trace.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into an always-failing\nexporter: refusing at wiring time is strictly earlier than refusing at the\nfirst export.\n",
       "file": "service/observe/trace/exporter_otlphttp.go",
       "layer": "service",
       "family": "observe"

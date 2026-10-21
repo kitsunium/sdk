@@ -34,7 +34,7 @@ sentinels as `coretrace.X` and declares none.
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `collector/trace` and `trace.proto`, in FIELD-NUMBER order; the `common.proto` / `resource.proto` messages and the proto3-JSON scalars are the shared package's |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter over the shared `otlp.Stream` + `OTLPJSON` (registered, stderr) + the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
-| `exporter_otlphttp.go` | `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPTracesPath` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
+| `exporter_otlphttp.go` | `NewOTLPHTTPExporter` — a `coretrace.ContextSpanExporter`: `ExportContext` carries the caller's context into the POST, a done context ending it with the transient `OTLP_EXPORT_UNAVAILABLE`, and `Export` is `ExportContext` under `context.Background()` (#479) — + `OTLPRetryable` + `OTLPTracesPath` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
 | `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` |
 | `otlp_export_response.go` | `ExportTracePartialSuccess` reduced to `rejectedSpans` + `decodeRejected` — the one member of the answer that is this signal's own |
 | `http_server.go` | `ServerMiddleware` + the semantic-convention keys + `statusRecorder` |
@@ -280,8 +280,9 @@ Four decisions:
   site.
 - **Do NOT accept `Ratio(0)`.** See above.
 - **Do NOT register `NewOTLPHTTPExporter`, or give it a default endpoint.**
-- **Do NOT retry inside `Export`.** `resilience` owns backoff; a hidden one cannot
-  be tuned or cancelled, and `Export` has no context to cancel it with.
+- **Do NOT retry inside `Export` or `ExportContext`.** `resilience` owns backoff;
+  a hidden one cannot be tuned, and would spend the one round trip's bound
+  `ExportContext` is given.
 - **Do NOT build the default client without its own `Transport`.** A nil one is
   `http.DefaultTransport`, which any code in the process can empty. Nor replace,
   wrap or clone the `Transport` of a caller-SUPPLIED client: that is theirs.

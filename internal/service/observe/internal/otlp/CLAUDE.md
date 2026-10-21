@@ -56,7 +56,7 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | `stream.go` | `Stream` + `NewStream` + `Emit` — one terminated document per write, a writer fault under the caller's wrap |
 | `signal_spec.go` | `SignalSpec` — the per-signal vocabulary: four sentinels, three wraps of a foreign cause, the rejected field key, the response decoder |
 | `http_config.go` | `HTTPConfig` — each field documented once; each signal publishes it as a DEFINED type of its own |
-| `sender.go` | `Sender` + `NewSender` + `Post`, and everything behind them: `checkEndpoint`, `newClient`, `newTransport`, `closeResponse`, `swallowTeardown`, `classify`, `isRetryableStatus`, `retryAfterSeconds`, `partialSuccessOf`; the `retry_after_seconds` field is the key `app/resilience.RetryAfter` reads, pinned by `TestTheRetryPolicyReadsTheCollectorsDelay` (#476) |
+| `sender.go` | `Sender` + `NewSender` + `Post` / `PostContext` — the request carries the caller's context, so a context done before the collector answers ends the round trip with the transient verdict (#479); `Post` is `PostContext` under `context.Background()` —, and everything behind them: `checkEndpoint`, `newClient`, `newTransport`, `closeResponse`, `swallowTeardown`, `classify`, `isRetryableStatus`, `retryAfterSeconds`, `partialSuccessOf`; the `retry_after_seconds` field is the key `app/resilience.RetryAfter` reads, pinned by `TestTheRetryPolicyReadsTheCollectorsDelay` (#476) |
 | `response.go` | `LenientInt64` (number OR decimal string) + `RejectedCounter` + `DecodeRejected` |
 | `wire_external_test.go` | scalars, attributes, messages, the marshal, the caller's code on a fault, the unset instant, the stream under concurrency |
 | `sender_external_test.go` | the three verdicts for two stand-in signals, every success shape, every endpoint refusal, the transport fault, header precedence, the defaults |
@@ -100,8 +100,9 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 
 - **Declare an error code here**, or default a `SignalSpec` field. A verdict
   without the caller's code would be a verdict under nobody's.
-- **Retry inside `Post`**, or give it a context it would need to cancel a hidden
-  loop (ADR 0048 §Decision, ADR 0051 — unchanged).
+- **Retry inside `Post` or `PostContext`.** The context `PostContext` takes
+  bounds ONE round trip; a hidden loop would spend that bound on attempts the
+  caller cannot see (ADR 0048 §Decision, ADR 0051 — unchanged).
 - **Follow a redirect, or share `http.DefaultTransport` in the default client.**
   `newClient` and `newTransport` say why: CWE-918, and a pool anything in the
   process can empty under a response that already arrived.

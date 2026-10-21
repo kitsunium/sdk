@@ -50,6 +50,7 @@ go_test(
     name = "metrics_test",
     srcs = [
         "describer_external_test.go",
+        "export_context_external_test.go",
         "exporter_external_test.go",
         "gen_api_test.go",
         "model_external_test.go",

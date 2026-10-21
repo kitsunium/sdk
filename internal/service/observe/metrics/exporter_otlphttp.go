@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
@@ -79,8 +80,11 @@ type otlpHTTPExporter struct {
 	sender *otlp.Sender
 }
 
-// NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as
-// OTLP/JSON and POSTs it to cfg.Endpoint.
+// NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as
+// OTLP/JSON and POSTs it to cfg.Endpoint. ExportContext bounds the POST by its
+// context — a done context aborts the request and returns the transient
+// verdict — and Export is ExportContext under a context bounded by the client's
+// own deadline.
 //
 // It is the EMITTER half of this package's OTLP support; EncodeOTLPJSON is the
 // encoder half and this constructor adds nothing to it but transport. The split
@@ -109,7 +113,7 @@ type otlpHTTPExporter struct {
 // always fails: nothing here publishes a signature that forces the deferral,
 // and refusing at wiring time is strictly earlier than refusing at the first
 // scrape.
-func NewOTLPHTTPExporter(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exporter coremetrics.Exporter, err error) {
+func NewOTLPHTTPExporter(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exporter coremetrics.ContextExporter, err error) {
 	//: the shared transport, refusing an unusable endpoint under this
 	//: signal's code before anything is constructed.
 	sender, senderErr := otlp.NewSender((*otlp.HTTPConfig)(&cfg), &otlpSignal)
@@ -148,6 +152,17 @@ func (e *otlpHTTPExporter) Name() coremetrics.ExporterName {
 // it — the request, the bounded read, the drain, the verdict — is the shared
 // sender's, under this signal's codes.
 func (e *otlpHTTPExporter) Export(snap coremetrics.SnapshotValue) error {
+	//: the same export under a context that never ends: the client's deadline
+	//: is the bound, as it always was.
+	return e.ExportContext(context.Background(), snap)
+}
+
+// ExportContext implements core/observe/metrics.ContextExporter: Export, with
+// the POST bounded by ctx. A context that is done before the collector
+// answers — already, or midway — ends the round trip with the transient
+// verdict a transport fault earns, so a retry policy reads a timeout as the
+// retryable failure the specification says it is.
+func (e *otlpHTTPExporter) ExportContext(ctx context.Context, snap coremetrics.SnapshotValue) error {
 	//: encode first — an unrepresentable snapshot never reaches the network.
 	body, err := EncodeOTLPJSON(snap)
 	//: the sentinel already carries the code, reason and public message.
@@ -155,6 +170,6 @@ func (e *otlpHTTPExporter) Export(snap coremetrics.SnapshotValue) error {
 		//: surface the typed refusal.
 		return err
 	}
-	//: transport and classification.
-	return e.sender.Post(body)
+	//: transport and classification, under the caller's bound.
+	return e.sender.PostContext(ctx, body)
 }

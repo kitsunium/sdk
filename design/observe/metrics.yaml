@@ -152,6 +152,16 @@ packages:
         type: errs.Code
     constants:
       - doc: |-
+          DefaultExportTimeout bounds one export when the caller's context carries no
+          deadline of its own: 30 s, the OpenTelemetry metrics SDK specification's
+          default exportTimeout for a periodic exporting reader
+          (OTEL_METRIC_EXPORT_TIMEOUT). A context with no deadline is how an
+          indefinite block is written; a caller who wants another bound puts it on the
+          context.
+        name: DefaultExportTimeout
+        type: time.Duration
+        value: "30000000000"
+      - doc: |-
           OverflowAttrKey names the reserved attribute the meter attaches to the single
           aggregated series it folds observations into once an instrument has reached
           its cardinality bound. It is spelled with underscores rather than dots so it
@@ -321,6 +331,27 @@ packages:
           - name: snap
             type: SnapshotValue
         name: Export
+        out:
+          - type: error
+      - doc: |-
+          ExportContext ships snap through the Exporter registered as name, bounded by
+          ctx. A missing exporter returns UnknownExporter; an exporter failure wraps as
+          ExportFailed.
+
+          When ctx carries no deadline, DefaultExportTimeout is applied: the
+          specification bounds every export. An exporter that implements ContextExporter
+          receives the bounded context through ExportContext; one that implements only
+          Exporter is called through Export, which has no context to honour, and is
+          bounded by nothing but itself — every exporter that touches a network in this
+          SDK implements the sibling.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: ExporterName
+          - name: snap
+            type: SnapshotValue
+        name: ExportContext
         out:
           - type: error
       - doc: |-
@@ -518,6 +549,29 @@ packages:
             out:
               - type: error
         name: Exporter
+      - doc: |-
+          ContextExporter is an Exporter whose export can be bounded and cancelled:
+          ExportContext ships snap under ctx, and returns once ctx is done at the
+          latest. The OpenTelemetry metrics SDK specification bounds every export by
+          exportTimeout; Export has no context to bound it with, and Exporter is a
+          published port, so the bound arrives as this sibling rather than as a widened
+          method (ADR 0039). A caller holding an Exporter asks for it with a type
+          assertion, as ExportContext does.
+
+          Implementations MUST be safe for concurrent use, and Export keeps its
+          meaning: it is ExportContext under a context the exporter bounds itself.
+        embeds:
+          - Exporter
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: snap
+                type: SnapshotValue
+            name: ExportContext
+            out:
+              - type: error
+        name: ContextExporter
       - doc: Gauge is an instantaneous value that can go up or down.
         methods:
           - doc: Set replaces the gauge's current value.
@@ -1147,8 +1201,11 @@ packages:
       Cross-OS: 100% portable.
     functions:
       - doc: |-
-          NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as
-          OTLP/JSON and POSTs it to cfg.Endpoint.
+          NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as
+          OTLP/JSON and POSTs it to cfg.Endpoint. ExportContext bounds the POST by its
+          context — a done context aborts the request and returns the transient
+          verdict — and Export is ExportContext under a context bounded by the client's
+          own deadline.
 
           It is the EMITTER half of this package's OTLP support; EncodeOTLPJSON is the
           encoder half and this constructor adds nothing to it but transport. The split
@@ -1185,7 +1242,7 @@ packages:
         name: NewOTLPHTTPExporter
         out:
           - name: exporter
-            type: coremetrics.Exporter
+            type: coremetrics.ContextExporter
           - name: err
             type: error
       - doc: |-
@@ -1733,6 +1790,14 @@ packages:
             typed: true
             value: "\"/v1/metrics\""
           - doc: |-
+              DefaultExportTimeout bounds an ExportContext whose context carries no
+              deadline: 30s, the OpenTelemetry metrics SDK specification's exportTimeout.
+            name: DefaultExportTimeout
+            reexport: coremetrics.DefaultExportTimeout
+            type: time.Duration
+            typed: true
+            value: "30000000000"
+          - doc: |-
               DefaultOTLPTimeout bounds one OTLP/HTTP export round trip when
               OTLPHTTPConfig leaves Timeout unset. It is the OpenTelemetry protocol
               exporter specification's own default, not a figure this SDK invented.
@@ -1943,6 +2008,12 @@ packages:
           - doc: Exporter is the public alias for a snapshot shipper.
             name: Exporter
             target: coremetrics.Exporter
+      - alias:
+          - doc: |-
+              ContextExporter is the public alias for an Exporter whose export a context
+              bounds and cancels — a sibling, so Exporter is not widened (ADR 0039).
+            name: ContextExporter
+            target: coremetrics.ContextExporter
       - alias:
           - doc: ExporterName is the public alias for an exporter's registry key.
             name: ExporterName
@@ -2179,8 +2250,9 @@ packages:
             - type: Exporter
       - func:
           doc: |-
-            NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as
-            OTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is.
+            NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as
+            OTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is;
+            ExportContext bounds the POST by its context.
 
             It is never registered, and it never retries — compose resilience.NewRetry
             with OTLPRetryable instead. A refused endpoint fails here, at wiring, rather
@@ -2194,7 +2266,7 @@ packages:
           name: NewOTLPHTTPExporter
           out:
             - name: exporter
-              type: Exporter
+              type: ContextExporter
             - name: err
               type: error
       - func:
@@ -2228,6 +2300,21 @@ packages:
             - name: snap
               type: Snapshot
           name: Export
+          out:
+            - type: error
+      - func:
+          doc: |-
+            ExportContext ships snap through the exporter registered as name, bounded by
+            ctx — DefaultExportTimeout when ctx carries no deadline.
+          forward: coremetrics.ExportContext
+          in:
+            - name: ctx
+              type: context.Context
+            - name: name
+              type: ExporterName
+            - name: snap
+              type: Snapshot
+          name: ExportContext
           out:
             - type: error
       - func:

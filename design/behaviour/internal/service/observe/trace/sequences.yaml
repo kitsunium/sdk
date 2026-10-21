@@ -74,9 +74,20 @@ sequences:
         kind: actor
       - id: (*otlpHTTPExporter).Export
         kind: self
+      - id: e.ExportContext
+        kind: internal
+    steps:
+      - return: e.ExportContext(context.Background(), spans)
+        to: e.ExportContext
+  - of: (*otlpHTTPExporter).ExportContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportContext
+        kind: self
       - id: EncodeOTLPJSON
         kind: internal
-      - id: e.sender.Post
+      - id: e.sender.PostContext
         kind: value
     steps:
       - opt:
@@ -90,8 +101,8 @@ sequences:
           do:
             - return: err
           when: err != nil
-      - return: e.sender.Post(body)
-        to: e.sender.Post
+      - return: e.sender.PostContext(ctx, body)
+        to: e.sender.PostContext
   - of: EncodeOTLPJSON
     participants:
       - id: caller

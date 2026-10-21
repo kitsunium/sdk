@@ -78,6 +78,7 @@ See ADR 0051.
 - [func ContextWithSpanContext\(parent context.Context, spanContext SpanContext\) context.Context](<#ContextWithSpanContext>)
 - [func EncodeOTLPJSON\(spans Spans\) \(doc \[\]byte, err error\)](<#EncodeOTLPJSON>)
 - [func Export\(name ExporterName, spans Spans\) error](<#Export>)
+- [func ExportContext\(ctx context.Context, name ExporterName, spans Spans\) error](<#ExportContext>)
 - [func Extract\(carrier Carrier\) SpanContext](<#Extract>)
 - [func Float64\(key string, value float64\) Attr](<#Float64>)
 - [func FormatTraceParent\(context SpanContext\) \(header string, ok bool\)](<#FormatTraceParent>)
@@ -85,7 +86,7 @@ See ADR 0051.
 - [func Int64\(key string, value int64\) Attr](<#Int64>)
 - [func LookupExporter\(name ExporterName\) \(e SpanExporter, ok bool\)](<#LookupExporter>)
 - [func NeverSample\(params SamplingParams\) bool](<#NeverSample>)
-- [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter SpanExporter, err error\)](<#NewOTLPHTTPExporter>)
+- [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter ContextSpanExporter, err error\)](<#NewOTLPHTTPExporter>)
 - [func NewOTLPJSONExporter\(name ExporterName, dst io.Writer\) SpanExporter](<#NewOTLPJSONExporter>)
 - [func NewRecorder\(cfg RecorderConfig\) \*Recorder](<#NewRecorder>)
 - [func NewSpanID\(\) \(id SpanID, err error\)](<#NewSpanID>)
@@ -115,6 +116,8 @@ See ADR 0051.
 - [type Carrier](<#Carrier>)
   - [func \(Carrier\) Get\(key string\) string](<#Carrier.Get>)
   - [func \(Carrier\) Set\(key string, value string\)](<#Carrier.Set>)
+- [type ContextSpanExporter](<#ContextSpanExporter>)
+  - [func \(ContextSpanExporter\) ExportContext\(ctx context.Context, spans SpansValue\) error](<#ContextSpanExporter.ExportContext>)
 - [type Event](<#Event>)
   - [func \(Event\) Normalized\(\) EventValue](<#Event.Normalized>)
 - [type ExporterName](<#ExporterName>)
@@ -233,6 +236,15 @@ const AttrKindString AttrKind = 1
 AttrKindString marks a string-valued attribute.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString`.
+
+<a name="DefaultExportTimeout"></a>
+```go
+const DefaultExportTimeout time.Duration = 30000000000
+```
+
+DefaultExportTimeout bounds an ExportContext whose context carries no deadline: 30s, the OpenTelemetry trace SDK specification's exportTimeout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.DefaultExportTimeout`.
 
 <a name="DefaultMaxSpans"></a>
 ```go
@@ -734,6 +746,15 @@ func Export(name ExporterName, spans Spans) error
 
 Export ships spans through the SpanExporter registered as name.
 
+<a name="ExportContext"></a>
+## func [ExportContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+```go
+func ExportContext(ctx context.Context, name ExporterName, spans Spans) error
+```
+
+ExportContext ships spans through the SpanExporter registered as name, bounded by ctx — DefaultExportTimeout when ctx carries no deadline.
+
 <a name="Extract"></a>
 ## func [Extract](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
@@ -801,10 +822,10 @@ NeverSample drops every root trace. It exists so "off" has a NAME a reviewer can
 ## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
-func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error)
+func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter ContextSpanExporter, err error)
 ```
 
-NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP collector. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/app/resilience](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/resilience).
+NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an OTLP collector, ExportContext bounded by its context. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/app/resilience](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/resilience).
 
 <a name="NewOTLPJSONExporter"></a>
 ## func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
@@ -1096,6 +1117,31 @@ func (Carrier) Get(key string) string
 
 ```go
 func (Carrier) Set(key string, value string)
+```
+
+<a name="ContextSpanExporter"></a>
+## type [ContextSpanExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+ContextSpanExporter is a SpanExporter whose export a context bounds and cancels — the sibling that carries the specification's "MUST NOT block indefinitely" without widening SpanExporter (ADR 0039).
+
+```go
+type ContextSpanExporter = coretrace.ContextSpanExporter
+```
+
+ContextSpanExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter`, declared as:
+
+```go
+type ContextSpanExporter interface {
+	ExportContext(ctx context.Context, spans SpansValue) error
+	SpanExporter
+}
+```
+
+<a name="ContextSpanExporter.ExportContext"></a>
+### func \(ContextSpanExporter\) [ExportContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
+
+```go
+func (ContextSpanExporter) ExportContext(ctx context.Context, spans SpansValue) error
 ```
 
 <a name="Event"></a>

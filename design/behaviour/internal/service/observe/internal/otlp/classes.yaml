@@ -226,6 +226,7 @@ files:
       - newClient
       - newTransport
       - (*Sender).Post
+      - (*Sender).PostContext
       - closeResponse
       - swallowTeardown
       - (*Sender).classify
@@ -388,6 +389,7 @@ functions:
     results: "*Stream"
 imports:
   bytes: bytes
+  context: context
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   http: net/http
@@ -563,6 +565,10 @@ types:
     methods:
       - name: Post
         params: body []byte
+        recv: s *Sender
+        results: error
+      - name: PostContext
+        params: ctx context.Context, body []byte
         recv: s *Sender
         results: error
       - doc: |-

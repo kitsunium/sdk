@@ -360,6 +360,7 @@ files:
       - OTLPRetryable
       - (*otlpHTTPExporter).Name
       - (*otlpHTTPExporter).Export
+      - (*otlpHTTPExporter).ExportContext
     name: exporter_otlphttp.go
   - decls:
       - otlpJSONExporterName
@@ -516,7 +517,7 @@ functions:
     params: _ coretrace.SpanValue
   - name: NewOTLPHTTPExporter
     params: name coretrace.ExporterName, cfg OTLPHTTPConfig
-    results: exporter coretrace.SpanExporter, err error
+    results: exporter coretrace.ContextSpanExporter, err error
   - name: OTLPRetryable
     params: err error
     results: bool
@@ -863,6 +864,16 @@ types:
           make one every interval forever.
         name: Export
         params: spans coretrace.SpansValue
+        recv: e *otlpHTTPExporter
+        results: error
+      - doc: |-
+          ExportContext implements core/observe/trace.ContextSpanExporter: Export,
+          with the POST bounded by ctx. A context that is done before the collector
+          answers — already, or midway — ends the round trip with the transient
+          verdict a transport fault earns, so a retry policy reads a timeout as the
+          retryable failure the specification says it is.
+        name: ExportContext
+        params: ctx context.Context, spans coretrace.SpansValue
         recv: e *otlpHTTPExporter
         results: error
     name: otlpHTTPExporter

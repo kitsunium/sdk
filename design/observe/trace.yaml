@@ -179,6 +179,16 @@ packages:
         name: ExceptionStacktraceKey
         type: string
         value: "\"exception.stacktrace\""
+      - doc: |-
+          DefaultExportTimeout bounds one export when the caller's context carries no
+          deadline of its own: 30 s, the OpenTelemetry trace SDK specification's default
+          for a batch processor's exportTimeout (OTEL_BSP_EXPORT_TIMEOUT). The
+          specification says an export MUST NOT block indefinitely, and a context with
+          no deadline is how an indefinite block is written; a caller who wants another
+          bound puts it on the context.
+        name: DefaultExportTimeout
+        type: time.Duration
+        value: "30000000000"
       - blockDoc: |-
           TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
           opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
@@ -531,6 +541,27 @@ packages:
         out:
           - type: error
       - doc: |-
+          ExportContext ships spans through the SpanExporter registered as name, bounded
+          by ctx. A missing exporter returns UnknownExporter; an exporter failure wraps
+          as ExportFailed.
+
+          When ctx carries no deadline, DefaultExportTimeout is applied: the
+          specification forbids an export that blocks indefinitely. An exporter that
+          implements ContextSpanExporter receives the bounded context through
+          ExportContext; one that implements only SpanExporter is called through Export,
+          which has no context to honour, and is bounded by nothing but itself — every
+          exporter that touches a network in this SDK implements the sibling.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: ExporterName
+          - name: spans
+            type: SpansValue
+        name: ExportContext
+        out:
+          - type: error
+      - doc: |-
           ParseTraceID reads 32 lowercase hex digits into a TraceID, refusing an
           all-zero result.
 
@@ -630,6 +661,29 @@ packages:
             out:
               - type: error
         name: SpanExporter
+      - doc: |-
+          ContextSpanExporter is a SpanExporter whose export can be bounded and
+          cancelled: ExportContext ships spans under ctx, and returns once ctx is done
+          at the latest. The OpenTelemetry SDK specification says an export MUST NOT
+          block indefinitely; Export has no context to bound it with, and SpanExporter
+          is a published port, so the bound arrives as this sibling rather than as a
+          widened method (ADR 0039). A caller holding a SpanExporter asks for it with a
+          type assertion, as ExportContext and the batch sink do.
+
+          Implementations MUST be safe for concurrent use, and Export keeps its
+          meaning: it is ExportContext under a context the exporter bounds itself.
+        embeds:
+          - SpanExporter
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: spans
+                type: SpansValue
+            name: ExportContext
+            out:
+              - type: error
+        name: ContextSpanExporter
       - doc: |-
           Tracer starts spans. It is the only way a span comes into existence.
 
@@ -1734,8 +1788,10 @@ packages:
       mechanism (ADR 0160 §4).
     functions:
       - doc: |-
-          NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
-          collector as OTLP/JSON.
+          NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an
+          OTLP collector as OTLP/JSON. ExportContext bounds the POST by its context —
+          a done context aborts the request and returns the transient verdict — and
+          Export is ExportContext under a context bounded by the client's own deadline.
 
           # It is NOT registered, and that is a decision one step beyond ADR 0030
 
@@ -1753,9 +1809,9 @@ packages:
           The specification asks a client to honour Retry-After and otherwise back off
           exponentially. `internal/service/app/resilience` already ships that policy, and a
           backoff hidden inside Export would be a second one a caller cannot see, tune or
-          cancel — Export has no context to cancel it with. What this exporter supplies
-          instead is the CLASSIFICATION a retry policy needs, in the exact shape
-          resilience.RetryConfig.Retryable wants:
+          cancel, and would spend the very deadline ExportContext is given. What this
+          exporter supplies instead is the CLASSIFICATION a retry policy needs, in the
+          exact shape resilience.RetryConfig.Retryable wants:
 
           	resilience.NewRetry(resilience.RetryConfig{
           	    MaxAttempts: 3,
@@ -1774,7 +1830,7 @@ packages:
         name: NewOTLPHTTPExporter
         out:
           - name: exporter
-            type: coretrace.SpanExporter
+            type: coretrace.ContextSpanExporter
           - name: err
             type: error
       - doc: |-
@@ -2836,6 +2892,15 @@ packages:
             value: 1 << 20
       - const:
           - doc: |-
+              DefaultExportTimeout bounds an ExportContext whose context carries no
+              deadline: 30s, the OpenTelemetry trace SDK specification's exportTimeout.
+            name: DefaultExportTimeout
+            reexport: coretrace.DefaultExportTimeout
+            type: time.Duration
+            typed: true
+            value: "30000000000"
+      - const:
+          - doc: |-
               DefaultMaxSpans is a Recorder's default bound. There is no "unbounded"
               setting, because a buffer nobody drains is how a tracing integration takes a
               process down.
@@ -2994,6 +3059,13 @@ packages:
           - doc: SpanExporter ships a batch of finished spans to a backend.
             name: SpanExporter
             target: coretrace.SpanExporter
+      - alias:
+          - doc: |-
+              ContextSpanExporter is a SpanExporter whose export a context bounds and
+              cancels — the sibling that carries the specification's "MUST NOT block
+              indefinitely" without widening SpanExporter (ADR 0039).
+            name: ContextSpanExporter
+            target: coretrace.ContextSpanExporter
       - alias:
           - doc: ExporterName is the typed key a SpanExporter registers under.
             name: ExporterName
@@ -3416,10 +3488,10 @@ packages:
             - type: SpanExporter
       - func:
           doc: |-
-            NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
-            collector. It is deliberately NOT in the registry: arming a network client from
-            an import is worse than arming a writer, and no endpoint could be a correct
-            default. It does not retry either — use OTLPRetryable with
+            NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an
+            OTLP collector, ExportContext bounded by its context. It is deliberately NOT in
+            the registry: arming a network client from an import is worse than arming a
+            writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with
             [github.com/kitsunium/sdk/pkg/v1/app/resilience].
           forward: svctrace.NewOTLPHTTPExporter
           in:
@@ -3430,7 +3502,7 @@ packages:
           name: NewOTLPHTTPExporter
           out:
             - name: exporter
-              type: SpanExporter
+              type: ContextSpanExporter
             - name: err
               type: error
       - func:
@@ -3484,6 +3556,21 @@ packages:
             - name: spans
               type: Spans
           name: Export
+          out:
+            - type: error
+      - func:
+          doc: |-
+            ExportContext ships spans through the SpanExporter registered as name, bounded
+            by ctx — DefaultExportTimeout when ctx carries no deadline.
+          forward: coretrace.ExportContext
+          in:
+            - name: ctx
+              type: context.Context
+            - name: name
+              type: ExporterName
+            - name: spans
+              type: Spans
+          name: ExportContext
           out:
             - type: error
     imports:

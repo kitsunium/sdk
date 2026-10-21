@@ -1491,6 +1491,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/metrics.ContextExporter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
+      "name": "ContextExporter",
+      "spelled": "coremetrics.ContextExporter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter",
+      "doc": "ContextExporter is the public alias for an Exporter whose export a context\nbounds and cancels — a sibling, so Exporter is not widened (ADR 0039).\n",
+      "file": "metrics/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/metrics.Counter",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
@@ -1499,6 +1512,20 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.Counter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Counter",
       "doc": "Counter is the public alias for a monotonic sum instrument.\n",
+      "file": "metrics/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/metrics.DefaultExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
+      "name": "DefaultExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "init": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultExportTimeout",
+      "doc": "DefaultExportTimeout bounds an ExportContext whose context carries no\ndeadline: 30s, the OpenTelemetry metrics SDK specification's exportTimeout.\n",
       "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -1610,6 +1637,18 @@
       "spelled": "func(name ExporterName, snap Snapshot) error",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/pkg/v1/observe/metrics.Snapshot) error",
       "doc": "Export ships snap through the exporter registered as name.\n",
+      "file": "metrics/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExportContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
+      "name": "ExportContext",
+      "spelled": "func(ctx context.Context, name ExporterName, snap Snapshot) error",
+      "canonical": "func(ctx context.Context, name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/pkg/v1/observe/metrics.Snapshot) error",
+      "doc": "ExportContext ships snap through the exporter registered as name, bounded by\nctx — DefaultExportTimeout when ctx carries no deadline.\n",
       "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -1962,9 +2001,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
       "name": "NewOTLPHTTPExporter",
-      "spelled": "func(name ExporterName, cfg OTLPHTTPConfig) (exporter Exporter, err error)",
-      "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/pkg/v1/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/pkg/v1/observe/metrics.Exporter, err error)",
-      "doc": "NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is.\n\nIt is never registered, and it never retries — compose resilience.NewRetry\nwith OTLPRetryable instead. A refused endpoint fails here, at wiring, rather\nthan at the first scrape.\n",
+      "spelled": "func(name ExporterName, cfg OTLPHTTPConfig) (exporter ContextExporter, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/pkg/v1/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/pkg/v1/observe/metrics.ContextExporter, err error)",
+      "doc": "NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is;\nExportContext bounds the POST by its context.\n\nIt is never registered, and it never retries — compose resilience.NewRetry\nwith OTLPRetryable instead. A refused endpoint fails here, at wiring, rather\nthan at the first scrape.\n",
       "file": "metrics/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -3211,6 +3250,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/trace.ContextSpanExporter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/trace",
+      "name": "ContextSpanExporter",
+      "spelled": "coretrace.ContextSpanExporter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter",
+      "doc": "ContextSpanExporter is a SpanExporter whose export a context bounds and\ncancels — the sibling that carries the specification's \"MUST NOT block\nindefinitely\" without widening SpanExporter (ADR 0039).\n",
+      "file": "trace/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/trace.ContextWithSpanContext",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/trace",
@@ -3218,6 +3270,20 @@
       "spelled": "func(parent context.Context, spanContext SpanContext) context.Context",
       "canonical": "func(parent context.Context, spanContext github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanContext) context.Context",
       "doc": "ContextWithSpanContext returns a copy of parent carrying spanContext. An\ninvalid context is still stored: it is how \"this scope deliberately has no\ntrace\" is expressed, and it shadows any outer one.\n",
+      "file": "trace/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/trace.DefaultExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/trace",
+      "name": "DefaultExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DefaultExportTimeout",
+      "doc": "DefaultExportTimeout bounds an ExportContext whose context carries no\ndeadline: 30s, the OpenTelemetry trace SDK specification's exportTimeout.\n",
       "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -3389,6 +3455,18 @@
       "spelled": "func(name ExporterName, spans Spans) error",
       "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, spans github.com/kitsunium/sdk/pkg/v1/observe/trace.Spans) error",
       "doc": "Export ships spans through the SpanExporter registered as name.\n",
+      "file": "trace/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/trace.ExportContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/trace",
+      "name": "ExportContext",
+      "spelled": "func(ctx context.Context, name ExporterName, spans Spans) error",
+      "canonical": "func(ctx context.Context, name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, spans github.com/kitsunium/sdk/pkg/v1/observe/trace.Spans) error",
+      "doc": "ExportContext ships spans through the SpanExporter registered as name, bounded\nby ctx — DefaultExportTimeout when ctx carries no deadline.\n",
       "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -3769,9 +3847,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/trace",
       "name": "NewOTLPHTTPExporter",
-      "spelled": "func(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error)",
-      "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/pkg/v1/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/pkg/v1/observe/trace.SpanExporter, err error)",
-      "doc": "NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP\ncollector. It is deliberately NOT in the registry: arming a network client from\nan import is worse than arming a writer, and no endpoint could be a correct\ndefault. It does not retry either — use OTLPRetryable with\n[github.com/kitsunium/sdk/pkg/v1/app/resilience].\n",
+      "spelled": "func(name ExporterName, cfg OTLPHTTPConfig) (exporter ContextSpanExporter, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/pkg/v1/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/pkg/v1/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/pkg/v1/observe/trace.ContextSpanExporter, err error)",
+      "doc": "NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an\nOTLP collector, ExportContext bounded by its context. It is deliberately NOT in\nthe registry: arming a network client from an import is worse than arming a\nwriter, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with\n[github.com/kitsunium/sdk/pkg/v1/app/resilience].\n",
       "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"

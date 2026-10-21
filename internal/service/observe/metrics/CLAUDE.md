@@ -541,7 +541,10 @@ exporter per collector, once — one per export holds a pool per call.
 **It does not retry, and that is a decision.** The specification asks a client to
 honour `Retry-After` and otherwise back off exponentially; `resilience` already
 ships that policy, and a backoff hidden inside `Export` would be one a caller
-cannot see, tune or cancel. The exporter supplies the **classification** instead,
+cannot see, tune or cancel. What the exporter does take is a BOUND:
+`NewOTLPHTTPExporter` returns a `ContextExporter`, and `ExportContext` carries
+the caller's context into the request, so a done context ends the POST with the
+transient `OTLP_EXPORT_UNAVAILABLE` (#479). The exporter supplies the **classification** instead,
 in exactly the shape `resilience.RetryConfig.Retryable` wants: a caller passes
 `metrics.OTLPRetryable` there and keeps the attempts and the delay its own.
 
@@ -684,7 +687,7 @@ cloned at construction so a later caller mutation cannot change the wire.
   drain a response without a bound, or bound the drain by `MaxResponseBytes`
   (that knob caps what is read into memory, and a caller who lowered it must
   not lose connection reuse on a conforming response); retry inside `Export` (`resilience` owns backoff, `OTLPRetryable`
-  classifies, and `Export` has no `context` to cancel a hidden loop with); attach
+  classifies, and the context `ExportContext` takes bounds one round trip, which a hidden loop would spend); attach
   the collector's `errorMessage`, a `Retry-After` HTTP-date or the endpoint to an
   error — all three are remote-controlled or secret, and a Field goes into
   structured logs.

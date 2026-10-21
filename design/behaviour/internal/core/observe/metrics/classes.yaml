@@ -19,6 +19,18 @@ constants:
         value: "\"sdk_metric_overflow\""
     name: OverflowAttrKey
   - doc: |-
+      DefaultExportTimeout bounds one export when the caller's context carries no
+      deadline of its own: 30 s, the OpenTelemetry metrics SDK specification's
+      default exportTimeout for a periodic exporting reader
+      (OTEL_METRIC_EXPORT_TIMEOUT). A context with no deadline is how an
+      indefinite block is written; a caller who wants another bound puts it on the
+      context.
+    items:
+      - name: DefaultExportTimeout
+        type: time.Duration
+        value: 30 * time.Second
+    name: DefaultExportTimeout
+  - doc: |-
       DefaultScopeName names this SDK as the instrumenting library when a caller
       declares no scope of their own. An empty scope name is legal in the
       specification and useless in a backend, so the meter fills in the one thing
@@ -74,6 +86,7 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - DefaultExportTimeout
       - ExporterName
       - ExporterName.String
       - registry
@@ -81,6 +94,8 @@ files:
       - LookupExporter
       - AvailableExporters
       - Export
+      - ExportContext
+      - boundExport
     name: exporter.go
   - decls:
       - GaugeValue
@@ -131,10 +146,21 @@ functions:
   - name: Export
     params: name ExporterName, snap SnapshotValue
     results: error
+  - name: ExportContext
+    params: ctx context.Context, name ExporterName, snap SnapshotValue
+    results: error
+  - doc: |-
+      boundExport returns ctx unchanged when it already carries a deadline, and
+      ctx bounded by DefaultExportTimeout when it does not, with the function that
+      releases it.
+    name: boundExport
+    params: ctx context.Context
+    results: context.Context, context.CancelFunc
   - name: NormalizeScope
     params: scope coreotel.ScopeValue
     results: coreotel.ScopeValue
 imports:
+  context: context
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   plugin: github.com/kitsunium/sdk/internal/kernel/plugin
