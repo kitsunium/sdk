@@ -119,6 +119,18 @@ constants:
         type: float64
         value: "1"
     name: oneToken
+  - doc: ratelimitPolicy names the limiter in a PolicyMisconfigured refusal.
+    items:
+      - name: ratelimitPolicy
+        type: string
+        value: "\"ratelimit\""
+    name: ratelimitPolicy
+  - doc: nanosPerSecond converts a wait in seconds to a time.Duration.
+    items:
+      - name: nanosPerSecond
+        type: float64
+        value: "1e9"
+    name: nanosPerSecond
   - doc: minAttempts is the floor on the attempt budget.
     items:
       - name: minAttempts
@@ -165,6 +177,31 @@ constants:
         type: string
         value: "\"retrybudget\""
     name: budgetPolicy
+  - doc: |-
+      The adaptive throttle's defaults, each the SRE book's own ("Handling
+      Overload", client-side throttling): K = 2 and a two-minute history. The ten
+      slots are the breaker window's, so the two windows reach back alike.
+    grouped: true
+    items:
+      - doc: defaultThrottleK is the SRE book's multiplier.
+        name: defaultThrottleK
+        type: float64
+        value: "2"
+      - doc: |-
+          minThrottleK is the smallest multiplier that never refuses a call to a
+          dependency accepting every one of them.
+        name: minThrottleK
+        type: float64
+        value: "1"
+      - doc: defaultThrottleWindow is the SRE book's two minutes of history.
+        name: defaultThrottleWindow
+        type: time.Duration
+        value: 2 * time.Minute
+      - doc: throttlePolicy names the throttle in a PolicyMisconfigured refusal.
+        name: throttlePolicy
+        type: string
+        value: "\"throttle\""
+    name: defaultThrottleK
 files:
   - decls:
       - BackoffValue
@@ -243,6 +280,17 @@ files:
       - NewBulkhead
       - (*bulkhead).Run
     name: bulkhead.go
+  - decls:
+      - waitingBulkhead
+      - NewBulkheadWait
+      - newWaitingBulkhead
+      - (*waitingBulkhead).Run
+      - (*waitingBulkhead).runHeld
+      - (*waitingBulkhead).await
+    name: bulkhead_wait.go
+  - decls:
+      - BulkheadWaitConfig
+    name: bulkhead_wait_config.go
   - decls: []
     name: doc.go
   - decls:
@@ -302,14 +350,19 @@ files:
     name: misconfigured.go
   - decls:
       - oneToken
+      - ratelimitPolicy
+      - nanosPerSecond
       - tokenBucket
       - NewRateLimiter
       - usableRate
       - bucketSize
       - newTokenBucket
       - (*tokenBucket).Run
+      - (*tokenBucket).await
+      - (*tokenBucket).giveBack
       - rateLimited
       - (*tokenBucket).take
+      - (*tokenBucket).refill
     name: ratelimit.go
   - decls:
       - RateLimiterConfig
@@ -324,6 +377,7 @@ files:
       - (*retryRunner).mayRetry
       - (*retryRunner).wait
       - (*retryRunner).delay
+      - (*retryRunner).curveWait
       - capDelay
       - (*retryRunner).backoff
       - (*retryRunner).jittered
@@ -359,6 +413,28 @@ files:
   - decls:
       - isRetryable
     name: retryable.go
+  - decls:
+      - adaptiveThrottle
+      - NewAdaptiveThrottle
+      - (*adaptiveThrottle).Run
+      - (*adaptiveThrottle).refuse
+      - (*adaptiveThrottle).accepted
+      - (*adaptiveThrottle).accept
+    name: throttle.go
+  - decls:
+      - AdaptiveThrottleConfig
+    name: throttle_config.go
+  - decls:
+      - defaultThrottleK
+      - throttleBucket
+      - throttleWindow
+      - throttleSettings
+      - resolveThrottle
+      - newThrottleWindow
+      - (*throttleWindow).advance
+      - (*throttleWindow).drop
+      - (*throttleWindow).refusal
+    name: throttle_window.go
   - decls:
       - timeoutRunner
       - NewTimeout
@@ -434,6 +510,15 @@ functions:
   - name: NewBulkhead
     params: maxConcurrent int
     results: coreres.Runner
+  - name: NewBulkheadWait
+    params: cfg BulkheadWaitConfig
+    results: coreres.Runner
+  - doc: |-
+      newWaitingBulkhead builds the bulkhead that queues from a cfg whose Queue and
+      MaxWait are both positive.
+    name: newWaitingBulkhead
+    params: cfg BulkheadWaitConfig
+    results: "*waitingBulkhead"
   - name: NewFallback
     params: cfg FallbackConfig
     results: coreres.Runner
@@ -524,6 +609,19 @@ functions:
     name: isRetryable
     params: pred func(error) bool, err error
     results: bool
+  - name: NewAdaptiveThrottle
+    params: cfg AdaptiveThrottleConfig
+    results: coreres.Runner
+  - doc: |-
+      resolveThrottle applies the defaults of cfg's numbers and returns the field
+      it refuses, if any.
+    name: resolveThrottle
+    params: cfg AdaptiveThrottleConfig
+    results: throttleSettings, string
+  - doc: newThrottleWindow allocates the slots of a window starting at origin.
+    name: newThrottleWindow
+    params: s throttleSettings, origin time.Time
+    results: throttleWindow
   - name: NewTimeout
     params: d time.Duration
     results: coreres.Runner
@@ -563,6 +661,7 @@ imports:
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
   math: math
+  rand: math/rand/v2
   slices: slices
   strconv: strconv
   sync: sync
@@ -621,6 +720,10 @@ types:
         type: "*slidingWindow"
       - name: threshold
         type: int
+      - name: trials
+        type: int
+      - name: passed
+        type: int
       - name: cooldown
         type: time.Duration
       - name: backoff
@@ -651,7 +754,7 @@ types:
           configure installs the open backoff, the window and the change queue cfg
           asks for, and returns the field it refuses, if any.
         name: configure
-        params: cfg BreakerConfig
+        params: cfg *BreakerConfig
         recv: b *circuitBreaker
         results: string
       - doc: |-
@@ -884,11 +987,25 @@ types:
           Its BaseDelay and its MaxDelay are both required — a zero base is
           a cooldown of nothing, and a zero ceiling one that may grow to
           centuries — and are refused when not positive, with
-          PolicyMisconfigured naming the field. Its Multiplier and Jitter
-          read as BackoffValue reads them. Nil keeps every opening at
-          OpenDuration.
+          PolicyMisconfigured naming the field. Its Multiplier, Jitter and
+          JitterMode read as BackoffValue reads them. Nil keeps every opening
+          at OpenDuration.
         name: OpenBackoff
         type: "*BackoffValue"
+      - doc: |-
+          HalfOpenTrials is how many trials in a row must succeed before a
+          HalfOpen breaker closes. The trials still run one at a time, and
+          any one that fails opens the breaker again. Zero, or less, is one:
+          the first successful trial closes it, as before the field existed.
+
+          One success is thin evidence that a dependency has recovered — the
+          trial may have reached the one healthy replica, or a cache — and a
+          breaker that closes on it and trips again at once doubles the load
+          it meant to spare. A few trials in a row cost a few more cooldowns'
+          worth of latency to the first callers after recovery, which is what
+          resilience4j's permittedNumberOfCallsInHalfOpenState buys too.
+        name: HalfOpenTrials
+        type: int
     kind: struct
     name: BreakerConfig
   - fields:
@@ -1078,6 +1195,72 @@ types:
         recv: b *bulkhead
         results: error
     name: bulkhead
+  - doc: |-
+      waitingBulkhead is the bulkhead that queues: slots bounds the operations
+      running, queue the calls waiting for one, and maxWait how long each waits on
+      clk. Both semaphores are buffered channels, so a call that finds a slot free
+      pays what the reject-mode bulkhead pays.
+    fields:
+      - name: slots
+        type: chan struct{}
+      - name: queue
+        type: chan struct{}
+      - name: clk
+        type: clock.Timed
+      - name: maxWait
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: |-
+          Run admits op at once if a slot is free, else queues it for at most maxWait,
+          else rejects with BulkheadFull.
+        name: Run
+        params: ctx context.Context, op coreres.Operation
+        recv: b *waitingBulkhead
+        results: error
+      - doc: |-
+          runHeld runs op under a slot already claimed and releases it on return,
+          panic included.
+        name: runHeld
+        params: ctx context.Context, op coreres.Operation
+        recv: b *waitingBulkhead
+        results: error
+      - doc: |-
+          await waits at most maxWait on the clock for a slot, the queue place already
+          held, and leaves the queue whatever happens. nil means a slot was claimed.
+        name: await
+        params: ctx context.Context
+        recv: b *waitingBulkhead
+        results: error
+    name: waitingBulkhead
+  - fields:
+      - doc: |-
+          Max is how many operations run at once. A non-positive Max is 1,
+          as NewBulkhead's limit is.
+        name: Max
+        type: int
+      - doc: |-
+          Queue is how many calls may wait for a slot beyond the Max
+          running; a call that finds the queue full is rejected at once with
+          BulkheadFull. Zero, or less, is no queue. It bounds the memory
+          and the goroutines a saturated dependency can pin, which an
+          unbounded queue would not.
+        name: Queue
+        type: int
+      - doc: |-
+          MaxWait is how long a queued call waits for a slot before it is
+          rejected with BulkheadFull. Zero, or less, is no wait. Size it
+          below the caller's own deadline: a wait the caller cannot afford
+          only moves the timeout from this policy to the caller.
+        name: MaxWait
+        type: time.Duration
+      - doc: |-
+          Clock is what MaxWait is measured on. Nil means clock.System; a
+          ManualClock lets a test run the wait out without sleeping.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    name: BulkheadWaitConfig
   - doc: |-
       fallbackRunner runs a secondary Operation when the primary one fails, and
       reports BOTH errors when the secondary fails too.
@@ -1543,34 +1726,60 @@ types:
     name: misconfiguredRunner
   - doc: |-
       tokenBucket admits a call when a token is available, refilling continuously at
-      Rate tokens/sec up to Burst. Reject mode — no waiting.
+      Rate tokens/sec up to Burst. With a positive maxWait, a call whose token is
+      due within it reserves the token — tokens goes below zero, and the calls
+      after it queue behind the debt — and waits for it on waiter; with none it is
+      rejected at once.
     fields:
       - name: mu
         type: sync.Mutex
       - name: clk
         type: clock.Clock
+      - name: waiter
+        type: clock.Timed
       - name: rate
         type: float64
       - name: burst
         type: float64
       - name: tokens
         type: float64
+      - name: maxWait
+        type: float64
       - name: last
         type: time.Time
     kind: struct
     methods:
-      - doc: Run admits op if a token is available, else rejects with RateLimited.
+      - doc: |-
+          Run admits op if a token is available — or due within maxWait, waited for
+          on the clock — else rejects with RateLimited.
         name: Run
         params: ctx context.Context, op coreres.Operation
         recv: t *tokenBucket
         results: error
       - doc: |-
+          await waits waitSeconds on the bucket's clock for a reserved token. A
+          context that ends first hands the token back and returns its error.
+        name: await
+        params: ctx context.Context, waitSeconds float64
+        recv: t *tokenBucket
+        results: error
+      - doc: giveBack returns a reserved token a caller did not use. Holds mu.
+        name: giveBack
+        recv: t *tokenBucket
+      - doc: |-
           take refills by elapsed time then consumes one token if available. Holds mu.
-          A refusal also reports how many seconds the bucket needs, at its rate, to
-          hold a whole token again: (1 − tokens) / rate.
+          A token that is not available yet is reserved when it is due within
+          maxWait: the call is admitted with how many seconds it must wait for it.
+          A refusal reports how many seconds the bucket needs, at its rate, to hold a
+          whole token again: (1 − tokens) / rate.
         name: take
         recv: t *tokenBucket
         results: admitted bool, waitSeconds float64
+      - doc: |-
+          refill adds the tokens earned since the last reading, never past the
+          bucket's capacity. The caller holds mu.
+        name: refill
+        recv: t *tokenBucket
     name: tokenBucket
   - fields:
       - doc: |-
@@ -1588,6 +1797,20 @@ types:
         type: int
       - name: Clock
         type: clock.Clock
+      - doc: |-
+          MaxWait is how long a call may wait for its token instead of being
+          rejected: a call whose token is due within MaxWait reserves it at
+          once — later calls queue behind the reservation — and waits for
+          it on Clock. Zero, or less, rejects at once with RateLimited, as
+          the limiter always has. A call whose token is due later than
+          MaxWait is rejected at once, saying when it would have been due.
+
+          Waiting needs a clock that can wait: with a positive MaxWait, a
+          Clock that is not a clock.Timed is refused with
+          PolicyMisconfigured, naming Clock. A nil Clock waits on the wall
+          clock.
+        name: MaxWait
+        type: time.Duration
     kind: struct
     name: RateLimiterConfig
   - doc: retryRunner retries op with capped exponential backoff between attempts.
@@ -1616,18 +1839,29 @@ types:
         results: bool
       - doc: |-
           wait sleeps the delay before the given attempt on the configured clock,
-          returning ctx.Err on cancel. failed is the error of the attempt before it.
-          OnRetry hears the retry first, on this goroutine.
+          returning ctx.Err on cancel. failed is the error of the attempt before it,
+          and previous the call's last wait drawn from the curve, which a wait drawn
+          from the curve replaces. OnRetry hears the retry first, on this goroutine.
         name: wait
-        params: ctx context.Context, attempt int, failed error
+        params: ctx context.Context, attempt int, failed error, previous *time.Duration
         recv: r *retryRunner
         results: error
       - doc: |-
           delay is the wait before attempt: the one cfg.Delay reads from the failure
-          when it reads one, held at MaxDelay and never negative, else the jittered
-          backoff curve.
+          when it reads one, held at MaxDelay and never negative, else the backoff
+          curve randomised as JitterMode says — and then recorded in previous, the
+          wait a decorrelated draw grows from. An imposed wait is not recorded: it is
+          the other side's, not the curve's.
         name: delay
-        params: attempt int, failed error
+        params: attempt int, failed error, previous *time.Duration
+        recv: r *retryRunner
+        results: time.Duration
+      - doc: |-
+          curveWait is the backoff curve's wait before attempt, randomised as
+          JitterMode says: Jitter added (the zero), a full draw below the curve, or a
+          draw decorrelated from previous, the call's last curve wait.
+        name: curveWait
+        params: attempt int, previous time.Duration
         recv: r *retryRunner
         results: time.Duration
       - doc: |-
@@ -1754,8 +1988,26 @@ types:
           Jitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no
           ceiling to raise: the backoff grows geometrically and the jitter widens
           whatever it reaches, bounded only by what a time.Duration can represent.
+
+          It is read only under the zero JitterMode.
         name: Jitter
         type: float64
+      - doc: |-
+          JitterMode is how the backoff is randomised. The zero,
+          JitterAdditive, adds Jitter as above. JitterFull waits a uniform
+          draw from [0, the capped curve]; JitterDecorrelated draws each wait
+          from [BaseDelay, 3 × the previous wait of this call], held at
+          MaxDelay. Both are the AWS Builders' Library's variants and ignore
+          Jitter; a wait the failure imposed through Delay is not randomised
+          and is not the previous wait a decorrelated draw starts from.
+
+          Full jitter spreads callers that failed together the most, at the
+          cost of sometimes retrying almost at once; decorrelated jitter
+          keeps the waits growing while drifting each caller off the others'
+          curve. With a zero MaxDelay a decorrelated wait is bounded only by
+          what a time.Duration can represent.
+        name: JitterMode
+        type: kbackoff.JitterMode
       - doc: |-
           Clock is what the backoff waits on. Nil means clock.System.
 
@@ -1814,6 +2066,164 @@ types:
         type: func(attempt int, err error, delay time.Duration)
     kind: struct
     name: RetryConfig
+  - doc: |-
+      adaptiveThrottle refuses calls on the client side with the probability the
+      requests and accepts of its window give. Every field but window and random's
+      state is set at construction; mu guards the window, and Random is called
+      under it, so a caller's own source need not be safe for concurrent use.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: clk
+        type: clock.Clock
+      - name: rejected
+        type: func(error) bool
+      - name: random
+        type: func() float64
+      - name: k
+        type: float64
+      - name: window
+        type: throttleWindow
+    kind: struct
+    methods:
+      - doc: |-
+          Run refuses op with Throttled when the draw falls below the refusal
+          probability, else runs it and counts whether the dependency accepted it.
+        name: Run
+        params: ctx context.Context, op coreres.Operation
+        recv: t *adaptiveThrottle
+        results: error
+      - doc: |-
+          refuse counts one request and reports whether it is refused. The
+          probability is read from the window BEFORE this request is counted, so the
+          first request of an empty window is never refused. Holds mu.
+        name: refuse
+        recv: t *adaptiveThrottle
+        results: bool
+      - doc: |-
+          accepted reports whether a finished call counts as accepted by the
+          dependency: a success, an error the classifier does not call a refusal, and
+          a caller who left.
+        name: accepted
+        params: ctx context.Context, err error
+        recv: t *adaptiveThrottle
+        results: bool
+      - doc: accept counts one accept in the slot of now. Holds mu.
+        name: accept
+        recv: t *adaptiveThrottle
+    name: adaptiveThrottle
+  - fields:
+      - doc: |-
+          K is how many requests per accept the throttle lets through before
+          it starts refusing: a call is refused with probability
+          max(0, (requests − K × accepts) / (requests + 1)). Zero is 2, the
+          SRE book's value. A lower K refuses sooner and wastes less of the
+          dependency's capacity on calls it will refuse; a higher one refuses
+          later and keeps more traffic flowing. A K below 1 would refuse calls
+          to a dependency accepting every one of them, and is refused, as is
+          one that is not a finite number.
+        name: K
+        type: float64
+      - doc: |-
+          Window is how far back the requests and accepts are counted. Zero
+          is two minutes, the SRE book's history. A negative Window is
+          refused.
+        name: Window
+        type: time.Duration
+      - doc: |-
+          Buckets is how many slots the window is kept in: a slot leaves the
+          window whole, so it reaches back between Window − Window/Buckets
+          and Window. Zero is 10; more than 1000 is refused, as is a Window
+          too short to give each slot a nanosecond.
+        name: Buckets
+        type: int
+      - doc: |-
+          Rejected classifies a non-nil error of the operation: true is a
+          refusal by the dependency — overload, quota, unavailability —,
+          false an answer it gave, which counts as an accept however
+          unwelcome. Nil counts every error as a refusal. It is not
+          consulted for a context.Canceled returned once the caller's
+          context is closed: that call counts as an accept.
+        name: Rejected
+        type: func(error) bool
+      - doc: Clock is what the window is kept on. Nil means clock.System.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          Random returns a number in [0, 1) each time a call might be
+          refused; the call is refused when it is below the probability.
+          Nil is math/rand/v2's Float64. A test hands it a sequence to
+          decide each refusal.
+        name: Random
+        type: func() float64
+    kind: struct
+    name: AdaptiveThrottleConfig
+  - doc: |-
+      throttleBucket is one slot of the throttle's window: the requests counted
+      in it and the accepts.
+    fields:
+      - name: requests
+        type: int64
+      - name: accepts
+        type: int64
+    kind: struct
+    name: throttleBucket
+  - doc: |-
+      throttleWindow holds the requests and accepts of the last
+      len(buckets)×width on the throttle's clock, slot e%len(buckets) holding
+      epoch e, as the breaker's slidingWindow does — head the latest epoch seen,
+      headEnd where it ends, and the totals kept as slots fill and empty. It is
+      guarded by the throttle's mutex and allocates nothing after
+      newThrottleWindow.
+    fields:
+      - name: buckets
+        type: "[]throttleBucket"
+      - name: width
+        type: time.Duration
+      - name: origin
+        type: time.Time
+      - name: head
+        type: int64
+      - name: headEnd
+        type: time.Duration
+      - name: requests
+        type: int64
+      - name: accepts
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          advance moves the window to the epoch of now, emptying every slot time has
+          moved past, and returns the slot now falls in. A now before the latest epoch
+          seen — a clock set back — is counted in that latest slot.
+        name: advance
+        params: now time.Time
+        recv: w *throttleWindow
+        results: "*throttleBucket"
+      - doc: drop takes one slot out of the totals and empties it.
+        name: drop
+        params: b *throttleBucket
+        recv: w *throttleWindow
+      - doc: |-
+          refusal is the probability, in [0, 1), that the next request is refused:
+          max(0, (requests − k × accepts) / (requests + 1)).
+        name: refusal
+        params: k float64
+        recv: w *throttleWindow
+        results: float64
+    name: throttleWindow
+  - doc: |-
+      throttleSettings is an AdaptiveThrottleConfig's numbers with every default
+      applied.
+    fields:
+      - name: k
+        type: float64
+      - name: window
+        type: time.Duration
+      - name: buckets
+        type: int
+    kind: struct
+    name: throttleSettings
   - doc: |-
       timeoutRunner caps an Operation's run time with a deadline. A nil clk is the
       wall clock, through context.WithTimeout; any other clock goes through

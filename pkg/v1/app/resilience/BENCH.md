@@ -182,6 +182,71 @@ BenchmarkCircuitBreaker_Open-8                     	18210210	        65.92 ns/op
 BenchmarkCircuitBreaker_Open-8                     	18243685	        65.76 ns/op	       0 B/op	       0 allocs/op
 ```
 
+## A wait that is not taken costs nothing, and the throttle is two clock reads ([ADR 0184](../../../../docs/adr/0184-a-wait-is-bounded-a-restart-gives-up-and-a-client-throttles-itself.md), [issue 482](https://github.com/kitsunium/sdk/issues/482))
+
+A run of its own, `-count=5`, the median of each row; the "before" column of
+the rate limiter is the admitted path of `origin/main` (`f36c4583`), swapped
+into the same tree and run on the same machine minutes earlier:
+
+| policy | before #482 | after #482 | B/op | allocs |
+|---|---:|---:|---:|---:|
+| `RateLimiter`, admitted | 115.2 | 117.4 | 0 | **0** |
+| `RateLimiter` with a `MaxWait`, admitted | — | 117.7 | 0 | **0** |
+| `Bulkhead`, uncontended | — | 64.33 | 0 | **0** |
+| `BulkheadWait`, uncontended (a slot free) | — | 68.16 | 0 | **0** |
+| `AdaptiveThrottle`, healthy dependency | — | 189.7 | 0 | **0** |
+
+**A wait that is not taken is not paid for.** The limiter's admitted path
+gained the `refill` call `take` now shares with `giveBack` and one branch on
+the wait: 2 ns, and a `MaxWait` adds nothing more while a token is there. The
+bulkhead that queues pays 4 ns over the rejecting one on a free slot — a second
+`select` it never enters — and nothing allocates on either. Only a call that
+actually waits arms a timer on the clock.
+
+**The throttle is two clock reads and two locks**: the request is counted at
+admission and the accept when the call returns, each in the slot of its own
+instant, so it reads `time.Now()` twice — about 70 ns each on this VM's
+`kvm-clock` (see the breaker's window above) — and the probability is zero on a
+healthy dependency, so `Random` is never drawn.
+
+| Dimension | Value |
+|---|---|
+| CPU                | AMD EPYC 7351P, 8 cores |
+| RAM                | 15 GiB |
+| OS / kernel        | Linux 6.12.101+deb13-amd64 |
+| Go toolchain       | go1.27.3 linux/amd64 |
+| Git branch         | feat/resilience-bounds |
+| Generated (UTC)    | 2026-10-21 |
+| Bench wall-clock   | `go test -run='^$' -bench='RateLimiter_Admitted\|Bulkhead\|AdaptiveThrottle' -benchmem -benchtime=1s -count=5` |
+
+```
+BenchmarkRateLimiter_Admitted-8               	10284525	       117.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted-8               	10313455	       116.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted-8               	10264378	       117.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted-8               	10262886	       116.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted-8               	10147189	       117.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted_WithMaxWait-8   	10263069	       117.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted_WithMaxWait-8   	10306687	       117.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted_WithMaxWait-8   	 9958446	       121.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted_WithMaxWait-8   	 9879178	       118.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRateLimiter_Admitted_WithMaxWait-8   	10240167	       117.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkheadWait_Uncontended-8   	17759640	        68.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkheadWait_Uncontended-8   	17725741	        67.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkheadWait_Uncontended-8   	17667961	        68.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkheadWait_Uncontended-8   	17499728	        68.34 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkheadWait_Uncontended-8   	17441956	        68.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdaptiveThrottle_Healthy-8   	 6341730	       191.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdaptiveThrottle_Healthy-8   	 6268219	       191.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdaptiveThrottle_Healthy-8   	 6316921	       189.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdaptiveThrottle_Healthy-8   	 6313269	       189.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdaptiveThrottle_Healthy-8   	 6344408	       189.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkhead_Uncontended-8       	18519628	        64.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkhead_Uncontended-8       	18679489	        64.33 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkhead_Uncontended-8       	18190588	        64.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkhead_Uncontended-8       	18395871	        64.33 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBulkhead_Uncontended-8       	18672102	        64.88 ns/op	       0 B/op	       0 allocs/op
+```
+
 ## What is NOT measured here
 
 `Hedge` has no benchmark. It duplicates the operation after a delay, so any

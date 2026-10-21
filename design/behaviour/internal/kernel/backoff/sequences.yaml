@@ -7,11 +7,28 @@ sequences:
         kind: actor
       - id: Value.Delay
         kind: self
+      - id: Full
+        kind: internal
+      - id: Decorrelate
+        kind: internal
       - id: Widen
         kind: internal
     steps:
-      - return: Widen(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt), b.Jitter)
-        to: Widen
+      - switch:
+          cases:
+            - case: JitterFull
+              do:
+                - return: Full(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt))
+                  to: Full
+            - case: JitterDecorrelated
+              do:
+                - return: Decorrelate(b.BaseDelay, b.MaxDelay, Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt-1))
+                  to: Decorrelate
+            - default: true
+              do:
+                - return: Widen(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt), b.Jitter)
+                  to: Widen
+          "on": b.JitterMode
   - of: Grow
     participants:
       - id: caller
@@ -111,3 +128,80 @@ sequences:
             - return: delay
           when: width <= 0
       - return: delay + time.Duration(rand.Int64N(width))
+  - of: JitterMode.String
+    steps:
+      - switch:
+          cases:
+            - case: JitterAdditive
+              do:
+                - return: "\"additive\""
+            - case: JitterFull
+              do:
+                - return: "\"full\""
+            - case: JitterDecorrelated
+              do:
+                - return: "\"decorrelated\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": m
+  - of: Full
+    participants:
+      - id: caller
+        kind: actor
+      - id: Full
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: delay <= 0
+      - opt:
+          do:
+            - return: time.Duration(rand.Int64N(int64(delay)))
+              to: time
+          when: delay == maxDuration
+      - return: time.Duration(rand.Int64N(int64(delay) + 1))
+        to: time
+  - of: Decorrelate
+    participants:
+      - id: caller
+        kind: actor
+      - id: Decorrelate
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: base <= 0
+      - bind: limit
+        eval: maxDuration
+      - opt:
+          do:
+            - set: limit
+              value: ceiling
+          when: ceiling > 0
+      - opt:
+          do:
+            - return: limit
+          when: base >= limit
+      - set: previous
+        value: max(previous, base)
+      - bind: upper
+        eval: limit
+      - opt:
+          do:
+            - set: upper
+              to: time
+              value: time.Duration(bound)
+          init:
+            bind: bound
+            eval: float64(previous) * decorrelatedFactor
+          when: bound < float64(limit)
+      - bind: span
+        eval: int64(upper - base)
+      - return: base + time.Duration(rand.Int64N(span+1))

@@ -28,6 +28,7 @@ type Value struct {
     MaxDelay   time.Duration // ceiling on the growth; 0 is none
     Multiplier float64       // growth factor; <= 1 and NaN mean 2
     Jitter     float64       // [0, Jitter) of the wait ADDED after the ceiling; clamped into [0, 1], NaN is 0
+    JitterMode JitterMode    // JitterAdditive (0, the Jitter above) | JitterFull | JitterDecorrelated (ADR 0184)
 }
 
 func (b Value) Delay(attempt int) time.Duration // Widen(Grow(...)); attempt < 1 reads as 1; never negative
@@ -36,7 +37,19 @@ func Grow(base, ceiling time.Duration, multiplier float64, attempt int) time.Dur
 func Widen(delay time.Duration, jitter float64) time.Duration                          // the random half
 func NormalMultiplier(multiplier float64) float64 // <= 1 and NaN -> 2
 func NormalJitter(jitter float64) float64         // clamp into [0, 1], NaN -> 0
+func Full(delay time.Duration) time.Duration      // uniform in [0, delay]
+func Decorrelate(base, ceiling, previous time.Duration) time.Duration // uniform in [base, min(ceiling, 3 × max(previous, base))]
+
+type JitterMode uint8 // JitterAdditive (0) | JitterFull (1) | JitterDecorrelated (2); String: additive, full, decorrelated
 ```
+
+`Delay` dispatches on `JitterMode` (`jitter.go`): additive is `Widen(Grow)`,
+full is `Full(Grow)`, decorrelated is `Decorrelate` with the curve's wait for
+the attempt before standing for the previous wait — the one reading a
+memoryless method has. A loop that knows what it waited (the retry) calls
+`Decorrelate` itself. Unknown modes read as additive. The three are the AWS
+Builders' Library's; `Decorrelate` compares `3 × previous` with its bound in
+the float domain before converting, for the reason `grow` does.
 
 Public reach: `pkg/v1/app/resilience.Backoff` is an alias of `Value` (ADR 0074 —
 the alias points at the layer that owns the type), and

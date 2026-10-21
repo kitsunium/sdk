@@ -22,8 +22,8 @@ and only this package's parser raises the `0.3.43.*` refusals.
 | `every.go` | `Every(period)` — the fixed-interval Schedule |
 | `scheduler.go` | the engine struct, `New`, `Add`, `begin`/`finish`, `emit` |
 | `config.go` | `Config` — `Clock clock.Timed` + `OnResult func(ResultValue)` |
-| `entry.go` | `entry` — per-registration run state, `arm`, `due` (the missed-deadline walk) |
-| `run.go` | `Run`, the wait/fire/re-arm loop, `fire`, `run`, `invoke` (panic recovery) |
+| `entry.go` | `entry` — per-registration run state, `arm`, `due` (the missed-deadline walk), `expired` (the StartingDeadline), and for `OverlapReplace` the `current` run (`replaceable`: cancel, done, replaced) behind `mu` — `replaceWith`, `release` |
+| `run.go` | `Run`, the wait/fire/re-arm loop, `fire`, `run`, `replace` / `runReplacing` (OverlapReplace), `invoke` (panic recovery) |
 | `reject.go` | the refusal helpers that raise the core's `0.3.43.*` sentinels |
 
 ## The accepted cron dialect
@@ -95,11 +95,19 @@ never from `time.Now`, so a parse verdict never depends on the day it runs.
   `TestWallClockAuditDetectsAViolation` proves the audit fires.
 - **Missed deadlines: skip and count.** One run for the LATEST due instant at or
   before the wake-up; `ResultValue.Missed` counts the older ones dropped. No
-  catch-up. Fires missed while the process was down are invisible — there is no
+  catch-up. With `EntryValue.StartingDeadline`, that run is itself dropped when
+  the wake-up is later than the deadline after its instant, and reported
+  `Expired` (ADR 0184, Kubernetes' `startingDeadlineSeconds`). Fires missed while the process was down are invisible — there is no
   persisted state, and ADR 0041 says so rather than implying otherwise.
-- **Overlap: skip by default, and report it.** `EntryValue.AllowOverlap` is the
-  caller's in-code assertion that concurrent copies are safe (the
-  `resilience.HedgeConfig.Idempotent` instrument). Queueing is not offered.
+- **Overlap: skip by default, and report it.** `EntryValue.AllowOverlap` (or
+  `Overlap: OverlapAllow`) is the caller's in-code assertion that concurrent
+  copies are safe (the `resilience.HedgeConfig.Idempotent` instrument).
+  `OverlapReplace` (ADR 0184) cancels the run still going and starts the fire
+  in a goroutine that waits for that run's `done` — closed only after its
+  result is published — so two runs never overlap and results come in order;
+  a fire due while one is still waiting replaces the waiting one, which never
+  runs and is reported `Replaced`. At most one run waits. Queueing is not
+  offered.
 - **One goroutine per fired job**, so a slow entry never delays another's
   deadline. `Run` waits for all of them before returning.
 - **A panicking job is recovered** into `core/app/scheduler.JobPanicked` and the
@@ -123,7 +131,11 @@ never from `time.Now`, so a parse verdict never depends on the day it runs.
   with the calendar passes CI and fails in production.
 - **Add a queueing overlap mode.** An unbounded queue is a memory leak with a
   scheduler's name on it; a bounded one raises "what do you drop", which is the
-  caller's decision to make inside their own job.
+  caller's decision to make inside their own job. `OverlapReplace` answers it
+  once — the newest wins, one waits — and is not a queue.
+- **Start a Replace run beside the one it replaced.** It waits for the
+  predecessor's `done`; a caller who chose Replace over Allow said the copies
+  must not overlap.
 
 ## Verification
 
@@ -141,6 +153,7 @@ Tests:
 |---|---|
 | `cron_external_test.go` | every accepted form's first instant; every refusal's CODE; the POSIX day rule and its contrast; strict monotonicity; a `MaxInt64` step meaning what a merely large one does, with a panic reported as a failure |
 | `cron_dst_external_test.go` | spring-forward skip, fall-back fires once at the FIRST occurrence (asserted in UTC) in New York and — where `time.Date` picks the later one — in Europe/Berlin and Australia/Lord_Howe's thirty-minute shift, the days either side, and a UTC control. Imports `time/tzdata` so `LoadLocation` resolves everywhere — the DST tests never skip |
+| `bounds_external_test.go` | `StartingDeadline` (expired past it, run within it) and `OverlapReplace` (the running run cancelled and reported, a waiting run replaced before it starts), the overlap refusals (ADR 0184) |
 | `run_external_test.go` | the engine on a `ManualClock`: cadence, injected-clock timestamps, missed deadlines, overlap both ways, panic recovery and the panicking job's own stack, verbatim job errors, the legitimate empty scheduler, `Add` refusals, the frozen entry set, the drain, reuse, exhausted and misbehaving schedules |
 | `config_external_test.go` | the zero-`Config` fallbacks, jobs running with no hook, independent entries, and the refusal echo clip |
 | `nosleep_external_test.go` | the wall-clock-wait audit, plus the fixture proving it detects a violation |

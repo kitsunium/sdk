@@ -105,7 +105,8 @@ func Test_retryRunner_wait(t *testing.T) {
 		}
 
 		start := time.Now()
-		err := r.wait(ctx, 1, nil)
+		var previous time.Duration
+		err := r.wait(ctx, 1, nil, &previous)
 
 		if c.cancelled {
 			//: the cancellation is surfaced verbatim so a caller shutting down

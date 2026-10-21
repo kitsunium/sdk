@@ -119,7 +119,7 @@
       "dir": "core/app/scheduler",
       "layer": "core",
       "family": "app",
-      "doc": "Package scheduler — ranges 0.2.12.* (ADR 0041 core/app/scheduler block) and\n0.3.43.* (ADR 0041 service/app/scheduler block, declared here since ADR 0160).\n\nPackage scheduler — declares the sentinel *errs.Error outcomes of the\ndomain: the registration refusals, and the parser's refusals of a schedule.\nEach var's name equals its errs.Define Reason in SCREAMING_SNAKE form.\n\nPackage scheduler declares the time-driven execution port of the SDK: the\n[Job] that runs, the [Schedule] that says when, and the [Scheduler] that\nowns the pairing and fires it. A core sibling admitted by ADR 0041.\n\nBoth halves of the contract are FUNCTION ports rather than interfaces — the\nshape internal/core/CLAUDE.md already admits for resilience.Operation. Each\nis a single behaviour, so a named func IS the contract and needs no adapter\nat the call site; it is also the narrowest thing pkg/v1 can publish. ADR\n0039's lesson is that a published port cannot grow a method without breaking\nevery downstream implementer at compile time, and a func type cannot grow\none at all.\n\nThe concrete schedules (a POSIX cron expression, a fixed interval) and the\nengine that drives them live in internal/service/app/scheduler; this package\nowns only the contract, the two domain values, and the typed sentinels the\nengine emits. Cron vocabulary deliberately does not appear here: the port\nknows about instants, not about expressions.\n\nPackage scheduler — hosts EntryValue, the registration a Scheduler owns.\n\nPackage scheduler — hosts ResultValue, the record of one scheduling decision.\n"
+      "doc": "Package scheduler — ranges 0.2.12.* (ADR 0041 core/app/scheduler block) and\n0.3.43.* (ADR 0041 service/app/scheduler block, declared here since ADR 0160).\n\nPackage scheduler — declares the sentinel *errs.Error outcomes of the\ndomain: the registration refusals, and the parser's refusals of a schedule.\nEach var's name equals its errs.Define Reason in SCREAMING_SNAKE form.\n\nPackage scheduler declares the time-driven execution port of the SDK: the\n[Job] that runs, the [Schedule] that says when, and the [Scheduler] that\nowns the pairing and fires it. A core sibling admitted by ADR 0041.\n\nBoth halves of the contract are FUNCTION ports rather than interfaces — the\nshape internal/core/CLAUDE.md already admits for resilience.Operation. Each\nis a single behaviour, so a named func IS the contract and needs no adapter\nat the call site; it is also the narrowest thing pkg/v1 can publish. ADR\n0039's lesson is that a published port cannot grow a method without breaking\nevery downstream implementer at compile time, and a func type cannot grow\none at all.\n\nThe concrete schedules (a POSIX cron expression, a fixed interval) and the\nengine that drives them live in internal/service/app/scheduler; this package\nowns only the contract, the two domain values, and the typed sentinels the\nengine emits. Cron vocabulary deliberately does not appear here: the port\nknows about instants, not about expressions.\n\nPackage scheduler — hosts EntryValue, the registration a Scheduler owns.\n\nPackage scheduler — hosts ResultValue, the record of one scheduling decision.\n\nPackage scheduler — hosts OverlapPolicy, what a fire does while the\nprevious run of its entry is still running.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/core/app/statemachine",
@@ -607,7 +607,7 @@
       "dir": "kernel/backoff",
       "layer": "kernel",
       "family": "root",
-      "doc": "Package backoff computes an exponential backoff: how long a loop that keeps\nfailing waits before its next attempt. It is a kernel primitive — stdlib-only\nand domain-neutral: a duration, a growth factor, a ceiling and a jitter, with\nno Retry, no Job and no Delivery in a signature.\n\nOne curve serves every loop that backs off. The retry policy waits it between\nattempts; a supervised goroutine waits it between restarts, an outbox between\ndeliveries, a state machine between failed transitions, a server between\nfailed accepts. Each of those used to compute its own copy, and the copy that\nlived in the retry policy carried a defect the shared one fixes (ADR 0103):\nsee [Value] for the float-to-duration conversion that made amd64 retries stop\nwaiting at attempt 35.\n\nThe curve is two claims kept apart on purpose. [Grow] is the deterministic\ngrowth, a PURE function of the attempt; [Widen] is the randomisation laid on\ntop of it. [Value.Delay] composes the two. A suite that cannot assert the\ngrowth without the jitter can assert neither precisely, and a caller that\nwants the deterministic curve asks for it by name.\n"
+      "doc": "Package backoff computes an exponential backoff: how long a loop that keeps\nfailing waits before its next attempt. It is a kernel primitive — stdlib-only\nand domain-neutral: a duration, a growth factor, a ceiling and a jitter, with\nno Retry, no Job and no Delivery in a signature.\n\nOne curve serves every loop that backs off. The retry policy waits it between\nattempts; a supervised goroutine waits it between restarts, an outbox between\ndeliveries, a state machine between failed transitions, a server between\nfailed accepts. Each of those used to compute its own copy, and the copy that\nlived in the retry policy carried a defect the shared one fixes (ADR 0103):\nsee [Value] for the float-to-duration conversion that made amd64 retries stop\nwaiting at attempt 35.\n\nThe curve is two claims kept apart on purpose. [Grow] is the deterministic\ngrowth, a PURE function of the attempt; [Widen] is the randomisation laid on\ntop of it. [Value.Delay] composes the two. A suite that cannot assert the\ngrowth without the jitter can assert neither precisely, and a caller that\nwants the deterministic curve asks for it by name.\n\nHow the randomisation is laid on is [Value].JitterMode: added to the curve\n(the zero, [JitterAdditive]), drawn across all of it ([JitterFull]), or\ndrawn from the previous wait ([JitterDecorrelated]) — the three variants of\nthe AWS Builders' Library's \"Timeouts, retries and backoff with jitter\".\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/kernel/clock",
@@ -855,7 +855,7 @@
       "dir": "service/app/resilience",
       "layer": "service",
       "family": "app",
-      "doc": "Package resilience — the exponential backoff every waiting policy computes,\nre-exported from the kernel package that owns it.\n\nPackage resilience — circuit-breaker policy.\n\nPackage resilience — circuit-breaker configuration.\n\nPackage resilience — circuit-breaker state machine values.\n\nPackage resilience — the circuit breaker's sliding window: time slots on\nthe breaker's clock, the oldest dropped as time moves past it.\n\nPackage resilience — what the circuit breaker reports, what an operator\nforces on it, and the changes of phase it delivers outside its lock.\n\nPackage resilience — bulkhead (bounded-concurrency) policy.\n\nPackage resilience — fallback (secondary-operation) policy.\n\nPackage resilience — fallback policy configuration.\n\nPackage resilience — hedging (duplicate-request racing) policy.\n\nPackage resilience — hedging policy configuration.\n\nPackage resilience — what one hedged attempt reports back to the race.\n\nPackage resilience — the per-call bookkeeping of a hedged race.\n\nPackage resilience — the keyed rate limiter: one token bucket per caller,\nwith the set of callers bounded and idle ones forgotten.\n\nPackage resilience — keyed rate-limiter configuration.\n\nPackage resilience — the Runner returned when a policy cannot be honoured.\n\nPackage resilience — token-bucket rate-limit policy.\n\nPackage resilience — token-bucket rate-limiter configuration.\n\nPackage resilience — retry-with-exponential-backoff policy.\n\nPackage resilience — retry policy configuration.\n\nPackage resilience — shared retryable-error classification helper.\n\nPackage resilience provides the concrete reliability policies (retry,\ncircuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)\nimplementing core/app/resilience.Runner. Each constructor returns a Runner;\npolicies compose by nesting. ADR 0026. Cross-OS: 100% portable (context,\ntime, sync, atomic).\n\nHedging is the one policy that runs the Operation CONCURRENTLY with itself,\nso it is correct only on an idempotent Operation; HedgeConfig.Idempotent\nmakes the caller say so in code (ADR 0031's rule applied to a precondition\nthe SDK cannot check).\n\nPackage resilience — shared sentinel-wrapping helper.\n"
+      "doc": "Package resilience — the exponential backoff every waiting policy computes,\nre-exported from the kernel package that owns it.\n\nPackage resilience — circuit-breaker policy.\n\nPackage resilience — circuit-breaker configuration.\n\nPackage resilience — circuit-breaker state machine values.\n\nPackage resilience — the circuit breaker's sliding window: time slots on\nthe breaker's clock, the oldest dropped as time moves past it.\n\nPackage resilience — what the circuit breaker reports, what an operator\nforces on it, and the changes of phase it delivers outside its lock.\n\nPackage resilience — bulkhead (bounded-concurrency) policy.\n\nPackage resilience — the bulkhead that queues: a bounded number of calls\nwait a bounded time, on an injected clock, for a slot to free.\n\nPackage resilience — the adaptive throttle: Google SRE's client-side\nthrottling, a call refused locally with the probability the dependency's\nrecent refusals give it.\n\nPackage resilience — adaptive throttle configuration.\n\nPackage resilience — the adaptive throttle's window: requests and accepts\ncounted in time slots on the throttle's clock.\n\nPackage resilience — fallback (secondary-operation) policy.\n\nPackage resilience — fallback policy configuration.\n\nPackage resilience — hedging (duplicate-request racing) policy.\n\nPackage resilience — hedging policy configuration.\n\nPackage resilience — what one hedged attempt reports back to the race.\n\nPackage resilience — the per-call bookkeeping of a hedged race.\n\nPackage resilience — the keyed rate limiter: one token bucket per caller,\nwith the set of callers bounded and idle ones forgotten.\n\nPackage resilience — keyed rate-limiter configuration.\n\nPackage resilience — the Runner returned when a policy cannot be honoured.\n\nPackage resilience — token-bucket rate-limit policy.\n\nPackage resilience — token-bucket rate-limiter configuration.\n\nPackage resilience — retry-with-exponential-backoff policy.\n\nPackage resilience — retry policy configuration.\n\nPackage resilience — shared retryable-error classification helper.\n\nPackage resilience provides the concrete reliability policies (retry,\ncircuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)\nimplementing core/app/resilience.Runner. Each constructor returns a Runner;\npolicies compose by nesting. ADR 0026. Cross-OS: 100% portable (context,\ntime, sync, atomic).\n\nHedging is the one policy that runs the Operation CONCURRENTLY with itself,\nso it is correct only on an idempotent Operation; HedgeConfig.Idempotent\nmakes the caller say so in code (ADR 0031's rule applied to a precondition\nthe SDK cannot check).\n\nPackage resilience — shared sentinel-wrapping helper.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/scheduler",
@@ -9203,6 +9203,22 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.CodeSupervisorGaveUp",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
+      "name": "CodeSupervisorGaveUp",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "209161",
+      "code": {
+        "value": "0.3.49.9"
+      },
+      "doc": "CodeSupervisorGaveUp identifies a supervision that ended on its own\nbecause its function ended early more often than its GiveUpAfter bound\nallows.\n",
+      "file": "core/app/lifecycle/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.CodeSupervisorMisconfigured",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
@@ -9554,6 +9570,23 @@
         "public": "A component did not stop within its budget and was abandoned"
       },
       "doc": "StopTimeout is returned for a component whose Stop had not returned\nwhen its budget expired. The engine cancels the context it handed that\nStop — an announcement — and stops WAITING; it does not kill the\ngoroutine, which Go cannot do, and it closes nothing on the component's\nbehalf, which is what severed sockets under live handlers before ADR\n0043. Every component after it in the reverse order still gets its own\nfull budget.\n",
+      "file": "core/app/lifecycle/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.SupervisorGaveUp",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
+      "name": "SupervisorGaveUp",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.49.9",
+        "reason": "SUPERVISOR_GAVE_UP",
+        "public": "The supervised function kept failing and the supervisor gave up"
+      },
+      "doc": "SupervisorGaveUp reports a supervision that gave up: its function ended\nearly more than GiveUpAfter.Restarts times within GiveUpAfter.Within, so\nit was not restarted again — Erlang's restart intensity, after which a\nsupervisor stops and lets the level above it decide. Supervisor.Check\nreturns it from then on, so a liveness check sees it; the last run's\nerror travels as a field.\n",
       "file": "core/app/lifecycle/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11643,7 +11676,7 @@
         "reason": "BULKHEAD_FULL",
         "public": "The call was rejected because the bulkhead is full"
       },
-      "doc": "BulkheadFull is returned when every concurrency slot is occupied.\n",
+      "doc": "BulkheadFull is returned when every concurrency slot is occupied, and,\nfor a bulkhead that queues, when its queue is full or no slot freed\nwithin its MaxWait.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11676,7 +11709,7 @@
       "code": {
         "value": "0.2.8.4"
       },
-      "doc": "CodeBulkheadFull identifies a call rejected because the bulkhead's concurrency\nslots were all occupied.\n",
+      "doc": "CodeBulkheadFull identifies a call rejected because the bulkhead's concurrency\nslots were all occupied — and, for a bulkhead that queues, its queue\nwas full or no slot freed within its MaxWait.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11740,7 +11773,7 @@
       "code": {
         "value": "0.2.8.3"
       },
-      "doc": "CodeRateLimited identifies a call rejected (or whose wait was cancelled)\nbecause the rate limiter had no token available.\n",
+      "doc": "CodeRateLimited identifies a call rejected because the rate limiter had\nno token available, at once or within its MaxWait.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11773,6 +11806,22 @@
         "value": "0.2.8.1"
       },
       "doc": "CodeRetryExhausted identifies a retry policy that used its whole attempt\nbudget without a success (the last attempt's error is the wrap cause).\n",
+      "file": "core/app/resilience/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.CodeThrottled",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "CodeThrottled",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133129",
+      "code": {
+        "value": "0.2.8.9"
+      },
+      "doc": "CodeThrottled identifies a call the adaptive throttle refused on the\nclient side, without sending it: the dependency had been refusing more\nthan its share of the calls recently sent to it.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11851,7 +11900,7 @@
         "reason": "RATE_LIMITED",
         "public": "The call was rejected by the rate limiter"
       },
-      "doc": "RateLimited is returned when no token was available (or the wait was cancelled).\nA rejection by the SDK's limiters carries, as the field\nretry_after_seconds, how long the bucket needs to earn the next token.\n",
+      "doc": "RateLimited is returned when no token was available, at once or within\nthe limiter's MaxWait. A rejection by the SDK's limiters carries, as the field\nretry_after_seconds, how long the bucket needs to earn the next token.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11948,7 +11997,7 @@
       "name": "Runner",
       "spelled": "interface{Run(ctx context.Context, op Operation) error}",
       "canonical": "interface{Run(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/resilience.Operation) error}",
-      "doc": "Runner executes an Operation under a reliability policy and returns the\noperation's error, a policy sentinel (RetryExhausted, RetryBudgetExceeded,\nCircuitOpen, RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed),\nor ctx.Err().\nImplementations MUST be safe for concurrent use. Runners compose: a Runner\nmay itself invoke an inner Runner inside its Operation.\n\nIFACE-PLUGIN: concrete policies (retry/breaker/...) implement this interface;\ntheir concrete types stay unexported behind their constructors.\n",
+      "doc": "Runner executes an Operation under a reliability policy and returns the\noperation's error, a policy sentinel (RetryExhausted, RetryBudgetExceeded,\nCircuitOpen, RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed,\nThrottled), or ctx.Err().\nImplementations MUST be safe for concurrent use. Runners compose: a Runner\nmay itself invoke an inner Runner inside its Operation.\n\nIFACE-PLUGIN: concrete policies (retry/breaker/...) implement this interface;\ntheir concrete types stay unexported behind their constructors.\n",
       "file": "core/app/resilience/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -11962,6 +12011,23 @@
       "spelled": "func(ctx context.Context, op Operation) error",
       "canonical": "func(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/resilience.Operation) error",
       "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.Throttled",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "Throttled",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.8.9",
+        "reason": "THROTTLED",
+        "public": "The call was throttled on the client side"
+      },
+      "doc": "Throttled is returned when the adaptive throttle refused the call on\nthe client side, without sending it, because the dependency had been\nrefusing more than its share of the recent calls (Google SRE's\nclient-side throttling). It is transient: the probability of a refusal\nfalls as the dependency accepts again.\n",
+      "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
     },
@@ -12148,8 +12214,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
       "name": "EntryValue",
-      "spelled": "struct{Name string; Schedule Schedule; Job Job; AllowOverlap bool}",
-      "canonical": "struct{Name string; Schedule github.com/kitsunium/sdk/internal/core/app/scheduler.Schedule; Job github.com/kitsunium/sdk/internal/core/app/scheduler.Job; AllowOverlap bool}",
+      "spelled": "struct{Name string; Schedule Schedule; Job Job; AllowOverlap bool; Overlap OverlapPolicy; StartingDeadline time.Duration}",
+      "canonical": "struct{Name string; Schedule github.com/kitsunium/sdk/internal/core/app/scheduler.Schedule; Job github.com/kitsunium/sdk/internal/core/app/scheduler.Job; AllowOverlap bool; Overlap github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy; StartingDeadline time.Duration}",
       "fields": [
         {
           "name": "Name",
@@ -12169,7 +12235,17 @@
         {
           "name": "AllowOverlap",
           "type": "bool",
-          "doc": "AllowOverlap permits a fire while the previous run of THIS entry has not\nreturned. The zero value (false) skips that fire and reports it as\n[ResultValue.Skipped] — the safe default, because the SDK cannot know\nwhether two concurrent copies of a Job are safe and the symptom of\ngetting it wrong is a duplicated side effect rather than an error.\nSetting it is the caller's in-code assertion that concurrent copies are\nsafe, the same instrument resilience.HedgeConfig.Idempotent uses for the\nsame class of claim (ADR 0031).\n"
+          "doc": "AllowOverlap permits a fire while the previous run of THIS entry has not\nreturned. The zero value (false) skips that fire and reports it as\n[ResultValue.Skipped] — the safe default, because the SDK cannot know\nwhether two concurrent copies of a Job are safe and the symptom of\ngetting it wrong is a duplicated side effect rather than an error.\nSetting it is the caller's in-code assertion that concurrent copies are\nsafe, the same instrument resilience.HedgeConfig.Idempotent uses for the\nsame class of claim (ADR 0031). It is OverlapAllow written as a bool,\nkept because it was there first; set with any Overlap but\nOverlapSkip or OverlapAllow, Add refuses the entry.\n"
+        },
+        {
+          "name": "Overlap",
+          "type": "OverlapPolicy",
+          "doc": "Overlap is what a fire does while the previous run of THIS entry has\nnot returned: OverlapSkip — the zero — skips it, OverlapAllow runs it\nbeside, OverlapReplace cancels the previous run and runs this one\nonce it has returned.\n"
+        },
+        {
+          "name": "StartingDeadline",
+          "type": "time.Duration",
+          "doc": "StartingDeadline bounds how late a fire may start. When the scheduler\nwakes after a due instant — a machine that slept, a timer that\noverran — it runs the latest instant missed, however late; with a\npositive StartingDeadline, an instant more than StartingDeadline in\nthe past is not run but reported with [ResultValue].Expired, as\nKubernetes' startingDeadlineSeconds does. Zero, or less, is no\ndeadline, as before the field existed.\n\nIt is how a job whose run is worth something only near its instant\n— a report for 02:00, a rotation tied to the hour — says so: a run\nlong after the fact is a surprise, not a catch-up.\n"
         }
       ],
       "doc": "EntryValue is one registered pairing of a [Schedule] with a [Job], under a\nname that identifies it in every [ResultValue] and every error field.\n\nThe zero value is not runnable and is refused by Add ([InvalidEntry]) rather\nthan accepted and silently never fired.\n",
@@ -12189,7 +12265,7 @@
         "reason": "INVALID_ENTRY",
         "public": "The scheduler entry is not runnable and was refused"
       },
-      "doc": "InvalidEntry is returned by Add for an entry that could never run.\n",
+      "doc": "InvalidEntry is returned by Add for an entry that could never run, or\nwhose overlap is asked two contradictory ways (AllowOverlap with an\nOverlap other than OverlapSkip or OverlapAllow), or an Overlap this\npackage does not define.\n",
       "file": "core/app/scheduler/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -12275,12 +12351,76 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapAllow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
+      "name": "OverlapAllow",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy",
+      "value": "1",
+      "doc": "OverlapAllow runs the fire beside the previous run: the caller's in-code\nassertion that concurrent copies are safe. [EntryValue].AllowOverlap\nsays the same.\n",
+      "file": "core/app/scheduler/scheduler_overlap.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
+      "name": "OverlapPolicy",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "OverlapPolicy is what a fire does while the previous run of its entry has\nnot returned: [OverlapSkip] (the zero), [OverlapAllow] or\n[OverlapReplace].\n",
+      "file": "core/app/scheduler/scheduler_overlap.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
+      "name": "String",
+      "recv": "OverlapPolicy",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String renders the policy for a log line: \"skip\", \"allow\", \"replace\";\na value this package does not define renders \"unknown\".\n",
+      "file": "core/app/scheduler/scheduler_overlap.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapReplace",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
+      "name": "OverlapReplace",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy",
+      "value": "2",
+      "doc": "OverlapReplace cancels the previous run's context and runs the fire once\nthat run has returned — never beside it. The cancelled run is reported\nwith [ResultValue].Replaced. A fire that comes due while its own\npredecessor is still returning replaces the waiting one in turn, so at\nmost one run waits: the newest.\n",
+      "file": "core/app/scheduler/scheduler_overlap.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapSkip",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
+      "name": "OverlapSkip",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy",
+      "value": "0",
+      "doc": "OverlapSkip does not run the fire and reports it as\n[ResultValue].Skipped. It is the zero OverlapPolicy: the SDK cannot know\nwhether two copies of a Job are safe side by side.\n",
+      "file": "core/app/scheduler/scheduler_overlap.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.ResultValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/scheduler",
       "name": "ResultValue",
-      "spelled": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Err error}",
-      "canonical": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Err error}",
+      "spelled": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Expired bool; Replaced bool; Err error}",
+      "canonical": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Expired bool; Replaced bool; Err error}",
       "fields": [
         {
           "name": "Name",
@@ -12295,12 +12435,12 @@
         {
           "name": "Started",
           "type": "time.Time",
-          "doc": "Started is when the Job was invoked. Zero when Skipped.\n"
+          "doc": "Started is when the Job was invoked. Zero when it was not.\n"
         },
         {
           "name": "Finished",
           "type": "time.Time",
-          "doc": "Finished is when the Job returned. Zero when Skipped.\n"
+          "doc": "Finished is when the Job returned. Zero when it was not invoked.\n"
         },
         {
           "name": "Missed",
@@ -12310,7 +12450,17 @@
         {
           "name": "Skipped",
           "type": "bool",
-          "doc": "Skipped reports that the fire was not run because the previous run of\nthis entry had not returned and AllowOverlap is false.\n"
+          "doc": "Skipped reports that the fire was not run because the previous run of\nthis entry had not returned and its overlap policy is OverlapSkip.\n"
+        },
+        {
+          "name": "Expired",
+          "type": "bool",
+          "doc": "Expired reports that the fire was not run because the scheduler came\nto it more than the entry's StartingDeadline after its Scheduled\ninstant. Started and Finished are zero.\n"
+        },
+        {
+          "name": "Replaced",
+          "type": "bool",
+          "doc": "Replaced reports a run whose context was cancelled because a newer\nfire of the same OverlapReplace entry replaced it; Err is what the\nJob returned. A run replaced before it started has zero Started and\nFinished: it waited for its predecessor and never ran.\n"
         },
         {
           "name": "Err",
@@ -42192,6 +42342,30 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.Decorrelate",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "Decorrelate",
+      "spelled": "func(base time.Duration, ceiling time.Duration, previous time.Duration) time.Duration",
+      "canonical": "func(base time.Duration, ceiling time.Duration, previous time.Duration) time.Duration",
+      "doc": "Decorrelate returns the next wait of a \"Decorrelated Jitter\" backoff (AWS\nBuilders' Library): drawn uniformly from [base, 3 × previous], held at\nceiling when one is set (a zero ceiling is none) and at the longest\ntime.Duration otherwise. A previous wait below base is read as base, so\nthe first wait of a loop is drawn from [base, 3 × base]; a non-positive\nbase is no wait.\n\nIt is the one variant whose wait depends on the previous wait rather\nthan on the attempt, so the loop keeps that wait and hands it back: the\nbound grows with what was actually waited, and two callers that failed\ntogether drift apart instead of following one curve.\n",
+      "file": "kernel/backoff/jitter.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.Full",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "Full",
+      "spelled": "func(delay time.Duration) time.Duration",
+      "canonical": "func(delay time.Duration) time.Duration",
+      "doc": "Full returns a wait drawn uniformly from [0, delay]: the \"Full Jitter\" of\nthe AWS Builders' Library, laid on a delay the caller already grew and\nheld at its ceiling. A zero or negative delay is no wait.\n",
+      "file": "kernel/backoff/jitter.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.Grow",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
@@ -42200,6 +42374,70 @@
       "canonical": "func(base time.Duration, ceiling time.Duration, multiplier float64, attempt int) time.Duration",
       "doc": "Grow returns the deterministic half of the curve: base × multiplier^(attempt−1),\nheld at ceiling when one is set (a zero ceiling is none) and at the longest\ntime.Duration otherwise. It is a PURE function of its arguments.\n\nmultiplier is normalised as [NormalMultiplier] does, and attempt is read as\nat least 1, so no input makes it return a negative duration or loop past\nthe few dozen multiplications that reach the bound.\n",
       "file": "kernel/backoff/backoff.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterAdditive",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "JitterAdditive",
+      "spelled": "JitterMode",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode",
+      "value": "0",
+      "doc": "JitterAdditive widens the grown wait by a random fraction of itself,\ndrawn from [0, Jitter) and ADDED: the average wait keeps growing with\nthe attempt. A zero Jitter is the deterministic curve. It is the zero\nJitterMode.\n",
+      "file": "kernel/backoff/jitter.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterDecorrelated",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "JitterDecorrelated",
+      "spelled": "JitterMode",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode",
+      "value": "2",
+      "doc": "JitterDecorrelated draws each wait from the previous one, as [Decorrelate]\ndoes: uniformly from [BaseDelay, 3 × previous], held at MaxDelay — the\n\"Decorrelated Jitter\" of the Builders' Library. A loop that keeps the\nprevious wait calls Decorrelate; [Value.Delay], which has no memory,\nreads the curve's own previous step as the previous wait. Jitter is not\nread.\n",
+      "file": "kernel/backoff/jitter.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "JitterFull",
+      "spelled": "JitterMode",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode",
+      "value": "1",
+      "doc": "JitterFull draws the wait uniformly from [0, grown], the grown wait being\nthe curve held at MaxDelay: the \"Full Jitter\" of the Builders' Library,\nwhich spreads callers that failed together the most widely of the three\nand keeps the average at half the curve. Jitter is not read.\n",
+      "file": "kernel/backoff/jitter.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "JitterMode",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "JitterMode is how a [Value] randomises its waits: [JitterAdditive] (the\nzero), [JitterFull] or [JitterDecorrelated].\n",
+      "file": "kernel/backoff/jitter.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
+      "name": "String",
+      "recv": "JitterMode",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String renders the mode for a log line or a configuration dump:\n\"additive\", \"full\", \"decorrelated\"; a value this package does not\ndefine renders \"unknown\".\n",
+      "file": "kernel/backoff/jitter.go",
       "layer": "kernel",
       "family": "root"
     },
@@ -42232,8 +42470,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/kernel/backoff",
       "name": "Value",
-      "spelled": "struct{BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Jitter float64}",
-      "canonical": "struct{BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Jitter float64}",
+      "spelled": "struct{BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Jitter float64; JitterMode JitterMode}",
+      "canonical": "struct{BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Jitter float64; JitterMode github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode}",
       "fields": [
         {
           "name": "BaseDelay",
@@ -42253,10 +42491,15 @@
         {
           "name": "Jitter",
           "type": "float64",
-          "doc": "Jitter widens each wait by a uniform random fraction of itself, drawn\nfrom [0, Jitter) and ADDED, after the MaxDelay ceiling — so when a\nceiling is set a wait may reach MaxDelay × (1 + Jitter). Zero is the\ndeterministic backoff.\n\nIt exists because a deterministic backoff SYNCHRONISES the very callers\nit is meant to spread: N clients that fail against one dependency at the\nsame instant retry at the same instant, N times over. Jitter turns those\nbursts back into a distribution.\n"
+          "doc": "Jitter widens each wait by a uniform random fraction of itself, drawn\nfrom [0, Jitter) and ADDED, after the MaxDelay ceiling — so when a\nceiling is set a wait may reach MaxDelay × (1 + Jitter). Zero is the\ndeterministic backoff.\n\nIt exists because a deterministic backoff SYNCHRONISES the very callers\nit is meant to spread: N clients that fail against one dependency at the\nsame instant retry at the same instant, N times over. Jitter turns those\nbursts back into a distribution.\n\nIt is read only under JitterAdditive.\n"
+        },
+        {
+          "name": "JitterMode",
+          "type": "JitterMode",
+          "doc": "JitterMode is how the randomisation is laid on the curve. The zero,\nJitterAdditive, is the Jitter above — what Value has always done;\nJitterFull and JitterDecorrelated are the Builders' Library's two\nother variants, which randomise the whole wait and ignore Jitter. A\nvalue outside the three is read as JitterAdditive.\n"
         }
       ],
-      "doc": "Value is an exponential backoff: the wait after the n-th consecutive failure\nis BaseDelay × Multiplier^(n−1), held at MaxDelay when one is set and widened\nby Jitter when one is asked for.\n\nThe zero value is usable and waits nothing: a zero BaseDelay retries at\nonce. Every other field is normalised on each call, so no value can make\nDelay misbehave:\n\n  - a Multiplier of 1 or below, or NaN, grows by 2 — a flat or shrinking\n    \"exponential\" backoff is a fixed-interval hammer on a dependency that is\n    already struggling;\n  - a zero MaxDelay is no ceiling, and the growth then stops at the longest\n    time.Duration rather than wrapping negative;\n  - a Jitter outside [0, 1], or NaN, is clamped into it.\n\nThe growth is compared against its bound in the float domain BEFORE any\nconversion. The copy this replaces converted first: past 2^63 nanoseconds Go\nleaves that conversion implementation-defined — math.MinInt64 on amd64,\nmath.MaxInt64 on arm64 — and a negative wait is below every ceiling, so a\none-second retry on amd64 stopped backing off at attempt 35.\n",
+      "doc": "Value is an exponential backoff: the wait after the n-th consecutive failure\nis BaseDelay × Multiplier^(n−1), held at MaxDelay when one is set and widened\nby Jitter when one is asked for.\n\nThe zero value is usable and waits nothing: a zero BaseDelay retries at\nonce. Every other field is normalised on each call, so no value can make\nDelay misbehave:\n\n  - a Multiplier of 1 or below, or NaN, grows by 2 — a flat or shrinking\n    \"exponential\" backoff is a fixed-interval hammer on a dependency that is\n    already struggling;\n  - a zero MaxDelay is no ceiling, and the growth then stops at the longest\n    time.Duration rather than wrapping negative;\n  - a Jitter outside [0, 1], or NaN, is clamped into it;\n  - a JitterMode this package does not define is read as JitterAdditive.\n\nThe growth is compared against its bound in the float domain BEFORE any\nconversion. The copy this replaces converted first: past 2^63 nanoseconds Go\nleaves that conversion implementation-defined — math.MinInt64 on amd64,\nmath.MaxInt64 on arm64 — and a negative wait is below every ceiling, so a\none-second retry on amd64 stopped backing off at attempt 35.\n",
       "file": "kernel/backoff/backoff.go",
       "layer": "kernel",
       "family": "root"
@@ -42269,7 +42512,7 @@
       "recv": "Value",
       "spelled": "func(attempt int) time.Duration",
       "canonical": "func(attempt int) time.Duration",
-      "doc": "Delay returns the wait after the attempt-th consecutive failure: [Grow] for\nthe curve, then [Widen] for the jitter. attempt counts from 1; a smaller\nvalue is read as 1, so a loop that has not failed yet and asks anyway waits\nBaseDelay rather than nothing.\n\nIt never returns a negative duration, and it costs at most as many\nmultiplications as it takes the delay to reach its ceiling, however large\nattempt is.\n",
+      "doc": "Delay returns the wait after the attempt-th consecutive failure: [Grow] for\nthe curve, then the randomisation JitterMode names — [Widen] by Jitter\nfor JitterAdditive, [Full] for JitterFull, and for JitterDecorrelated\n[Decorrelate], reading the curve's wait for the attempt before as the\nprevious wait (a loop that keeps its own calls Decorrelate). attempt\ncounts from 1; a smaller value is read as 1, so a loop that has not\nfailed yet and asks anyway waits BaseDelay rather than nothing.\n\nIt never returns a negative duration, and it costs at most as many\nmultiplications as it takes the delay to reach its ceiling, however large\nattempt is.\n",
       "file": "kernel/backoff/backoff.go",
       "layer": "kernel",
       "family": "root"
@@ -49924,6 +50167,30 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.GiveUpValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
+      "name": "GiveUpValue",
+      "spelled": "struct{Restarts int; Within time.Duration}",
+      "canonical": "struct{Restarts int; Within time.Duration}",
+      "fields": [
+        {
+          "name": "Restarts",
+          "type": "int",
+          "doc": "Restarts is how many early ends Within tolerates, each restarted.\n"
+        },
+        {
+          "name": "Within",
+          "type": "time.Duration",
+          "doc": "Within is the span the early ends are counted over.\n"
+        }
+      ],
+      "doc": "GiveUpValue is a restart intensity, Erlang's: a supervisor gives up when\nits function ends early more than Restarts times within any span of\nWithin on the supervisor's clock. The (Restarts+1)-th early end inside\nWithin is not restarted: the supervision ends, its observer hears\nSupervisionGaveUp, and Supervisor.Check reports SupervisorGaveUp, so\nthe level above — a liveness probe, an orchestrator — decides what\nhappens next instead of a loop that cannot succeed restarting forever.\n\nThe zero value never gives up. Restarts zero with a positive Within\ngives up at the first early end. A negative field, and a positive\nRestarts without a positive Within, are refused by NewSupervisor with\nSupervisorMisconfigured: a bound with no span is no bound.\n",
+      "file": "service/app/lifecycle/supervise_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.New",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
@@ -49942,7 +50209,7 @@
       "name": "NewSupervisor",
       "spelled": "func(name string, run func(ctx context.Context) error, cfg SupervisorConfig) (*Supervisor, error)",
       "canonical": "func(name string, run func(ctx context.Context) error, cfg github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisorConfig) (*github.com/kitsunium/sdk/internal/service/app/lifecycle.Supervisor, error)",
-      "doc": "NewSupervisor builds a supervisor named name over run, tuned by cfg. run\nmust run until its context ends and then return; returning earlier — with\nan error, with nil, or by panicking — is a failure, and run is started again\nafter the backoff. NewSupervisor starts nothing: Start does.\n\n\tjanitor, err := lifecycle.NewSupervisor(\"janitor\", sweep, lifecycle.SupervisorConfig{})\n\terr = app.Add(janitor.Component()) // started and stopped with the application\n",
+      "doc": "NewSupervisor builds a supervisor named name over run, tuned by cfg. run\nmust run until its context ends and then return; returning earlier — with\nan error, with nil, or by panicking — is a failure, and run is started again\nafter the backoff, unless cfg.GiveUpAfter says it has failed too often.\nNewSupervisor starts nothing: Start does.\n\nA cfg.GiveUpAfter with a negative field, or with Restarts but no\npositive Within, is refused with SupervisorMisconfigured naming it.\n\n\tjanitor, err := lifecycle.NewSupervisor(\"janitor\", sweep, lifecycle.SupervisorConfig{})\n\terr = app.Add(janitor.Component()) // started and stopped with the application\n",
       "file": "service/app/lifecycle/supervise.go",
       "layer": "service",
       "family": "app"
@@ -49994,7 +50261,7 @@
         {
           "name": "Err",
           "type": "error",
-          "doc": "Err is what an ended run returned: nil when it returned nil before its\ncontext ended, RunPanicked for a panic, and nil too when it ended\nbecause the supervision was stopping and it returned its context's\nerror — the way out, not a failure.\n"
+          "doc": "Err is what an ended run returned: nil when it returned nil before its\ncontext ended, RunPanicked for a panic, and nil too when it ended\nbecause the supervision was stopping and it returned its context's\nerror — the way out, not a failure. On SupervisionGaveUp it is\nSupervisorGaveUp, carrying the last run's error as a field.\n"
         },
         {
           "name": "At",
@@ -50019,7 +50286,7 @@
         {
           "name": "Run",
           "type": "int",
-          "doc": "Run numbers the run the event is about, from 1; the Stopped event\ncarries the last one.\n"
+          "doc": "Run numbers the run the event is about, from 1; the Stopped and\nGaveUp events carry the last one.\n"
         },
         {
           "name": "Failures",
@@ -50038,6 +50305,19 @@
         }
       ],
       "doc": "SupervisionEventValue is one thing a supervisor did: a run started or\nended, a restart scheduled, the supervision over. Which fields mean\nsomething depends on Phase, and the others are zero.\n",
+      "file": "service/app/lifecycle/supervise_event.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisionGaveUp",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
+      "name": "SupervisionGaveUp",
+      "spelled": "SupervisionPhase",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisionPhase",
+      "value": "5",
+      "doc": "SupervisionGaveUp: a run ended early once too often for GiveUpAfter,\nand the function is not restarted; Err is SupervisorGaveUp. The\nStopped event follows it.\n",
       "file": "service/app/lifecycle/supervise_event.go",
       "layer": "service",
       "family": "app"
@@ -50132,6 +50412,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.(*Supervisor).Check",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
+      "name": "Check",
+      "recv": "Supervisor",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Check reports whether the supervision gave up: SupervisorGaveUp once\nits function ended early more often than cfg.GiveUpAfter allows, and\nnil otherwise — while it runs, once it was stopped, and before it was\never started. A later Start clears it. Its shape is a health check's,\nso a liveness probe takes it as it is:\n\n\thealth.LivenessCheck{Name: \"sweeper\", Check: sweeper.Check}\n\nA ctx already done reports its own error, as a Start does; otherwise\nthe answer is a field read under a lock, never a wait.\n",
+      "file": "service/app/lifecycle/supervise.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.(*Supervisor).Component",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
@@ -50175,8 +50468,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
       "name": "SupervisorConfig",
-      "spelled": "struct{Clock clock.Timed; Observe func(SupervisionEventValue); Backoff kbackoff.Value; HealthyAfter time.Duration}",
-      "canonical": "struct{Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Observe func(github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisionEventValue); Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; HealthyAfter time.Duration}",
+      "spelled": "struct{Clock clock.Timed; Observe func(SupervisionEventValue); Backoff kbackoff.Value; HealthyAfter time.Duration; GiveUpAfter GiveUpValue}",
+      "canonical": "struct{Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Observe func(github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisionEventValue); Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; HealthyAfter time.Duration; GiveUpAfter github.com/kitsunium/sdk/internal/service/app/lifecycle.GiveUpValue}",
       "fields": [
         {
           "name": "Clock",
@@ -50197,6 +50490,11 @@
           "name": "HealthyAfter",
           "type": "time.Duration",
           "doc": "HealthyAfter is how long a run must last for its end to reset the\nconsecutive-failure count. Not positive means [DefaultHealthyRun].\n"
+        },
+        {
+          "name": "GiveUpAfter",
+          "type": "GiveUpValue",
+          "doc": "GiveUpAfter bounds how often the function may end early before the\nsupervisor stops restarting it. The zero value restarts it forever,\nas a supervisor always has.\n"
         }
       ],
       "doc": "SupervisorConfig tunes [NewSupervisor]. Every field is optional, and the\nzero value supervises on the wall clock, restarting after one second,\ndoubling to a minute, and telling nobody. The name and the function are\nNewSupervisor's own arguments, because there is no supervisor without them.\n",
@@ -51265,6 +51563,50 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.AdaptiveThrottleConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "AdaptiveThrottleConfig",
+      "spelled": "struct{K float64; Window time.Duration; Buckets int; Rejected func(error) bool; Clock clock.Clock; Random func() float64}",
+      "canonical": "struct{K float64; Window time.Duration; Buckets int; Rejected func(error) bool; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Random func() float64}",
+      "fields": [
+        {
+          "name": "K",
+          "type": "float64",
+          "doc": "K is how many requests per accept the throttle lets through before\nit starts refusing: a call is refused with probability\nmax(0, (requests − K × accepts) / (requests + 1)). Zero is 2, the\nSRE book's value. A lower K refuses sooner and wastes less of the\ndependency's capacity on calls it will refuse; a higher one refuses\nlater and keeps more traffic flowing. A K below 1 would refuse calls\nto a dependency accepting every one of them, and is refused, as is\none that is not a finite number.\n"
+        },
+        {
+          "name": "Window",
+          "type": "time.Duration",
+          "doc": "Window is how far back the requests and accepts are counted. Zero\nis two minutes, the SRE book's history. A negative Window is\nrefused.\n"
+        },
+        {
+          "name": "Buckets",
+          "type": "int",
+          "doc": "Buckets is how many slots the window is kept in: a slot leaves the\nwindow whole, so it reaches back between Window − Window/Buckets\nand Window. Zero is 10; more than 1000 is refused, as is a Window\ntoo short to give each slot a nanosecond.\n"
+        },
+        {
+          "name": "Rejected",
+          "type": "func(error) bool",
+          "doc": "Rejected classifies a non-nil error of the operation: true is a\nrefusal by the dependency — overload, quota, unavailability —,\nfalse an answer it gave, which counts as an accept however\nunwelcome. Nil counts every error as a refusal. It is not\nconsulted for a context.Canceled returned once the caller's\ncontext is closed: that call counts as an accept.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Clock",
+          "doc": "Clock is what the window is kept on. Nil means clock.System.\n"
+        },
+        {
+          "name": "Random",
+          "type": "func() float64",
+          "doc": "Random returns a number in [0, 1) each time a call might be\nrefused; the call is refused when it is below the probability.\nNil is math/rand/v2's Float64. A test hands it a sequence to\ndecide each refusal.\n"
+        }
+      ],
+      "doc": "AdaptiveThrottleConfig parameterises NewAdaptiveThrottle, in the terms\nof Google's SRE book: the multiplier K, the window the requests and\naccepts are counted over, and what counts as a refusal. Every field\nhas a default; a value out of range is refused with\nPolicyMisconfigured, naming the field (ADR 0031).\n",
+      "file": "service/app/resilience/throttle_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.BackoffValue",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
@@ -51282,8 +51624,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "BreakerConfig",
-      "spelled": "struct{FailureThreshold int; OpenDuration time.Duration; Clock clock.Clock; Retryable func(error) bool; Window *BreakerWindowValue; OnStateChange func(from coreres.BreakerPhase, to coreres.BreakerPhase); OpenBackoff *BackoffValue}",
-      "canonical": "struct{FailureThreshold int; OpenDuration time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Retryable func(error) bool; Window *github.com/kitsunium/sdk/internal/service/app/resilience.BreakerWindowValue; OnStateChange func(from github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase, to github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase); OpenBackoff *github.com/kitsunium/sdk/internal/service/app/resilience.BackoffValue}",
+      "spelled": "struct{FailureThreshold int; OpenDuration time.Duration; Clock clock.Clock; Retryable func(error) bool; Window *BreakerWindowValue; OnStateChange func(from coreres.BreakerPhase, to coreres.BreakerPhase); OpenBackoff *BackoffValue; HalfOpenTrials int}",
+      "canonical": "struct{FailureThreshold int; OpenDuration time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Retryable func(error) bool; Window *github.com/kitsunium/sdk/internal/service/app/resilience.BreakerWindowValue; OnStateChange func(from github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase, to github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase); OpenBackoff *github.com/kitsunium/sdk/internal/service/app/resilience.BackoffValue; HalfOpenTrials int}",
       "fields": [
         {
           "name": "FailureThreshold",
@@ -51317,10 +51659,15 @@
         {
           "name": "OpenBackoff",
           "type": "*BackoffValue",
-          "doc": "OpenBackoff, when set, makes each opening last longer than the one\nbefore while the dependency keeps failing its trials: the n-th\nopening since the breaker last closed lasts OpenBackoff.Delay(n),\nin place of OpenDuration. The count starts over when a trial closes\nthe breaker, and on Reset.\n\nIts BaseDelay and its MaxDelay are both required — a zero base is\na cooldown of nothing, and a zero ceiling one that may grow to\ncenturies — and are refused when not positive, with\nPolicyMisconfigured naming the field. Its Multiplier and Jitter\nread as BackoffValue reads them. Nil keeps every opening at\nOpenDuration.\n"
+          "doc": "OpenBackoff, when set, makes each opening last longer than the one\nbefore while the dependency keeps failing its trials: the n-th\nopening since the breaker last closed lasts OpenBackoff.Delay(n),\nin place of OpenDuration. The count starts over when a trial closes\nthe breaker, and on Reset.\n\nIts BaseDelay and its MaxDelay are both required — a zero base is\na cooldown of nothing, and a zero ceiling one that may grow to\ncenturies — and are refused when not positive, with\nPolicyMisconfigured naming the field. Its Multiplier, Jitter and\nJitterMode read as BackoffValue reads them. Nil keeps every opening\nat OpenDuration.\n"
+        },
+        {
+          "name": "HalfOpenTrials",
+          "type": "int",
+          "doc": "HalfOpenTrials is how many trials in a row must succeed before a\nHalfOpen breaker closes. The trials still run one at a time, and\nany one that fails opens the breaker again. Zero, or less, is one:\nthe first successful trial closes it, as before the field existed.\n\nOne success is thin evidence that a dependency has recovered — the\ntrial may have reached the one healthy replica, or a cache — and a\nbreaker that closes on it and trips again at once doubles the load\nit meant to spare. A few trials in a row cost a few more cooldowns'\nworth of latency to the first callers after recovery, which is what\nresilience4j's permittedNumberOfCallsInHalfOpenState buys too.\n"
         }
       ],
-      "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure;\na nil Window opens on consecutive failures; a nil OnStateChange hears\nnothing; a nil OpenBackoff keeps every opening at OpenDuration.\n",
+      "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure;\na nil Window opens on consecutive failures; a nil OnStateChange hears\nnothing; a nil OpenBackoff keeps every opening at OpenDuration; a\nnon-positive HalfOpenTrials closes on one successful trial.\n",
       "file": "service/app/resilience/breaker_config.go",
       "layer": "service",
       "family": "app"
@@ -51366,6 +51713,40 @@
       ],
       "doc": "BreakerWindowValue is a circuit breaker's sliding window: the calls of the\nlast Size, kept in Buckets slots of Size/Buckets each on the breaker's\nclock, the oldest slot dropped as time moves past it. The breaker opens\nwhen the window holds at least MinCalls calls and either FailureRatio of\nthem failed or SlowRatio of them lasted SlowAfter or longer.\n\nA zero field takes its default, each one a published library's own:\nSize 30s, Buckets 10, MinCalls 100 and FailureRatio 0.1 are Polly v8's\nSamplingDuration, its ten sampling windows, MinimumThroughput and\nFailureRatio; SlowAfter 60s and SlowRatio 1 are resilience4j's\nslowCallDurationThreshold and slowCallRateThreshold. A negative value,\na ratio above 1 or not a number, more than 1000 Buckets, or a Size too\nshort to split into Buckets, is refused: every call returns\nPolicyMisconfigured, naming the field.\n\nA call is counted when it ends, in the slot of its end, if the breaker\nis still Closed and it was not admitted before the breaker last opened. A\ndeterministic error and a caller who left are not counted at all. The\nwindow is emptied each time the breaker changes phase.\n",
       "file": "service/app/resilience/breaker_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.BulkheadWaitConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "BulkheadWaitConfig",
+      "spelled": "struct{Max int; Queue int; MaxWait time.Duration; Clock clock.Timed}",
+      "canonical": "struct{Max int; Queue int; MaxWait time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "fields": [
+        {
+          "name": "Max",
+          "type": "int",
+          "doc": "Max is how many operations run at once. A non-positive Max is 1,\nas NewBulkhead's limit is.\n"
+        },
+        {
+          "name": "Queue",
+          "type": "int",
+          "doc": "Queue is how many calls may wait for a slot beyond the Max\nrunning; a call that finds the queue full is rejected at once with\nBulkheadFull. Zero, or less, is no queue. It bounds the memory\nand the goroutines a saturated dependency can pin, which an\nunbounded queue would not.\n"
+        },
+        {
+          "name": "MaxWait",
+          "type": "time.Duration",
+          "doc": "MaxWait is how long a queued call waits for a slot before it is\nrejected with BulkheadFull. Zero, or less, is no wait. Size it\nbelow the caller's own deadline: a wait the caller cannot afford\nonly moves the timeout from this policy to the caller.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock is what MaxWait is measured on. Nil means clock.System; a\nManualClock lets a test run the wait out without sleeping.\n"
+        }
+      ],
+      "doc": "BulkheadWaitConfig parameterises NewBulkheadWait: how many calls run at\nonce, how many more may wait for a slot, for how long, and on which\nclock. Its zero value is NewBulkhead(1) — one slot and no waiting —:\neach field's zero is the reject-at-once bulkhead the SDK has always\nhad, never a queue nobody sized (ADR 0031).\n",
+      "file": "service/app/resilience/bulkhead_wait_config.go",
       "layer": "service",
       "family": "app"
     },
@@ -51482,6 +51863,18 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewAdaptiveThrottle",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "NewAdaptiveThrottle",
+      "spelled": "func(cfg AdaptiveThrottleConfig) coreres.Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.AdaptiveThrottleConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
+      "doc": "NewAdaptiveThrottle returns a Runner that refuses calls on the client\nside, before sending them, when the dependency has been refusing more\nthan its share: the adaptive throttling of Google's SRE book (\"Handling\nOverload\"). Over the last cfg.Window it counts requests — every call\nRun was asked to make, the ones it refused included — and accepts —\nthe calls the dependency answered without refusing them — and refuses\neach new call with probability\n\n\tmax(0, (requests − K × accepts) / (requests + 1))\n\nreturning Throttled without running the operation. While the\ndependency accepts at least one call in K, nothing is refused; past\nthat, the refusals grow with the excess. A dependency that refuses\neverything still receives a trickle of calls — the traffic that tells\nit, and us, when it has recovered — and the refusals fade as its\naccepts come back into the window.\n\nA call's error is a refusal when cfg.Rejected says so — every error\nwhen it is nil —; a nil error is an accept, and so is a call that\nended in context.Canceled once the caller's own context was closed: a\ncaller who left says nothing about the dependency. The refusal is drawn\nfrom cfg.Random, so a test decides it.\n\nA K below 1 or not a number, a negative Window, more than 1000\nBuckets, or a Window too short to split into its Buckets, is refused:\nevery call returns PolicyMisconfigured, naming the field. A call that\nis not refused costs one lock and no allocation.\n",
+      "file": "service/app/resilience/throttle.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewBulkhead",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
@@ -51494,13 +51887,25 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewBulkheadWait",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "NewBulkheadWait",
+      "spelled": "func(cfg BulkheadWaitConfig) coreres.Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BulkheadWaitConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
+      "doc": "NewBulkheadWait returns a Runner that admits at most cfg.Max simultaneous\noperations (clamped to >= 1) and lets up to cfg.Queue more calls wait, each\nat most cfg.MaxWait on cfg.Clock, for a slot to free — Polly's\nConcurrencyLimiter(permitLimit, queueLimit), failsafe-go's bulkhead\nWithMaxWaitTime. A call that finds the queue full, or whose wait runs out,\nreturns BulkheadFull; one whose context ends while it waits returns\nctx.Err() and frees its place in the queue.\n\nA non-positive Queue or MaxWait is no waiting at all: the call is\nrejected at once, as NewBulkhead rejects it, so the zero\nBulkheadWaitConfig is NewBulkhead(1). Waiters take the freed slots in\nthe order they started waiting, as far as the Go runtime's channel\nqueues keep it.\n\nA call that finds a slot free pays what NewBulkhead's does and\nallocates nothing; a call that waits arms one timer on cfg.Clock.\n",
+      "file": "service/app/resilience/bulkhead_wait.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewCircuitBreaker",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "NewCircuitBreaker",
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral — neither a success nor a failure — because the caller\nleft, not the dependency: a wave of client disconnects cannot open the\nbreaker on a healthy dependency, and a HalfOpen trial abandoned that way\nfrees the slot for the next call. context.DeadlineExceeded stays a\nfailure: a dependency too slow for the caller's deadline is a slow\ndependency.\n\nWith a nil cfg.Window the breaker opens on FailureThreshold consecutive\nfailures. With one, it opens on the rate of failures, or of slow calls,\namong the calls of a sliding time window on cfg.Clock, once that window\nholds at least MinCalls of them; a HalfOpen trial that lasts SlowAfter\nor longer counts as failed. A Window or an OpenBackoff with a value it\ncannot honour is refused: every call returns PolicyMisconfigured,\nnaming the field, and the Runner returned is not a BreakerState.\n\nThe Runner returned otherwise implements BreakerState: State reports\nthe phase and its counts, Isolate opens the breaker until Reset, and\nReset closes it. cfg.OnStateChange hears every change of phase.\n",
+      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles; cfg.HalfOpenTrials successful trials in a row close the\nbreaker, and any failed one opens it again. The outcome of a call\nadmitted before the breaker last opened is ignored: its success cannot\nclose the breaker and its failure cannot restart the cooldown.\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral — neither a success nor a failure — because the caller\nleft, not the dependency: a wave of client disconnects cannot open the\nbreaker on a healthy dependency, and a HalfOpen trial abandoned that way\nfrees the slot for the next call. context.DeadlineExceeded stays a\nfailure: a dependency too slow for the caller's deadline is a slow\ndependency.\n\nWith a nil cfg.Window the breaker opens on FailureThreshold consecutive\nfailures. With one, it opens on the rate of failures, or of slow calls,\namong the calls of a sliding time window on cfg.Clock, once that window\nholds at least MinCalls of them; a HalfOpen trial that lasts SlowAfter\nor longer counts as failed. A Window or an OpenBackoff with a value it\ncannot honour is refused: every call returns PolicyMisconfigured,\nnaming the field, and the Runner returned is not a BreakerState.\n\nThe Runner returned otherwise implements BreakerState: State reports\nthe phase and its counts, Isolate opens the breaker until Reset, and\nReset closes it. cfg.OnStateChange hears every change of phase.\n",
       "file": "service/app/resilience/breaker.go",
       "layer": "service",
       "family": "app"
@@ -51548,7 +51953,7 @@
       "name": "NewRateLimiter",
       "spelled": "func(cfg RateLimiterConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.RateLimiterConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewRateLimiter returns a Runner that admits at most Rate calls/sec (with a\nBurst allowance), rejecting excess calls with RateLimited. A Rate that is not\na finite positive number — zero, negative, NaN or infinite — is refused\nrather than defaulted: every call returns PolicyMisconfigured without running\nthe operation (ADR 0031).\n",
+      "doc": "NewRateLimiter returns a Runner that admits at most Rate calls/sec (with a\nBurst allowance), rejecting excess calls with RateLimited. A Rate that is not\na finite positive number — zero, negative, NaN or infinite — is refused\nrather than defaulted: every call returns PolicyMisconfigured without running\nthe operation (ADR 0031).\n\nWith a positive cfg.MaxWait, a call whose token is due within MaxWait\nreserves it and waits for it on cfg.Clock instead of being rejected; a\ncall whose context ends while it waits returns ctx.Err() and hands its\ntoken back. A cfg.Clock that cannot wait — a clock.Clock that is not a\nclock.Timed — is refused when MaxWait is positive, naming Clock.\n",
       "file": "service/app/resilience/ratelimit.go",
       "layer": "service",
       "family": "app"
@@ -51560,7 +51965,7 @@
       "name": "NewRetry",
       "spelled": "func(cfg RetryConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.RetryConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,\nsleeping an exponentially-growing (capped) delay between attempts and aborting\nearly on ctx cancellation. The final attempt's error wraps as RetryExhausted.\nAn error rejected by cfg.Retryable ends the loop at once and is returned\nverbatim, so a deterministic failure neither spends the budget nor hides\nbehind RetryExhausted. When cfg.Delay reads a wait from the failure — a\nRetry-After, a RateLimited rejection — that wait replaces the backoff,\nheld at cfg.MaxDelay.\n\nWith a cfg.Budget, every success and every retryable failure is recorded\nin it, and a retry it refuses ends the loop with RetryBudgetExceeded\nwrapping the last error. cfg.OnRetry hears each retry before its wait. A\ncfg.Budget NewRetryBudget refused makes every call return\nPolicyMisconfigured.\n",
+      "doc": "NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,\nsleeping an exponentially-growing (capped) delay between attempts and aborting\nearly on ctx cancellation. The final attempt's error wraps as RetryExhausted.\nAn error rejected by cfg.Retryable ends the loop at once and is returned\nverbatim, so a deterministic failure neither spends the budget nor hides\nbehind RetryExhausted. When cfg.Delay reads a wait from the failure — a\nRetry-After, a RateLimited rejection — that wait replaces the backoff,\nheld at cfg.MaxDelay. cfg.JitterMode chooses how the backoff is\nrandomised: added Jitter (the zero), full, or decorrelated from the\nprevious wait of the same call.\n\nWith a cfg.Budget, every success and every retryable failure is recorded\nin it, and a retry it refuses ends the loop with RetryBudgetExceeded\nwrapping the last error. cfg.OnRetry hears each retry before its wait. A\ncfg.Budget NewRetryBudget refused makes every call return\nPolicyMisconfigured.\n",
       "file": "service/app/resilience/retry.go",
       "layer": "service",
       "family": "app"
@@ -51606,8 +52011,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "RateLimiterConfig",
-      "spelled": "struct{Rate float64; Burst int; Clock clock.Clock}",
-      "canonical": "struct{Rate float64; Burst int; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock}",
+      "spelled": "struct{Rate float64; Burst int; Clock clock.Clock; MaxWait time.Duration}",
+      "canonical": "struct{Rate float64; Burst int; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; MaxWait time.Duration}",
       "fields": [
         {
           "name": "Rate",
@@ -51621,9 +52026,14 @@
         {
           "name": "Clock",
           "type": "clock.Clock"
+        },
+        {
+          "name": "MaxWait",
+          "type": "time.Duration",
+          "doc": "MaxWait is how long a call may wait for its token instead of being\nrejected: a call whose token is due within MaxWait reserves it at\nonce — later calls queue behind the reservation — and waits for\nit on Clock. Zero, or less, rejects at once with RateLimited, as\nthe limiter always has. A call whose token is due later than\nMaxWait is rejected at once, saying when it would have been due.\n\nWaiting needs a clock that can wait: with a positive MaxWait, a\nClock that is not a clock.Timed is refused with\nPolicyMisconfigured, naming Clock. A nil Clock waits on the wall\nclock.\n"
         }
       ],
-      "doc": "RateLimiterConfig parameterises NewRateLimiter. Burst is the bucket capacity\n(clamped to >= 1); a nil Clock defaults to System.\n",
+      "doc": "RateLimiterConfig parameterises NewRateLimiter. Burst is the bucket capacity\n(clamped to >= 1); a nil Clock defaults to System; a zero MaxWait\nrejects at once a call that finds no token.\n",
       "file": "service/app/resilience/ratelimit_config.go",
       "layer": "service",
       "family": "app"
@@ -51669,8 +52079,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "RetryConfig",
-      "spelled": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock clock.Timed; Delay func(attempt int, err error) (time.Duration, bool); Budget coreres.RetryBudget; OnRetry func(attempt int, err error, delay time.Duration)}",
-      "canonical": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Delay func(attempt int, err error) (time.Duration, bool); Budget github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget; OnRetry func(attempt int, err error, delay time.Duration)}",
+      "spelled": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; JitterMode kbackoff.JitterMode; Clock clock.Timed; Delay func(attempt int, err error) (time.Duration, bool); Budget coreres.RetryBudget; OnRetry func(attempt int, err error, delay time.Duration)}",
+      "canonical": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; JitterMode github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Delay func(attempt int, err error) (time.Duration, bool); Budget github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget; OnRetry func(attempt int, err error, delay time.Duration)}",
       "fields": [
         {
           "name": "MaxAttempts",
@@ -51696,7 +52106,12 @@
         {
           "name": "Jitter",
           "type": "float64",
-          "doc": "Jitter widens each backoff by a random fraction of itself, drawn\nuniformly from [0, Jitter) and ADDED to the computed delay. 0 — the zero\nvalue — is the deterministic backoff this policy has always had, so an\nexisting caller's timing is unchanged. 0.5 is the common choice: it\ndesynchronises callers that failed together without letting the average\nwait stop growing monotonically. Values outside [0, 1] clamp into it.\n\nIt exists because deterministic backoff SYNCHRONISES the very callers it\nis meant to spread. N clients that fail against one dependency at the\nsame instant retry at the same instant, N times over, and every retry\nround lands as one burst on a dependency that is already struggling.\nJitter is what turns those bursts back into a distribution.\n\nIt applies AFTER the MaxDelay cap, deliberately: the cap bounds the\ngrowth, and jitter spreads callers around the bound rather than being\nsqueezed flat against it. The consequence is worth stating — WHEN a cap is\nconfigured, the effective ceiling on one wait becomes MaxDelay * (1 +\nJitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no\nceiling to raise: the backoff grows geometrically and the jitter widens\nwhatever it reaches, bounded only by what a time.Duration can represent.\n"
+          "doc": "Jitter widens each backoff by a random fraction of itself, drawn\nuniformly from [0, Jitter) and ADDED to the computed delay. 0 — the zero\nvalue — is the deterministic backoff this policy has always had, so an\nexisting caller's timing is unchanged. 0.5 is the common choice: it\ndesynchronises callers that failed together without letting the average\nwait stop growing monotonically. Values outside [0, 1] clamp into it.\n\nIt exists because deterministic backoff SYNCHRONISES the very callers it\nis meant to spread. N clients that fail against one dependency at the\nsame instant retry at the same instant, N times over, and every retry\nround lands as one burst on a dependency that is already struggling.\nJitter is what turns those bursts back into a distribution.\n\nIt applies AFTER the MaxDelay cap, deliberately: the cap bounds the\ngrowth, and jitter spreads callers around the bound rather than being\nsqueezed flat against it. The consequence is worth stating — WHEN a cap is\nconfigured, the effective ceiling on one wait becomes MaxDelay * (1 +\nJitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no\nceiling to raise: the backoff grows geometrically and the jitter widens\nwhatever it reaches, bounded only by what a time.Duration can represent.\n\nIt is read only under the zero JitterMode.\n"
+        },
+        {
+          "name": "JitterMode",
+          "type": "kbackoff.JitterMode",
+          "doc": "JitterMode is how the backoff is randomised. The zero,\nJitterAdditive, adds Jitter as above. JitterFull waits a uniform\ndraw from [0, the capped curve]; JitterDecorrelated draws each wait\nfrom [BaseDelay, 3 × the previous wait of this call], held at\nMaxDelay. Both are the AWS Builders' Library's variants and ignore\nJitter; a wait the failure imposed through Delay is not randomised\nand is not the previous wait a decorrelated draw starts from.\n\nFull jitter spreads callers that failed together the most, at the\ncost of sometimes retrying almost at once; decorrelated jitter\nkeeps the waits growing while drifting each caller off the others'\ncurve. With a zero MaxDelay a decorrelated wait is bounded only by\nwhat a time.Duration can represent.\n"
         },
         {
           "name": "Clock",
@@ -51719,7 +52134,7 @@
           "doc": "OnRetry, when set, is called before each retry's wait, on the\ncalling goroutine, with the retry's number — 1 before the second\nattempt —, the error that caused it and the wait about to start. It\nis how a caller counts retries in their own metrics without this\npackage depending on one. It is not called for the first attempt,\nnor for a retry the budget refused. It must not block: the retry\nwaits for it.\n"
         }
       ],
-      "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock; a nil Delay\nalways waits the backoff curve; a nil Budget never refuses a retry; a nil\nOnRetry hears nothing.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
+      "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically, and a zero JitterMode is that additive Jitter; a nil\nClock waits on the wall clock; a nil Delay\nalways waits the backoff curve; a nil Budget never refuses a retry; a nil\nOnRetry hears nothing.\n\nBaseDelay, MaxDelay, Multiplier, Jitter and JitterMode are the five\nfields of BackoffValue, under the same names and with the same meaning:\nNewRetry builds its curve from them, so a loop that retries on its own\nterms and a Retry policy configured alike wait alike — save that a\ndecorrelated retry draws each wait from the one it actually waited\nbefore, which the memoryless BackoffValue.Delay cannot know.\n",
       "file": "service/app/resilience/retry_config.go",
       "layer": "service",
       "family": "app"

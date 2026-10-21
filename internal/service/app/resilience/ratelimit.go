@@ -14,15 +14,26 @@ import (
 // oneToken is the cost of a single admitted call.
 const oneToken float64 = 1
 
+// ratelimitPolicy names the limiter in a PolicyMisconfigured refusal.
+const ratelimitPolicy string = "ratelimit"
+
+// nanosPerSecond converts a wait in seconds to a time.Duration.
+const nanosPerSecond float64 = 1e9
+
 // tokenBucket admits a call when a token is available, refilling continuously at
-// Rate tokens/sec up to Burst. Reject mode — no waiting.
+// Rate tokens/sec up to Burst. With a positive maxWait, a call whose token is
+// due within it reserves the token — tokens goes below zero, and the calls
+// after it queue behind the debt — and waits for it on waiter; with none it is
+// rejected at once.
 type tokenBucket struct {
-	mu     sync.Mutex
-	clk    clock.Clock
-	rate   float64
-	burst  float64
-	tokens float64
-	last   time.Time
+	mu      sync.Mutex
+	clk     clock.Clock
+	waiter  clock.Timed
+	rate    float64
+	burst   float64
+	tokens  float64
+	maxWait float64
+	last    time.Time
 }
 
 // NewRateLimiter returns a Runner that admits at most Rate calls/sec (with a
@@ -30,6 +41,12 @@ type tokenBucket struct {
 // a finite positive number — zero, negative, NaN or infinite — is refused
 // rather than defaulted: every call returns PolicyMisconfigured without running
 // the operation (ADR 0031).
+//
+// With a positive cfg.MaxWait, a call whose token is due within MaxWait
+// reserves it and waits for it on cfg.Clock instead of being rejected; a
+// call whose context ends while it waits returns ctx.Err() and hands its
+// token back. A cfg.Clock that cannot wait — a clock.Clock that is not a
+// clock.Timed — is refused when MaxWait is positive, naming Clock.
 func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
 	//: a rate is the entire content of this policy — there is no SDK-side value
 	//: that is not a guess at the caller's requirement, so refuse rather than
@@ -56,7 +73,7 @@ func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
 	//: typing it: budget/window is +Inf for a zero window, and 0.0/0.0 is NaN.
 	if !usableRate(cfg.Rate) {
 		//: fail closed, and say why.
-		return newMisconfigured("ratelimit", "Rate")
+		return newMisconfigured(ratelimitPolicy, "Rate")
 	}
 	//: default the clock to the system source.
 	clk := cfg.Clock
@@ -66,7 +83,23 @@ func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
 		clk = clock.System
 	}
 	//: one bucket, full, so the first call is admitted.
-	return newTokenBucket(clk, cfg.Rate, bucketSize(cfg.Burst))
+	bucket := newTokenBucket(clk, cfg.Rate, bucketSize(cfg.Burst))
+	//: no wait asked for: reject at once, as the limiter always has.
+	if cfg.MaxWait <= 0 {
+		//: reject mode.
+		return bucket
+	}
+	//: a wait is measured on the clock the bucket refills on, so that clock
+	//: must be able to wait; a Now-only clock would split the two.
+	waiter, timed := clk.(clock.Timed)
+	//: refuse rather than wait on a second, different clock (ADR 0031).
+	if !timed {
+		//: fail closed, and say why.
+		return newMisconfigured(ratelimitPolicy, "Clock")
+	}
+	bucket.waiter, bucket.maxWait = waiter, cfg.MaxWait.Seconds()
+	//: wait mode.
+	return bucket
 }
 
 // usableRate reports whether rate is a finite positive number of tokens per
@@ -98,15 +131,54 @@ func newTokenBucket(clk clock.Clock, rate, burst float64) *tokenBucket {
 	return &tokenBucket{clk: clk, rate: rate, burst: burst, tokens: burst, last: clk.Now()}
 }
 
-// Run admits op if a token is available, else rejects with RateLimited.
+// Run admits op if a token is available — or due within maxWait, waited for
+// on the clock — else rejects with RateLimited.
 func (t *tokenBucket) Run(ctx context.Context, op coreres.Operation) error {
+	admitted, wait := t.take()
 	//: a refused token rejects the call fast, saying when the next one is due.
-	if admitted, wait := t.take(); !admitted {
-		//: bucket empty for this instant.
+	if !admitted {
+		//: bucket empty for this instant, and beyond the wait allowed.
 		return rateLimited(wait)
+	}
+	//: a reserved token is waited for; an available one is not.
+	if wait > 0 {
+		//: the caller left while waiting: its token is handed back.
+		if err := t.await(ctx, wait); err != nil {
+			//: the caller's own verdict.
+			return err
+		}
 	}
 	//: token consumed — run the operation.
 	return op(ctx)
+}
+
+// await waits waitSeconds on the bucket's clock for a reserved token. A
+// context that ends first hands the token back and returns its error.
+func (t *tokenBucket) await(ctx context.Context, waitSeconds float64) error {
+	//: rounded up, so the call never runs before its token is earned.
+	timer := t.waiter.NewTimer(time.Duration(math.Ceil(waitSeconds * nanosPerSecond)))
+	//: always release the timer.
+	defer timer.Stop()
+	select {
+	//: the token is due.
+	case <-timer.C():
+		//: run.
+		return nil
+	//: the caller left first.
+	case <-ctx.Done():
+		t.giveBack()
+		//: the cancellation, not a rejection: the limiter refused nothing.
+		return ctx.Err()
+	}
+}
+
+// giveBack returns a reserved token a caller did not use. Holds mu.
+func (t *tokenBucket) giveBack() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.refill()
+	//: never past the bucket's capacity.
+	t.tokens = min(t.tokens+oneToken, t.burst)
 }
 
 // rateLimited is the RateLimited rejection carrying, as retryAfterField, the
@@ -117,11 +189,36 @@ func rateLimited(waitSeconds float64) error {
 }
 
 // take refills by elapsed time then consumes one token if available. Holds mu.
-// A refusal also reports how many seconds the bucket needs, at its rate, to
-// hold a whole token again: (1 − tokens) / rate.
+// A token that is not available yet is reserved when it is due within
+// maxWait: the call is admitted with how many seconds it must wait for it.
+// A refusal reports how many seconds the bucket needs, at its rate, to hold a
+// whole token again: (1 − tokens) / rate.
 func (t *tokenBucket) take() (admitted bool, waitSeconds float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.refill()
+	//: a full token admits the call.
+	if t.tokens >= oneToken {
+		//: consume it.
+		t.tokens -= oneToken
+		//: admitted.
+		return true, 0
+	}
+	//: not enough credit this instant; the rest of a token, earned at rate.
+	waitSeconds = (oneToken - t.tokens) / t.rate
+	//: due soon enough: reserve it, so the calls after this one queue behind.
+	if waitSeconds <= t.maxWait {
+		t.tokens -= oneToken
+		//: admitted, after the wait.
+		return true, waitSeconds
+	}
+	//: rejected, saying when the token is due.
+	return false, waitSeconds
+}
+
+// refill adds the tokens earned since the last reading, never past the
+// bucket's capacity. The caller holds mu.
+func (t *tokenBucket) refill() {
 	//: refill proportional to the elapsed time since the last call.
 	now := t.clk.Now()
 	t.tokens += now.Sub(t.last).Seconds() * t.rate
@@ -131,13 +228,4 @@ func (t *tokenBucket) take() (admitted bool, waitSeconds float64) {
 		//: cap at the bucket size.
 		t.tokens = t.burst
 	}
-	//: a full token admits the call.
-	if t.tokens >= oneToken {
-		//: consume it.
-		t.tokens -= oneToken
-		//: admitted.
-		return true, 0
-	}
-	//: not enough credit this instant; the rest of a token, earned at rate.
-	return false, (oneToken - t.tokens) / t.rate
 }

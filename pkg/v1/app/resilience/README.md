@@ -16,7 +16,7 @@ err := r.Run(ctx, func(ctx context.Context) error {
 })
 ```
 
-Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded / CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via errs.HasReason / errs.HasCode.
+Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded / CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed / Throttled) matchable via errs.HasReason / errs.HasCode.
 
 ### Classifying deterministic failures
 
@@ -141,13 +141,42 @@ state := b.(resilience.BreakerState)
 ready := state.State().Phase != resilience.BreakerOpen // a readiness check
 ```
 
-A nil Window is the consecutive-failure breaker, unchanged. The Runner is a [BreakerState](#BreakerState): State reports the phase and its counts, Isolate opens it by hand until Reset, and [BreakerConfig](#BreakerConfig).OnStateChange hears each change of phase in order, outside the breaker's lock. [BreakerConfig](#BreakerConfig).OpenBackoff lengthens each opening while the trials keep failing.
+A nil Window is the consecutive-failure breaker, unchanged. The Runner is a [BreakerState](#BreakerState): State reports the phase and its counts, Isolate opens it by hand until Reset, and [BreakerConfig](#BreakerConfig).OnStateChange hears each change of phase in order, outside the breaker's lock. [BreakerConfig](#BreakerConfig).OpenBackoff lengthens each opening while the trials keep failing, and [BreakerConfig](#BreakerConfig).HalfOpenTrials asks for several successful trials in a row before the breaker closes.
+
+### Waiting a bounded time for a slot or a token
+
+[NewBulkhead](#NewBulkhead) and [NewRateLimiter](#NewRateLimiter) reject at once a call they cannot admit. [NewBulkheadWait](#NewBulkheadWait) lets a bounded queue of calls wait a bounded time for a slot, and [RateLimiterConfig](#RateLimiterConfig).MaxWait lets a call wait for a token due soon enough — both on an injected clock, both rejecting as before when their wait is zero:
+
+```
+b := resilience.NewBulkheadWait(resilience.BulkheadWaitConfig{
+    Max: 16, Queue: 64, MaxWait: 50 * time.Millisecond,
+})
+l := resilience.NewRateLimiter(resilience.RateLimiterConfig{
+    Rate: 100, Burst: 10, MaxWait: 20 * time.Millisecond,
+})
+```
+
+### How the backoff is randomised
+
+[RetryConfig](#RetryConfig).JitterMode, like [Backoff](#Backoff).JitterMode, chooses between the AWS Builders' Library's three jitters: [JitterAdditive](#JitterAdditive), the zero and the Jitter fraction added to the curve; [JitterFull](#JitterFull), a uniform draw below the curve; and [JitterDecorrelated](#JitterDecorrelated), each wait drawn from the one before.
+
+### Throttling on the client side
+
+[NewAdaptiveThrottle](#NewAdaptiveThrottle) is the adaptive throttling of Google's SRE book: it counts, over a window, the calls it was asked to make and the calls the dependency accepted, and refuses a new call locally — with [Throttled](#Throttled), without sending it — with probability max(0, (requests − K × accepts) / (requests + 1)). A dependency that refuses most of its traffic is no longer sent most of it, and the refusals fade as it accepts again:
+
+```
+t := resilience.NewAdaptiveThrottle(resilience.AdaptiveThrottleConfig{
+    Rejected: isOverload, // the caller's own: a 429, a 503, a RESOURCE_EXHAUSTED
+})
+```
 
 ## Index
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func NewAdaptiveThrottle\(cfg AdaptiveThrottleConfig\) Runner](<#NewAdaptiveThrottle>)
 - [func NewBulkhead\(maxConcurrent int\) Runner](<#NewBulkhead>)
+- [func NewBulkheadWait\(cfg BulkheadWaitConfig\) Runner](<#NewBulkheadWait>)
 - [func NewCircuitBreaker\(cfg BreakerConfig\) Runner](<#NewCircuitBreaker>)
 - [func NewFallback\(cfg FallbackConfig\) Runner](<#NewFallback>)
 - [func NewHedge\(cfg HedgeConfig\) Runner](<#NewHedge>)
@@ -158,6 +187,7 @@ A nil Window is the consecutive-failure breaker, unchanged. The Runner is a [Bre
 - [func NewTimeout\(d time.Duration\) Runner](<#NewTimeout>)
 - [func NewTimeoutWith\(cfg TimeoutConfig\) Runner](<#NewTimeoutWith>)
 - [func RetryAfter\(err error\) \(time.Duration, bool\)](<#RetryAfter>)
+- [type AdaptiveThrottleConfig](<#AdaptiveThrottleConfig>)
 - [type Backoff](<#Backoff>)
   - [func \(Backoff\) Delay\(attempt int\) time.Duration](<#Backoff.Delay>)
 - [type BreakerConfig](<#BreakerConfig>)
@@ -169,8 +199,11 @@ A nil Window is the consecutive-failure breaker, unchanged. The Runner is a [Bre
   - [func \(BreakerState\) State\(\) BreakerStateValue](<#BreakerState.State>)
 - [type BreakerStateValue](<#BreakerStateValue>)
 - [type BreakerWindowValue](<#BreakerWindowValue>)
+- [type BulkheadWaitConfig](<#BulkheadWaitConfig>)
 - [type FallbackConfig](<#FallbackConfig>)
 - [type HedgeConfig](<#HedgeConfig>)
+- [type JitterMode](<#JitterMode>)
+  - [func \(JitterMode\) String\(\) string](<#JitterMode.String>)
 - [type KeyedRateLimiterConfig](<#KeyedRateLimiterConfig>)
 - [type Operation](<#Operation>)
 - [type RateLimiterConfig](<#RateLimiterConfig>)
@@ -213,6 +246,33 @@ BreakerOpen is a breaker rejecting every call fast with CircuitOpen.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerOpen`.
 
+<a name="JitterAdditive"></a>
+```go
+const JitterAdditive JitterMode = 0
+```
+
+JitterAdditive adds a random fraction of each wait, drawn from \[0, Jitter). It is the zero JitterMode.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/backoff.JitterAdditive`.
+
+<a name="JitterDecorrelated"></a>
+```go
+const JitterDecorrelated JitterMode = 2
+```
+
+JitterDecorrelated draws each wait from \[BaseDelay, 3 × the previous wait], held at MaxDelay.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/backoff.JitterDecorrelated`.
+
+<a name="JitterFull"></a>
+```go
+const JitterFull JitterMode = 1
+```
+
+JitterFull draws each wait uniformly from \[0, the capped curve].
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/backoff.JitterFull`.
+
 ## Variables
 
 <a name="BulkheadFull"></a>
@@ -220,7 +280,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerO
 var BulkheadFull *errs.Error
 ```
 
-BulkheadFull is returned when every concurrency slot is occupied. It carries HTTP 503.
+BulkheadFull is returned when every concurrency slot is occupied — and, for NewBulkheadWait, when the queue is full or no slot freed within MaxWait. It carries HTTP 503.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.BulkheadFull`.
 
@@ -253,7 +313,7 @@ Code `0.2.8.7` · reason `FALLBACK_FAILED` · public "The operation and its fall
 var PolicyMisconfigured *errs.Error
 ```
 
-PolicyMisconfigured is returned by every call to a policy that was built with a configuration it cannot honour — a non-positive RateLimiterConfig .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback, an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an IdleTimeout, a retry budget built with an unusable MaxTokens or TokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of range. The operation is not run. Unlike the sentinels above it is permanent, not transient: the fix is at the construction site, never a retry (ADR 0031).
+PolicyMisconfigured is returned by every call to a policy that was built with a configuration it cannot honour — a non-positive RateLimiterConfig .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback, an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an IdleTimeout, a retry budget built with an unusable MaxTokens or TokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of range, a RateLimiterConfig.Clock that cannot wait for a positive MaxWait, an AdaptiveThrottleConfig field out of range. The operation is not run. Unlike the sentinels above it is permanent, not transient: the fix is at the construction site, never a retry (ADR 0031).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.PolicyMisconfigured`.
 
@@ -292,6 +352,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.RetryExh
 
 Code `0.2.8.1` · reason `RETRY_EXHAUSTED` · public "The operation failed after exhausting all retries"
 
+<a name="Throttled"></a>
+```go
+var Throttled *errs.Error
+```
+
+Throttled is returned when NewAdaptiveThrottle refused the call on the client side, without sending it. It carries HTTP 503.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.Throttled`.
+
+Code `0.2.8.9` · reason `THROTTLED` · public "The call was throttled on the client side"
+
 <a name="TimeoutExceeded"></a>
 ```go
 var TimeoutExceeded *errs.Error
@@ -303,6 +374,15 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.TimeoutE
 
 Code `0.2.8.5` · reason `TIMEOUT_EXCEEDED` · public "The operation exceeded its timeout"
 
+<a name="NewAdaptiveThrottle"></a>
+## func [NewAdaptiveThrottle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+```go
+func NewAdaptiveThrottle(cfg AdaptiveThrottleConfig) Runner
+```
+
+NewAdaptiveThrottle returns a Runner that refuses calls on the client side with Throttled, with probability max(0, (requests − K × accepts) / (requests + 1)) over a sliding window — the adaptive throttling of Google's SRE book. A field out of range is refused with PolicyMisconfigured.
+
 <a name="NewBulkhead"></a>
 ## func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
 
@@ -311,6 +391,15 @@ func NewBulkhead(maxConcurrent int) Runner
 ```
 
 NewBulkhead returns a bounded-concurrency Runner (reject mode).
+
+<a name="NewBulkheadWait"></a>
+## func [NewBulkheadWait](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+```go
+func NewBulkheadWait(cfg BulkheadWaitConfig) Runner
+```
+
+NewBulkheadWait returns a bounded-concurrency Runner whose excess calls wait in a bounded queue, each at most cfg.MaxWait on cfg.Clock, for a slot; a full queue or a wait run out is BulkheadFull. Its zero configuration is NewBulkhead(1).
 
 <a name="NewCircuitBreaker"></a>
 ## func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -359,7 +448,7 @@ NewKeyedRateLimiter returns a Runner holding one token bucket per key — the ke
 func NewRateLimiter(cfg RateLimiterConfig) Runner
 ```
 
-NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive cfg.Rate is refused: every call returns PolicyMisconfigured without running the operation, because any rate chosen for the caller would be a guess.
+NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive cfg.Rate is refused: every call returns PolicyMisconfigured without running the operation, because any rate chosen for the caller would be a guess. A positive cfg.MaxWait lets a call wait for a token due within it instead of being rejected.
 
 <a name="NewRetry"></a>
 ## func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -406,6 +495,54 @@ func RetryAfter(err error) (time.Duration, bool)
 
 RetryAfter reports the delay err says to wait before the next attempt — the retry\_after\_seconds field an OTLP exporter, the guarded HTTP client on a 429 or 503, and RateLimited set — and whether it says one. Its shape is RetryConfig.Delay's.
 
+<a name="AdaptiveThrottleConfig"></a>
+## type [AdaptiveThrottleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+AdaptiveThrottleConfig is the public alias for the adaptive throttle's configuration: K, Window, Buckets, Rejected, Clock, Random.
+
+```go
+type AdaptiveThrottleConfig = svcres.AdaptiveThrottleConfig
+```
+
+AdaptiveThrottleConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/resilience.AdaptiveThrottleConfig`, declared as:
+
+```go
+type AdaptiveThrottleConfig struct {
+	// K is how many requests per accept the throttle lets through before
+	// it starts refusing: a call is refused with probability
+	// max(0, (requests − K × accepts) / (requests + 1)). Zero is 2, the
+	// SRE book's value. A lower K refuses sooner and wastes less of the
+	// dependency's capacity on calls it will refuse; a higher one refuses
+	// later and keeps more traffic flowing. A K below 1 would refuse calls
+	// to a dependency accepting every one of them, and is refused, as is
+	// one that is not a finite number.
+	K        float64
+	// Window is how far back the requests and accepts are counted. Zero
+	// is two minutes, the SRE book's history. A negative Window is
+	// refused.
+	Window   time.Duration
+	// Buckets is how many slots the window is kept in: a slot leaves the
+	// window whole, so it reaches back between Window − Window/Buckets
+	// and Window. Zero is 10; more than 1000 is refused, as is a Window
+	// too short to give each slot a nanosecond.
+	Buckets  int
+	// Rejected classifies a non-nil error of the operation: true is a
+	// refusal by the dependency — overload, quota, unavailability —,
+	// false an answer it gave, which counts as an accept however
+	// unwelcome. Nil counts every error as a refusal. It is not
+	// consulted for a context.Canceled returned once the caller's
+	// context is closed: that call counts as an accept.
+	Rejected func(error) bool
+	// Clock is what the window is kept on. Nil means clock.System.
+	Clock    clock.Clock
+	// Random returns a number in [0, 1) each time a call might be
+	// refused; the call is refused when it is below the probability.
+	// Nil is math/rand/v2's Float64. A test hands it a sequence to
+	// decide each refusal.
+	Random   func() float64
+}
+```
+
 <a name="Backoff"></a>
 ## type [Backoff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
 
@@ -436,7 +573,15 @@ type Backoff struct {
 	// it is meant to spread: N clients that fail against one dependency at the
 	// same instant retry at the same instant, N times over. Jitter turns those
 	// bursts back into a distribution.
+	//
+	// It is read only under JitterAdditive.
 	Jitter     float64
+	// JitterMode is how the randomisation is laid on the curve. The zero,
+	// JitterAdditive, is the Jitter above — what Value has always done;
+	// JitterFull and JitterDecorrelated are the Builders' Library's two
+	// other variants, which randomise the whole wait and ignore Jitter. A
+	// value outside the three is read as JitterAdditive.
+	JitterMode JitterMode
 }
 ```
 
@@ -447,7 +592,7 @@ type Backoff struct {
 func (Backoff) Delay(attempt int) time.Duration
 ```
 
-Delay returns the wait after the attempt-th consecutive failure: \[Grow] for the curve, then \[Widen] for the jitter. attempt counts from 1; a smaller value is read as 1, so a loop that has not failed yet and asks anyway waits BaseDelay rather than nothing.
+Delay returns the wait after the attempt-th consecutive failure: \[Grow] for the curve, then the randomisation JitterMode names — \[Widen] by Jitter for JitterAdditive, \[Full] for JitterFull, and for JitterDecorrelated \[Decorrelate], reading the curve's wait for the attempt before as the previous wait (a loop that keeps its own calls Decorrelate). attempt counts from 1; a smaller value is read as 1, so a loop that has not failed yet and asks anyway waits BaseDelay rather than nothing.
 
 It never returns a negative duration, and it costs at most as many multiplications as it takes the delay to reach its ceiling, however large attempt is.
 
@@ -519,10 +664,22 @@ type BreakerConfig struct {
 	// Its BaseDelay and its MaxDelay are both required — a zero base is
 	// a cooldown of nothing, and a zero ceiling one that may grow to
 	// centuries — and are refused when not positive, with
-	// PolicyMisconfigured naming the field. Its Multiplier and Jitter
-	// read as BackoffValue reads them. Nil keeps every opening at
-	// OpenDuration.
+	// PolicyMisconfigured naming the field. Its Multiplier, Jitter and
+	// JitterMode read as BackoffValue reads them. Nil keeps every opening
+	// at OpenDuration.
 	OpenBackoff      *BackoffValue
+	// HalfOpenTrials is how many trials in a row must succeed before a
+	// HalfOpen breaker closes. The trials still run one at a time, and
+	// any one that fails opens the breaker again. Zero, or less, is one:
+	// the first successful trial closes it, as before the field existed.
+	//
+	// One success is thin evidence that a dependency has recovered — the
+	// trial may have reached the one healthy replica, or a cache — and a
+	// breaker that closes on it and trips again at once doubles the load
+	// it meant to spare. A few trials in a row cost a few more cooldowns'
+	// worth of latency to the first callers after recovery, which is what
+	// resilience4j's permittedNumberOfCallsInHalfOpenState buys too.
+	HalfOpenTrials   int
 }
 ```
 
@@ -684,6 +841,39 @@ type BreakerWindowValue struct {
 }
 ```
 
+<a name="BulkheadWaitConfig"></a>
+## type [BulkheadWaitConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+BulkheadWaitConfig is the public alias for the configuration of the bulkhead that queues: Max, Queue, MaxWait, Clock.
+
+```go
+type BulkheadWaitConfig = svcres.BulkheadWaitConfig
+```
+
+BulkheadWaitConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/resilience.BulkheadWaitConfig`, declared as:
+
+```go
+type BulkheadWaitConfig struct {
+	// Max is how many operations run at once. A non-positive Max is 1,
+	// as NewBulkhead's limit is.
+	Max     int
+	// Queue is how many calls may wait for a slot beyond the Max
+	// running; a call that finds the queue full is rejected at once with
+	// BulkheadFull. Zero, or less, is no queue. It bounds the memory
+	// and the goroutines a saturated dependency can pin, which an
+	// unbounded queue would not.
+	Queue   int
+	// MaxWait is how long a queued call waits for a slot before it is
+	// rejected with BulkheadFull. Zero, or less, is no wait. Size it
+	// below the caller's own deadline: a wait the caller cannot afford
+	// only moves the timeout from this policy to the caller.
+	MaxWait time.Duration
+	// Clock is what MaxWait is measured on. Nil means clock.System; a
+	// ManualClock lets a test run the wait out without sleeping.
+	Clock   clock.Timed
+}
+```
+
 <a name="FallbackConfig"></a>
 ## type [FallbackConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
 
@@ -830,6 +1020,30 @@ type HedgeConfig struct {
 }
 ```
 
+<a name="JitterMode"></a>
+## type [JitterMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+JitterMode is the public alias for how a Backoff, and a retry, randomise their waits: additive (the zero), full, or decorrelated.
+
+```go
+type JitterMode = kbackoff.JitterMode
+```
+
+JitterMode is an alias of `github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode`, declared as:
+
+```go
+type JitterMode uint8
+```
+
+<a name="JitterMode.String"></a>
+### func \(JitterMode\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/backoff/jitter.go>)
+
+```go
+func (JitterMode) String() string
+```
+
+String renders the mode for a log line or a configuration dump: "additive", "full", "decorrelated"; a value this package does not define renders "unknown".
+
 <a name="KeyedRateLimiterConfig"></a>
 ## type [KeyedRateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
 
@@ -917,9 +1131,21 @@ type RateLimiterConfig struct {
 	// who silently received one would believe they were limited at the rate
 	// they intended (ADR 0031). Contrast Burst, which does have an obvious
 	// floor — admit at least one call — and is therefore clamped.
-	Rate  float64
-	Burst int
-	Clock clock.Clock
+	Rate    float64
+	Burst   int
+	Clock   clock.Clock
+	// MaxWait is how long a call may wait for its token instead of being
+	// rejected: a call whose token is due within MaxWait reserves it at
+	// once — later calls queue behind the reservation — and waits for
+	// it on Clock. Zero, or less, rejects at once with RateLimited, as
+	// the limiter always has. A call whose token is due later than
+	// MaxWait is rejected at once, saying when it would have been due.
+	//
+	// Waiting needs a clock that can wait: with a positive MaxWait, a
+	// Clock that is not a clock.Timed is refused with
+	// PolicyMisconfigured, naming Clock. A nil Clock waits on the wall
+	// clock.
+	MaxWait time.Duration
 }
 ```
 
@@ -1049,7 +1275,23 @@ type RetryConfig struct {
 	// Jitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no
 	// ceiling to raise: the backoff grows geometrically and the jitter widens
 	// whatever it reaches, bounded only by what a time.Duration can represent.
+	//
+	// It is read only under the zero JitterMode.
 	Jitter      float64
+	// JitterMode is how the backoff is randomised. The zero,
+	// JitterAdditive, adds Jitter as above. JitterFull waits a uniform
+	// draw from [0, the capped curve]; JitterDecorrelated draws each wait
+	// from [BaseDelay, 3 × the previous wait of this call], held at
+	// MaxDelay. Both are the AWS Builders' Library's variants and ignore
+	// Jitter; a wait the failure imposed through Delay is not randomised
+	// and is not the previous wait a decorrelated draw starts from.
+	//
+	// Full jitter spreads callers that failed together the most, at the
+	// cost of sometimes retrying almost at once; decorrelated jitter
+	// keeps the waits growing while drifting each caller off the others'
+	// curve. With a zero MaxDelay a decorrelated wait is bounded only by
+	// what a time.Duration can represent.
+	JitterMode  kbackoff.JitterMode
 	// Clock is what the backoff waits on. Nil means clock.System.
 	//
 	// It exists so a test drives the whole retry loop with a ManualClock —

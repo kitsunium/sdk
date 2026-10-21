@@ -129,11 +129,23 @@ func (s *scheduler) fire(ctx context.Context, entries []*entry, wg *sync.WaitGro
 			//: next entry.
 			continue
 		}
+		//: too late to be worth running: reported, never run.
+		if e.expired(scheduled, now) {
+			s.emit(coresched.ResultValue{Name: e.name, Scheduled: scheduled, Missed: missed, Expired: true})
+			//: next entry.
+			continue
+		}
+		//: the newest fire replaces the run still going.
+		if e.overlap == coresched.OverlapReplace {
+			s.replace(ctx, wg, e, scheduled, missed)
+			//: next entry.
+			continue
+		}
 		//: the safe default: a previous run of THIS entry is still going, so
 		//: this fire is dropped rather than run beside it. Queueing would grow
 		//: without bound behind a persistently slow job; running in parallel
 		//: would duplicate a side effect the SDK cannot know is safe.
-		if !e.allowOverlap && e.busy.Load() {
+		if e.overlap == coresched.OverlapSkip && e.busy.Load() {
 			//: report the skip — an unreported skip is indistinguishable from
 			//: an entry that is keeping up.
 			s.emit(coresched.ResultValue{
@@ -149,6 +161,70 @@ func (s *scheduler) fire(ctx context.Context, entries []*entry, wg *sync.WaitGro
 		//: worth answering in the first place.
 		go s.run(ctx, wg, e, scheduled, missed)
 	}
+}
+
+// replace starts the fire of an OverlapReplace entry: it becomes the entry's
+// current run, the run it replaces — running, or itself waiting — is told so
+// and its context cancelled, and the new run waits for that one to return
+// before it starts, so two runs of the entry never overlap.
+//
+// Lifecycle: one goroutine, registered on wg like every other run, so Run's
+// deferred wg.Wait joins it.
+func (s *scheduler) replace(ctx context.Context, wg *sync.WaitGroup, e *entry, scheduled time.Time, missed int) {
+	runCtx, cancel := context.WithCancel(ctx)
+	next := &replaceable{cancel: cancel}
+	//: released by the run's goroutine once its result is published.
+	next.done.Add(1)
+	prev := e.replaceWith(next)
+	//: the run still going, or still waiting, is replaced.
+	if prev != nil {
+		prev.replaced.Store(true)
+		prev.cancel()
+	}
+	wg.Add(1)
+	go s.runReplacing(runCtx, wg, replacement{entry: e, mine: next, prev: prev, scheduled: scheduled, missed: missed})
+}
+
+// replacement is one fire of an OverlapReplace entry, as runReplacing runs
+// it: its entry, its own run, the run it replaced (nil when none), and the
+// instant and count it reports.
+type replacement struct {
+	entry     *entry
+	mine      *replaceable
+	prev      *replaceable
+	scheduled time.Time
+	missed    int
+}
+
+// runReplacing runs one fire of an OverlapReplace entry once the run it
+// replaced has returned and published its result. A run replaced while it
+// was still waiting never starts, and is reported Replaced.
+func (s *scheduler) runReplacing(ctx context.Context, wg *sync.WaitGroup, r replacement) {
+	defer wg.Done()
+	e, mine := r.entry, r.mine
+	//: released after the result is published, so the run after this one
+	//: starts after its predecessor's result.
+	defer mine.done.Done()
+	defer mine.cancel()
+	//: never beside the run it replaced.
+	if r.prev != nil {
+		r.prev.done.Wait()
+	}
+	result := coresched.ResultValue{Name: e.name, Scheduled: r.scheduled, Missed: r.missed}
+	//: replaced in its turn before it could start: it never runs.
+	if mine.replaced.Load() {
+		result.Replaced = true
+		e.release(mine)
+		s.emit(result)
+		//: nothing ran.
+		return
+	}
+	result.Started = s.clk.Now()
+	result.Err = invoke(ctx, e)
+	result.Finished = s.clk.Now()
+	result.Replaced = mine.replaced.Load()
+	e.release(mine)
+	s.emit(result)
 }
 
 // run executes one job and publishes its result.

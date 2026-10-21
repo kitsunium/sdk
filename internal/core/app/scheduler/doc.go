@@ -26,4 +26,7 @@
 // Package scheduler — hosts EntryValue, the registration a Scheduler owns.
 //
 // Package scheduler — hosts ResultValue, the record of one scheduling decision.
+//
+// Package scheduler — hosts OverlapPolicy, what a fire does while the
+// previous run of its entry is still running.
 package scheduler

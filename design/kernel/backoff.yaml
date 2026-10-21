@@ -20,7 +20,81 @@ packages:
       top of it. [Value.Delay] composes the two. A suite that cannot assert the
       growth without the jitter can assert neither precisely, and a caller that
       wants the deterministic curve asks for it by name.
+
+      How the randomisation is laid on is [Value].JitterMode: added to the curve
+      (the zero, [JitterAdditive]), drawn across all of it ([JitterFull]), or
+      drawn from the previous wait ([JitterDecorrelated]) — the three variants of
+      the AWS Builders' Library's "Timeouts, retries and backoff with jitter".
+    constants:
+      - blockDoc: |-
+          The three ways a [Value] lays its randomisation on the curve. The zero is
+          the additive jitter the curve has always had, so a Value written before
+          the mode existed waits exactly as it did (ADR 0031).
+        doc: |-
+          JitterAdditive widens the grown wait by a random fraction of itself,
+          drawn from [0, Jitter) and ADDED: the average wait keeps growing with
+          the attempt. A zero Jitter is the deterministic curve. It is the zero
+          JitterMode.
+        name: JitterAdditive
+        type: JitterMode
+        value: "0"
+      - blockDoc: |-
+          The three ways a [Value] lays its randomisation on the curve. The zero is
+          the additive jitter the curve has always had, so a Value written before
+          the mode existed waits exactly as it did (ADR 0031).
+        doc: |-
+          JitterFull draws the wait uniformly from [0, grown], the grown wait being
+          the curve held at MaxDelay: the "Full Jitter" of the Builders' Library,
+          which spreads callers that failed together the most widely of the three
+          and keeps the average at half the curve. Jitter is not read.
+        name: JitterFull
+        type: JitterMode
+        value: "1"
+      - blockDoc: |-
+          The three ways a [Value] lays its randomisation on the curve. The zero is
+          the additive jitter the curve has always had, so a Value written before
+          the mode existed waits exactly as it did (ADR 0031).
+        doc: |-
+          JitterDecorrelated draws each wait from the previous one, as [Decorrelate]
+          does: uniformly from [BaseDelay, 3 × previous], held at MaxDelay — the
+          "Decorrelated Jitter" of the Builders' Library. A loop that keeps the
+          previous wait calls Decorrelate; [Value.Delay], which has no memory,
+          reads the curve's own previous step as the previous wait. Jitter is not
+          read.
+        name: JitterDecorrelated
+        type: JitterMode
+        value: "2"
     functions:
+      - doc: |-
+          Full returns a wait drawn uniformly from [0, delay]: the "Full Jitter" of
+          the AWS Builders' Library, laid on a delay the caller already grew and
+          held at its ceiling. A zero or negative delay is no wait.
+        in:
+          - name: delay
+            type: time.Duration
+        name: Full
+        out:
+          - type: time.Duration
+      - doc: |-
+          Decorrelate returns the next wait of a "Decorrelated Jitter" backoff (AWS
+          Builders' Library): drawn uniformly from [base, 3 × previous], held at
+          ceiling when one is set (a zero ceiling is none) and at the longest
+          time.Duration otherwise. A previous wait below base is read as base, so
+          the first wait of a loop is drawn from [base, 3 × base]; a non-positive
+          base is no wait.
+
+          It is the one variant whose wait depends on the previous wait rather
+          than on the attempt, so the loop keeps that wait and hands it back: the
+          bound grows with what was actually waited, and two callers that failed
+          together drift apart instead of following one curve.
+        in:
+          - name: base
+          - name: ceiling
+          - name: previous
+            type: time.Duration
+        name: Decorrelate
+        out:
+          - type: time.Duration
       - doc: |-
           Grow returns the deterministic half of the curve: base × multiplier^(attempt−1),
           held at ceiling when one is set (a zero ceiling is none) and at the longest
@@ -95,7 +169,8 @@ packages:
               already struggling;
             - a zero MaxDelay is no ceiling, and the growth then stops at the longest
               time.Duration rather than wrapping negative;
-            - a Jitter outside [0, 1], or NaN, is clamped into it.
+            - a Jitter outside [0, 1], or NaN, is clamped into it;
+            - a JitterMode this package does not define is read as JitterAdditive.
 
           The growth is compared against its bound in the float domain BEFORE any
           conversion. The copy this replaces converted first: past 2^63 nanoseconds Go
@@ -105,9 +180,12 @@ packages:
         methods:
           - doc: |-
               Delay returns the wait after the attempt-th consecutive failure: [Grow] for
-              the curve, then [Widen] for the jitter. attempt counts from 1; a smaller
-              value is read as 1, so a loop that has not failed yet and asks anyway waits
-              BaseDelay rather than nothing.
+              the curve, then the randomisation JitterMode names — [Widen] by Jitter
+              for JitterAdditive, [Full] for JitterFull, and for JitterDecorrelated
+              [Decorrelate], reading the curve's wait for the attempt before as the
+              previous wait (a loop that keeps its own calls Decorrelate). attempt
+              counts from 1; a smaller value is read as 1, so a loop that has not
+              failed yet and asks anyway waits BaseDelay rather than nothing.
 
               It never returns a negative duration, and it costs at most as many
               multiplications as it takes the delay to reach its ceiling, however large
@@ -145,5 +223,29 @@ packages:
                 it is meant to spread: N clients that fail against one dependency at the
                 same instant retry at the same instant, N times over. Jitter turns those
                 bursts back into a distribution.
+
+                It is read only under JitterAdditive.
               name: Jitter
               type: float64
+            - doc: |-
+                JitterMode is how the randomisation is laid on the curve. The zero,
+                JitterAdditive, is the Jitter above — what Value has always done;
+                JitterFull and JitterDecorrelated are the Builders' Library's two
+                other variants, which randomise the whole wait and ignore Jitter. A
+                value outside the three is read as JitterAdditive.
+              name: JitterMode
+              type: JitterMode
+      - doc: |-
+          JitterMode is how a [Value] randomises its waits: [JitterAdditive] (the
+          zero), [JitterFull] or [JitterDecorrelated].
+        methods:
+          - doc: |-
+              String renders the mode for a log line or a configuration dump:
+              "additive", "full", "decorrelated"; a value this package does not
+              define renders "unknown".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: JitterMode
+        underlying: uint8

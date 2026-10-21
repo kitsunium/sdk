@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "backoff.go",
         "doc.go",
+        "jitter.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/backoff",
     visibility = [
@@ -31,6 +32,7 @@ go_test(
         "backoff_external_test.go",
         "backoff_internal_test.go",
         "gen_api_test.go",
+        "jitter_external_test.go",
     ],
     embed = [":backoff"],
 )

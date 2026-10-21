@@ -152,7 +152,11 @@ files:
     name: doc.go
   - decls:
       - entry
+      - replaceable
       - newEntry
+      - (*entry).expired
+      - (*entry).replaceWith
+      - (*entry).release
       - (*entry).arm
       - (*entry).due
     name: entry.go
@@ -189,6 +193,9 @@ files:
       - (*scheduler).idle
       - earliest
       - (*scheduler).fire
+      - (*scheduler).replace
+      - replacement
+      - (*scheduler).runReplacing
       - (*scheduler).run
       - invoke
     name: run.go
@@ -197,6 +204,7 @@ files:
       - New
       - (*scheduler).Add
       - validateEntry
+      - overlapRefusal
       - (*scheduler).begin
       - (*scheduler).finish
       - (*scheduler).emit
@@ -297,6 +305,13 @@ functions:
     name: validateEntry
     params: value coresched.EntryValue
     results: error
+  - doc: |-
+      overlapRefusal names the field of an entry's overlap policy that cannot be
+      honoured — an Overlap this package does not define, or AllowOverlap beside
+      an Overlap that says something else — and reports whether there is one.
+    name: overlapRefusal
+    params: value coresched.EntryValue
+    results: field string, refused bool
 imports:
   atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
@@ -517,16 +532,19 @@ types:
       without taking a mutex on its hot path.
     fields:
       - doc: |-
-          name, schedule, job and allowOverlap are the registration, frozen once
-          Add returns.
+          name, schedule, job, overlap and deadline are the registration, frozen
+          once Add returns; overlap is resolved, AllowOverlap read as
+          OverlapAllow.
         name: name
         type: string
       - name: schedule
         type: coresched.Schedule
       - name: job
         type: coresched.Job
-      - name: allowOverlap
-        type: bool
+      - name: overlap
+        type: coresched.OverlapPolicy
+      - name: deadline
+        type: time.Duration
       - doc: next is the entry's next due instant; loop goroutine only.
         name: next
         type: time.Time
@@ -543,8 +561,36 @@ types:
           a free slot.
         name: busy
         type: atomic.Bool
+      - doc: mu guards current.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          current is the newest run of an OverlapReplace entry — running, or
+          waiting for the one it replaced to return —, nil when there is none.
+        name: current
+        type: "*replaceable"
     kind: struct
     methods:
+      - doc: |-
+          expired reports whether a fire for scheduled, reached at now, is later than
+          the entry's StartingDeadline allows. A non-positive deadline is none.
+        name: expired
+        params: scheduled, now time.Time
+        recv: e *entry
+        results: bool
+      - doc: |-
+          replaceWith makes next the entry's current run and returns the one it
+          replaces, nil when none is running or waiting.
+        name: replaceWith
+        params: next *replaceable
+        recv: e *entry
+        results: "*replaceable"
+      - doc: |-
+          release forgets mine as the entry's current run, unless a newer one has
+          taken its place already.
+        name: release
+        params: mine *replaceable
+        recv: e *entry
       - doc: arm computes the entry's first due instant from now.
         name: arm
         params: now time.Time
@@ -564,6 +610,19 @@ types:
         recv: e *entry
         results: scheduled time.Time, missed int, fire bool
     name: entry
+  - doc: |-
+      replaceable is one run of an OverlapReplace entry: cancel ends its context,
+      done is released once it has returned and published its result, and
+      replaced says a newer fire took its place.
+    fields:
+      - name: cancel
+        type: context.CancelFunc
+      - name: done
+        type: sync.WaitGroup
+      - name: replaced
+        type: atomic.Bool
+    kind: struct
+    name: replaceable
   - doc: |-
       fieldSpec describes one cron field: its human label, its inclusive bounds,
       the names it accepts instead of numbers, and a hint appended to an
@@ -642,6 +701,23 @@ types:
         results: stride int, err error
     name: fieldSpec
   - doc: |-
+      replacement is one fire of an OverlapReplace entry, as runReplacing runs
+      it: its entry, its own run, the run it replaced (nil when none), and the
+      instant and count it reports.
+    fields:
+      - name: entry
+        type: "*entry"
+      - name: mine
+        type: "*replaceable"
+      - name: prev
+        type: "*replaceable"
+      - name: scheduled
+        type: time.Time
+      - name: missed
+        type: int
+    kind: struct
+    name: replacement
+  - doc: |-
       scheduler is the concrete core/app/scheduler.Scheduler. It is unexported: there
       is one canonical engine, so a registry would be over-abstraction (the proc
       and resilience precedents, ADR 0016 / ADR 0026).
@@ -702,6 +778,24 @@ types:
           the return rather than escaping it.
         name: fire
         params: ctx context.Context, entries []*entry, wg *sync.WaitGroup, now time.Time
+        recv: s *scheduler
+      - doc: |-
+          replace starts the fire of an OverlapReplace entry: it becomes the entry's
+          current run, the run it replaces — running, or itself waiting — is told so
+          and its context cancelled, and the new run waits for that one to return
+          before it starts, so two runs of the entry never overlap.
+
+          Lifecycle: one goroutine, registered on wg like every other run, so Run's
+          deferred wg.Wait joins it.
+        name: replace
+        params: ctx context.Context, wg *sync.WaitGroup, e *entry, scheduled time.Time, missed int
+        recv: s *scheduler
+      - doc: |-
+          runReplacing runs one fire of an OverlapReplace entry once the run it
+          replaced has returned and published its result. A run replaced while it
+          was still waiting never starts, and is reported Replaced.
+        name: runReplacing
+        params: ctx context.Context, wg *sync.WaitGroup, r replacement
         recv: s *scheduler
       - doc: run executes one job and publishes its result.
         name: run

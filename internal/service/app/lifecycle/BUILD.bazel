@@ -52,6 +52,7 @@ go_test(
         "start_external_test.go",
         "stop_external_test.go",
         "supervise_external_test.go",
+        "supervise_giveup_external_test.go",
     ],
     # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
     # files at runtime. Bazel's sandbox strips the source-tree relationship, so

@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,12 +16,14 @@ import (
 // atomic. Keeping that split explicit is what lets the loop decide overlap
 // without taking a mutex on its hot path.
 type entry struct {
-	// name, schedule, job and allowOverlap are the registration, frozen once
-	// Add returns.
-	name         string
-	schedule     coresched.Schedule
-	job          coresched.Job
-	allowOverlap bool
+	// name, schedule, job, overlap and deadline are the registration, frozen
+	// once Add returns; overlap is resolved, AllowOverlap read as
+	// OverlapAllow.
+	name     string
+	schedule coresched.Schedule
+	job      coresched.Job
+	overlap  coresched.OverlapPolicy
+	deadline time.Duration
 	// next is the entry's next due instant; loop goroutine only.
 	next time.Time
 	// armed reports whether next holds a real due instant; loop goroutine
@@ -31,17 +35,68 @@ type entry struct {
 	// publishes the result, so an observer that has seen the result also sees
 	// a free slot.
 	busy atomic.Bool
+	// mu guards current.
+	mu sync.Mutex
+	// current is the newest run of an OverlapReplace entry — running, or
+	// waiting for the one it replaced to return —, nil when there is none.
+	current *replaceable
+}
+
+// replaceable is one run of an OverlapReplace entry: cancel ends its context,
+// done is released once it has returned and published its result, and
+// replaced says a newer fire took its place.
+type replaceable struct {
+	cancel   context.CancelFunc
+	done     sync.WaitGroup
+	replaced atomic.Bool
 }
 
 // newEntry builds the engine state for a validated registration.
 func newEntry(value coresched.EntryValue) *entry {
 	//: the registration is copied out of the caller's value; the engine never
 	//: reads EntryValue again, so a caller mutating theirs changes nothing.
+	overlap := value.Overlap
+	//: the older spelling of OverlapAllow; validateEntry refused it beside
+	//: any other policy.
+	if value.AllowOverlap {
+		overlap = coresched.OverlapAllow
+	}
+	//: frozen copy of the registration.
 	return &entry{
-		name:         value.Name,
-		schedule:     value.Schedule,
-		job:          value.Job,
-		allowOverlap: value.AllowOverlap,
+		name:     value.Name,
+		schedule: value.Schedule,
+		job:      value.Job,
+		overlap:  overlap,
+		deadline: value.StartingDeadline,
+	}
+}
+
+// expired reports whether a fire for scheduled, reached at now, is later than
+// the entry's StartingDeadline allows. A non-positive deadline is none.
+func (e *entry) expired(scheduled, now time.Time) bool {
+	//: no deadline, or late within it.
+	return e.deadline > 0 && now.Sub(scheduled) > e.deadline
+}
+
+// replaceWith makes next the entry's current run and returns the one it
+// replaces, nil when none is running or waiting.
+func (e *entry) replaceWith(next *replaceable) *replaceable {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	prev := e.current
+	e.current = next
+	//: the run next waits for, if any.
+	return prev
+}
+
+// release forgets mine as the entry's current run, unless a newer one has
+// taken its place already.
+func (e *entry) release(mine *replaceable) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	//: a newer run is current: leave it.
+	if e.current == mine {
+		e.current = nil
 	}
 }
 

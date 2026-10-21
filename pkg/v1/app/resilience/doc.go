@@ -10,8 +10,8 @@
 //	})
 //
 // Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /
-// CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)
-// matchable via
+// CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed /
+// Throttled) matchable via
 // errs.HasReason / errs.HasCode.
 //
 // # Classifying deterministic failures
@@ -209,5 +209,42 @@
 // [BreakerState]: State reports the phase and its counts, Isolate opens it by
 // hand until Reset, and [BreakerConfig].OnStateChange hears each change of
 // phase in order, outside the breaker's lock. [BreakerConfig].OpenBackoff
-// lengthens each opening while the trials keep failing.
+// lengthens each opening while the trials keep failing, and
+// [BreakerConfig].HalfOpenTrials asks for several successful trials in a row
+// before the breaker closes.
+//
+// # Waiting a bounded time for a slot or a token
+//
+// [NewBulkhead] and [NewRateLimiter] reject at once a call they cannot admit.
+// [NewBulkheadWait] lets a bounded queue of calls wait a bounded time for a
+// slot, and [RateLimiterConfig].MaxWait lets a call wait for a token due
+// soon enough — both on an injected clock, both rejecting as before when
+// their wait is zero:
+//
+//	b := resilience.NewBulkheadWait(resilience.BulkheadWaitConfig{
+//	    Max: 16, Queue: 64, MaxWait: 50 * time.Millisecond,
+//	})
+//	l := resilience.NewRateLimiter(resilience.RateLimiterConfig{
+//	    Rate: 100, Burst: 10, MaxWait: 20 * time.Millisecond,
+//	})
+//
+// # How the backoff is randomised
+//
+// [RetryConfig].JitterMode, like [Backoff].JitterMode, chooses between the
+// AWS Builders' Library's three jitters: [JitterAdditive], the zero and the
+// Jitter fraction added to the curve; [JitterFull], a uniform draw below the
+// curve; and [JitterDecorrelated], each wait drawn from the one before.
+//
+// # Throttling on the client side
+//
+// [NewAdaptiveThrottle] is the adaptive throttling of Google's SRE book: it
+// counts, over a window, the calls it was asked to make and the calls the
+// dependency accepted, and refuses a new call locally — with [Throttled],
+// without sending it — with probability max(0, (requests − K × accepts) /
+// (requests + 1)). A dependency that refuses most of its traffic is no
+// longer sent most of it, and the refusals fade as it accepts again:
+//
+//	t := resilience.NewAdaptiveThrottle(resilience.AdaptiveThrottleConfig{
+//	    Rejected: isOverload, // the caller's own: a 429, a 503, a RESOURCE_EXHAUSTED
+//	})
 package resilience

@@ -26,6 +26,8 @@ sequences:
             - set: threshold
               value: defaultThreshold
           when: threshold < 1
+      - bind: trials
+        eval: max(cfg.HalfOpenTrials, 1)
       - bind: openFor
         eval: cfg.OpenDuration
       - opt:
@@ -37,7 +39,7 @@ sequences:
         eval: |-
           &circuitBreaker{
           		clk: clk, retryable: cfg.Retryable, onChange: cfg.OnStateChange,
-          		threshold: threshold, cooldown: openFor, openFor: openFor, state: coreres.BreakerClosed,
+          		threshold: threshold, trials: trials, cooldown: openFor, openFor: openFor, state: coreres.BreakerClosed,
           	}
       - opt:
           do:
@@ -45,7 +47,7 @@ sequences:
               to: newMisconfigured
           init:
             bind: knob
-            eval: b.configure(cfg)
+            eval: b.configure(&cfg)
             to: b.configure
           when: knob != ""
       - return: b
@@ -570,6 +572,12 @@ sequences:
               to: b.trip
             - return: ""
           when: slow
+      - op: ++
+        set: b.passed
+      - opt:
+          do:
+            - return: ""
+          when: b.passed < b.trials
       - set: b.failures, b.opens
         value: 0, 0
       - eval: b.moveTo(coreres.BreakerClosed)
@@ -660,6 +668,8 @@ sequences:
         eval: b.state
       - set: b.state
         value: to
+      - set: b.passed
+        value: "0"
       - opt:
           do:
             - eval: b.window.clear()
@@ -923,6 +933,110 @@ sequences:
               do:
                 - return: wrapAs(coreres.BulkheadFull, nil)
                   to: wrapAs
+  - of: NewBulkheadWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewBulkheadWait
+        kind: self
+      - id: NewBulkhead
+        kind: internal
+      - id: newWaitingBulkhead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: NewBulkhead(cfg.Max)
+              to: NewBulkhead
+          when: cfg.Queue <= 0 || cfg.MaxWait <= 0
+      - return: newWaitingBulkhead(cfg)
+        to: newWaitingBulkhead
+  - of: newWaitingBulkhead
+    steps:
+      - bind: limit
+        eval: max(cfg.Max, 1)
+      - return: |-
+          &waitingBulkhead{
+          		slots:   make(chan struct{}, limit),
+          		queue:   make(chan struct{}, cfg.Queue),
+          		clk:     timedOrSystem(cfg.Clock),
+          		maxWait: cfg.MaxWait,
+          	}
+  - of: (*waitingBulkhead).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*waitingBulkhead).Run
+        kind: self
+      - id: b.runHeld
+        kind: internal
+      - id: wrapAs
+        kind: internal
+      - id: b.await
+        kind: internal
+    steps:
+      - select:
+          cases:
+            - comm: b.slots <- struct{}{}
+              do:
+                - return: b.runHeld(ctx, op)
+                  to: b.runHeld
+            - default: true
+      - select:
+          cases:
+            - comm: b.queue <- struct{}{}
+            - default: true
+              do:
+                - return: wrapAs(coreres.BulkheadFull, nil)
+                  to: wrapAs
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: b.await(ctx)
+            to: b.await
+          when: err != nil
+      - return: b.runHeld(ctx, op)
+        to: b.runHeld
+  - of: (*waitingBulkhead).runHeld
+    steps:
+      - defer: func() { <-b.slots }()
+      - return: op(ctx)
+  - of: (*waitingBulkhead).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*waitingBulkhead).await
+        kind: self
+      - id: b.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: wrapAs
+        kind: internal
+      - id: ctx.Err
+        kind: value
+    steps:
+      - defer: func() { <-b.queue }()
+      - bind: timer
+        eval: b.clk.NewTimer(b.maxWait)
+        to: b.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: b.slots <- struct{}{}
+              do:
+                - return: nil
+            - comm: <-timer.C()
+              do:
+                - return: wrapAs(coreres.BulkheadFull, nil)
+                  to: wrapAs
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
   - of: NewFallback
     participants:
       - id: caller
@@ -1471,7 +1585,7 @@ sequences:
     steps:
       - opt:
           do:
-            - return: newMisconfigured("ratelimit", "Rate")
+            - return: newMisconfigured(ratelimitPolicy, "Rate")
               to: newMisconfigured
           when: "!usableRate(cfg.Rate)"
       - bind: clk
@@ -1481,8 +1595,23 @@ sequences:
             - set: clk
               value: clock.System
           when: clk == nil
-      - return: newTokenBucket(clk, cfg.Rate, bucketSize(cfg.Burst))
+      - bind: bucket
+        eval: newTokenBucket(clk, cfg.Rate, bucketSize(cfg.Burst))
         to: newTokenBucket
+      - opt:
+          do:
+            - return: bucket
+          when: cfg.MaxWait <= 0
+      - bind: waiter, timed
+        eval: clk.(clock.Timed)
+      - opt:
+          do:
+            - return: newMisconfigured(ratelimitPolicy, "Clock")
+              to: newMisconfigured
+          when: "!timed"
+      - set: bucket.waiter, bucket.maxWait
+        value: waiter, cfg.MaxWait.Seconds()
+      - return: bucket
   - of: usableRate
     steps:
       - return: "!math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0"
@@ -1506,17 +1635,75 @@ sequences:
         kind: internal
       - id: rateLimited
         kind: internal
+      - id: t.await
+        kind: internal
     steps:
+      - bind: admitted, wait
+        eval: t.take()
+        to: t.take
       - opt:
           do:
             - return: rateLimited(wait)
               to: rateLimited
-          init:
-            bind: admitted, wait
-            eval: t.take()
-            to: t.take
           when: "!admitted"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: t.await(ctx, wait)
+                  to: t.await
+                when: err != nil
+          when: wait > 0
       - return: op(ctx)
+  - of: (*tokenBucket).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBucket).await
+        kind: self
+      - id: t.waiter.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: t.giveBack
+        kind: internal
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: timer
+        eval: t.waiter.NewTimer(time.Duration(math.Ceil(waitSeconds * nanosPerSecond)))
+        to: t.waiter.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - eval: t.giveBack()
+                  to: t.giveBack
+                - return: ctx.Err()
+                  to: ctx.Err
+  - of: (*tokenBucket).giveBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBucket).giveBack
+        kind: self
+      - id: t.refill
+        kind: internal
+    steps:
+      - lock:
+          mutex: t.mu
+      - eval: t.refill()
+        to: t.refill
+      - set: t.tokens
+        value: min(t.tokens+oneToken, t.burst)
   - of: rateLimited
     participants:
       - id: caller
@@ -1534,11 +1721,39 @@ sequences:
         kind: actor
       - id: (*tokenBucket).take
         kind: self
-      - id: t.clk.Now
-        kind: value
+      - id: t.refill
+        kind: internal
     steps:
       - lock:
           mutex: t.mu
+      - eval: t.refill()
+        to: t.refill
+      - opt:
+          do:
+            - op: "-="
+              set: t.tokens
+              value: oneToken
+            - return: true, 0
+          when: t.tokens >= oneToken
+      - set: waitSeconds
+        value: (oneToken - t.tokens) / t.rate
+      - opt:
+          do:
+            - op: "-="
+              set: t.tokens
+              value: oneToken
+            - return: true, waitSeconds
+          when: waitSeconds <= t.maxWait
+      - return: false, waitSeconds
+  - of: (*tokenBucket).refill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBucket).refill
+        kind: self
+      - id: t.clk.Now
+        kind: value
+    steps:
       - bind: now
         eval: t.clk.Now()
         to: t.clk.Now
@@ -1552,14 +1767,6 @@ sequences:
             - set: t.tokens
               value: t.burst
           when: t.tokens > t.burst
-      - opt:
-          do:
-            - op: "-="
-              set: t.tokens
-              value: oneToken
-            - return: true, 0
-          when: t.tokens >= oneToken
-      - return: false, (oneToken - t.tokens) / t.rate
   - of: NewRetry
     participants:
       - id: caller
@@ -1628,6 +1835,9 @@ sequences:
       - var:
           name: lastErr
           type: error
+      - var:
+          name: previous
+          type: time.Duration
       - loop:
           do:
             - opt:
@@ -1637,7 +1847,7 @@ sequences:
                         - return: waitErr
                       init:
                         bind: waitErr
-                        eval: r.wait(ctx, attempt, lastErr)
+                        eval: r.wait(ctx, attempt, lastErr, &previous)
                         to: r.wait
                       when: waitErr != nil
                 when: attempt > 0
@@ -1720,7 +1930,7 @@ sequences:
         kind: value
     steps:
       - bind: delay
-        eval: r.delay(attempt, failed)
+        eval: r.delay(attempt, failed, previous)
         to: r.delay
       - opt:
           do:
@@ -1748,7 +1958,7 @@ sequences:
         kind: self
       - id: capDelay
         kind: internal
-      - id: r.jittered
+      - id: r.curveWait
         kind: internal
     steps:
       - opt:
@@ -1762,8 +1972,36 @@ sequences:
                   eval: r.cfg.Delay(attempt, failed)
                 when: ok
           when: r.cfg.Delay != nil
-      - return: r.jittered(r.backoff(attempt))
-        to: r.jittered
+      - set: "*previous"
+        to: r.curveWait
+        value: r.curveWait(attempt, *previous)
+      - return: "*previous"
+  - of: (*retryRunner).curveWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).curveWait
+        kind: self
+      - id: kbackoff
+        kind: package
+      - id: r.jittered
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: kbackoff.JitterFull
+              do:
+                - return: kbackoff.Full(r.backoff(attempt))
+                  to: kbackoff
+            - case: kbackoff.JitterDecorrelated
+              do:
+                - return: kbackoff.Decorrelate(r.cfg.BaseDelay, r.cfg.MaxDelay, previous)
+                  to: kbackoff
+            - default: true
+              do:
+                - return: r.jittered(r.backoff(attempt))
+                  to: r.jittered
+          "on": r.cfg.JitterMode
   - of: capDelay
     steps:
       - opt:
@@ -1947,6 +2185,219 @@ sequences:
             - return: "true"
           when: pred == nil
       - return: pred(err)
+  - of: NewAdaptiveThrottle
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewAdaptiveThrottle
+        kind: self
+      - id: resolveThrottle
+        kind: internal
+      - id: newMisconfigured
+        kind: internal
+    steps:
+      - bind: settings, knob
+        eval: resolveThrottle(cfg)
+        to: resolveThrottle
+      - opt:
+          do:
+            - return: newMisconfigured(throttlePolicy, knob)
+              to: newMisconfigured
+          when: knob != ""
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - bind: random
+        eval: cfg.Random
+      - opt:
+          do:
+            - set: random
+              value: rand.Float64
+          when: random == nil
+      - return: |-
+          &adaptiveThrottle{
+          		clk: clk, rejected: cfg.Rejected, random: random, k: settings.k,
+          		window: newThrottleWindow(settings, clk.Now()),
+          	}
+  - of: (*adaptiveThrottle).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*adaptiveThrottle).Run
+        kind: self
+      - id: wrapAs
+        kind: internal
+      - id: t.accept
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coreres.Throttled, nil)
+              to: wrapAs
+          when: t.refuse()
+      - bind: err
+        eval: op(ctx)
+      - opt:
+          do:
+            - eval: t.accept()
+              to: t.accept
+          when: t.accepted(ctx, err)
+      - return: err
+  - of: (*adaptiveThrottle).refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*adaptiveThrottle).refuse
+        kind: self
+      - id: t.window.advance
+        kind: internal
+      - id: t.window.refusal
+        kind: internal
+    steps:
+      - lock:
+          mutex: t.mu
+      - bind: slot
+        eval: t.window.advance(t.clk.Now())
+        to: t.window.advance
+      - bind: p
+        eval: t.window.refusal(t.k)
+        to: t.window.refusal
+      - op: ++
+        set: slot.requests
+      - op: ++
+        set: t.window.requests
+      - opt:
+          do:
+            - return: "false"
+          when: p <= 0
+      - return: t.random() < p
+  - of: (*adaptiveThrottle).accepted
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: err == nil || ctx.Err() != nil && errors.Is(err, context.Canceled)
+      - opt:
+          do:
+            - return: "false"
+          when: t.rejected == nil
+      - return: "!t.rejected(err)"
+  - of: (*adaptiveThrottle).accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*adaptiveThrottle).accept
+        kind: self
+      - id: t.window.advance
+        kind: internal
+    steps:
+      - lock:
+          mutex: t.mu
+      - bind: slot
+        eval: t.window.advance(t.clk.Now())
+        to: t.window.advance
+      - op: ++
+        set: slot.accepts
+      - op: ++
+        set: t.window.accepts
+  - of: resolveThrottle
+    steps:
+      - bind: settings
+        eval: |-
+          throttleSettings{
+          		k:       orRatio(cfg.K, defaultThrottleK),
+          		window:  orDuration(cfg.Window, defaultThrottleWindow),
+          		buckets: orInt(cfg.Buckets, defaultWindowBuckets),
+          	}
+      - switch:
+          cases:
+            - case: math.IsNaN(settings.k) || math.IsInf(settings.k, 0) || settings.k < minThrottleK
+              do:
+                - return: settings, "K"
+            - case: settings.buckets < 0 || settings.buckets > maxWindowBuckets
+              do:
+                - return: settings, "Buckets"
+            - case: settings.window < 0 || settings.window/time.Duration(settings.buckets) <= 0
+              do:
+                - return: settings, "Window"
+            - default: true
+              do:
+                - return: settings, ""
+  - of: newThrottleWindow
+    steps:
+      - bind: width
+        eval: s.window / time.Duration(s.buckets)
+      - return: "throttleWindow{buckets: make([]throttleBucket, s.buckets), width: width, origin: origin, headEnd: width}"
+  - of: (*throttleWindow).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*throttleWindow).advance
+        kind: self
+      - id: now.Sub
+        kind: value
+      - id: w.drop
+        kind: internal
+      - id: epochEnd
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: int64(len(w.buckets))
+      - bind: elapsed
+        eval: now.Sub(w.origin)
+        to: now.Sub
+      - opt:
+          do:
+            - return: "&w.buckets[w.head%n]"
+          when: elapsed < w.headEnd
+      - bind: epoch
+        eval: int64(elapsed / w.width)
+      - alt:
+          - do:
+              - eval: clear(w.buckets)
+              - set: w.requests, w.accepts
+                value: 0, 0
+            when: epoch-w.head >= n
+          - do:
+              - loop:
+                  cond: e <= epoch
+                  do:
+                    - eval: w.drop(&w.buckets[e%n])
+                      to: w.drop
+                  init: e := w.head + 1
+                  post: e++
+            else: true
+      - set: w.head
+        value: epoch
+      - set: w.headEnd
+        to: epochEnd
+        value: epochEnd(epoch, w.width)
+      - return: "&w.buckets[epoch%n]"
+  - of: (*throttleWindow).drop
+    steps:
+      - op: "-="
+        set: w.requests
+        value: b.requests
+      - op: "-="
+        set: w.accepts
+        value: b.accepts
+      - set: "*b"
+        value: throttleBucket{}
+  - of: (*throttleWindow).refusal
+    steps:
+      - bind: requests
+        eval: float64(w.requests)
+      - bind: excess
+        eval: requests - k*float64(w.accepts)
+      - opt:
+          do:
+            - return: "0"
+          when: excess <= 0
+      - return: excess / (requests + 1)
   - of: NewTimeout
     participants:
       - id: caller

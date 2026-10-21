@@ -42,7 +42,9 @@ Around a DST transition the rules are fixed and documented rather than emergent:
 
 The scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its slot past the next deadline, the job runs once for the most recent due instant and [Result](#Result).Missed reports how many older ones were dropped. It never replays them: a process that was down for a day would come back to a burst of stale work at the worst possible moment. Fires missed while the process was not running are invisible — this scheduler keeps no state across restarts.
 
-When a run has not returned by the next deadline, the default is to SKIP that fire and report it as [Result](#Result).Skipped. Queueing grows without bound behind a persistently slow job; running copies in parallel duplicates a side effect the SDK cannot know is safe. A caller who knows concurrent copies are safe says so with [Entry](#Entry).AllowOverlap — an in-code assertion, like resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
+When a run has not returned by the next deadline, the default is to SKIP that fire and report it as [Result](#Result).Skipped. Queueing grows without bound behind a persistently slow job; running copies in parallel duplicates a side effect the SDK cannot know is safe. A caller who knows concurrent copies are safe says so with [Entry](#Entry).AllowOverlap — an in-code assertion, like resilience.HedgeConfig.Idempotent, whose zero value is the safe answer. [Entry](#Entry).Overlap names the third answer, Kubernetes' Replace: [OverlapReplace](#OverlapReplace) cancels the run still going and starts the new one once it has returned, reporting the cancelled one with [Result](#Result).Replaced.
+
+A late fire runs however late by default. [Entry](#Entry).StartingDeadline bounds it: an instant missed by more than that is not run but reported with [Result](#Result).Expired — a 02:00 report is not produced at 09:00 because the machine slept through the night.
 
 ### What is guaranteed
 
@@ -52,6 +54,7 @@ A failing job never stops the scheduler and never affects another entry. A PANIC
 
 ## Index
 
+- [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Every\(period time.Duration\) \(schedule Schedule, err error\)](<#Every>)
 - [func New\(cfg Config\) Scheduler](<#New>)
@@ -60,11 +63,42 @@ A failing job never stops the scheduler and never affects another entry. A PANIC
 - [type Config](<#Config>)
 - [type Entry](<#Entry>)
 - [type Job](<#Job>)
+- [type OverlapPolicy](<#OverlapPolicy>)
+  - [func \(OverlapPolicy\) String\(\) string](<#OverlapPolicy.String>)
 - [type Result](<#Result>)
 - [type Schedule](<#Schedule>)
 - [type Scheduler](<#Scheduler>)
   - [func \(Scheduler\) Add\(entry EntryValue\) error](<#Scheduler.Add>)
   - [func \(Scheduler\) Run\(ctx context.Context\) error](<#Scheduler.Run>)
+
+## Constants
+
+<a name="OverlapAllow"></a>
+```go
+const OverlapAllow OverlapPolicy = 1
+```
+
+OverlapAllow runs a fire beside its previous run.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapAllow`.
+
+<a name="OverlapReplace"></a>
+```go
+const OverlapReplace OverlapPolicy = 2
+```
+
+OverlapReplace cancels the previous run and runs the fire once that run has returned.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapReplace`.
+
+<a name="OverlapSkip"></a>
+```go
+const OverlapSkip OverlapPolicy = 0
+```
+
+OverlapSkip skips a fire whose previous run is still going. It is the zero.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapSkip`.
 
 ## Variables
 
@@ -84,7 +118,7 @@ Code `0.2.12.2` · reason `DUPLICATE_JOB` · public "A job is already registered
 var InvalidEntry *errs.Error
 ```
 
-InvalidEntry is returned by Add for an entry that could never run — an empty Name, a nil Schedule, a nil Job. The "missing" field names which.
+InvalidEntry is returned by Add for an entry that could never run — an empty Name, a nil Schedule, a nil Job, named by the "missing" field — or whose overlap policy it cannot honour, named by the "field" field.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/scheduler.InvalidEntry`.
 
@@ -255,11 +289,11 @@ Entry is an alias of `github.com/kitsunium/sdk/internal/core/app/scheduler.Entry
 type Entry struct {
 	// Name identifies the entry in results and errors. It must be non-empty
 	// and unique within one Scheduler.
-	Name         string
+	Name             string
 	// Schedule decides when the Job is due.
-	Schedule     Schedule
+	Schedule         Schedule
 	// Job is the work to run.
-	Job          Job
+	Job              Job
 	// AllowOverlap permits a fire while the previous run of THIS entry has not
 	// returned. The zero value (false) skips that fire and reports it as
 	// [ResultValue.Skipped] — the safe default, because the SDK cannot know
@@ -267,8 +301,27 @@ type Entry struct {
 	// getting it wrong is a duplicated side effect rather than an error.
 	// Setting it is the caller's in-code assertion that concurrent copies are
 	// safe, the same instrument resilience.HedgeConfig.Idempotent uses for the
-	// same class of claim (ADR 0031).
-	AllowOverlap bool
+	// same class of claim (ADR 0031). It is OverlapAllow written as a bool,
+	// kept because it was there first; set with any Overlap but
+	// OverlapSkip or OverlapAllow, Add refuses the entry.
+	AllowOverlap     bool
+	// Overlap is what a fire does while the previous run of THIS entry has
+	// not returned: OverlapSkip — the zero — skips it, OverlapAllow runs it
+	// beside, OverlapReplace cancels the previous run and runs this one
+	// once it has returned.
+	Overlap          OverlapPolicy
+	// StartingDeadline bounds how late a fire may start. When the scheduler
+	// wakes after a due instant — a machine that slept, a timer that
+	// overran — it runs the latest instant missed, however late; with a
+	// positive StartingDeadline, an instant more than StartingDeadline in
+	// the past is not run but reported with [ResultValue].Expired, as
+	// Kubernetes' startingDeadlineSeconds does. Zero, or less, is no
+	// deadline, as before the field existed.
+	//
+	// It is how a job whose run is worth something only near its instant
+	// — a report for 02:00, a rotation tied to the hour — says so: a run
+	// long after the fact is a surprise, not a catch-up.
+	StartingDeadline time.Duration
 }
 ```
 
@@ -286,6 +339,30 @@ Job is an alias of `github.com/kitsunium/sdk/internal/core/app/scheduler.Job`, d
 ```go
 type Job func(ctx context.Context) error
 ```
+
+<a name="OverlapPolicy"></a>
+## type [OverlapPolicy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
+
+OverlapPolicy is the public alias for what a fire does while the previous run of its entry is still going: skip, allow or replace.
+
+```go
+type OverlapPolicy = coresched.OverlapPolicy
+```
+
+OverlapPolicy is an alias of `github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy`, declared as:
+
+```go
+type OverlapPolicy uint8
+```
+
+<a name="OverlapPolicy.String"></a>
+### func \(OverlapPolicy\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/scheduler/scheduler_overlap.go>)
+
+```go
+func (OverlapPolicy) String() string
+```
+
+String renders the policy for a log line: "skip", "allow", "replace"; a value this package does not define renders "unknown".
 
 <a name="Result"></a>
 ## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/scheduler/gen_facade.go>)
@@ -307,9 +384,9 @@ type Result struct {
 	// oldest: the scheduler skips rather than catches up, so the run that
 	// happens is the current one and the stale ones are what got dropped.
 	Scheduled time.Time
-	// Started is when the Job was invoked. Zero when Skipped.
+	// Started is when the Job was invoked. Zero when it was not.
 	Started   time.Time
-	// Finished is when the Job returned. Zero when Skipped.
+	// Finished is when the Job returned. Zero when it was not invoked.
 	Finished  time.Time
 	// Missed counts the due instants that were dropped because they had
 	// already passed when the scheduler woke — a machine that slept, a
@@ -321,8 +398,17 @@ type Result struct {
 	// not visible to it and are not counted here.
 	Missed    int
 	// Skipped reports that the fire was not run because the previous run of
-	// this entry had not returned and AllowOverlap is false.
+	// this entry had not returned and its overlap policy is OverlapSkip.
 	Skipped   bool
+	// Expired reports that the fire was not run because the scheduler came
+	// to it more than the entry's StartingDeadline after its Scheduled
+	// instant. Started and Finished are zero.
+	Expired   bool
+	// Replaced reports a run whose context was cancelled because a newer
+	// fire of the same OverlapReplace entry replaced it; Err is what the
+	// Job returned. A run replaced before it started has zero Started and
+	// Finished: it waited for its predecessor and never ran.
+	Replaced  bool
 	// Err is the Job's own error, verbatim and unwrapped, so errors.Is against
 	// the caller's own sentinels keeps working. It is [JobPanicked] when the
 	// Job panicked and the scheduler recovered.

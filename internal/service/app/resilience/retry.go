@@ -24,7 +24,9 @@ type retryRunner struct {
 // verbatim, so a deterministic failure neither spends the budget nor hides
 // behind RetryExhausted. When cfg.Delay reads a wait from the failure — a
 // Retry-After, a RateLimited rejection — that wait replaces the backoff,
-// held at cfg.MaxDelay.
+// held at cfg.MaxDelay. cfg.JitterMode chooses how the backoff is
+// randomised: added Jitter (the zero), full, or decorrelated from the
+// previous wait of the same call.
 //
 // With a cfg.Budget, every success and every retryable failure is recorded
 // in it, and a retry it refuses ends the loop with RetryBudgetExceeded
@@ -71,12 +73,14 @@ func newRetryRunner(cfg RetryConfig) coreres.Runner {
 func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 	//: track the last error so exhaustion can wrap it.
 	var lastErr error
+	//: the last wait the curve drew, which a decorrelated draw grows from.
+	var previous time.Duration
 	//: each attempt (attempt 0 runs immediately; later ones back off first).
 	for attempt := range r.cfg.MaxAttempts {
 		//: a non-first attempt waits the backoff (or aborts on ctx).
 		if attempt > 0 {
 			//: a cancelled wait propagates ctx.Err immediately.
-			if waitErr := r.wait(ctx, attempt, lastErr); waitErr != nil {
+			if waitErr := r.wait(ctx, attempt, lastErr, &previous); waitErr != nil {
 				//: ctx cancelled mid-backoff.
 				return waitErr
 			}
@@ -143,10 +147,11 @@ func (r *retryRunner) mayRetry(attempt int) bool {
 }
 
 // wait sleeps the delay before the given attempt on the configured clock,
-// returning ctx.Err on cancel. failed is the error of the attempt before it.
-// OnRetry hears the retry first, on this goroutine.
-func (r *retryRunner) wait(ctx context.Context, attempt int, failed error) error {
-	delay := r.delay(attempt, failed)
+// returning ctx.Err on cancel. failed is the error of the attempt before it,
+// and previous the call's last wait drawn from the curve, which a wait drawn
+// from the curve replaces. OnRetry hears the retry first, on this goroutine.
+func (r *retryRunner) wait(ctx context.Context, attempt int, failed error, previous *time.Duration) error {
+	delay := r.delay(attempt, failed, previous)
 	//: the caller's hook, synchronous: it sees the wait before it starts.
 	if r.cfg.OnRetry != nil {
 		//: the retry's number, its cause and its wait.
@@ -169,9 +174,11 @@ func (r *retryRunner) wait(ctx context.Context, attempt int, failed error) error
 }
 
 // delay is the wait before attempt: the one cfg.Delay reads from the failure
-// when it reads one, held at MaxDelay and never negative, else the jittered
-// backoff curve.
-func (r *retryRunner) delay(attempt int, failed error) time.Duration {
+// when it reads one, held at MaxDelay and never negative, else the backoff
+// curve randomised as JitterMode says — and then recorded in previous, the
+// wait a decorrelated draw grows from. An imposed wait is not recorded: it is
+// the other side's, not the curve's.
+func (r *retryRunner) delay(attempt int, failed error, previous *time.Duration) time.Duration {
 	//: the failure decides first, when the caller asked it to.
 	if r.cfg.Delay != nil {
 		//: a delay the failure named replaces the curve, jitter included.
@@ -180,8 +187,30 @@ func (r *retryRunner) delay(attempt int, failed error) time.Duration {
 			return capDelay(imposed, r.cfg.MaxDelay)
 		}
 	}
-	//: the curve, as before the field existed.
-	return r.jittered(r.backoff(attempt))
+	*previous = r.curveWait(attempt, *previous)
+	//: the curve's draw.
+	return *previous
+}
+
+// curveWait is the backoff curve's wait before attempt, randomised as
+// JitterMode says: Jitter added (the zero), a full draw below the curve, or a
+// draw decorrelated from previous, the call's last curve wait.
+func (r *retryRunner) curveWait(attempt int, previous time.Duration) time.Duration {
+	//: the mode decides how the randomisation is laid on.
+	switch r.cfg.JitterMode {
+	//: uniform in [0, the capped curve].
+	case kbackoff.JitterFull:
+		//: Full Jitter.
+		return kbackoff.Full(r.backoff(attempt))
+	//: drawn from the wait this call actually waited before.
+	case kbackoff.JitterDecorrelated:
+		//: Decorrelated Jitter; the first retry starts from BaseDelay.
+		return kbackoff.Decorrelate(r.cfg.BaseDelay, r.cfg.MaxDelay, previous)
+	//: JitterAdditive, the zero, and any value the kernel does not define.
+	default:
+		//: the curve, as before the mode existed.
+		return r.jittered(r.backoff(attempt))
+	}
 }
 
 // capDelay holds d into [0, ceiling], a non-positive ceiling being no cap.

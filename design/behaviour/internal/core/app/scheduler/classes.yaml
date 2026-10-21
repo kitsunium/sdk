@@ -1,5 +1,32 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The three answers to a fire that comes due while the previous run of the
+      same entry has not returned — the concurrencyPolicy of a Kubernetes
+      CronJob, under the scheduler's names. The zero is the safe one.
+    grouped: true
+    items:
+      - doc: |-
+          OverlapSkip does not run the fire and reports it as
+          [ResultValue].Skipped. It is the zero OverlapPolicy: the SDK cannot know
+          whether two copies of a Job are safe side by side.
+        name: OverlapSkip
+        type: OverlapPolicy
+        value: iota
+      - doc: |-
+          OverlapAllow runs the fire beside the previous run: the caller's in-code
+          assertion that concurrent copies are safe. [EntryValue].AllowOverlap
+          says the same.
+        name: OverlapAllow
+      - doc: |-
+          OverlapReplace cancels the previous run's context and runs the fire once
+          that run has returned — never beside it. The cancelled run is reported
+          with [ResultValue].Replaced. A fire that comes due while its own
+          predecessor is still returning replaces the waiting one in turn, so at
+          most one run waits: the newest.
+        name: OverlapReplace
+    name: OverlapSkip
 files:
   - decls: []
     name: doc.go
@@ -10,6 +37,11 @@ files:
   - decls:
       - EntryValue
     name: scheduler_entry.go
+  - decls:
+      - OverlapPolicy
+      - OverlapSkip
+      - OverlapPolicy.String
+    name: scheduler_overlap.go
   - decls:
       - ResultValue
     name: scheduler_result.go
@@ -48,11 +80,41 @@ types:
           getting it wrong is a duplicated side effect rather than an error.
           Setting it is the caller's in-code assertion that concurrent copies are
           safe, the same instrument resilience.HedgeConfig.Idempotent uses for the
-          same class of claim (ADR 0031).
+          same class of claim (ADR 0031). It is OverlapAllow written as a bool,
+          kept because it was there first; set with any Overlap but
+          OverlapSkip or OverlapAllow, Add refuses the entry.
         name: AllowOverlap
         type: bool
+      - doc: |-
+          Overlap is what a fire does while the previous run of THIS entry has
+          not returned: OverlapSkip — the zero — skips it, OverlapAllow runs it
+          beside, OverlapReplace cancels the previous run and runs this one
+          once it has returned.
+        name: Overlap
+        type: OverlapPolicy
+      - doc: |-
+          StartingDeadline bounds how late a fire may start. When the scheduler
+          wakes after a due instant — a machine that slept, a timer that
+          overran — it runs the latest instant missed, however late; with a
+          positive StartingDeadline, an instant more than StartingDeadline in
+          the past is not run but reported with [ResultValue].Expired, as
+          Kubernetes' startingDeadlineSeconds does. Zero, or less, is no
+          deadline, as before the field existed.
+
+          It is how a job whose run is worth something only near its instant
+          — a report for 02:00, a rotation tied to the hour — says so: a run
+          long after the fact is a surprise, not a catch-up.
+        name: StartingDeadline
+        type: time.Duration
     kind: struct
     name: EntryValue
+  - kind: named
+    methods:
+      - name: String
+        recv: p OverlapPolicy
+        results: string
+    name: OverlapPolicy
+    underlying: uint8
   - fields:
       - doc: Name is the entry's registered name.
         name: Name
@@ -64,10 +126,10 @@ types:
           happens is the current one and the stale ones are what got dropped.
         name: Scheduled
         type: time.Time
-      - doc: Started is when the Job was invoked. Zero when Skipped.
+      - doc: Started is when the Job was invoked. Zero when it was not.
         name: Started
         type: time.Time
-      - doc: Finished is when the Job returned. Zero when Skipped.
+      - doc: Finished is when the Job returned. Zero when it was not invoked.
         name: Finished
         type: time.Time
       - doc: |-
@@ -83,8 +145,21 @@ types:
         type: int
       - doc: |-
           Skipped reports that the fire was not run because the previous run of
-          this entry had not returned and AllowOverlap is false.
+          this entry had not returned and its overlap policy is OverlapSkip.
         name: Skipped
+        type: bool
+      - doc: |-
+          Expired reports that the fire was not run because the scheduler came
+          to it more than the entry's StartingDeadline after its Scheduled
+          instant. Started and Finished are zero.
+        name: Expired
+        type: bool
+      - doc: |-
+          Replaced reports a run whose context was cancelled because a newer
+          fire of the same OverlapReplace entry replaced it; Err is what the
+          Job returned. A run replaced before it started has zero Started and
+          Finished: it waited for its predecessor and never ran.
+        name: Replaced
         type: bool
       - doc: |-
           Err is the Job's own error, verbatim and unwrapped, so errors.Is against

@@ -25,10 +25,11 @@ stop. Stdlib-only → dep-light; cross-OS portable.
 | `PhaseStart` / `PhaseStop` | the closed two-value set |
 | `InvalidComponent` / `DuplicateComponent` / `LifecycleRunning` / `ComponentPanicked` | core sentinels (`0.2.19.*`) |
 | `StartFailed` / `StopFailed` / `StopTimeout` / `UnwindFailed` / `ReadinessFailed` | engine sentinels (`0.3.49.*`) |
-| `NewSupervisor(name, run, cfg)` | the supervisor; `Supervisor` (`Start`, `Stop`, `Component`), `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`) — aliases onto `service/app/lifecycle` |
-| `SupervisionEvent` / `SupervisionPhase` + `SupervisionRunStarted` … `SupervisionStopped` | what the observer is told |
+| `NewSupervisor(name, run, cfg)` | the supervisor; `Supervisor` (`Start`, `Stop`, `Component`), `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`, `GiveUpAfter`) — aliases onto `service/app/lifecycle` |
+| `GiveUp` / `Supervisor.Check` | alias onto `GiveUpValue{Restarts, Within}`, Erlang's restart intensity: more than `Restarts` early ends within `Within` and the supervision gives up; the zero restarts forever. `Check(ctx) error` has a health check's shape and reports `SupervisorGaveUp` once it did (ADR 0184) |
+| `SupervisionEvent` / `SupervisionPhase` + `SupervisionRunStarted` … `SupervisionStopped`, `SupervisionGaveUp` | what the observer is told |
 | `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun` | 1s / 1m / 1m — the clamps of a zero `Backoff` and a non-positive `HealthyAfter` |
-| `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` | supervisor sentinels (`0.3.49.6`–`0.3.49.8`) |
+| `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` / `SupervisorGaveUp` | supervisor sentinels (`0.3.49.6`–`0.3.49.9`) |
 
 ## Conventions
 

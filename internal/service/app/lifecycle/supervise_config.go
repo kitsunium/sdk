@@ -54,6 +54,57 @@ type SupervisorConfig struct {
 	// HealthyAfter is how long a run must last for its end to reset the
 	// consecutive-failure count. Not positive means [DefaultHealthyRun].
 	HealthyAfter time.Duration
+	// GiveUpAfter bounds how often the function may end early before the
+	// supervisor stops restarting it. The zero value restarts it forever,
+	// as a supervisor always has.
+	GiveUpAfter GiveUpValue
+}
+
+// GiveUpValue is a restart intensity, Erlang's: a supervisor gives up when
+// its function ends early more than Restarts times within any span of
+// Within on the supervisor's clock. The (Restarts+1)-th early end inside
+// Within is not restarted: the supervision ends, its observer hears
+// SupervisionGaveUp, and Supervisor.Check reports SupervisorGaveUp, so
+// the level above — a liveness probe, an orchestrator — decides what
+// happens next instead of a loop that cannot succeed restarting forever.
+//
+// The zero value never gives up. Restarts zero with a positive Within
+// gives up at the first early end. A negative field, and a positive
+// Restarts without a positive Within, are refused by NewSupervisor with
+// SupervisorMisconfigured: a bound with no span is no bound.
+type GiveUpValue struct {
+	// Restarts is how many early ends Within tolerates, each restarted.
+	Restarts int
+	// Within is the span the early ends are counted over.
+	Within time.Duration
+}
+
+// enabled reports whether the bound gives up at all: its zero value never does.
+func (g GiveUpValue) enabled() bool {
+	//: a span to count over is what turns the bound on.
+	return g.Within > 0
+}
+
+// validateGiveUp refuses a restart intensity that is no bound: a negative
+// field, or restarts counted over no span.
+func validateGiveUp(name string, giveUp GiveUpValue) error {
+	//: the field the refusal names, empty when the bound is usable.
+	field := ""
+	//: the first field that cannot be honoured.
+	switch {
+	case giveUp.Restarts < 0:
+		field = "GiveUpAfter.Restarts"
+	case giveUp.Within < 0, giveUp.Restarts > 0 && giveUp.Within == 0:
+		field = "GiveUpAfter.Within"
+	}
+	//: usable, or the zero value.
+	if field == "" {
+		//: accepted.
+		return nil
+	}
+	//: SupervisorMisconfigured, naming the field.
+	return kerrs.Wrap(corelc.SupervisorMisconfigured, kerrs.WrapParams{},
+		kerrs.String("argument", field), kerrs.String("supervisor", name))
 }
 
 // validateSupervisor refuses a supervisor that could never run.

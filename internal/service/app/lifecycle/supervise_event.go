@@ -5,7 +5,7 @@ import "time"
 // SupervisionPhase names what a [SupervisionEventValue] reports.
 type SupervisionPhase uint8
 
-// The four phases of a supervision. The zero value is none of them, so an
+// The phases of a supervision. The zero value is none of them, so an
 // event that was never filled in reads as "unknown".
 const (
 	// SupervisionRunStarted: a run of the function began.
@@ -18,12 +18,16 @@ const (
 	// SupervisionStopped: the supervision is over, and the goroutine
 	// that ran it is returning.
 	SupervisionStopped
+	// SupervisionGaveUp: a run ended early once too often for GiveUpAfter,
+	// and the function is not restarted; Err is SupervisorGaveUp. The
+	// Stopped event follows it.
+	SupervisionGaveUp
 )
 
 // String renders the phase for a log line; a value this package never mints
 // renders as "unknown".
 func (p SupervisionPhase) String() string {
-	//: a closed set of four, plus the honest answer for anything else.
+	//: a closed set of five, plus the honest answer for anything else.
 	switch p {
 	//: a run began.
 	case SupervisionRunStarted:
@@ -41,6 +45,10 @@ func (p SupervisionPhase) String() string {
 	case SupervisionStopped:
 		//: stopped.
 		return "stopped"
+	//: the supervision gave up.
+	case SupervisionGaveUp:
+		//: gave up.
+		return "gave up"
 	//: a value this package never mints.
 	default:
 		//: name the absence rather than print a number.
@@ -55,7 +63,8 @@ type SupervisionEventValue struct {
 	// Err is what an ended run returned: nil when it returned nil before its
 	// context ended, RunPanicked for a panic, and nil too when it ended
 	// because the supervision was stopping and it returned its context's
-	// error — the way out, not a failure.
+	// error — the way out, not a failure. On SupervisionGaveUp it is
+	// SupervisorGaveUp, carrying the last run's error as a field.
 	Err error
 	// At is when the event happened, on the supervisor's clock.
 	At time.Time
@@ -65,8 +74,8 @@ type SupervisionEventValue struct {
 	Duration time.Duration
 	// Delay is how long a restart waits before the next run.
 	Delay time.Duration
-	// Run numbers the run the event is about, from 1; the Stopped event
-	// carries the last one.
+	// Run numbers the run the event is about, from 1; the Stopped and
+	// GaveUp events carry the last one.
 	Run int
 	// Failures is how many runs in a row have ended early, counting this
 	// one — the attempt the backoff is computed for.

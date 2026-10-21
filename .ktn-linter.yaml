@@ -1027,10 +1027,19 @@ rules:
   # exists for — and wantServing cannot be folded into want, because deriving
   # it would assert Status.Serving() against itself instead of pinning that
   # Degraded serves.
+  #
+  # core/app/scheduler.ResultValue carries Skipped, Expired and Replaced (ADR
+  # 0184): three facts a published value reports to the caller's OnResult hook,
+  # read by name — `if r.Expired` — in the caller's own code and in every log
+  # line built from it. A bitfield would make each consumer decode bits of an
+  # SDK-private layout, and Replaced is not exclusive with a run that happened,
+  # so the three are not one enum either.
   KTN-STRUCT-FLAGS:
     exclude:
       - "**/internal/service/app/health/entry.go"
       - "internal/service/app/health/entry.go"
+      - "**/internal/core/app/scheduler/scheduler_result.go"
+      - "internal/core/app/scheduler/scheduler_result.go"
       - "**/internal/service/app/health/probe_external_test.go"
       - "internal/service/app/health/probe_external_test.go"
 
@@ -1443,6 +1452,19 @@ rules:
   # too but is not flagged (it is not a pure forwarder).
   KTN-VAR-BIGSTRUCT:
     exclude:
+      # service/app/resilience.BreakerConfig (72 bytes) and
+      # service/app/lifecycle.SupervisorConfig (88 bytes) crossed 64 bytes when
+      # ADR 0184 gave them HalfOpenTrials and GiveUpAfter. Both are published
+      # configs passed BY VALUE to their constructor — NewCircuitBreaker(cfg),
+      # NewSupervisor(name, run, cfg) — written as a composite literal at the
+      # call site, whose zero fields are the documented defaults (ADR 0031): a
+      # pointer would make nil a second zero and let a caller mutate a config
+      # after the constructor resolved it. Each is copied once per policy or
+      # supervisor built, never on a call path.
+      - "**/internal/service/app/resilience/breaker.go"
+      - "internal/service/app/resilience/breaker.go"
+      - "**/internal/service/app/lifecycle/supervise.go"
+      - "internal/service/app/lifecycle/supervise.go"
       # core/app/cli.CommandValue is 88 bytes — Name + Summary + Description (16
       # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
       # removable: they are the whole declaration. Value semantics are the

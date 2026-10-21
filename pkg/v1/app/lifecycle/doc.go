@@ -101,6 +101,16 @@
 // STARTUP. Every wait is on [SupervisorConfig].Clock, so a test drives each
 // restart with a ManualClock instead of sleeping.
 //
+// A supervisor restarts forever by default. [SupervisorConfig].GiveUpAfter
+// bounds it the way Erlang's restart intensity does: more than Restarts early
+// ends within Within, and the supervision ends instead of restarting again.
+// Its observer hears [SupervisionGaveUp], and [Supervisor].Check — a health
+// check's shape — reports [SupervisorGaveUp] to a liveness probe from then on:
+//
+//	sweeper, err := lifecycle.NewSupervisor("session-sweeper", sweep, lifecycle.SupervisorConfig{
+//	    GiveUpAfter: lifecycle.GiveUp{Restarts: 5, Within: time.Minute},
+//	})
+//
 // # Errors
 //
 // A failed [Lifecycle].Start returns an errors.Join carrying [StartFailed]

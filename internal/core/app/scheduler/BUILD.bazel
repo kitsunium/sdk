@@ -10,6 +10,7 @@ go_library(
         "gen_ports.go",
         "scheduler.go",
         "scheduler_entry.go",
+        "scheduler_overlap.go",
         "scheduler_result.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/scheduler",
@@ -34,6 +35,7 @@ go_test(
     size = "small",
     srcs = [
         "gen_api_test.go",
+        "overlap_external_test.go",
         "scheduler_external_test.go",
     ],
     deps = [

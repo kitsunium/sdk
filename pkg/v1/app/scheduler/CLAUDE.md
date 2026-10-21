@@ -17,6 +17,8 @@ portable.
 | `New` | cannot fail: a nil `Clock` falls back to the wall clock, a nil `OnResult` to no observation |
 | `Parse` / `ParseInLocation` | five-field POSIX cron; UTC by default, a nil location refused |
 | `Every` | fixed interval; a non-positive period refused. Deliberately not spelled `@every` |
+| `OverlapPolicy` + `OverlapSkip` / `OverlapAllow` / `OverlapReplace` | alias onto `core/app/scheduler`: what a fire does while the previous run is still going — `Entry.Overlap`; Replace cancels it and runs the fire once it returned (ADR 0184) |
+| `Entry.StartingDeadline` | a fire reached later than this after its instant is not run but reported `Result.Expired`; zero is no deadline (ADR 0184) |
 | `InvalidEntry` / `DuplicateJob` / `SchedulerRunning` / `JobPanicked` | core sentinels (`0.2.12.*`) |
 | `InvalidExpression` / `UnsupportedSyntax` / `UnreachableSchedule` / `InvalidLocation` / `InvalidInterval` | parser sentinels (`0.3.43.*`) |
 
@@ -34,7 +36,7 @@ portable.
 - **DST is decided, not emergent.** Spring forward skips the day; fall back
   fires once, at the first occurrence. `Parse` is UTC; `time.Local` is never a
   default because it differs across a fleet.
-- **`Result.Skipped` and `Result.Missed` are the observability contract.** A
+- **`Result.Skipped`, `Expired`, `Replaced` and `Missed` are the observability contract.** A
   scheduler that reported only successful runs would make a permanently-skipping
   entry look healthy.
 - **`Entry.AllowOverlap` is an assertion, not a hint** — the same instrument as

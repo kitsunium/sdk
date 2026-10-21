@@ -15,6 +15,18 @@
 //
 // Package resilience — bulkhead (bounded-concurrency) policy.
 //
+// Package resilience — the bulkhead that queues: a bounded number of calls
+// wait a bounded time, on an injected clock, for a slot to free.
+//
+// Package resilience — the adaptive throttle: Google SRE's client-side
+// throttling, a call refused locally with the probability the dependency's
+// recent refusals give it.
+//
+// Package resilience — adaptive throttle configuration.
+//
+// Package resilience — the adaptive throttle's window: requests and accepts
+// counted in time slots on the throttle's clock.
+//
 // Package resilience — fallback (secondary-operation) policy.
 //
 // Package resilience — fallback policy configuration.

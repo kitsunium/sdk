@@ -35,10 +35,10 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `validation` | app | A `Constraint` port, located violations and the engine composing them; a message never names the value | 0046 |
 | `view` | app | Server-side rendering on `html/template`: one trust type, templates parsed once, `text/template` refused | 0058 |
 | `events` | app | An in-process synchronous event bus keyed on Go types — not a queue | 0053 |
-| `scheduler` | app | Five-field POSIX cron and fixed intervals, with DST, missed deadlines and overlap decided | 0041 |
+| `scheduler` | app | Five-field POSIX cron and fixed intervals, with DST, missed deadlines and overlap decided — skip, allow or replace — and a starting deadline past which a late fire expires | 0041, 0184 |
 | `statemachine` | app | Entities moved by events, timers, deadlines and guards over the caller's store, on an agenda rather than a sweep | 0120 |
-| `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve; a retry budget shared by retry and hedge, and the delay a failure imposes (`RetryAfter`); a breaker that opens on a rate of failures or slow calls over a sliding window, and says where it stands (`BreakerState`) | 0026, 0031, 0103 |
-| `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop | 0050, 0112 |
+| `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve; a retry budget shared by retry and hedge, and the delay a failure imposes (`RetryAfter`); a breaker that opens on a rate of failures or slow calls over a sliding window, and says where it stands (`BreakerState`); a bulkhead and a limiter that wait a bounded time, three jitters, and the SRE book's adaptive client-side throttle | 0026, 0031, 0103, 0184 |
+| `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop — and gives up past an Erlang restart intensity | 0050, 0112, 0184 |
 | `health` | app | Startup, readiness and liveness as three types, every wait bounded, and the loopback readiness probe | 0060, 0072, 0131 |
 | `consensus` | app | A write is committed when a majority holds it on disk: a Raft with PreVote and CheckQuorum always on, snapshots, single-server membership through learners, a segmented log that classifies every hole before it repairs one, an mTLS transport pinned by SPKI | 0152, 0174 |
 | `lock` | app | Named exclusive leases over one process or one machine, with fencing tokens and the guarantee that is not made said out loud | 0052, 0081, 0082, 0083, 0084, 0086 |
@@ -182,7 +182,8 @@ internal/
                            statemachine — declarations + per-entity
                              transitions + an agenda heap the loop sleeps on;
                            resilience — retry, circuit breaker, rate limit +
-                             keyed, bulkhead, timeout, fallback, hedging; the
+                             keyed, bulkhead (+ the one that queues), timeout,
+                             fallback, hedging, adaptive throttle; the
                              backoff curve, an alias of kernel/backoff's;
                            lifecycle — ordered engine + per-component stop
                              budget + opt-in signal/sd_notify Run + the
@@ -287,7 +288,8 @@ pkg/
                       statemachine/ — entities moved by events, timers,
                         deadlines, guards; an agenda, not a sweep — ADR 0120;
                       resilience/ — retry, breaker, rate limit + keyed, bulkhead,
-                        timeout, fallback, hedging — ADR 0026, ADR 0103;
+                        timeout, fallback, hedging — ADR 0026, ADR 0103; waits
+                        bounded, three jitters, adaptive throttle — ADR 0184;
                       lifecycle/ — ordered start, reverse stop, per-component
                         budget — ADR 0050; the supervisor — ADR 0112;
                       health/ — startup, readiness and liveness — three
@@ -622,5 +624,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0181 — a generated file's name opens with `gen_` (the owner's decision on kitsunium/studio#74, kit's ADR 0014): `gen_api*_test.go`, `gen_ports.go`, `gen_codes.go`, `gen_ranges_test.go`, `gen_perf_test.go`, `gen_facade.go`, `gen_decls.go`, `gen_stubs.go`; the generated files linted, the rules unfit for them leaving `**/gen_*.go` out — `docs/adr/0181-a-generated-files-name-opens-with-gen.md`
 - ADR 0182 — a runtime directory ends on the caller's directory, never on a shared tree, accepted on 2026-10-20 for kodflow/ktn-linter#785: `ipc.RuntimeDirOr(app, fallback)` ends `RuntimeDir`'s chain on a directory the caller keeps private instead of `<tmp>/<app>-<uid>`; `RuntimeDir` unchanged — `docs/adr/0182-a-runtime-directory-ends-on-the-callers-directory-never-on-a-shared-tree.md`
 - ADR 0183 — a message may wait for its instant, and recurrence stays the scheduler's, accepted on 2026-10-21 for kitsunium/sdk#481, decided autonomously and revisable while v0 (ADR 0040): resolves ADR 0054's deferred `PublishAt` — one message held until one instant, durably, recurrence left to ADR 0041's scheduler — and adds on every broker `DelayedPublisher`, `DelayedNacker` with the handler's `RetryAfter` (`RETRY_REQUESTED` `0.2.23.10`) and `OncePublisher` (a duplicate is a boolean) — `docs/adr/0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md`
+- ADR 0184 — a wait is bounded, a restart gives up, and a client throttles itself, accepted on 2026-10-21 for kitsunium/sdk#482, decided autonomously and revisable while v0 (ADR 0040): resolves ADR 0026's deferred wait mode with `NewBulkheadWait` and `RateLimiterConfig.MaxWait`, adds full and decorrelated jitter (`JitterMode`), `BreakerConfig.HalfOpenTrials`, the supervisor's `GiveUpAfter` with `Supervisor.Check` and `SUPERVISOR_GAVE_UP` (`0.3.49.9`), the scheduler's `StartingDeadline` and `OverlapReplace`, and the SRE book's adaptive throttle `NewAdaptiveThrottle` (`THROTTLED`, `0.2.8.9`); adaptive concurrency deferred — `docs/adr/0184-a-wait-is-bounded-a-restart-gives-up-and-a-client-throttles-itself.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
