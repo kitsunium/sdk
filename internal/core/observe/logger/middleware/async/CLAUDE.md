@@ -16,8 +16,8 @@ Nothing else lives here. It has no port of its own: the middleware is a `Sink` o
 
 | Symbol | Kind | Notes |
 |---|---|---|
-| `CodeAsyncStopped`, `CodeAsyncBufferFull`, `CodeAsyncCtxCancelled` | `errs.Code` constants | one per sentinel, literal values |
-| `Stopped`, `BufferFull`, `CtxCancelled` | `*errs.Error` sentinels | built by `errs.Define`; match with `errs.HasCode` or `errors.Is` |
+| `CodeAsyncStopped`, `CodeAsyncBufferFull`, `CodeAsyncCtxCancelled`, `CodeAsyncBlockTimeout` | `errs.Code` constants | one per sentinel, literal values |
+| `Stopped`, `BufferFull`, `CtxCancelled`, `BlockTimeout` | `*errs.Error` sentinels | built by `errs.Define`; match with `errs.HasCode` or `errors.Is` |
 
 ## Error codes — range 0.3.17.*
 
@@ -26,6 +26,7 @@ Nothing else lives here. It has no port of its own: the middleware is a `Sink` o
 | 0.3.17.1 | `CodeAsyncStopped` | `Stopped` | `ASYNC_STOPPED` | — |
 | 0.3.17.2 | `CodeAsyncBufferFull` | `BufferFull` | `ASYNC_BUFFER_FULL` | — |
 | 0.3.17.3 | `CodeAsyncCtxCancelled` | `CtxCancelled` | `ASYNC_CTX_CANCELLED` | — |
+| 0.3.17.4 | `CodeAsyncBlockTimeout` | `BlockTimeout` | `ASYNC_BLOCK_TIMEOUT` | — (#479, the `Block` policy's bound) |
 
 ## Do NOT
 

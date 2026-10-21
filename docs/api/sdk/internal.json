@@ -1287,7 +1287,7 @@
       "dir": "service/observe/logger/middleware/async",
       "layer": "service",
       "family": "observe",
-      "doc": "Package async wraps any corelogger.Sink with a non-blocking ring buffer\nand a single drainer goroutine, decoupling the producer hot path from\nthe (potentially slow) downstream sink. Producers call Write synchronously\nbut never block on I/O — entries land in the ring and the drainer sips\nthem out.\n\nWhen the ring saturates, the configured DropPolicy decides:\n  - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.\n  - DropOldest: the oldest queued entry is silently discarded; the new\n    entry takes its slot. OnDrop fires for the dropped entry.\n\nUse case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never\nstalls the application's hot path.\n\nPackage async — declares the DropPolicy enum used by the async Sink to\ndecide what happens when the ring buffer saturates. Held as a sibling of\nasync_sink.go so the sink file stays focused on the Sink contract.\n\nPackage async — holds the Config struct consumed by New. Pulled\ninto its own file so async_sink.go stays focused on the Sink contract.\n\nPackage async — declares the goroutine loop that consumes the\nring buffer and forwards entries to the downstream sink. Pulled into its\nown file so async_sink.go stays focused on the Sink contract.\n\nPackage async — holds the recycled payload struct that travels\nthrough the ring buffer between the producer (Write) and the consumer\n(drain goroutine).\n\nPackage async — gathers the small runtime helpers used by the\nasync drainer (yield primitive, channel-closed probe, error swallowers).\nPulled out of async_sink.go to keep that file focused on the Sink contract.\n"
+      "doc": "Package async wraps any corelogger.Sink with a non-blocking ring buffer\nand a single drainer goroutine, decoupling the producer hot path from\nthe (potentially slow) downstream sink. Producers call Write synchronously\nbut never block on I/O — entries land in the ring and the drainer sips\nthem out.\n\nWhen the ring saturates, the configured DropPolicy decides:\n  - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.\n  - DropOldest: the oldest queued entry is silently discarded; the new\n    entry takes its slot. OnDrop fires for the dropped entry.\n  - Block: the Write waits for a free slot, at most MaxBlock on the\n    configured Clock; past it the entry is dropped, OnDrop fires and Write\n    returns BlockTimeout.\n\nUse case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never\nstalls the application's hot path.\n\nPackage async — declares the DropPolicy enum used by the async Sink to\ndecide what happens when the ring buffer saturates. Held as a sibling of\nasync_sink.go so the sink file stays focused on the Sink contract.\n\nPackage async — holds the Config struct consumed by New. Pulled\ninto its own file so async_sink.go stays focused on the Sink contract.\n\nPackage async — declares the goroutine loop that consumes the\nring buffer and forwards entries to the downstream sink. Pulled into its\nown file so async_sink.go stays focused on the Sink contract.\n\nPackage async — holds the recycled payload struct that travels\nthrough the ring buffer between the producer (Write) and the consumer\n(drain goroutine).\n\nPackage async — gathers the small runtime helpers used by the\nasync drainer (yield primitive, channel-closed probe, error swallowers).\nPulled out of async_sink.go to keep that file focused on the Sink contract.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite",
@@ -28638,6 +28638,23 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async.BlockTimeout",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async",
+      "name": "BlockTimeout",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.17.4",
+        "reason": "ASYNC_BLOCK_TIMEOUT",
+        "public": "Async sink ring buffer stayed full"
+      },
+      "doc": "BlockTimeout is returned by Write under the Block policy when the ring\nstayed saturated for MaxBlock; the entry is dropped and the OnDrop\ncallback fires.\n",
+      "file": "core/observe/logger/middleware/async/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async.BufferFull",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async",
@@ -28650,6 +28667,22 @@
         "public": "Async sink ring buffer is full"
       },
       "doc": "BufferFull is returned by Write under the DropNewest policy when the\nring is saturated; the entry is dropped and the OnDrop callback fires.\n",
+      "file": "core/observe/logger/middleware/async/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async.CodeAsyncBlockTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async",
+      "name": "CodeAsyncBlockTimeout",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "200964",
+      "code": {
+        "value": "0.3.17.4"
+      },
+      "doc": "CodeAsyncBlockTimeout identifies a Write under the Block policy that waited\nMaxBlock for a free slot without one appearing; the entry is dropped and the\nOnDrop callback fires.\n",
       "file": "core/observe/logger/middleware/async/gen_codes.go",
       "layer": "core",
       "family": "observe"
@@ -60337,12 +60370,25 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.Block",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async",
+      "name": "Block",
+      "spelled": "DropPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DropPolicy",
+      "value": "2",
+      "doc": "Block waits for a free slot when the ring is full — the producer is slowed to\nthe downstream's pace instead of losing the entry — for at most MaxBlock on\nthe configured Clock. Past the bound the entry is dropped, OnDrop fires and\nWrite returns BlockTimeout; a cancelled context returns CtxCancelled and Close\nreturns Stopped to every waiting Write. It is Vector's `when_full: block`\nwith the one difference ADR 0031 requires: the wait is never unbounded.\n",
+      "file": "service/observe/logger/middleware/async/async_sink_policy.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.Config",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async",
       "name": "Config",
-      "spelled": "struct{BufferSize int; Policy DropPolicy; OnDrop func(missed int); OnError func(err error)}",
-      "canonical": "struct{BufferSize int; Policy github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DropPolicy; OnDrop func(missed int); OnError func(err error)}",
+      "spelled": "struct{BufferSize int; Policy DropPolicy; MaxBlock time.Duration; Clock clock.Timed; OnDrop func(missed int); OnError func(err error)}",
+      "canonical": "struct{BufferSize int; Policy github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DropPolicy; MaxBlock time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; OnDrop func(missed int); OnError func(err error)}",
       "fields": [
         {
           "name": "BufferSize",
@@ -60352,7 +60398,17 @@
         {
           "name": "Policy",
           "type": "DropPolicy",
-          "doc": "Policy selects DropNewest (default) or DropOldest behaviour on saturation.\n"
+          "doc": "Policy selects DropNewest (default), DropOldest or Block behaviour on saturation.\n"
+        },
+        {
+          "name": "MaxBlock",
+          "type": "time.Duration",
+          "doc": "MaxBlock bounds how long a Write waits for a free slot under the Block\npolicy; non-positive falls back to DefaultMaxBlock (one second), never to\nan unbounded wait (ADR 0031). Ignored by the two drop policies.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock drives the MaxBlock wait; nil falls back to clock.System. A test\ninjects a ManualClock and waits on nothing.\n"
         },
         {
           "name": "OnDrop",
@@ -60367,6 +60423,20 @@
       ],
       "doc": "Config tunes the async sink at construction time. Every field is optional\n— the zero-value Config produces a sink with the documented defaults\n(defaultBufferSize ring, DropNewest policy, no callbacks).\n",
       "file": "service/observe/logger/middleware/async/config.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DefaultMaxBlock",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async",
+      "name": "DefaultMaxBlock",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "1000000000",
+      "init": "go:time.Second",
+      "doc": "DefaultMaxBlock is how long a Write waits under the Block policy when\nConfig.MaxBlock is unset: one second. Zero does not mean \"forever\" (ADR 0031):\na logger that blocks without a bound turns a dead downstream into a stalled\nservice, and a caller that wants a longer wait says so, or bounds the wait by\nits context.\n",
+      "file": "service/observe/logger/middleware/async/async_sink_policy.go",
       "layer": "service",
       "family": "observe"
     },

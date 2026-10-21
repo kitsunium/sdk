@@ -1481,6 +1481,10 @@ codes:
     const: CodeAsyncCtxCancelled
     hex: "0x00_03_11_03"
     package: internal/core/observe/logger/middleware/async
+  - code: "0.3.17.4"
+    const: CodeAsyncBlockTimeout
+    hex: "0x00_03_11_04"
+    package: internal/core/observe/logger/middleware/async
   - code: "0.3.18.1"
     const: CodeRouteNoMatch
     hex: "0x00_03_12_01"

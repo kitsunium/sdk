@@ -26,6 +26,29 @@ constants:
         value: "1"
     name: DropOldest
   - doc: |-
+      Block waits for a free slot when the ring is full — the producer is slowed to
+      the downstream's pace instead of losing the entry — for at most MaxBlock on
+      the configured Clock. Past the bound the entry is dropped, OnDrop fires and
+      Write returns BlockTimeout; a cancelled context returns CtxCancelled and Close
+      returns Stopped to every waiting Write. It is Vector's `when_full: block`
+      with the one difference ADR 0031 requires: the wait is never unbounded.
+    items:
+      - name: Block
+        type: DropPolicy
+        value: "2"
+    name: Block
+  - doc: |-
+      DefaultMaxBlock is how long a Write waits under the Block policy when
+      Config.MaxBlock is unset: one second. Zero does not mean "forever" (ADR 0031):
+      a logger that blocks without a bound turns a dead downstream into a stalled
+      service, and a caller that wants a longer wait says so, or bounds the wait by
+      its context.
+    items:
+      - name: DefaultMaxBlock
+        type: time.Duration
+        value: time.Second
+    name: DefaultMaxBlock
+  - doc: |-
       maxSaneCap caps the per-entry backing array size the pool will retain
       after a forward() call. An attacker-influenced record (huge Message or
       attr value) otherwise leaves the entry with a massive cap(ent.data)
@@ -49,6 +72,9 @@ files:
       - noopOnError
       - noopOnDrop
       - (*asyncSink).Write
+      - (*asyncSink).blockForSpace
+      - (*asyncSink).retryBlocked
+      - (*asyncSink).signalSpace
       - (*asyncSink).handleFull
       - (*asyncSink).Flush
       - (*asyncSink).waitForDrainerProgress
@@ -59,6 +85,8 @@ files:
       - DropPolicy
       - DropNewest
       - DropOldest
+      - Block
+      - DefaultMaxBlock
     name: async_sink_policy.go
   - decls:
       - Config
@@ -134,6 +162,7 @@ functions:
     name: swallowRingError
     params: err error
 imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   coreasync: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
@@ -142,6 +171,7 @@ imports:
   ring: github.com/kitsunium/sdk/internal/kernel/collections/ring
   runtime: runtime
   sync: sync
+  time: time
   worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
 package:
   docFile: doc.go
@@ -165,6 +195,19 @@ types:
       - doc: policy selects the saturation behaviour at Write time.
         name: policy
         type: DropPolicy
+      - doc: maxBlock bounds a Block wait, on clk. Resolved at construction.
+        name: maxBlock
+        type: time.Duration
+      - doc: clk drives the Block wait; never nil once New has run.
+        name: clk
+        type: clock.Timed
+      - doc: |-
+          space carries "a slot was freed" from the drainer to a Write waiting
+          under Block. One buffered slot: a free slot wakes one waiter, which
+          passes the token on when it leaves room behind. nil under the two drop
+          policies, where nobody waits, so the drainer sends nothing.
+        name: space
+        type: chan struct{}
       - doc: onDrop fires for every entry discarded by the policy; never nil.
         name: onDrop
         type: func(missed int)
@@ -248,6 +291,28 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, payload []byte
         recv: s *asyncSink
         results: n int, err error
+      - doc: |-
+          blockForSpace is the Block policy: it waits for the drainer to free a slot,
+          at most maxBlock on clk, and stops early when ctx ends or Close begins. The
+          timer is armed only here, on the saturated path — a Write that finds room
+          never touches the clock.
+        name: blockForSpace
+        params: ctx context.Context, ent *recordEntry
+        recv: s *asyncSink
+        results: n int, err error
+      - doc: |-
+          retryBlocked makes one TryWrite for a waiting Block entry and reports
+          whether the wait is over. When the write lands and room is left, it passes
+          the wake-up on, so a second waiter is not left waiting for the next read.
+        name: retryBlocked
+        params: ent *recordEntry
+        recv: s *asyncSink
+        results: n int, done bool, err error
+      - doc: |-
+          signalSpace tells one Block waiter that a slot may be free. Non-blocking,
+          and a no-op under the drop policies, where nobody waits.
+        name: signalSpace
+        recv: s *asyncSink
       - doc: handleFull applies the configured DropPolicy to a saturated ring.
         name: handleFull
         params: ent *recordEntry
@@ -332,9 +397,20 @@ types:
           defaultBufferSize (1024 slots).
         name: BufferSize
         type: int
-      - doc: Policy selects DropNewest (default) or DropOldest behaviour on saturation.
+      - doc: Policy selects DropNewest (default), DropOldest or Block behaviour on saturation.
         name: Policy
         type: DropPolicy
+      - doc: |-
+          MaxBlock bounds how long a Write waits for a free slot under the Block
+          policy; non-positive falls back to DefaultMaxBlock (one second), never to
+          an unbounded wait (ADR 0031). Ignored by the two drop policies.
+        name: MaxBlock
+        type: time.Duration
+      - doc: |-
+          Clock drives the MaxBlock wait; nil falls back to clock.System. A test
+          injects a ManualClock and waits on nothing.
+        name: Clock
+        type: clock.Timed
       - doc: |-
           OnDrop is invoked for every entry the policy discards because the ring
           is saturated. Useful for wiring a metric counter; nil disables the
