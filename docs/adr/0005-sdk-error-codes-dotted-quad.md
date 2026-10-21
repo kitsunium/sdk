@@ -108,7 +108,7 @@ a follow-up CI wave; this MR ships prose)
 
 ### Enforcement
 
-- **Runtime:** `validateDefineArgs` rejects `code == 0`, `uint32(code) > 0x7FFF_FFFF`, and `Layer == 0` outside the 6-member meta-code whitelist. `newValidationError` is a bootstrap struct-literal constructor that never re-enters `Define` — init recursion is impossible by construction.
+- **Runtime:** `validateDefineArgs` rejects `code == 0`, `uint32(code) > 0x7FFF_FFFF`, and `Layer == 0` outside the 6-member meta-code whitelist. `newValidationError` is a bootstrap struct-literal constructor that never re-enters `Define` — init recursion is impossible by construction. (2026-10-21, [issue 469](https://github.com/kitsunium/sdk/issues/469): its errors hold to the Public/Private split like every other — a fixed Public literal of at most 120 runes that never echoes the caller's argument, the detail in Private with the caller's value clipped to 64 runes; `Define`'s panic message is the rendering followed by that Private.)
 - **AST audit:** existing registry audit in `internal/kernel/errs/registry_external_test.go` walks `errs.Define` calls and enforces uniqueness + `screamingSnake(varName) == reason`. Follow-up: `tools/errs-codegen` + `tools/errs-audit` binaries that load a canonical YAML registry.
 - **Build tag:** `//go:build amd64 || arm64 || riscv64 || ppc64 || ppc64le || s390x` on `internal/kernel/errs/code.go` + a static `unsafe.Sizeof(int(0))` assertion guarantees 64-bit GOARCH so the deprecated `Code() int` accessor roundtrips losslessly.
 

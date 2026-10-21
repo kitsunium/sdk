@@ -60,6 +60,7 @@ go_test(
         "trail_internal_test.go",
         "trailof_external_test.go",
         "validate_internal_test.go",
+        "validate_rule4_external_test.go",
     ],
     data = ["//:audit_sources"],
     embed = [":errs"],

@@ -82,6 +82,21 @@ workflows:
             - return: 0, false
           when: n > octetMax
       - return: uint8(n), true
+  - of: clipEcho
+    steps:
+      - bind: seen
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: value[:offset] + echoEllipsis
+                when: seen == maxEchoRunes
+            - op: ++
+              set: seen
+          key: offset
+          range: value
+      - return: value
   - of: containsNewline
     steps:
       - loop:

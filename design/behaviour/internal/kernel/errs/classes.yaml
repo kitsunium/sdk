@@ -316,6 +316,62 @@ constants:
         value: "\"^[A-Z][A-Z0-9_]*$\""
     name: reasonPattern
   - doc: |-
+      maxEchoRunes bounds how much of a caller's argument a structural failure
+      quotes in its Private. The argument is the caller's own data, of any length:
+      it never reaches Public (rule 4), and Private keeps enough to find the call
+      site without carrying a runaway string into every log line.
+    items:
+      - name: maxEchoRunes
+        type: int
+        value: "64"
+    name: maxEchoRunes
+  - doc: echoEllipsis marks an echo clipped at maxEchoRunes.
+    items:
+      - name: echoEllipsis
+        type: string
+        value: "\"…\""
+    name: echoEllipsis
+  - doc: |-
+      The Public of each structural failure: a fixed literal, at most
+      maxPublicRunes runes and free of newlines, that never carries the caller's
+      argument (rule 4). The detail — the offending value, the measured size — is
+      the Private's.
+    grouped: true
+    items:
+      - doc: publicCodeZero is the Public of a zero code.
+        name: publicCodeZero
+        type: string
+        value: "\"The error code must be non-zero\""
+      - doc: publicCodeOverflow is the Public of a code above the int32 range.
+        name: publicCodeOverflow
+        type: string
+        value: "\"The error code must fit the positive int32 range\""
+      - doc: publicCodeMetaLayer is the Public of a Layer=0 code outside the meta-codes.
+        name: publicCodeMetaLayer
+        type: string
+        value: "\"Layer 0 of an error code is reserved for the errs meta-codes\""
+      - doc: publicReason is the Public of a malformed Reason.
+        name: publicReason
+        type: string
+        value: "\"The reason must match \" + reasonPattern"
+      - doc: publicEmpty is the Public of an empty Public.
+        name: publicEmpty
+        type: string
+        value: "\"The public message must not be empty\""
+      - doc: publicTooLong is the Public of a Public above maxPublicRunes.
+        name: publicTooLong
+        type: string
+        value: "\"The public message exceeds the 120-rune limit\""
+      - doc: publicNewline is the Public of a Public holding a line terminator.
+        name: publicNewline
+        type: string
+        value: "\"The public message must not contain a newline\""
+      - doc: publicPrivateEmpty is the Public of an empty Private.
+        name: publicPrivateEmpty
+        type: string
+        value: "\"The private message must not be empty\""
+    name: publicCodeZero
+  - doc: |-
       maxInt32Positive caps the dotted-quad Code at the largest non-negative
       int32 value so the deprecated Code() int accessor never wraps to a
       negative integer.
@@ -459,6 +515,9 @@ files:
   - decls:
       - maxPublicRunes
       - reasonPattern
+      - maxEchoRunes
+      - echoEllipsis
+      - publicCodeZero
       - maxInt32Positive
       - metaCodeAllowed
       - validateDefineArgs
@@ -466,6 +525,7 @@ files:
       - validateReason
       - validatePublic
       - validatePrivate
+      - clipEcho
       - containsNewline
       - isScreamingSnake
       - isValidReasonRune
@@ -563,7 +623,7 @@ functions:
 
       Direct struct literal — does not call Define or validateDefineArgs.
     name: newValidationError
-    params: code Code, reason, public string
+    params: code Code, reason, public, private string
     results: "*Error"
   - name: Wrap
     params: cause error, params WrapParams, fields ...FieldValue
@@ -700,6 +760,12 @@ functions:
     name: validatePrivate
     params: private string
     results: "*Error"
+  - doc: |-
+      clipEcho bounds a caller's argument to maxEchoRunes runes for a Private,
+      marking a cut with echoEllipsis. A cut never splits a rune.
+    name: clipEcho
+    params: value string
+    results: string
   - doc: containsNewline reports whether s contains any newline rune.
     name: containsNewline
     params: s string

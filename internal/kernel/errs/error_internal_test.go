@@ -16,6 +16,7 @@ func Test_newValidationError(t *testing.T) {
 		code    Code
 		reason  string
 		public  string
+		private string
 		wantStr string
 	}{
 		{
@@ -23,13 +24,14 @@ func Test_newValidationError(t *testing.T) {
 			code:    CodeInvalidCode,
 			reason:  "INVALID_CODE",
 			public:  "bootstrap public",
+			private: "bootstrap private",
 			wantStr: "[0.0.0.1 INVALID_CODE] bootstrap public",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			built := newValidationError(tc.code, tc.reason, tc.public)
+			built := newValidationError(tc.code, tc.reason, tc.public, tc.private)
 			if built.Code() != tc.code {
 				t.Errorf("CodeValue = %s, want %s", built.Code(), tc.code)
 			}
@@ -39,9 +41,9 @@ func Test_newValidationError(t *testing.T) {
 			if built.Public() != tc.public {
 				t.Errorf("Public = %q, want %q", built.Public(), tc.public)
 			}
-			//: bootstrap path leaves Private empty by construction.
-			if built.Private() != "" {
-				t.Errorf("Private = %q, want empty", built.Private())
+			//: the detail rides in Private, never in the rendering (rule 4).
+			if built.Private() != tc.private {
+				t.Errorf("Private = %q, want %q", built.Private(), tc.private)
 			}
 			if got := built.Error(); got != tc.wantStr {
 				t.Errorf("Error = %q, want %q", got, tc.wantStr)
