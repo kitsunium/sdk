@@ -1131,6 +1131,11 @@ rules:
       # which the same linter's naming rules discourage elsewhere (ADR 0111).
       - "**/internal/service/app/mail/spool/spool.go"
       - "internal/service/app/mail/spool/spool.go"
+      # service/app/forward.Forwarder is the one main type of package forward,
+      # built by New as spool.New is: forward.NewForwarder would stutter at
+      # every call site (ADR 0185).
+      - "**/internal/service/app/forward/forwarder.go"
+      - "internal/service/app/forward/forwarder.go"
       # service/data/docstore.Store is built by Open, as os.Open and sql.Open build
       # theirs: the constructor LOADS — the snapshot read, the overlay
       # replayed, the indexes rebuilt — and "open" is what that is called. A
@@ -1465,6 +1470,14 @@ rules:
       - "internal/service/app/resilience/breaker.go"
       - "**/internal/service/app/lifecycle/supervise.go"
       - "internal/service/app/lifecycle/supervise.go"
+      # service/app/forward.Config (168 bytes) is the published configuration
+      # New takes BY VALUE, as NewCircuitBreaker takes its config: a composite
+      # literal at the call site whose zero fields are the documented defaults
+      # (ADR 0031) — a pointer would make nil a second zero and let a caller
+      # mutate it after New resolved it. It is copied once per forwarder
+      # built, never on Enqueue's path (ADR 0185).
+      - "**/internal/service/app/forward/forwarder.go"
+      - "internal/service/app/forward/forwarder.go"
       # core/app/cli.CommandValue is 88 bytes — Name + Summary + Description (16
       # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
       # removable: they are the whole declaration. Value semantics are the

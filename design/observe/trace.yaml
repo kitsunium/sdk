@@ -700,6 +700,28 @@ packages:
               - type: error
         name: ContextSpanExporter
       - doc: |-
+          DocumentExporter is the sibling of ContextSpanExporter an exporter
+          implements when it can ship a batch already encoded as its wire
+          document: ExportDocument sends doc under ctx, as ExportContext sends
+          the spans it would have encoded into it, with the same verdicts.
+          The OTLP/HTTP exporter implements it, doc being an OTLP/JSON
+          ExportTraceServiceRequest — what EncodeOTLPJSON writes —, so a
+          batch encoded and stored by a store-and-forward queue is posted
+          later without being decoded (ADR 0185). An empty doc sends nothing.
+
+          A caller holding a ContextSpanExporter asks for it with a type
+          assertion (ADR 0039). Implementations MUST be safe for concurrent use.
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: doc
+                type: "[]byte"
+            name: ExportDocument
+            out:
+              - type: error
+        name: DocumentExporter
+      - doc: |-
           Tracer starts spans. It is the only way a span comes into existence.
 
           IFACE-PLUGIN: it is FROZEN at one method (ADR 0039). Everything a caller might
@@ -3336,6 +3358,14 @@ packages:
               indefinitely" without widening SpanExporter (ADR 0039).
             name: ContextSpanExporter
             target: coretrace.ContextSpanExporter
+      - alias:
+          - doc: |-
+              DocumentExporter is the sibling of ContextSpanExporter an exporter
+              implements to ship a batch already encoded — the OTLP/HTTP exporter's
+              ExportDocument posts an OTLP/JSON document as ExportContext posts
+              spans, with the same verdicts (ADR 0185).
+            name: DocumentExporter
+            target: coretrace.DocumentExporter
       - alias:
           - doc: ExporterName is the typed key a SpanExporter registers under.
             name: ExporterName

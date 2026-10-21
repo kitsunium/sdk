@@ -1,0 +1,67 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "forward",
+    srcs = [
+        "config.go",
+        "deliver.go",
+        "doc.go",
+        "forwarder.go",
+        "signal.go",
+        "stats.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/forward",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/forward",
+        "//internal/core/app/resilience",
+        "//internal/core/data/queue",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/trace",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/app/resilience",
+        "//internal/service/data/queue",
+        "//internal/service/observe/metrics",
+        "//internal/service/observe/trace",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":forward",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "forward_test",
+    srcs = [
+        "forward_bench_test.go",
+        "forward_external_test.go",
+        "gen_api_test.go",
+        "harness_external_test.go",
+        "signal_external_test.go",
+    ],
+    deps = [
+        ":forward",
+        "//internal/core/app/forward",
+        "//internal/core/data/queue",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/trace",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/data/queue",
+        "//internal/service/observe/metrics",
+        "//internal/service/observe/trace",
+    ],
+)

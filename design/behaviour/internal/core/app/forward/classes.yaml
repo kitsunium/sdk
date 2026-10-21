@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/app/forward
+  name: forward
+  purpose: Package forward — range 0.3.93.* (ADR 0185 service/app/forward block, declared in the core per ADR 0160).
+types: []

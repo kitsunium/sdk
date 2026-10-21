@@ -1618,6 +1618,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/metrics.DocumentExporter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
+      "name": "DocumentExporter",
+      "spelled": "coremetrics.DocumentExporter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/metrics.DocumentExporter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DocumentExporter",
+      "doc": "DocumentExporter is the public alias for the sibling of ContextExporter\nan exporter implements to ship a snapshot already encoded — the\nOTLP/HTTP exporter's ExportDocument posts an OTLP/JSON document with\nthe verdicts of ExportContext (ADR 0185).\n",
+      "file": "metrics/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/metrics.EncodeOTLPJSON",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/metrics",
@@ -3458,6 +3471,19 @@
       "value": "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DefaultScopeName",
       "doc": "DefaultScopeName names this package as the instrumenting library when a caller\ndeclares no scope. It is deliberately NOT the metrics one: a scope names the\nlibrary that produced THIS signal.\n",
+      "file": "trace/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/trace.DocumentExporter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/trace",
+      "name": "DocumentExporter",
+      "spelled": "coretrace.DocumentExporter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/observe/trace.DocumentExporter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DocumentExporter",
+      "doc": "DocumentExporter is the sibling of ContextSpanExporter an exporter\nimplements to ship a batch already encoded — the OTLP/HTTP exporter's\nExportDocument posts an OTLP/JSON document as ExportContext posts\nspans, with the same verdicts (ADR 0185).\n",
       "file": "trace/gen_facade.go",
       "layer": "public",
       "family": "observe"

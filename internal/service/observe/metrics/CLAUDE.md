@@ -544,7 +544,10 @@ ships that policy, and a backoff hidden inside `Export` would be one a caller
 cannot see, tune or cancel. What the exporter does take is a BOUND:
 `NewOTLPHTTPExporter` returns a `ContextExporter`, and `ExportContext` carries
 the caller's context into the request, so a done context ends the POST with the
-transient `OTLP_EXPORT_UNAVAILABLE` (#479). The exporter supplies the **classification** instead,
+transient `OTLP_EXPORT_UNAVAILABLE` (#479). It is also a `DocumentExporter`
+(ADR 0185): `ExportDocument` posts a document `EncodeOTLPJSON` wrote earlier —
+what a store-and-forward queue keeps — through the same sender and verdicts,
+an empty one posting nothing. The exporter supplies the **classification** instead,
 in exactly the shape `resilience.RetryConfig.Retryable` wants: a caller passes
 `metrics.OTLPRetryable` there and keeps the attempts and the delay its own.
 

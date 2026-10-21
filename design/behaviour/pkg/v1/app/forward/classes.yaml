@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/forward
+  name: forward
+  purpose: "Package forward is the public facade for store and forward: an export that waits on disk while the collector it is meant for is down, and a count of what it held, sent and lost (ADR 0185)."
+types: []

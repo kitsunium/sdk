@@ -57,6 +57,7 @@ go_test(
         "cardinality_external_test.go",
         "exporter_description_external_test.go",
         "exporter_otlphttp_context_external_test.go",
+        "exporter_otlphttp_document_external_test.go",
         "exporter_otlphttp_external_test.go",
         "exporter_otlpjson_external_test.go",
         "exporter_prometheus_external_test.go",

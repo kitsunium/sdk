@@ -2805,6 +2805,18 @@ codes:
     const: CodeStopMarkerPresent
     hex: "0x00_03_5C_12"
     package: internal/core/app/consensus
+  - code: "0.3.93.1"
+    const: CodeForwardMisconfigured
+    hex: "0x00_03_5D_01"
+    package: internal/core/app/forward
+  - code: "0.3.93.2"
+    const: CodeForwardFull
+    hex: "0x00_03_5D_02"
+    package: internal/core/app/forward
+  - code: "0.3.93.3"
+    const: CodeBatchTooLarge
+    hex: "0x00_03_5D_03"
+    package: internal/core/app/forward
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

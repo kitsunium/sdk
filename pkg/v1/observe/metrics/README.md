@@ -194,6 +194,8 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
   - [func \(Counter\) Inc\(\)](<#Counter.Inc>)
 - [type Describer](<#Describer>)
   - [func \(Describer\) Describe\(name string, description string\)](<#Describer.Describe>)
+- [type DocumentExporter](<#DocumentExporter>)
+  - [func \(DocumentExporter\) ExportDocument\(ctx context.Context, doc \[\]byte\) error](<#DocumentExporter.ExportDocument>)
 - [type Exporter](<#Exporter>)
   - [func \(Exporter\) Export\(snap SnapshotValue\) error](<#Exporter.Export>)
   - [func \(Exporter\) Name\(\) ExporterName](<#Exporter.Name>)
@@ -972,6 +974,30 @@ func (Describer) Describe(name string, description string)
 ```
 
 Describe binds description to the instrument called name. It is idempotent for identical text and refused for conflicting text.
+
+<a name="DocumentExporter"></a>
+## type [DocumentExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+DocumentExporter is the public alias for the sibling of ContextExporter an exporter implements to ship a snapshot already encoded — the OTLP/HTTP exporter's ExportDocument posts an OTLP/JSON document with the verdicts of ExportContext (ADR 0185).
+
+```go
+type DocumentExporter = coremetrics.DocumentExporter
+```
+
+DocumentExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.DocumentExporter`, declared as:
+
+```go
+type DocumentExporter interface {
+	ExportDocument(ctx context.Context, doc []byte) error
+}
+```
+
+<a name="DocumentExporter.ExportDocument"></a>
+### func \(DocumentExporter\) [ExportDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (DocumentExporter) ExportDocument(ctx context.Context, doc []byte) error
+```
 
 <a name="Exporter"></a>
 ## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
