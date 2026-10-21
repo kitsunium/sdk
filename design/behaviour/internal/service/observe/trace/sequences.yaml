@@ -262,7 +262,7 @@ sequences:
           name: first
           type: error
       - loop:
-          cond: b.Len() > 0
+          cond: remaining > 0
           do:
             - opt:
                 do:
@@ -273,6 +273,8 @@ sequences:
                   eval: b.exportBatch()
                   to: b.exportBatch
                 when: err != nil && first == nil
+          init: remaining := b.Len()
+          post: remaining -= b.maxBatch
       - return: first
   - of: (*BatchSink).exportBatch
     participants:

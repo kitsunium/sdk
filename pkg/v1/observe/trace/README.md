@@ -59,7 +59,7 @@ The client one lives at the transport for the same reason the network domain's p
 
 ### What it deliberately does not do
 
-It does not batch. A [SpanSink](#SpanSink) receives one span at a time and a batching processor is a sink that buffers and forwards — which is where its cost is visible, rather than hidden inside a tracer.
+It does not batch inside the tracer. A [SpanSink](#SpanSink) receives one span at a time, and batching is a sink that buffers and forwards — [NewBatchSink](#NewBatchSink), the specification's batching processor, whose cost is visible there rather than hidden inside a tracer.
 
 It does not schedule an export. [github.com/kitsunium/sdk/pkg/v1/app/scheduler](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/scheduler) already owns "when", and Collect plus Export is one call.
 
@@ -2345,8 +2345,9 @@ type TracerConfig struct {
 	// no destination has nowhere to put a span, and buffering into a slice
 	// nobody drains is the memory leak that shape invites.
 	//
-	// NewRecorder is the in-tree destination; a batching processor would be a
-	// Sink that buffers and forwards (ADR 0051 §Deferred).
+	// NewRecorder is the in-tree destination a caller collects from;
+	// NewBatchSink is the batching processor that buffers and forwards to an
+	// exporter on its own.
 	Sink     coretrace.SpanSink
 	// Clock stamps StartTime and EndTime. Unset CLAMPS to clock.System.
 	//

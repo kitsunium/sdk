@@ -41,8 +41,9 @@ type TracerConfig struct {
 	// no destination has nowhere to put a span, and buffering into a slice
 	// nobody drains is the memory leak that shape invites.
 	//
-	// NewRecorder is the in-tree destination; a batching processor would be a
-	// Sink that buffers and forwards (ADR 0051 §Deferred).
+	// NewRecorder is the in-tree destination a caller collects from;
+	// NewBatchSink is the batching processor that buffers and forwards to an
+	// exporter on its own.
 	Sink coretrace.SpanSink
 
 	// Clock stamps StartTime and EndTime. Unset CLAMPS to clock.System.

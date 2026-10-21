@@ -62685,7 +62685,7 @@
         {
           "name": "Sink",
           "type": "coretrace.SpanSink",
-          "doc": "Sink receives every sampled span at End. Unset means the tracer records\nnothing — which is not an inert policy but the honest one: a Tracer with\nno destination has nowhere to put a span, and buffering into a slice\nnobody drains is the memory leak that shape invites.\n\nNewRecorder is the in-tree destination; a batching processor would be a\nSink that buffers and forwards (ADR 0051 §Deferred).\n"
+          "doc": "Sink receives every sampled span at End. Unset means the tracer records\nnothing — which is not an inert policy but the honest one: a Tracer with\nno destination has nowhere to put a span, and buffering into a slice\nnobody drains is the memory leak that shape invites.\n\nNewRecorder is the in-tree destination a caller collects from;\nNewBatchSink is the batching processor that buffers and forwards to an\nexporter on its own.\n"
         },
         {
           "name": "Clock",

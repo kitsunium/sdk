@@ -330,12 +330,14 @@ func (b *BatchSink) exportFull() {
 	}
 }
 
-// exportAll exports everything queued, in batches, and returns the first
-// failure.
+// exportAll exports the spans queued when it is called, in batches, and
+// returns the first failure. It is bounded by that count, not by an empty
+// queue: spans that keep ending while it exports wait for the next export, so
+// a ForceFlush under steady traffic still returns.
 func (b *BatchSink) exportAll() error {
 	var first error
-	//: until the queue is empty; a span ending meanwhile joins a later batch.
-	for b.Len() > 0 {
+	//: what was queued at entry; a span ending meanwhile joins a later export.
+	for remaining := b.Len(); remaining > 0; remaining -= b.maxBatch {
 		//: keep the first failure, keep exporting the rest.
 		if err := b.exportBatch(); err != nil && first == nil {
 			first = err

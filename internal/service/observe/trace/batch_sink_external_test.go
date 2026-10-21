@@ -246,6 +246,35 @@ func TestBatchSinkForceFlushExportsEverythingQueued(t *testing.T) {
 	}
 }
 
+// TestBatchSinkForceFlushReturnsUnderSteadyTraffic pins that a flush is
+// bounded by what was queued when it began: spans that keep ending while it
+// exports wait for a later export, so ForceFlush returns instead of chasing a
+// queue that never empties.
+func TestBatchSinkForceFlushReturnsUnderSteadyTraffic(t *testing.T) {
+	t.Parallel()
+	sink, _ := newSink(t, svctrace.BatchSinkConfig{Exporter: benchDiscard{}, MaxExportBatchSize: 4, MaxQueueSize: 64})
+	stop := make(chan struct{})
+	traffic := make(chan struct{})
+	go func() {
+		defer close(traffic)
+		end := sink.Sink()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				end(coretrace.SpanValue{Name: "steady"})
+			}
+		}
+	}()
+	record(sink, spans(8))
+	if err := sink.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("ForceFlush: %v", err)
+	}
+	close(stop)
+	<-traffic
+}
+
 // TestBatchSinkForceFlushReturnsTheExportFailure pins that a flush reports
 // what the exporter said, typed.
 func TestBatchSinkForceFlushReturnsTheExportFailure(t *testing.T) {

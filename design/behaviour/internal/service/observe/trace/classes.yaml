@@ -964,8 +964,10 @@ types:
         name: exportFull
         recv: b *BatchSink
       - doc: |-
-          exportAll exports everything queued, in batches, and returns the first
-          failure.
+          exportAll exports the spans queued when it is called, in batches, and
+          returns the first failure. It is bounded by that count, not by an empty
+          queue: spans that keep ending while it exports wait for the next export, so
+          a ForceFlush under steady traffic still returns.
         name: exportAll
         recv: b *BatchSink
         results: error
@@ -1082,8 +1084,9 @@ types:
           no destination has nowhere to put a span, and buffering into a slice
           nobody drains is the memory leak that shape invites.
 
-          NewRecorder is the in-tree destination; a batching processor would be a
-          Sink that buffers and forwards (ADR 0051 §Deferred).
+          NewRecorder is the in-tree destination a caller collects from;
+          NewBatchSink is the batching processor that buffers and forwards to an
+          exporter on its own.
         name: Sink
         type: coretrace.SpanSink
       - doc: |-

@@ -497,7 +497,7 @@ keep: a bare `http://collector:4318` **connects**, answers 404, and looks
 exactly like a collector that is up. Refusing at wiring is strictly earlier than
 refusing at the first scrape, and — unlike the `resilience` constructors — no
 published signature forces the refusal to be deferred into an always-failing
-value, so the constructor returns `(Exporter, error)`.
+value, so the constructor returns `(ContextExporter, error)`.
 
 **Bounds, in both directions that matter.**
 
