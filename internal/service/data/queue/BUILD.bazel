@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "consume.go",
         "consume_config.go",
+        "consume_lease.go",
         "dirtrust_posix.go",
         "dirtrust_windows.go",
         "doc.go",
@@ -68,7 +69,9 @@ go_test(
     size = "medium",
     srcs = [
         "conformance_external_test.go",
+        "consume_drain_external_test.go",
         "consume_external_test.go",
+        "consume_lease_external_test.go",
         "deadletter_external_test.go",
         "deadletter_write_external_test.go",
         "death_external_test.go",
@@ -80,6 +83,7 @@ go_test(
         "message_copy_external_test.go",
         "order_external_test.go",
         "queue_bench_test.go",
+        "release_external_test.go",
         "sql_export_test.go",
         "sql_external_test.go",
         "sql_statements_external_test.go",

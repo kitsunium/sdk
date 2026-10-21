@@ -140,6 +140,7 @@ func TestTheQueueSiblingsKeepTheirMethodCounts(t *testing.T) {
 		{reflect.TypeFor[corequeue.LeaseExtender](), 1},
 		{reflect.TypeFor[corequeue.Waker](), 1},
 		{reflect.TypeFor[corequeue.Rejecter](), 1},
+		{reflect.TypeFor[corequeue.Releaser](), 1},
 		{reflect.TypeFor[corequeue.DeadLetterManager](), 2},
 		{reflect.TypeFor[corequeue.DeadLetterWriter](), 1},
 		{reflect.TypeFor[corequeue.MessageReader](), 1},

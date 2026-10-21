@@ -303,6 +303,33 @@ func (b *memoryBroker) Reject(ctx context.Context, receipt corequeue.ReceiptValu
 	return nil
 }
 
+// Release hands the leased message back, visible now, with the delivery its
+// lease counted given back (core/data/queue.Releaser).
+func (b *memoryBroker) Release(ctx context.Context, receipt corequeue.ReceiptValue) error {
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	record, resolveErr := b.resolve(receipt)
+	//: the same refusals Ack makes, and nothing moves.
+	if resolveErr != nil {
+		//: UnknownReceipt or LeaseExpired.
+		return resolveErr
+	}
+	delete(b.inflight, record.receipt)
+	//: this lease never became an attempt, so it is not one.
+	record.deliveries = max(record.deliveries-1, 0)
+	record.visibleAt = b.clk.Now()
+	b.insertReady(record)
+	//: an idle consumer may take it now.
+	b.wake.fire()
+	//: queued again, receivable at once.
+	return nil
+}
+
 // ReplayDeadLetter queues the dead letter id again, visible now, with its
 // delivery count reset (core/data/queue.DeadLetterManager). It keeps its ID, its
 // payload and its enqueue instant.

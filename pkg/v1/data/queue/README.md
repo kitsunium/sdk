@@ -144,6 +144,21 @@ queue.Consume(ctx, broker, queue.ConsumerConfig{
 
 Two durable brokers over one directory — or one database and table — in one process share their wake, as they share everything else: they are one queue.
 
+### A stop hands back what it did not do, and a handler ends before its lease
+
+When the consumer's context ends, [Consume](#Consume) leases nothing more. The message a handler is running gets [ConsumerConfig](#ConsumerConfig).DrainTimeout to finish; what the stop cut short, and every message of the batch never started, is handed back through [Releaser](#Releaser) — receivable at once, its delivery not counted — so a deployment no longer moves work toward the dead-letter store. Every outcome is sent past the stop, bounded by [ConsumerConfig](#ConsumerConfig).SettleTimeout, so give the consumer a stop budget that covers both.
+
+A handler's context ends a margin before its lease does — a tenth of it, at most SettleTimeout — with LEASE\_EXPIRED as its cause, since past that instant another consumer may hold the same message. A handler that legitimately runs longer than a lease sets [ConsumerConfig](#ConsumerConfig).AutoExtend, and its lease is renewed every third of it while it runs:
+
+```
+queue.Consume(ctx, broker, queue.ConsumerConfig{
+	Handler:             handle,
+	HandlerIsIdempotent: true,
+	DrainTimeout:        10 * time.Second, // let the message in hand finish
+	AutoExtend:          true,             // renew the lease while it runs
+})
+```
+
 ### A queue in your own database, joined to your transaction
 
 [NewSQL](#NewSQL) keeps the queue in one table of the PostgreSQL, MySQL or SQLite database your application already writes, handed over as the \[sql.Transactor] you open your own transactions with. Every call runs on the transaction its context carries — a savepoint of it — so a message published inside yours exists if and only if yours commits. That is the transactional outbox: the write and the message that announces it are never one without the other, and a process that dies between your commit and a publication loses nothing, because there is no between.
@@ -215,6 +230,8 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [type Receipt](<#Receipt>)
 - [type Rejecter](<#Rejecter>)
   - [func \(Rejecter\) Reject\(ctx context.Context, receipt ReceiptValue, cause error\) error](<#Rejecter.Reject>)
+- [type Releaser](<#Releaser>)
+  - [func \(Releaser\) Release\(ctx context.Context, receipt ReceiptValue\) error](<#Releaser.Release>)
 - [type SQLConfig](<#SQLConfig>)
 - [type Wake](<#Wake>)
 - [type Waker](<#Waker>)
@@ -294,6 +311,15 @@ const DefaultPollInterval time.Duration = 100000000
 DefaultPollInterval is how long an idle worker waits before asking again when [ConsumerConfig](#ConsumerConfig).PollInterval is left at zero. With a [Waker](#Waker) broker it bounds only how late another process's publication is noticed.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/data/queue.DefaultPollInterval`.
+
+<a name="DefaultSettleTimeout"></a>
+```go
+const DefaultSettleTimeout time.Duration = 5000000000
+```
+
+DefaultSettleTimeout bounds each acknowledgement, nack, rejection or release [Consume](#Consume) sends past a stop, when [ConsumerConfig](#ConsumerConfig).SettleTimeout is left at zero: five seconds.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/data/queue.DefaultSettleTimeout`.
 
 <a name="MaxDeadlineOffset"></a>
 ```go
@@ -482,6 +508,8 @@ Consume runs cfg.Handler against broker until ctx is done, on cfg.Parallelism go
 
 It returns nil when ctx ends — a cancelled consumer is a stopped consumer, not a failed one — and returns the broker's error when the STORAGE fails. A handler's error is never returned: it is nacked, retried, and eventually dead-lettered, which is the entire point of the domain.
 
+A stop hands back, uncounted, every message a handler did not finish, after cfg.DrainTimeout; a handler's context ends a margin before its lease does, unless cfg.AutoExtend renews it. See the package documentation.
+
 cfg.HandlerIsIdempotent must be true; see the package documentation.
 
 <a name="DoNotRetry"></a>
@@ -546,7 +574,7 @@ SQLMigration returns the migration that creates the one table an SQL queue named
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
-Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
+Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [Releaser](#Releaser), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
 
 ```go
 type Broker = corequeue.Broker
@@ -698,10 +726,17 @@ ConsumerConfig is an alias of `github.com/kitsunium/sdk/internal/service/data/qu
 type ConsumerConfig struct {
 	// Handler processes one delivery. It must be non-nil.
 	Handler             corequeue.Handler
-	// Clock drives the idle wait. Nil means clock.System.
+	// Clock drives the idle wait, the handler's lease bound, the drain, the
+	// bound on each outcome and the lease renewals. Nil means clock.System.
 	//
 	// Nothing in this package calls time.Sleep; an idle worker waits through
 	// Waiter.After and a cancelled context wakes it immediately.
+	//
+	// A lease's end is the broker's instant and is read on this clock, so it
+	// must be the broker's: a test drives both with one ManualClock. A lease
+	// that already looks ended on this clock the moment it is received —
+	// two clocks that disagree — is not bounded at all, as before the bound
+	// existed, rather than never run.
 	Clock               clock.Timed
 	// PollInterval is how long a worker waits after finding the queue empty.
 	// Zero means [DefaultPollInterval]; negative is read as zero.
@@ -734,7 +769,61 @@ type ConsumerConfig struct {
 	// 30 seconds minus the other 49's processing time. Batch for throughput
 	// against a durable broker, where one poll is a directory read; do not
 	// batch to get parallelism, which is what Parallelism is.
+	//
+	// A message whose lease has run down to the margin [Consume] keeps
+	// before its turn comes is not started: it is handed back uncounted
+	// and leased again by a later poll — or, with AutoExtend, renewed
+	// before it starts.
 	BatchSize           int
+	// SettleTimeout bounds each outcome a worker reports once ctx has
+	// ended — an acknowledgement, a nack, a rejection or a release — and
+	// each lease renewal AutoExtend sends. Zero means
+	// [DefaultSettleTimeout]; negative is read as zero.
+	//
+	// Every outcome is sent on the consumer's context WITHOUT its
+	// cancellation, so a stop landing between a handler's return and its
+	// acknowledgement does not abandon it (kitsunium/sdk#472) and a batch a
+	// stop interrupts is still handed back. That is what needs a bound: a
+	// medium that stopped answering would otherwise hold the stop forever.
+	// It runs on Clock, from the instant ctx ends — while the consumer
+	// runs an outcome is not timed, and nothing but the worker waits on
+	// it. An outcome the bound cut short is QueueBackendFailed, which a
+	// stopping consumer reads as its stop, not as a failure.
+	//
+	// It also caps the margin a handler is stopped by before its lease
+	// ends: a tenth of the lease, at most this.
+	SettleTimeout       time.Duration
+	// DrainTimeout is how long the message a worker is handling when ctx
+	// ends may still run before its handler's context is cancelled — River's
+	// SoftStopTimeout. Zero cancels it at once, which is what a stop always
+	// did; negative is read as zero.
+	//
+	// A handler that finishes inside it is acknowledged; one the drain cut
+	// short is handed back uncounted, through the broker's
+	// [corequeue.Releaser]. No new message is leased once ctx has ended,
+	// and the lease bound still applies: a drain never keeps a handler past
+	// the margin before its lease ends. Measured on Clock. A caller's stop
+	// budget — a lifecycle component's — must cover it plus SettleTimeout.
+	DrainTimeout        time.Duration
+	// AutoExtend renews the lease of the message a handler is running, a
+	// third of the lease after it was granted or last renewed, for as long
+	// as the handler runs — the heartbeat of SQS, JetStream's in-progress
+	// acknowledgement, Temporal's activity heartbeat. A message of a batch
+	// whose lease is a third spent when its turn comes is renewed before
+	// its handler starts. Each renewal is as long as the lease the broker
+	// first granted, and is bounded by SettleTimeout.
+	//
+	// It needs the broker's [corequeue.LeaseExtender]; without it, or when
+	// false, the lease is never renewed and the handler is stopped a margin
+	// before it ends. A renewal the broker refuses — the lease lapsed, the
+	// medium failed — cancels the handler's context with that refusal as
+	// its cause: its work is now a duplicate in the making.
+	//
+	// A renewal replaces the receipt, and the engine acknowledges with the
+	// newest one. So a handler that extends its own lease — parking its
+	// message, as the mail spool does — must leave AutoExtend false: the
+	// receipt it holds is void after the first renewal.
+	AutoExtend          bool
 	// HandlerIsIdempotent asserts, IN CODE, that Handler is safe to run more
 	// than once for the same message.
 	//
@@ -1478,6 +1567,44 @@ func (Rejecter) Reject(ctx context.Context, receipt ReceiptValue, cause error) e
 Reject moves the leased message named by receipt to the dead-letter store with cause, recorded as [Broker.Nack](#Broker.Nack) records the cause of a message that ran out of attempts: its Reason, its dotted-quad Code and its wire-safe Public half, never the Private one. The dead letter's Deliveries is the count the message had, which may be below \[PolicyValue.MaxDeliveries].
 
 A lapsed receipt is [LeaseExpired](#LeaseExpired) and one this broker cannot read is [UnknownReceipt](#UnknownReceipt), exactly as [Broker.Ack](#Broker.Ack) refuses them; neither moves anything.
+
+<a name="Releaser"></a>
+## type [Releaser](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Releaser is the public alias for the capability of handing a leased message back at once without counting its delivery. Every broker here implements it, and Consume uses it for the messages a stop or a spent lease kept the handler from starting, or finishing.
+
+```go
+type Releaser = corequeue.Releaser
+```
+
+Releaser is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.Releaser`, declared as:
+
+```go
+type Releaser interface {
+	// Release makes the leased message named by receipt receivable again
+	// now, by any consumer, with its delivery count put back to what it was
+	// before this lease: its next delivery carries the [DeliveryValue]
+	// .Deliveries this one did. It is never dead-lettered, whatever that
+	// count, and no retry delay applies. It wakes an idle consumer, as a
+	// Nack that hands a message back does.
+	//
+	// A lapsed receipt is [LeaseExpired] and one this broker cannot read is
+	// [UnknownReceipt], exactly as [Broker.Ack] refuses them; neither moves
+	// anything. The receipt is void once Release returns nil.
+	Release(ctx context.Context, receipt ReceiptValue) error
+}
+```
+
+<a name="Releaser.Release"></a>
+### func \(Releaser\) [Release](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (Releaser) Release(ctx context.Context, receipt ReceiptValue) error
+```
+
+Release makes the leased message named by receipt receivable again now, by any consumer, with its delivery count put back to what it was before this lease: its next delivery carries the \[DeliveryValue] .Deliveries this one did. It is never dead-lettered, whatever that count, and no retry delay applies. It wakes an idle consumer, as a Nack that hands a message back does.
+
+A lapsed receipt is [LeaseExpired](#LeaseExpired) and one this broker cannot read is [UnknownReceipt](#UnknownReceipt), exactly as [Broker.Ack](#Broker.Ack) refuses them; neither moves anything. The receipt is void once Release returns nil.
 
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)

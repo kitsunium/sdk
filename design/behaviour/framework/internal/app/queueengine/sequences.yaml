@@ -315,6 +315,17 @@ sequences:
     steps:
       - return: o.reject.Reject(ctx, receipt, cause)
         to: o.reject.Reject
+  - of: (*sealedOutbox).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).Release
+        kind: self
+      - id: o.release.Release
+        kind: value
+    steps:
+      - return: o.release.Release(ctx, receipt)
+        to: o.release.Release
   - of: (*sealedOutbox).DeadLetters
     participants:
       - id: caller

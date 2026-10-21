@@ -179,6 +179,49 @@ func TestTheFacadeConsumesAndStops(t *testing.T) {
 	}
 }
 
+// TestTheFacadeHandsBackWhatAStopInterrupts spells kitsunium/sdk#474's names
+// through the public surface alone: Releaser by type assertion on both
+// brokers, DefaultSettleTimeout, and ConsumerConfig's SettleTimeout,
+// DrainTimeout and AutoExtend on a consumer whose stop lands in the middle of
+// its batch — the message it never started is receivable at once, uncounted.
+func TestTheFacadeHandsBackWhatAStopInterrupts(t *testing.T) {
+	t.Parallel()
+	if queue.DefaultSettleTimeout != 5*time.Second {
+		t.Fatalf("DefaultSettleTimeout = %v, want 5s", queue.DefaultSettleTimeout)
+	}
+	for _, name := range []string{"memory", "file"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			broker := facadeBroker(t, name)
+			if _, ok := broker.(queue.Releaser); !ok {
+				t.Fatalf("%T does not implement queue.Releaser", broker)
+			}
+			for _, payload := range []string{"first", "second"} {
+				if _, err := broker.Publish(t.Context(), []byte(payload)); err != nil {
+					t.Fatalf("Publish() = %v, want nil", err)
+				}
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			err := queue.Consume(ctx, broker, queue.ConsumerConfig{
+				Handler: func(context.Context, queue.Delivery) error {
+					cancel()
+					return nil
+				},
+				HandlerIsIdempotent: true, BatchSize: 2,
+				SettleTimeout: time.Second, DrainTimeout: time.Second, AutoExtend: true,
+			})
+			if err != nil {
+				t.Fatalf("Consume() = %v, want nil for a stopped consumer", err)
+			}
+			batch, err := broker.Receive(t.Context(), 10)
+			if err != nil || len(batch) != 1 || batch[0].Deliveries != 1 {
+				t.Fatalf("Receive() = %+v, %v; want the message never started, as its first delivery", batch, err)
+			}
+		})
+	}
+}
+
 // facadeBroker builds one of the two public brokers.
 func facadeBroker(t *testing.T, kind string) queue.Broker {
 	t.Helper()

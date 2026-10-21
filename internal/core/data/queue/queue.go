@@ -25,7 +25,9 @@ import (
 // broker's [Rejecter]. ctx is the consumer's and IS honoured: unlike
 // events.Listener, a handler that outlives its context is holding a lease it
 // is about to lose, so abandoning the work is the correct response and the
-// message will simply be redelivered.
+// message will simply be redelivered. internal/service/data/queue.Consume
+// ends it a margin before the lease does, with [LeaseExpired] as its
+// context.Cause, and when the consumer stops.
 type Handler func(ctx context.Context, delivery DeliveryValue) error
 
 // NackValue is what [Broker.Nack] decided.

@@ -54,6 +54,10 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 			` WHERE id = $5 AND lease = $6 AND deliveries = $7 AND dead = 0 AND due > $8`},
 		{dialect: coresql.DialectPostgres, role: "extend", text: `UPDATE "app__jobs" SET due = $1, lease = $2 WHERE id = $3 AND lease = $4 AND deliveries = $5` +
 			` AND dead = 0 AND due > $6`},
+		{dialect: coresql.DialectPostgres, role: "release", text: `UPDATE "app__jobs" SET due = $1, lease = NULL, deliveries = deliveries - 1` +
+			` WHERE id = $2 AND lease = $3 AND deliveries = $4 AND dead = 0 AND due > $5`},
+		{dialect: coresql.DialectMySQL, role: "release", text: "UPDATE `app__jobs` SET due = ?, lease = NULL, deliveries = deliveries - 1" +
+			" WHERE id = ? AND lease = ? AND deliveries = ? AND dead = 0 AND due > ?"},
 		{dialect: coresql.DialectPostgres, role: "deadList", text: `SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM "app__jobs"` +
 			` WHERE dead = 1 ORDER BY due, id LIMIT $1`},
 		{dialect: coresql.DialectPostgres, role: "replay", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL` +

@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings
+- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section)
 - **Related**: [ADR 0053](0053-sdk-events-domain.md) (the frontier table, written before this domain existed), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0052](0052-sdk-lock-domain.md) (leases that expire, and the `flock(2)` measurement), [ADR 0056](0056-sdk-vfs-domain.md) (`vfs`, whose `WriteAtomic` is this domain's durable publish), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate), [ADR 0001](0001-sdk-go-multimodule-layout.md) / [ADR 0005](0005-sdk-error-codes-dotted-quad.md)
 
 ## Context
@@ -570,6 +570,50 @@ and the documentation the change is obliged to keep in step (rule 11).
 - **Batch acknowledgement** (`AckAll`). It would amortise the durable broker's
   syscalls the way `BatchSize` amortises its directory scan; it needs a
   partial-failure semantic first, and that deserves its own decision.
+
+## Amendment — 2026-10-21: a stop hands back what it did not do, and a handler ends before its lease (kitsunium/sdk#474)
+
+`Consume` as decided above stopped by cancelling the handler's context and
+nothing else, and handled a batch whatever its leases had left. Two defects
+followed, reproduced on every broker before the change:
+
+- **A stop burnt deliveries.** Cancelled in the middle of a batch, the worker
+  handed the rest to the handler under a dead context and nacked each on it;
+  every broker refused that nack, so the message stayed leased for a whole
+  visibility timeout and came back one delivery closer to the dead-letter
+  store. A message nobody tried could end `LEASE_EXPIRED` after
+  `MaxDeliveries` deployments.
+- **A handler was not bounded by its lease.** Past `ExpiresAt` the broker may
+  hand the message to a second consumer while the first still runs, and a
+  batch's later messages could start with a lease all but lapsed.
+
+Decided:
+
+1. **A ninth sibling, `Releaser.Release`** (ADR 0039): the leased message is
+   receivable at once, its delivery count put back, never dead-lettered —
+   SQS's `ChangeMessageVisibility(0)`. The three brokers implement it in one
+   move each. `Consume` uses it for every message a stop or a spent lease kept
+   from its handler, and falls back to `Nack` for a broker without it.
+2. **`ConsumerConfig.DrainTimeout`** (River's `SoftStopTimeout`): the message
+   in hand may finish that long after the stop before its handler's context is
+   cancelled; zero is the old behaviour (ADR 0031). What the stop cut short is
+   released.
+3. **`ConsumerConfig.SettleTimeout`**: every outcome is sent on the
+   consumer's context without its cancellation (the rule #472 introduced for
+   the acknowledgement, extended to the nack, the rejection and the release),
+   bounded on the injected clock from the stop on (ADR 0090); zero is five
+   seconds, a clamp. While the consumer runs an outcome is not timed.
+4. **The handler's context ends a margin before its lease** — a tenth of the
+   lease, at most `SettleTimeout` — with `LEASE_EXPIRED` as its cause; a batch
+   message whose lease is down to the margin is released rather than started.
+   A lease that looks already ended on the consumer's clock is not judged.
+5. **`ConsumerConfig.AutoExtend`** renews the lease through `LeaseExtender`
+   every third of it while the handler runs, and before a batch message starts
+   once a third is spent; false — the zero — renews nothing.
+
+Not decided here: the framework's wiring — `DrainTimeout` tied to the
+lifecycle's stop budget, `AutoExtend` on by default per queue — which is the
+framework's and the Studio's to expose.
 
 ## References
 

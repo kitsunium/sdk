@@ -9,7 +9,7 @@ sequences:
         kind: self
       - id: cfg.validate
         kind: internal
-      - id: cfg.normalized
+      - id: newConsumer
         kind: internal
       - id: group
         kind: package
@@ -26,38 +26,52 @@ sequences:
             eval: cfg.validate()
             to: cfg.validate
           when: invalid != nil
-      - bind: resolved
-        eval: cfg.normalized()
-        to: cfg.normalized
+      - bind: engine
+        eval: newConsumer(broker, cfg.normalized())
+        to: newConsumer
       - bind: workers, _
-        eval: group.NewJoined(ctx, resolved.Parallelism)
+        eval: group.NewJoined(ctx, engine.cfg.Parallelism)
         to: group
       - loop:
           do:
             - eval: |-
                 workers.Go(func(stop context.Context) error {
                 			//: nil for a stopped worker, the broker's error for a failed one.
-                			return pump(stop, broker, resolved)
+                			return engine.pump(stop)
                 		})
               to: workers.Go
-          range: resolved.Parallelism
+          range: engine.cfg.Parallelism
       - return: workers.Wait()
         to: workers.Wait
-  - of: pump
+  - of: newConsumer
+    steps:
+      - bind: engine
+        eval: "&consumer{broker: broker, cfg: cfg}"
+      - set: engine.waker, _
+        value: broker.(corequeue.Waker)
+      - set: engine.releaser, _
+        value: broker.(corequeue.Releaser)
+      - set: engine.rejecter, _
+        value: broker.(corequeue.Rejecter)
+      - opt:
+          do:
+            - set: engine.extender, _
+              value: broker.(corequeue.LeaseExtender)
+          when: cfg.AutoExtend
+      - return: engine
+  - of: (*consumer).pump
     participants:
       - id: caller
         kind: actor
-      - id: pump
+      - id: (*consumer).pump
         kind: self
-      - id: broker.Receive
+      - id: c.broker.Receive
         kind: value
       - id: ignoreCancelled
         kind: internal
-      - id: settleBatch
+      - id: c.settleBatch
         kind: internal
     steps:
-      - bind: waker, wakes
-        eval: broker.(corequeue.Waker)
       - loop:
           do:
             - opt:
@@ -70,11 +84,11 @@ sequences:
             - opt:
                 do:
                   - set: signal
-                    value: waker.Wake().Signal
-                when: wakes
+                    value: c.waker.Wake().Signal
+                when: c.waker != nil
             - bind: batch, receiveErr
-              eval: broker.Receive(ctx, cfg.BatchSize)
-              to: broker.Receive
+              eval: c.broker.Receive(ctx, c.cfg.BatchSize)
+              to: c.broker.Receive
             - opt:
                 do:
                   - return: ignoreCancelled(ctx, receiveErr)
@@ -85,7 +99,7 @@ sequences:
                   - opt:
                       do:
                         - return: nil
-                      when: "!idle(ctx, cfg, signal, idleFor(cfg.PollInterval, waker, wakes))"
+                      when: "!idle(ctx, c.cfg, signal, idleFor(c.cfg.PollInterval, c.waker))"
                   - continue: true
                 when: len(batch) == 0
             - opt:
@@ -94,8 +108,8 @@ sequences:
                     to: ignoreCancelled
                 init:
                   bind: settleErr
-                  eval: settleBatch(ctx, broker, cfg.Handler, batch)
-                  to: settleBatch
+                  eval: c.settleBatch(ctx, batch, c.cfg.Clock.Now())
+                  to: c.settleBatch
                 when: settleErr != nil
           forever: true
   - of: idleFor
@@ -110,7 +124,7 @@ sequences:
       - opt:
           do:
             - return: poll
-          when: "!wakes"
+          when: waker == nil
       - bind: next
         eval: waker.Wake()
         to: waker.Wake
@@ -146,13 +160,165 @@ sequences:
             - comm: <-timer.C()
               do:
                 - return: "true"
-  - of: settleBatch
+  - of: (*consumer).settleBatch
     participants:
       - id: caller
         kind: actor
-      - id: settleBatch
+      - id: (*consumer).settleBatch
         kind: self
-      - id: settle
+      - id: c.handBackAll
+        kind: internal
+      - id: c.planFor
+        kind: internal
+      - id: c.prepare
+        kind: internal
+      - id: c.process
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: c.handBackAll(ctx, batch[index:])
+                    to: c.handBackAll
+                when: ctx.Err() != nil
+            - bind: plan
+              eval: c.planFor(delivery, receivedAt)
+              to: c.planFor
+            - bind: ready, prepared, prepareErr
+              eval: c.prepare(ctx, delivery, plan)
+              to: c.prepare
+            - opt:
+                do:
+                  - return: prepareErr
+                when: prepareErr != nil
+            - opt:
+                do:
+                  - continue: true
+                when: "!ready"
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: c.process(ctx, prepared, plan)
+                  to: c.process
+                when: err != nil
+          key: index
+          range: batch
+          value: delivery
+      - return: nil
+  - of: (*consumer).prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).prepare
+        kind: self
+      - id: delivery.Lease.ExpiresAt.Sub
+        kind: value
+      - id: c.renew
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: true, delivery, nil
+          when: "!plan.bounded"
+      - bind: left
+        eval: delivery.Lease.ExpiresAt.Sub(c.cfg.Clock.Now())
+        to: delivery.Lease.ExpiresAt.Sub
+      - opt:
+          do:
+            - bind: lease, renewErr
+              eval: c.renew(ctx, delivery.Lease.Receipt, plan.granted)
+              to: c.renew
+            - opt:
+                do:
+                  - return: false, delivery, nil
+                when: kerrs.HasCode(renewErr, corequeue.CodeLeaseExpired)
+            - opt:
+                do:
+                  - return: false, delivery, renewErr
+                when: renewErr != nil
+            - set: delivery.Lease
+              value: lease
+            - return: true, delivery, nil
+          when: c.extender != nil && left <= plan.granted-plan.renewEvery
+      - opt:
+          do:
+            - return: false, delivery, c.handBack(ctx, delivery.Lease.Receipt)
+          when: left <= plan.margin
+      - return: true, delivery, nil
+  - of: (*consumer).process
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).process
+        kind: self
+      - id: c.watch
+        kind: internal
+      - id: guard
+        kind: internal
+      - id: watched.finish
+        kind: internal
+      - id: c.settle
+        kind: internal
+    steps:
+      - bind: watched
+        eval: c.watch(ctx, delivery, plan)
+        to: c.watch
+      - bind: failure
+        eval: guard(watched.ctx, c.cfg.Handler, delivery)
+        to: guard
+      - bind: lease, stopped
+        eval: watched.finish(ctx, failure)
+        to: watched.finish
+      - return: c.settle(ctx, lease.Receipt, failure, stopped)
+        to: c.settle
+  - of: (*consumer).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).settle
+        kind: self
+      - id: ignoreLapsed
+        kind: internal
+      - id: c.handBack
+        kind: internal
+      - id: c.nack
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                ignoreLapsed(c.bounded(ctx, "ack", false, func(settleCtx context.Context) error {
+                			//: removed.
+                			return c.broker.Ack(settleCtx, receipt)
+                		}))
+              to: ignoreLapsed
+          when: failure == nil
+      - opt:
+          do:
+            - return: |-
+                ignoreLapsed(c.bounded(ctx, "reject", false, func(settleCtx context.Context) error {
+                			//: dead-lettered with the handler's cause.
+                			return c.rejecter.Reject(settleCtx, receipt, failure)
+                		}))
+              to: ignoreLapsed
+          when: c.rejecter != nil && kerrs.HasCode(failure, corequeue.CodeNotRetryable)
+      - opt:
+          do:
+            - return: c.handBack(ctx, receipt)
+              to: c.handBack
+          when: stopped && !kerrs.HasCode(failure, corequeue.CodeHandlerPanicked)
+      - return: c.nack(ctx, receipt, failure)
+        to: c.nack
+  - of: (*consumer).handBackAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).handBackAll
+        kind: self
+      - id: c.handBack
         kind: internal
     steps:
       - loop:
@@ -162,45 +328,50 @@ sequences:
                   - return: err
                 init:
                   bind: err
-                  eval: settle(ctx, broker, handler, delivery)
-                  to: settle
+                  eval: c.handBack(ctx, delivery.Lease.Receipt)
+                  to: c.handBack
                 when: err != nil
           key: _
-          range: batch
+          range: rest
           value: delivery
       - return: nil
-  - of: settle
+  - of: (*consumer).handBack
     participants:
       - id: caller
         kind: actor
-      - id: settle
+      - id: (*consumer).handBack
         kind: self
-      - id: guard
+      - id: c.nack
         kind: internal
       - id: ignoreLapsed
         kind: internal
-      - id: broker.Nack
-        kind: value
     steps:
-      - bind: failure
-        eval: guard(ctx, handler, delivery)
-        to: guard
       - opt:
           do:
-            - return: ignoreLapsed(broker.Ack(context.WithoutCancel(ctx), delivery.Lease.Receipt))
-              to: ignoreLapsed
-          when: failure == nil
-      - bind: rejecter, rejects
-        eval: broker.(corequeue.Rejecter)
-      - opt:
-          do:
-            - return: ignoreLapsed(rejecter.Reject(ctx, delivery.Lease.Receipt, failure))
-              to: ignoreLapsed
-          when: rejects && kerrs.HasCode(failure, corequeue.CodeNotRetryable)
-      - bind: _, nackErr
-        eval: broker.Nack(ctx, delivery.Lease.Receipt, failure)
-        to: broker.Nack
-      - return: ignoreLapsed(nackErr)
+            - return: c.nack(ctx, receipt, nil)
+              to: c.nack
+          when: c.releaser == nil
+      - return: |-
+          ignoreLapsed(c.bounded(ctx, "release", false, func(settleCtx context.Context) error {
+          		//: handed back.
+          		return c.releaser.Release(settleCtx, receipt)
+          	}))
+        to: ignoreLapsed
+  - of: (*consumer).nack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).nack
+        kind: self
+      - id: ignoreLapsed
+        kind: internal
+    steps:
+      - return: |-
+          ignoreLapsed(c.bounded(ctx, "nack", false, func(settleCtx context.Context) error {
+          		_, nackErr := c.broker.Nack(settleCtx, receipt, cause)
+          		//: retried, or dead-lettered with its cause.
+          		return nackErr
+          	}))
         to: ignoreLapsed
   - of: guard
     steps:
@@ -266,10 +437,340 @@ sequences:
           when: c.PollInterval <= 0
       - opt:
           do:
+            - set: c.SettleTimeout
+              value: DefaultSettleTimeout
+          when: c.SettleTimeout <= 0
+      - set: c.DrainTimeout
+        value: max(c.DrainTimeout, 0)
+      - opt:
+          do:
             - set: c.Clock
               value: clock.System
           when: c.Clock == nil
       - return: c
+  - of: (*consumer).planFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).planFor
+        kind: self
+      - id: delivery.Lease.ExpiresAt.Sub
+        kind: value
+    steps:
+      - bind: granted
+        eval: delivery.Lease.ExpiresAt.Sub(receivedAt)
+        to: delivery.Lease.ExpiresAt.Sub
+      - opt:
+          do:
+            - return: leasePlan{}
+          when: granted <= 0
+      - return: |-
+          leasePlan{
+          		granted: granted, margin: min(granted/leaseMarginDivisor, c.cfg.SettleTimeout),
+          		renewEvery: max(granted/renewDivisor, time.Nanosecond), bounded: true,
+          	}
+  - of: (*consumer).watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).watch
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: c.cfg.Clock.NewTimer
+        kind: value
+      - id: c.cfg.Clock.NewTicker
+        kind: value
+      - id: w.watcher.Go
+        kind: value
+    steps:
+      - bind: w
+        eval: "&watched{ctx: ctx, lease: delivery.Lease, plan: plan, id: delivery.Message.ID, stop: ctx.Done()}"
+      - opt:
+          do:
+            - return: w
+          when: "!plan.bounded && c.cfg.DrainTimeout <= 0"
+      - set: w.ctx, w.cancel
+        to: context
+        value: context.WithCancelCause(context.WithoutCancel(ctx))
+      - set: w.handled, w.markHandled
+        to: context
+        value: context.WithCancel(context.WithoutCancel(ctx))
+      - opt:
+          do:
+            - set: w.deadline
+              to: c.cfg.Clock.NewTimer
+              value: c.cfg.Clock.NewTimer(delivery.Lease.ExpiresAt.Sub(c.cfg.Clock.Now()) - plan.margin)
+          when: plan.bounded
+      - opt:
+          do:
+            - set: w.renewal
+              to: c.cfg.Clock.NewTicker
+              value: c.cfg.Clock.NewTicker(plan.renewEvery)
+          when: plan.bounded && c.extender != nil
+      - eval: |-
+          w.watcher.Go(func() {
+          		//: until the handler returns or its context is ended.
+          		for c.oversee(ctx, w) {
+          		}
+          	})
+        to: w.watcher.Go
+      - return: w
+  - of: (*consumer).oversee
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).oversee
+        kind: self
+      - id: c.cfg.Clock.NewTimer
+        kind: value
+      - id: w.drain.C
+        kind: value
+      - id: w.halt
+        kind: internal
+      - id: c.renewWatched
+        kind: internal
+    steps:
+      - select:
+          cases:
+            - comm: <-w.handled.Done()
+              do:
+                - return: "false"
+            - comm: <-w.stop
+              do:
+                - set: w.stop
+                  value: nil
+                - set: w.stopped
+                  value: "true"
+                - opt:
+                    do:
+                      - set: w.drain
+                        to: c.cfg.Clock.NewTimer
+                        value: c.cfg.Clock.NewTimer(c.cfg.DrainTimeout)
+                      - set: w.drained
+                        to: w.drain.C
+                        value: w.drain.C()
+                      - return: "true"
+                    when: c.cfg.DrainTimeout > 0
+                - return: w.halt(context.Cause(ctx))
+                  to: w.halt
+            - comm: <-w.drained
+              do:
+                - return: w.halt(context.Cause(ctx))
+                  to: w.halt
+            - comm: <-timerC(w.deadline)
+              do:
+                - return: |-
+                    w.halt(kerrs.Wrap(corequeue.LeaseExpired, kerrs.WrapParams{},
+                    			kerrs.String("message", w.id), kerrs.String("why", "the handler's lease ends within its margin")))
+                  to: w.halt
+            - comm: <-tickerC(w.renewal)
+              do:
+                - return: c.renewWatched(ctx, w)
+                  to: c.renewWatched
+  - of: (*consumer).renewWatched
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).renewWatched
+        kind: self
+      - id: c.renew
+        kind: internal
+      - id: w.halt
+        kind: internal
+      - id: w.deadline.Reset
+        kind: value
+    steps:
+      - bind: lease, renewErr
+        eval: c.renew(ctx, w.lease.Receipt, w.plan.granted)
+        to: c.renew
+      - opt:
+          do:
+            - return: w.halt(renewErr)
+              to: w.halt
+          when: renewErr != nil
+      - set: w.lease
+        value: lease
+      - eval: w.deadline.Reset(lease.ExpiresAt.Sub(c.cfg.Clock.Now()) - w.plan.margin)
+        to: w.deadline.Reset
+      - return: "true"
+  - of: (*watched).halt
+    steps:
+      - eval: w.cancel(cause)
+      - return: "false"
+  - of: (*watched).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watched).finish
+        kind: self
+      - id: w.watcher.Wait
+        kind: value
+      - id: stopTimer
+        kind: internal
+      - id: w.renewal.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: w.lease, failure != nil && ctx.Err() != nil
+          when: w.cancel == nil
+      - eval: w.markHandled()
+      - eval: w.watcher.Wait()
+        to: w.watcher.Wait
+      - eval: stopTimer(w.deadline)
+        to: stopTimer
+      - eval: stopTimer(w.drain)
+        to: stopTimer
+      - opt:
+          do:
+            - eval: w.renewal.Stop()
+              to: w.renewal.Stop
+          when: w.renewal != nil
+      - eval: w.cancel(context.Canceled)
+      - return: w.lease, w.stopped && failure != nil
+  - of: timerC
+    participants:
+      - id: caller
+        kind: actor
+      - id: timerC
+        kind: self
+      - id: timer.C
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: timer == nil
+      - return: timer.C()
+        to: timer.C
+  - of: tickerC
+    participants:
+      - id: caller
+        kind: actor
+      - id: tickerC
+        kind: self
+      - id: ticker.C
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ticker == nil
+      - return: ticker.C()
+        to: ticker.C
+  - of: stopTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: stopTimer
+        kind: self
+      - id: timer.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: timer.Stop()
+              to: timer.Stop
+          when: timer != nil
+  - of: (*consumer).renew
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).renew
+        kind: self
+      - id: c.bounded
+        kind: internal
+    steps:
+      - set: err
+        to: c.bounded
+        value: |-
+          c.bounded(ctx, "extend", true, func(settleCtx context.Context) error {
+          		var extendErr error
+          		lease, extendErr = c.extender.Extend(settleCtx, receipt, by)
+          		//: renewed, LeaseExpired, or the medium refusing.
+          		return extendErr
+          	})
+      - return: lease, err
+  - of: (*consumer).bounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).bounded
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: c.cfg.Clock.NewTimer
+        kind: value
+      - id: c.bound
+        kind: internal
+    steps:
+      - bind: settleCtx, cancel
+        eval: context.WithCancelCause(context.WithoutCancel(ctx))
+        to: context
+      - var:
+          name: armed
+          type: clock.Timer
+      - opt:
+          do:
+            - set: armed
+              to: c.cfg.Clock.NewTimer
+              value: c.cfg.Clock.NewTimer(c.cfg.SettleTimeout)
+          when: always || ctx.Err() != nil
+      - bind: done, exited
+        eval: make(chan struct{}), make(chan struct{})
+      - go: |-
+          c.bound(ctx, armed, done, exited, func() {
+          		//: the medium did not answer within the bound.
+          		cancel(kerrs.Wrap(corequeue.QueueBackendFailed, kerrs.WrapParams{},
+          			kerrs.String("op", op), kerrs.String("settle_timeout", c.cfg.SettleTimeout.String())))
+          	})
+        to: c.bound
+      - bind: err
+        eval: call(settleCtx)
+      - eval: close(done)
+      - eval: <-exited
+      - bind: cut, cause
+        eval: settleCtx.Err() != nil, context.Cause(settleCtx)
+      - eval: cancel(context.Canceled)
+      - opt:
+          do:
+            - return: err
+          when: err == nil || !cut
+      - return: cause
+  - of: (*consumer).bound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).bound
+        kind: self
+      - id: c.cfg.Clock.NewTimer
+        kind: value
+      - id: armed.Stop
+        kind: value
+    steps:
+      - defer: close(exited)
+      - opt:
+          do:
+            - select:
+                cases:
+                  - comm: <-done
+                    do:
+                      - return: ""
+                  - comm: <-ctx.Done()
+                    do:
+                      - set: armed
+                        to: c.cfg.Clock.NewTimer
+                        value: c.cfg.Clock.NewTimer(c.cfg.SettleTimeout)
+          when: armed == nil
+      - defer: armed.Stop()
+        to: armed.Stop
+      - select:
+          cases:
+            - comm: <-armed.C()
+              do:
+                - eval: expire()
+            - comm: <-done
   - of: rootWritableByAnyone
     participants:
       - id: caller
@@ -904,6 +1405,59 @@ sequences:
         to: b.clk.Now().UnixNano
       - return: b.bury(name, held, describeCause(cause), failedAt)
         to: b.bury
+  - of: (*fileBroker).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).Release
+        kind: self
+      - id: b.resolve
+        kind: internal
+      - id: b.root.Rename
+        kind: value
+      - id: b.classifyMissing
+        kind: internal
+      - id: b.dropStale
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - bind: held
+        eval: string(receipt)
+      - bind: name, resolveErr
+        eval: b.resolve(ctx, held)
+        to: b.resolve
+      - opt:
+          do:
+            - return: resolveErr
+          when: resolveErr != nil
+      - bind: requeued
+        eval: |-
+          nameValue{
+          		At: b.clk.Now().UnixNano(), EnqueuedAt: name.EnqueuedAt,
+          		Entropy: name.Entropy, Deliveries: max(name.Deliveries-1, 0),
+          	}
+      - bind: renameErr
+        eval: |-
+          b.root.Rename(
+          		path.Join(dirInflight, held), path.Join(dirReady, requeued.readyName()))
+        to: b.root.Rename
+      - opt:
+          do:
+            - return: b.classifyMissing("rename", held, renameErr)
+              to: b.classifyMissing
+          when: renameErr != nil
+      - opt:
+          do:
+            - return: dropErr
+          init:
+            bind: dropErr
+            eval: b.dropStale(path.Join(dirInflight, held))
+            to: b.dropStale
+          when: dropErr != nil
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: nil
   - of: (*fileBroker).nackDead
     participants:
       - id: caller
@@ -2567,6 +3121,48 @@ sequences:
       - eval: b.bury(record, b.clk.Now(), describeCause(cause))
         to: b.bury
       - return: nil
+  - of: (*memoryBroker).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryBroker).Release
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: b.resolve
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.insertReady
+        kind: internal
+      - id: b.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ctx.Err() != nil
+      - lock:
+          mutex: b.mu
+      - bind: record, resolveErr
+        eval: b.resolve(receipt)
+        to: b.resolve
+      - opt:
+          do:
+            - return: resolveErr
+          when: resolveErr != nil
+      - eval: delete(b.inflight, record.receipt)
+      - set: record.deliveries
+        value: max(record.deliveries-1, 0)
+      - set: record.visibleAt
+        to: b.clk.Now
+        value: b.clk.Now()
+      - eval: b.insertReady(record)
+        to: b.insertReady
+      - eval: b.wake.fire()
+        to: b.wake.fire
+      - return: nil
   - of: (*memoryBroker).ReplayDeadLetter
     participants:
       - id: caller
@@ -3482,6 +4078,53 @@ sequences:
       - eval: b.announce(ctx)
         to: b.announce
       - return: "corequeue.NackValue{Deliveries: held.deliveries, VisibleAt: time.Unix(0, visibleAt.UnixNano())}, nil"
+  - of: (*sqlBroker).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).Release
+        kind: self
+      - id: b.receiptOf
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: clockRefused
+        kind: internal
+      - id: b.run
+        kind: internal
+      - id: b.announce
+        kind: internal
+    steps:
+      - bind: held, err
+        eval: b.receiptOf(ctx, receipt)
+        to: b.receiptOf
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: now
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - opt:
+          do:
+            - return: clockRefused(now)
+              to: clockRefused
+          when: "!nameable(now)"
+      - bind: releaseErr
+        eval: |-
+          b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		result, execErr := ex.ExecContext(txCtx, b.stmts.release, append([]any{now.UnixNano()}, held.args(now.UnixNano())...)...)
+          		//: queued again, LeaseExpired, or QueueBackendFailed.
+          		return b.leased(result, execErr, "release a message")
+          	})
+        to: b.run
+      - opt:
+          do:
+            - return: releaseErr
+          when: releaseErr != nil
+      - eval: b.announce(ctx)
+        to: b.announce
+      - return: nil
   - of: (*sqlBroker).Extend
     participants:
       - id: caller
@@ -4287,6 +4930,7 @@ sequences:
           		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
           		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, 5),
           		extend:     "UPDATE " + q + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
+          		release:    "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
           		deadList:   "SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
           		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, reason = NULL, cause = NULL, code = NULL WHERE id = " + p(2) + " AND dead = 1",
           		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",

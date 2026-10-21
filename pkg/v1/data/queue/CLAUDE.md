@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-15T00:00:00Z -->
+<!-- updated: 2026-10-21T00:00:00Z -->
 # pkg/v1/data/queue/
 
 ## Purpose
@@ -14,12 +14,12 @@ and the consumer engine.
 |---|---|
 | Ports | `Broker` (frozen at four methods), `Handler` (func port) |
 | Values | `Message`, `LiveMessage` (ADR 0178), `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` |
-| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter`, `MessageReader`, `MessageWriter` (ADR 0178) — reached by type assertion |
+| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter`, `MessageReader`, `MessageWriter` (ADR 0178), `Releaser` (kitsunium/sdk#474) — reached by type assertion |
 | Configs | `FileConfig`, `SQLConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile` (its broker also answers `io.Closer` by type assertion, releasing its two directory descriptors; the messages stay on disk), `NewSQL`, `NewMemory` |
 | Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `DoNotRetry` (a failure no retry can fix) |
 | Engine | `Consume` |
-| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter`, `CodeInvalidMessage` |
+| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `DefaultSettleTimeout`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter`, `CodeInvalidMessage` |
 | Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `InvalidMessage`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
 
 ## Why this shape
@@ -48,6 +48,12 @@ and the consumer engine.
   poll for that reason, and the constant keeps its 100 ms so a zero means what
   it always meant for a broker that cannot wake anyone.
 
+- **A stop hands back what it did not finish** (kitsunium/sdk#474). The package
+  doc says what a caller must size: `DrainTimeout` for the message in hand,
+  `SettleTimeout` for each outcome sent past the stop — a stop budget covers
+  both — and `AutoExtend` for a handler that outlives its lease, whose context
+  otherwise ends a margin before the lease does.
+
 - **Three codes are published beside their sentinels** — the three ADR 0151
   added. `CodeNotRetryable` is the one a caller NEEDS: `DoNotRetry` puts it on
   the wrap trail of an SDK cause, whose own code stays the origin, so
@@ -57,7 +63,7 @@ and the consumer engine.
   test's own making, `SQLMigration`, `DoNotRetry`, both new siblings on the
   memory and file brokers — and ADR 0178's `DeadLetterWriter`,
   `InvalidDeadLetter` and `CodeInvalidDeadLetter` (`queue_external_test.go`,
-  `TestTheFacadeWritesADeadLetterAsItLies`), and `MessageReader`, `MessageWriter`, `LiveMessage`, `InvalidMessage` and `CodeInvalidMessage` (`TestTheFacadeMovesALiveMessage`). Issue #259 was a public API a downstream module
+  `TestTheFacadeWritesADeadLetterAsItLies`), and `MessageReader`, `MessageWriter`, `LiveMessage`, `InvalidMessage` and `CodeInvalidMessage` (`TestTheFacadeMovesALiveMessage`), and kitsunium/sdk#474's `Releaser`, `DefaultSettleTimeout` and `ConsumerConfig`'s `SettleTimeout`, `DrainTimeout` and `AutoExtend` (`TestTheFacadeHandsBackWhatAStopInterrupts`). Issue #259 was a public API a downstream module
   could not spell; this is the check that it can.
 
 ## Generated
