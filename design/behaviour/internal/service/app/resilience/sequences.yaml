@@ -57,23 +57,26 @@ sequences:
           when: adm.trial
       - bind: err
         eval: op(ctx)
-      - bind: res
-        eval: outcomeSuccess
-      - opt:
-          do:
-            - set: res
-              value: outcomeNeutral
-            - opt:
-                do:
-                  - set: res
-                    value: outcomeFailure
-                when: isRetryable(b.retryable, err)
-          when: err != nil
-      - eval: b.record(adm, res)
+      - eval: b.record(adm, b.classify(ctx, err))
         to: b.record
       - set: settled
         value: "true"
       - return: err
+  - of: (*circuitBreaker).classify
+    steps:
+      - opt:
+          do:
+            - return: outcomeSuccess
+          when: err == nil
+      - opt:
+          do:
+            - return: outcomeNeutral
+          when: ctx.Err() != nil && errors.Is(err, context.Canceled)
+      - opt:
+          do:
+            - return: outcomeFailure
+          when: isRetryable(b.retryable, err)
+      - return: outcomeNeutral
   - of: (*circuitBreaker).allow
     steps:
       - lock:
@@ -923,6 +926,17 @@ sequences:
         kind: actor
       - id: NewTimeout
         kind: self
+      - id: NewTimeoutWith
+        kind: internal
+    steps:
+      - return: "NewTimeoutWith(TimeoutConfig{Duration: d})"
+        to: NewTimeoutWith
+  - of: NewTimeoutWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTimeoutWith
+        kind: self
       - id: newMisconfigured
         kind: internal
     steps:
@@ -930,31 +944,190 @@ sequences:
           do:
             - return: newMisconfigured("timeout", "duration")
               to: newMisconfigured
-          when: d <= 0
-      - return: "timeoutRunner{timeout: d}"
+          when: cfg.Duration <= 0
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: nil
+          when: clk == clock.System
+      - return: "timeoutRunner{timeout: cfg.Duration, clk: clk}"
   - of: timeoutRunner.Run
     participants:
       - id: caller
         kind: actor
       - id: timeoutRunner.Run
         kind: self
-      - id: context
-        kind: stdlib
+      - id: t.derive
+        kind: internal
+      - id: ctx.Err
+        kind: value
       - id: wrapAs
         kind: internal
     steps:
       - bind: dctx, cancel
-        eval: context.WithTimeout(ctx, t.timeout)
-        to: context
+        eval: t.derive(ctx)
+        to: t.derive
       - defer: cancel()
       - bind: err
         eval: op(dctx)
       - opt:
           do:
+            - opt:
+                do:
+                  - return: parentErr
+                init:
+                  bind: parentErr
+                  eval: ctx.Err()
+                  to: ctx.Err
+                when: parentErr != nil
             - return: wrapAs(coreres.TimeoutExceeded, err)
               to: wrapAs
           when: dctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded)
       - return: err
+  - of: timeoutRunner.derive
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutRunner.derive
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: newClockDeadline
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: context.WithTimeout(ctx, t.timeout)
+              to: context
+          when: t.clk == nil
+      - return: newClockDeadline(ctx, t.clk, t.timeout)
+        to: newClockDeadline
+  - of: newClockDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: newClockDeadline
+        kind: self
+      - id: parent.Err
+        kind: value
+      - id: c.finish
+        kind: internal
+      - id: clk.NewTimer
+        kind: value
+      - id: c.watch
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&clockDeadline{parent: parent, done: make(chan struct{})}"
+      - opt:
+          do:
+            - eval: c.finish(parentErr)
+              to: c.finish
+            - return: c, func() {}
+          init:
+            bind: parentErr
+            eval: parent.Err()
+            to: parent.Err
+          when: parentErr != nil
+      - bind: timer
+        eval: clk.NewTimer(d)
+        to: clk.NewTimer
+      - bind: release
+        eval: make(chan struct{})
+      - go: c.watch(timer, release)
+        to: c.watch
+      - var:
+          name: once
+          type: sync.Once
+      - return: c, func() { once.Do(func() { close(release) }) }
+  - of: (*clockDeadline).watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).watch
+        kind: self
+      - id: timer.Stop
+        kind: value
+      - id: c.finish
+        kind: internal
+    steps:
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+              do:
+                - eval: c.finish(context.DeadlineExceeded)
+                  to: c.finish
+            - comm: <-c.parent.Done()
+              do:
+                - eval: c.finish(c.parent.Err())
+                  to: c.finish
+            - comm: <-release
+              do:
+                - eval: c.finish(context.Canceled)
+                  to: c.finish
+  - of: (*clockDeadline).finish
+    steps:
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - return: ""
+          when: c.err != nil
+      - set: c.err
+        value: err
+      - eval: close(c.done)
+  - of: (*clockDeadline).Deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).Deadline
+        kind: self
+      - id: c.parent.Deadline
+        kind: value
+    steps:
+      - return: c.parent.Deadline()
+        to: c.parent.Deadline
+  - of: (*clockDeadline).Done
+    steps:
+      - return: c.done
+  - of: (*clockDeadline).Err
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).Err
+        kind: self
+      - id: c.parent.Err
+        kind: value
+      - id: c.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.finish(parentErr)
+              to: c.finish
+          init:
+            bind: parentErr
+            eval: c.parent.Err()
+            to: c.parent.Err
+          when: parentErr != nil
+      - lock:
+          mutex: c.mu
+      - return: c.err
+  - of: (*clockDeadline).Value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).Value
+        kind: self
+      - id: c.parent.Value
+        kind: value
+    steps:
+      - return: c.parent.Value(key)
+        to: c.parent.Value
   - of: wrapAs
     participants:
       - id: caller

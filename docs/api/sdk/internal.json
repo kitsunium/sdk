@@ -50724,7 +50724,7 @@
         {
           "name": "Retryable",
           "type": "func(error) bool",
-          "doc": "Retryable classifies a non-nil operation error as a dependency failure\nworth counting against the breaker's health. false means the error is\ndeterministic — the caller's own fault, not the dependency's — so it is\nreturned verbatim and folded into neither the failure count nor the\nsuccess path: a stream of HTTP 400s can no longer trip the breaker, and\none of them cannot close a HalfOpen breaker either. A nil predicate\ncounts every error as a failure, which is the pre-classifier behaviour.\nShares its shape with RetryConfig.Retryable so one classifier serves a\nnested Retry(Breaker(op)) stack.\n"
+          "doc": "Retryable classifies a non-nil operation error as a dependency failure\nworth counting against the breaker's health. false means the error is\ndeterministic — the caller's own fault, not the dependency's — so it is\nreturned verbatim and folded into neither the failure count nor the\nsuccess path: a stream of HTTP 400s can no longer trip the breaker, and\none of them cannot close a HalfOpen breaker either. A nil predicate\ncounts every error as a failure, which is the pre-classifier behaviour.\nIt is not consulted for a context.Canceled returned once the caller's\ncontext is closed: that call is neutral whatever the predicate says.\nShares its shape with RetryConfig.Retryable so one classifier serves a\nnested Retry(Breaker(op)) stack.\n"
         }
       ],
       "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure.\n",
@@ -50858,7 +50858,7 @@
       "name": "NewCircuitBreaker",
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n",
+      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral — neither a success nor a failure — because the caller\nleft, not the dependency: a wave of client disconnects cannot open the\nbreaker on a healthy dependency, and a HalfOpen trial abandoned that way\nfrees the slot for the next call. context.DeadlineExceeded stays a\nfailure: a dependency too slow for the caller's deadline is a slow\ndependency.\n",
       "file": "service/app/resilience/breaker.go",
       "layer": "service",
       "family": "app"
@@ -50930,7 +50930,19 @@
       "name": "NewTimeout",
       "spelled": "func(d time.Duration) coreres.Runner",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it\ndoes not finish within d. The Operation MUST honour ctx for the deadline to\nfire promptly (a ctx-ignoring op caps precision at op granularity).\n\nA non-positive d is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an\nalready-expired context, so the previous behaviour failed even an\ninstantaneous operation with TimeoutExceeded — a policy that could never\nadmit anything, reporting it with the error it uses when it is working.\n",
+      "doc": "NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it\ndoes not finish within d. The Operation MUST honour ctx for the deadline to\nfire promptly (a ctx-ignoring op caps precision at op granularity).\n\nA non-positive d is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an\nalready-expired context, so the previous behaviour failed even an\ninstantaneous operation with TimeoutExceeded — a policy that could never\nadmit anything, reporting it with the error it uses when it is working.\n\nOnly this policy's own deadline is reported as TimeoutExceeded. When the\ncaller's context is already finished — cancelled, or past a deadline of\nits own — the call returns that context's error instead: the caller\nleft or ran out of time, and the policy did not time anything out.\n\nThe deadline runs on the wall clock; NewTimeoutWith takes a clock.\n",
+      "file": "service/app/resilience/timeout.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewTimeoutWith",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "NewTimeoutWith",
+      "spelled": "func(cfg TimeoutConfig) coreres.Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
+      "doc": "NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so\na test expires it by advancing a clock.ManualClock past cfg.Duration\ninstead of sleeping through it (ADR 0090). A nil cfg.Clock, or\nclock.System, is NewTimeout(cfg.Duration) exactly.\n\nUnder any other clock the Operation's context reports\ncontext.DeadlineExceeded once the clock passes the deadline, and its\nDeadline method reports the caller's deadline, not this one: a deadline\non a clock that is not the wall clock is not a time a socket can be\ngiven. A non-positive cfg.Duration is refused like NewTimeout's.\n",
       "file": "service/app/resilience/timeout.go",
       "layer": "service",
       "family": "app"
@@ -51004,6 +51016,30 @@
       ],
       "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
       "file": "service/app/resilience/retry_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "TimeoutConfig",
+      "spelled": "struct{Duration time.Duration; Clock clock.Timed}",
+      "canonical": "struct{Duration time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "fields": [
+        {
+          "name": "Duration",
+          "type": "time.Duration",
+          "doc": "Duration is how long the Operation may run. A non-positive Duration\nmakes NewTimeoutWith return a policy that refuses every call with\nPolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock is what Duration is measured on. Nil means clock.System, under\nwhich the policy is NewTimeout's: a context.WithTimeout whose\ndeadline the Operation can read.\n"
+        }
+      ],
+      "doc": "TimeoutConfig parameterises NewTimeoutWith: the deadline and the clock it\nis measured on. Duration has no default and is refused when not positive\n(ADR 0031); a nil Clock is the wall clock.\n",
+      "file": "service/app/resilience/timeout_config.go",
       "layer": "service",
       "family": "app"
     },

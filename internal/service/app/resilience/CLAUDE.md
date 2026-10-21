@@ -17,10 +17,10 @@ ADR 0026.
 | `retry.go` / `retry_config.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted` |
 | `backoff.go` | — | `BackoffValue` — an alias of `kernel/backoff.Value`, the layer that owns the curve (ADR 0074, ADR 0103); `retryRunner.backoff`/`jittered` delegate to its two halves, `kernel/backoff.Grow` (pure, bounded, never negative) and `Widen` (jitter) |
 | `keyed_ratelimit.go` / `keyed_ratelimit_config.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
-| `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen`; ONE HalfOpen trial at a time (a deterministic error or a panic frees the slot); each trip starts a generation a call captures on admission, and a straggler's outcome (an older generation) is ignored — ADR 0026 §Deferred, closed by #467 |
+| `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen`; ONE HalfOpen trial at a time (a deterministic error, a caller's cancellation or a panic frees the slot); each trip starts a generation a call captures on admission, and a straggler's outcome (an older generation) is ignored — ADR 0026 §Deferred, closed by #467; `classify` makes a `context.Canceled` under a closed caller context neutral, before the classifier is asked (#477) |
 | `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031); `usableRate`/`bucketSize`/`newTokenBucket` shared with the keyed limiter |
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
-| `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded`; non-positive `d` refused (ADR 0031) |
+| `timeout.go` / `timeout_config.go` / `timeout_clock.go` | timeout | `context.WithTimeout`, `TimeoutExceeded` — only for its OWN deadline: a caller's context already finished returns its own error (#477); `NewTimeoutWith(TimeoutConfig{Duration, Clock})` measures the deadline on an injected clock through `clockDeadline`, a context with its own `Done` so a derived context reports `DeadlineExceeded` too (ADR 0090); non-positive duration refused (ADR 0031) |
 | `fallback.go` / `fallback_config.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
 | `hedge.go` / `hedge_config.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
 | `wrap.go` | — | `wrapAs(sentinel, cause)` (sentinel origin-wins + cause as a field) over `wrapAsFields(sentinel, fields...)`, the one builder every outcome goes through, `FallbackFailed`'s two halves included |
@@ -31,11 +31,19 @@ ADR 0026.
 
 - **No `errs.Define` here** — service emits the `core/app/resilience` sentinels via
   `wrapAs` (origin-wins keeps the policy code even when the cause is an *errs.Error).
-- **Injectable clock** (breaker/ratelimit/keyed ratelimit read it; retry and
-  hedge WAIT on it — `RetryConfig.Clock` and `HedgeConfig.Clock` are
-  `clock.Timed`, so a test drives every backoff and every hedge delay with a
-  `ManualClock` instead of sleeping; `TestRetryWaitsOnItsClock` and
-  `TestHedgeWaitsOnItsClock` pin each to the nanosecond).
+- **Injectable clock** (breaker/ratelimit/keyed ratelimit read it; retry,
+  hedge and timeout WAIT on it — `RetryConfig.Clock`, `HedgeConfig.Clock` and
+  `TimeoutConfig.Clock` are `clock.Timed`, so a test drives every backoff,
+  every hedge delay and every deadline with a `ManualClock` instead of
+  sleeping; `TestRetryWaitsOnItsClock`, `TestHedgeWaitsOnItsClock` and
+  `TestTimeoutWithWaitsOnItsClock` pin each to the nanosecond). `NewTimeout`
+  stays on the wall clock, through `context.WithTimeout`, and so does
+  `NewTimeoutWith` under a nil clock or `clock.System`.
+- **A caller who leaves is not a failing dependency** (#477). The breaker
+  folds a `context.Canceled` returned once the caller's context is closed in
+  as neutral — it frees a HalfOpen trial and counts neither way — and the
+  timeout relabels a deadline as `TimeoutExceeded` only while the caller's
+  context is live. `DeadlineExceeded` from the dependency stays a failure.
 - **No constructor returns an inert policy** (ADR 0031). A non-positive knob is
   either clamped to a working floor — `MaxAttempts`→1, `Multiplier`→2,
   `FailureThreshold`→5, `OpenDuration`→30s, `Burst`→1, bulkhead limit→1 — or,

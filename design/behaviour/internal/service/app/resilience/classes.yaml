@@ -22,7 +22,9 @@ constants:
     name: defaultOpenDuration
   - grouped: true
     items:
-      - doc: "outcomeNeutral is a deterministic error or an abandoned call: no signal."
+      - doc: |-
+          outcomeNeutral is a deterministic error, an abandoned call, or a call the
+          caller cancelled: no signal.
         name: outcomeNeutral
         type: outcome
         value: iota
@@ -89,6 +91,7 @@ files:
       - outcomeNeutral
       - NewCircuitBreaker
       - (*circuitBreaker).Run
+      - (*circuitBreaker).classify
       - (*circuitBreaker).allow
       - (*circuitBreaker).release
       - (*circuitBreaker).record
@@ -194,8 +197,23 @@ files:
   - decls:
       - timeoutRunner
       - NewTimeout
+      - NewTimeoutWith
       - timeoutRunner.Run
+      - timeoutRunner.derive
     name: timeout.go
+  - decls:
+      - clockDeadline
+      - newClockDeadline
+      - (*clockDeadline).watch
+      - (*clockDeadline).finish
+      - (*clockDeadline).Deadline
+      - (*clockDeadline).Done
+      - (*clockDeadline).Err
+      - (*clockDeadline).Value
+    name: timeout_clock.go
+  - decls:
+      - TimeoutConfig
+    name: timeout_config.go
   - decls:
       - wrapAs
       - wrapAsFields
@@ -265,6 +283,16 @@ functions:
   - name: NewTimeout
     params: d time.Duration
     results: coreres.Runner
+  - name: NewTimeoutWith
+    params: cfg TimeoutConfig
+    results: coreres.Runner
+  - doc: |-
+      newClockDeadline returns a context that expires after d on clk, or when
+      parent is done, and the function that releases it. The watcher goroutine
+      ends at whichever comes first, or at release.
+    name: newClockDeadline
+    params: parent context.Context, clk clock.Timed, d time.Duration
+    results: context.Context, context.CancelFunc
   - doc: |-
       wrapAs returns the given resilience sentinel as the error origin (its
       code/reason/public win), attaching the cause's message as a structured field
@@ -360,6 +388,13 @@ types:
         recv: b *circuitBreaker
         results: error
       - doc: |-
+          classify turns a finished call into a health signal. A deterministic error
+          and a caller who left are no signal; a transient error is a failure.
+        name: classify
+        params: ctx context.Context, err error
+        recv: b *circuitBreaker
+        results: outcome
+      - doc: |-
           allow reports whether a call may proceed, transitioning Open→HalfOpen once the
           cooldown elapses, and admits at most one HalfOpen trial at a time. Holds mu.
         name: allow
@@ -423,6 +458,8 @@ types:
           success path: a stream of HTTP 400s can no longer trip the breaker, and
           one of them cannot close a HalfOpen breaker either. A nil predicate
           counts every error as a failure, which is the pre-classifier behaviour.
+          It is not consulted for a context.Canceled returned once the caller's
+          context is closed: that call is neutral whatever the predicate says.
           Shares its shape with RetryConfig.Retryable so one classifier serves a
           nested Retry(Breaker(op)) stack.
         name: Retryable
@@ -1030,10 +1067,15 @@ types:
         type: clock.Timed
     kind: struct
     name: RetryConfig
-  - doc: timeoutRunner caps an Operation's wall-clock with a context deadline.
+  - doc: |-
+      timeoutRunner caps an Operation's run time with a deadline. A nil clk is the
+      wall clock, through context.WithTimeout; any other clock goes through
+      clockDeadline.
     fields:
       - name: timeout
         type: time.Duration
+      - name: clk
+        type: clock.Timed
     kind: struct
     methods:
       - doc: Run executes op under a derived deadline.
@@ -1041,4 +1083,84 @@ types:
         params: ctx context.Context, op coreres.Operation
         recv: t timeoutRunner
         results: error
+      - doc: derive returns the Operation's deadline-bound context on the runner's clock.
+        name: derive
+        params: ctx context.Context
+        recv: t timeoutRunner
+        results: context.Context, context.CancelFunc
     name: timeoutRunner
+  - doc: |-
+      clockDeadline is a context that expires when an injected clock passes its
+      deadline, rather than when the wall clock does. It is what NewTimeoutWith
+      hands the Operation under any clock but the system one.
+
+      It is a context of its own, not a context.WithCancelCause, on purpose: a
+      cancelCtx reports context.Canceled from Err however it was cancelled, and so
+      does every context derived from it, so an Operation checking
+      errors.Is(ctx.Err(), context.DeadlineExceeded) would never see the deadline.
+      With its own Done channel, a context derived from this one is propagated
+      through Err and reports DeadlineExceeded too.
+
+      Deadline reports the caller's deadline, never this one: a time on a
+      ManualClock is not a time a socket can be given.
+    fields:
+      - name: parent
+        type: context.Context
+      - name: done
+        type: chan struct{}
+      - name: mu
+        type: sync.Mutex
+      - name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: |-
+          watch finishes the context at the first of the deadline, the parent's end
+          and the release, then stops the timer so a ManualClock holds no waiter.
+        name: watch
+        params: timer clock.Timer, release <-chan struct{}
+        recv: c *clockDeadline
+      - doc: |-
+          finish records err as the context's error and closes Done, once: the first
+          cause to arrive wins and Err never changes afterwards.
+        name: finish
+        params: err error
+        recv: c *clockDeadline
+      - doc: |-
+          Deadline reports the caller's deadline: this context's own runs on a clock
+          that is not the wall clock.
+        name: Deadline
+        recv: c *clockDeadline
+        results: time.Time, bool
+      - doc: Done is closed once the context is finished.
+        name: Done
+        recv: c *clockDeadline
+        results: <-chan struct{}
+      - doc: |-
+          Err reports why the context finished, or nil while it has not. A parent
+          that has finished is folded in on the spot rather than when the watcher
+          notices it, so Err never reports a live context under a dead caller.
+        name: Err
+        recv: c *clockDeadline
+        results: error
+      - doc: "Value is the parent's: this context carries no value of its own."
+        name: Value
+        params: key any
+        recv: c *clockDeadline
+        results: any
+    name: clockDeadline
+  - fields:
+      - doc: |-
+          Duration is how long the Operation may run. A non-positive Duration
+          makes NewTimeoutWith return a policy that refuses every call with
+          PolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.
+        name: Duration
+        type: time.Duration
+      - doc: |-
+          Clock is what Duration is measured on. Nil means clock.System, under
+          which the policy is NewTimeout's: a context.WithTimeout whose
+          deadline the Operation can read.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    name: TimeoutConfig

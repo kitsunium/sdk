@@ -90,9 +90,13 @@ wait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(
 
 Delay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1 or below doubles, and the growth stops at the ceiling — or at the longest time.Duration — instead of wrapping negative, however large n is.
 
-### Driving the retry and the hedge with a test clock
+### Driving the retry, the hedge and the timeout with a test clock
 
-[RetryConfig](#RetryConfig).Clock is the time source the retry backs off on, and [HedgeConfig](#HedgeConfig).Clock the one the hedge measures its delay on. Leave them nil in production; in a test, hand them a ManualClock from pkg/v1/clock and move it past each backoff, or past the hedge delay, instead of sleeping through it.
+[RetryConfig](#RetryConfig).Clock is the time source the retry backs off on, [HedgeConfig](#HedgeConfig).Clock the one the hedge measures its delay on, and [TimeoutConfig](#TimeoutConfig).Clock the one [NewTimeoutWith](#NewTimeoutWith) measures its deadline on. Leave them nil in production; in a test, hand them a ManualClock from pkg/v1/clock and move it past each backoff, the hedge delay or the deadline, instead of sleeping through it.
+
+### A caller who leaves is not a failing dependency
+
+A call that ends in context.Canceled once the caller's own context is closed is neutral to the circuit breaker — a wave of disconnecting clients cannot open it on a healthy dependency — and the timeout reports the caller's own context error rather than TimeoutExceeded when the caller's context finished first. A context.DeadlineExceeded from the dependency stays a failure.
 
 ## Index
 
@@ -105,6 +109,7 @@ Delay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1
 - [func NewRateLimiter\(cfg RateLimiterConfig\) Runner](<#NewRateLimiter>)
 - [func NewRetry\(cfg RetryConfig\) Runner](<#NewRetry>)
 - [func NewTimeout\(d time.Duration\) Runner](<#NewTimeout>)
+- [func NewTimeoutWith\(cfg TimeoutConfig\) Runner](<#NewTimeoutWith>)
 - [type Backoff](<#Backoff>)
   - [func \(Backoff\) Delay\(attempt int\) time.Duration](<#Backoff.Delay>)
 - [type BreakerConfig](<#BreakerConfig>)
@@ -116,6 +121,7 @@ Delay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1
 - [type RetryConfig](<#RetryConfig>)
 - [type Runner](<#Runner>)
   - [func \(Runner\) Run\(ctx context.Context, op Operation\) error](<#Runner.Run>)
+- [type TimeoutConfig](<#TimeoutConfig>)
 
 ## Variables
 
@@ -212,7 +218,7 @@ NewBulkhead returns a bounded-concurrency Runner (reject mode).
 func NewCircuitBreaker(cfg BreakerConfig) Runner
 ```
 
-NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine. HalfOpen runs one trial at a time, and the outcome of a call admitted before the breaker last opened is ignored.
+NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine. HalfOpen runs one trial at a time, and the outcome of a call admitted before the breaker last opened is ignored. A context.Canceled returned once the caller's context is closed counts neither way: the caller left, not the dependency.
 
 <a name="NewFallback"></a>
 ## func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -268,7 +274,16 @@ NewRetry returns a retry-with-backoff Runner. An error rejected by cfg.Retryable
 func NewTimeout(d time.Duration) Runner
 ```
 
-NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused: every call returns PolicyMisconfigured without running the operation, since any deadline chosen for the caller would be a guess (ADR 0031).
+NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused: every call returns PolicyMisconfigured without running the operation, since any deadline chosen for the caller would be a guess (ADR 0031). Only its own deadline is reported as TimeoutExceeded: when the caller's context is already finished, the call returns that context's error instead.
+
+<a name="NewTimeoutWith"></a>
+## func [NewTimeoutWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+```go
+func NewTimeoutWith(cfg TimeoutConfig) Runner
+```
+
+NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so a test expires it by advancing a ManualClock instead of sleeping. A nil cfg.Clock is NewTimeout(cfg.Duration) exactly; a non-positive cfg.Duration is refused.
 
 <a name="Backoff"></a>
 ## type [Backoff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -343,6 +358,8 @@ type BreakerConfig struct {
 	// success path: a stream of HTTP 400s can no longer trip the breaker, and
 	// one of them cannot close a HalfOpen breaker either. A nil predicate
 	// counts every error as a failure, which is the pre-classifier behaviour.
+	// It is not consulted for a context.Canceled returned once the caller's
+	// context is closed: that call is neutral whatever the predicate says.
 	// Shares its shape with RetryConfig.Retryable so one classifier serves a
 	// nested Retry(Breaker(op)) stack.
 	Retryable        func(error) bool
@@ -660,6 +677,30 @@ type Runner interface {
 
 ```go
 func (Runner) Run(ctx context.Context, op Operation) error
+```
+
+<a name="TimeoutConfig"></a>
+## type [TimeoutConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+TimeoutConfig is the public alias for the timeout policy configuration NewTimeoutWith takes: the deadline and the clock it is measured on.
+
+```go
+type TimeoutConfig = svcres.TimeoutConfig
+```
+
+TimeoutConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig`, declared as:
+
+```go
+type TimeoutConfig struct {
+	// Duration is how long the Operation may run. A non-positive Duration
+	// makes NewTimeoutWith return a policy that refuses every call with
+	// PolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.
+	Duration time.Duration
+	// Clock is what Duration is measured on. Nil means clock.System, under
+	// which the policy is NewTimeout's: a context.WithTimeout whose
+	// deadline the Operation can read.
+	Clock    clock.Timed
+}
 ```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

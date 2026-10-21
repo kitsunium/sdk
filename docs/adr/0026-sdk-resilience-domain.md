@@ -139,6 +139,35 @@ Two contracts were tightened during review, both before any release:
   choosing its constants without data is how a load-shedding mechanism becomes a
   second outage.
 
+## Amendment — 2026-10-21: a caller who leaves is not a failing dependency ([issue 477](https://github.com/kitsunium/sdk/issues/477))
+
+Two behaviour changes, admitted in v0 by ADR 0040, and one new constructor:
+
+- **The breaker treats a caller's cancellation as neutral.** A call that ends
+  in `context.Canceled` once the caller's own context is closed is neither a
+  success nor a failure, whatever `BreakerConfig.Retryable` would have said:
+  it is folded in through the generation #467 introduced as `outcomeNeutral`,
+  so it frees a HalfOpen trial and moves no count. Before, with a nil
+  classifier, a wave of client disconnects opened the breaker on a healthy
+  dependency. `context.DeadlineExceeded` stays a failure — a dependency too
+  slow for its caller's deadline is a slow dependency — and so does a
+  `Canceled` returned while the caller is still there. Polly excludes
+  `OperationCanceledException` by default for the same reason; gobreaker v2
+  leaves it to `IsSuccessful`.
+- **The timeout reports only its own deadline.** `Run` relabels a deadline as
+  `TimeoutExceeded` (HTTP 504) only while the caller's context is live; when
+  the caller's context finished first — cancelled, or past an earlier
+  deadline of its own — it returns that context's error. A client that went
+  away is no longer reported as a dependency timing out.
+- **`NewTimeoutWith(TimeoutConfig{Duration, Clock})`** measures the deadline
+  on an injected clock (ADR 0090), as the retry, the hedge and the breaker
+  already did. Under a nil clock or `clock.System` it is `NewTimeout`
+  exactly; under any other, the Operation receives a context of the
+  package's own whose `Err` reports `DeadlineExceeded` — and so does any
+  context derived from it, which a `context.WithCancelCause` would not give —
+  and whose `Deadline` reports the caller's, since a time on a ManualClock is
+  not one a socket can be given. `NewTimeout` is unchanged.
+
 ## Extension — `fallback` and `hedging` (Decision 2 now names seven policies)
 
 Two compositions landed after the original five, in the same shape (concrete

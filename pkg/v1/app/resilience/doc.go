@@ -131,11 +131,21 @@
 // or below doubles, and the growth stops at the ceiling — or at the longest
 // time.Duration — instead of wrapping negative, however large n is.
 //
-// # Driving the retry and the hedge with a test clock
+// # Driving the retry, the hedge and the timeout with a test clock
 //
-// [RetryConfig].Clock is the time source the retry backs off on, and
-// [HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil
-// in production; in a test, hand them a ManualClock from pkg/v1/clock and move
-// it past each backoff, or past the hedge delay, instead of sleeping through
-// it.
+// [RetryConfig].Clock is the time source the retry backs off on,
+// [HedgeConfig].Clock the one the hedge measures its delay on, and
+// [TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.
+// Leave them nil in production; in a test, hand them a ManualClock from
+// pkg/v1/clock and move it past each backoff, the hedge delay or the
+// deadline, instead of sleeping through it.
+//
+// # A caller who leaves is not a failing dependency
+//
+// A call that ends in context.Canceled once the caller's own context is
+// closed is neutral to the circuit breaker — a wave of disconnecting clients
+// cannot open it on a healthy dependency — and the timeout reports the
+// caller's own context error rather than TimeoutExceeded when the caller's
+// context finished first. A context.DeadlineExceeded from the dependency
+// stays a failure.
 package resilience

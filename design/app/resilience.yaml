@@ -251,6 +251,14 @@ packages:
           settles. The outcome of a call admitted before the breaker last opened
           is ignored: its success cannot close the breaker and its failure cannot
           restart the cooldown.
+
+          A call that ends in context.Canceled once the caller's own context is
+          closed is neutral — neither a success nor a failure — because the caller
+          left, not the dependency: a wave of client disconnects cannot open the
+          breaker on a healthy dependency, and a HalfOpen trial abandoned that way
+          frees the slot for the next call. context.DeadlineExceeded stays a
+          failure: a dependency too slow for the caller's deadline is a slow
+          dependency.
         in:
           - name: cfg
             type: BreakerConfig
@@ -416,10 +424,34 @@ packages:
           already-expired context, so the previous behaviour failed even an
           instantaneous operation with TimeoutExceeded — a policy that could never
           admit anything, reporting it with the error it uses when it is working.
+
+          Only this policy's own deadline is reported as TimeoutExceeded. When the
+          caller's context is already finished — cancelled, or past a deadline of
+          its own — the call returns that context's error instead: the caller
+          left or ran out of time, and the policy did not time anything out.
+
+          The deadline runs on the wall clock; NewTimeoutWith takes a clock.
         in:
           - name: d
             type: time.Duration
         name: NewTimeout
+        out:
+          - type: coreres.Runner
+      - doc: |-
+          NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so
+          a test expires it by advancing a clock.ManualClock past cfg.Duration
+          instead of sleeping through it (ADR 0090). A nil cfg.Clock, or
+          clock.System, is NewTimeout(cfg.Duration) exactly.
+
+          Under any other clock the Operation's context reports
+          context.DeadlineExceeded once the clock passes the deadline, and its
+          Deadline method reports the caller's deadline, not this one: a deadline
+          on a clock that is not the wall clock is not a time a socket can be
+          given. A non-positive cfg.Duration is refused like NewTimeout's.
+        in:
+          - name: cfg
+            type: TimeoutConfig
+        name: NewTimeoutWith
         out:
           - type: coreres.Runner
     imports:
@@ -455,6 +487,8 @@ packages:
                 success path: a stream of HTTP 400s can no longer trip the breaker, and
                 one of them cannot close a HalfOpen breaker either. A nil predicate
                 counts every error as a failure, which is the pre-classifier behaviour.
+                It is not consulted for a context.Canceled returned once the caller's
+                context is closed: that call is neutral whatever the predicate says.
                 Shares its shape with RetryConfig.Retryable so one classifier serves a
                 nested Retry(Breaker(op)) stack.
               name: Retryable
@@ -740,6 +774,25 @@ packages:
                 the one policy here that actually WAITS, did not.
               name: Clock
               type: clock.Timed
+      - doc: |-
+          TimeoutConfig parameterises NewTimeoutWith: the deadline and the clock it
+          is measured on. Duration has no default and is refused when not positive
+          (ADR 0031); a nil Clock is the wall clock.
+        name: TimeoutConfig
+        struct:
+          fields:
+            - doc: |-
+                Duration is how long the Operation may run. A non-positive Duration
+                makes NewTimeoutWith return a policy that refuses every call with
+                PolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.
+              name: Duration
+              type: time.Duration
+            - doc: |-
+                Clock is what Duration is measured on. Nil means clock.System, under
+                which the policy is NewTimeout's: a context.WithTimeout whose
+                deadline the Operation can read.
+              name: Clock
+              type: clock.Timed
   - doc: |-
       Package resilience is the public facade for the SDK's reliability policies:
       retry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.
@@ -874,13 +927,23 @@ packages:
       or below doubles, and the growth stops at the ceiling — or at the longest
       time.Duration — instead of wrapping negative, however large n is.
 
-      # Driving the retry and the hedge with a test clock
+      # Driving the retry, the hedge and the timeout with a test clock
 
-      [RetryConfig].Clock is the time source the retry backs off on, and
-      [HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil
-      in production; in a test, hand them a ManualClock from pkg/v1/clock and move
-      it past each backoff, or past the hedge delay, instead of sleeping through
-      it.
+      [RetryConfig].Clock is the time source the retry backs off on,
+      [HedgeConfig].Clock the one the hedge measures its delay on, and
+      [TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.
+      Leave them nil in production; in a test, hand them a ManualClock from
+      pkg/v1/clock and move it past each backoff, the hedge delay or the
+      deadline, instead of sleeping through it.
+
+      # A caller who leaves is not a failing dependency
+
+      A call that ends in context.Canceled once the caller's own context is
+      closed is neutral to the circuit breaker — a wave of disconnecting clients
+      cannot open it on a healthy dependency — and the timeout reports the
+      caller's own context error rather than TimeoutExceeded when the caller's
+      context finished first. A context.DeadlineExceeded from the dependency
+      stays a failure.
     facade:
       - alias:
           - doc: Operation is the public alias for the ctx-aware unit of guarded work.
@@ -917,6 +980,12 @@ packages:
               idle.
             name: KeyedRateLimiterConfig
             target: svcres.KeyedRateLimiterConfig
+      - alias:
+          - doc: |-
+              TimeoutConfig is the public alias for the timeout policy configuration
+              NewTimeoutWith takes: the deadline and the clock it is measured on.
+            name: TimeoutConfig
+            target: svcres.TimeoutConfig
       - alias:
           - doc: |-
               Backoff is the public alias for the exponential backoff curve NewRetry waits
@@ -989,7 +1058,9 @@ packages:
             NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by
             cfg.Retryable is returned verbatim and left out of the state machine.
             HalfOpen runs one trial at a time, and the outcome of a call admitted
-            before the breaker last opened is ignored.
+            before the breaker last opened is ignored. A context.Canceled returned
+            once the caller's context is closed counts neither way: the caller
+            left, not the dependency.
           forward: svcres.NewCircuitBreaker
           in:
             - name: cfg
@@ -1039,12 +1110,27 @@ packages:
           doc: |-
             NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:
             every call returns PolicyMisconfigured without running the operation, since
-            any deadline chosen for the caller would be a guess (ADR 0031).
+            any deadline chosen for the caller would be a guess (ADR 0031). Only its own
+            deadline is reported as TimeoutExceeded: when the caller's context is
+            already finished, the call returns that context's error instead.
           forward: svcres.NewTimeout
           in:
             - name: d
               type: time.Duration
           name: NewTimeout
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so a
+            test expires it by advancing a ManualClock instead of sleeping. A nil
+            cfg.Clock is NewTimeout(cfg.Duration) exactly; a non-positive
+            cfg.Duration is refused.
+          forward: svcres.NewTimeoutWith
+          in:
+            - name: cfg
+              type: TimeoutConfig
+          name: NewTimeoutWith
           out:
             - type: Runner
       - func:
