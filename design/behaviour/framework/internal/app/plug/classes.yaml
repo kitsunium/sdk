@@ -37,6 +37,24 @@ constants:
       - doc: MailEventDuplicate is a redelivery of a mail already sent, dropped.
         name: MailEventDuplicate
     name: MailEventOther
+  - doc: |-
+      Why a spool gave a mail up: what the framework tells the product's bounce
+      hook and the Studio's mailbox of a dead letter.
+    grouped: true
+    items:
+      - doc: MailGivenUpExhausted is a mail whose last attempt failed.
+        name: MailGivenUpExhausted
+        type: MailGiveUp
+        value: iota
+      - doc: |-
+          MailGivenUpRejected is a mail the receiving server refused for good,
+          an SMTP 5xx reply, dead-lettered without a retry.
+        name: MailGivenUpRejected
+      - doc: |-
+          MailGivenUpExpired is a mail whose attempt failed once it was older
+          than the spool's MaxAge.
+        name: MailGivenUpExpired
+    name: MailGivenUpExhausted
   - grouped: true
     items:
       - doc: LabelNode is the pprof label naming the node a goroutine works for.
@@ -260,10 +278,12 @@ files:
   - decls:
       - MailRefusalNone
       - MailEventOther
+      - MailGivenUpExhausted
       - Mail
       - MailDriverConfig
       - MailRefusal
       - MailEvent
+      - MailGiveUp
       - MailSpoolConfig
       - MailValue
       - MailRelayValue
@@ -407,6 +427,7 @@ imports:
   json: encoding/json
   model: github.com/kitsunium/sdk/framework/model
   sql: database/sql
+  textproto: net/textproto
   time: time
 package:
   docFile: doc.go
@@ -535,6 +556,9 @@ types:
   - kind: named
     name: MailEvent
     underlying: uint8
+  - kind: named
+    name: MailGiveUp
+    underlying: uint8
   - fields:
       - doc: |-
           Transport makes one delivery attempt of msg; the spool retries a
@@ -599,6 +623,17 @@ types:
           spool's own bound.
         name: MaxMessageBytes
         type: int
+      - doc: |-
+          MaxAge is how long after it was queued a mail may still be retried:
+          an attempt that fails later gives it up; zero sets no age.
+        name: MaxAge
+        type: time.Duration
+      - doc: |-
+          RetryPermanent retries a mail the receiving server refused for good —
+          an SMTP 5xx reply — like a temporary failure, instead of giving it up
+          at once.
+        name: RetryPermanent
+        type: bool
     kind: struct
     name: MailSpoolConfig
   - fields:
@@ -638,6 +673,11 @@ types:
       - doc: Err is a failed attempt's failure.
         name: Err
         type: error
+      - doc: |-
+          Reply is the SMTP reply the failure carries, nil for none: the
+          receiving server's own words, never shown in a public message.
+        name: Reply
+        type: "*textproto.Error"
       - doc: Meta is what Annotate kept of the Send.
         name: Meta
         type: map[string]string
@@ -659,6 +699,9 @@ types:
       - doc: Kind is what happened.
         name: Kind
         type: MailEvent
+      - doc: GivenUp is why a dead letter was given up, for MailEventDeadLettered.
+        name: GivenUp
+        type: MailGiveUp
     kind: struct
     name: MailEventValue
   - kind: named

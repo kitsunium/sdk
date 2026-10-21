@@ -11410,7 +11410,7 @@
       "code": {
         "value": "0.3.81.3"
       },
-      "doc": "CodeMessageUndecodable identifies a spooled record that does not decode —\nwritten by another program, or edited — and is dead-lettered like any\nfailed delivery.\n",
+      "doc": "CodeMessageUndecodable identifies a spooled record that does not decode —\nwritten by another program, or edited — and is marked not retryable,\nsince no attempt can decode it: dead-lettered at its first delivery\nwhere the queue can reject it, after its last attempt where it cannot.\n",
       "file": "core/app/mail/spool/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11542,7 +11542,7 @@
         "reason": "MESSAGE_UNDECODABLE",
         "public": "A spooled mail could not be read back"
       },
-      "doc": "MessageUndecodable reports a spooled record that does not decode. It is\nthe failure of that delivery, so the record is retried and then\ndead-lettered with the rest of its bytes intact for an investigator.\n",
+      "doc": "MessageUndecodable reports a spooled record that does not decode. It is\nthe failure of that delivery, marked not retryable — no attempt can\ndecode it —, so the record is dead-lettered at once where the queue can\nreject it, with the rest of its bytes intact for an investigator.\n",
       "file": "core/app/mail/spool/gen_codes.go",
       "layer": "core",
       "family": "app"

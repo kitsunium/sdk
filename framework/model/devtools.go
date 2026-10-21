@@ -12,7 +12,14 @@ const (
 	MailQueued   string = core.MailQueued   // in the outbox, not yet handed to the transport
 	MailSent     string = core.MailSent     // the transport accepted it (capture: kept for the mailbox)
 	MailRetrying string = core.MailRetrying // the last attempt failed; another is scheduled
-	MailDead     string = core.MailDead     // abandoned after its last attempt
+	MailDead     string = core.MailDead     // given up, and kept as a dead letter: GivenUp says why
+)
+
+// Why a dead mail was given up.
+const (
+	MailRejected  string = core.MailRejected  // the receiving server refused it for good: an SMTP 5xx reply
+	MailExpired   string = core.MailExpired   // an attempt failed once the mail was older than its mailer's max-age
+	MailExhausted string = core.MailExhausted // its last attempt failed
 )
 
 const (

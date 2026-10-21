@@ -2,6 +2,7 @@ package plug
 
 import (
 	"context"
+	"net/textproto"
 	"sync/atomic"
 	"time"
 )
@@ -46,6 +47,19 @@ const (
 	MailEventDuplicate
 )
 
+// Why a spool gave a mail up: what the framework tells the product's bounce
+// hook and the Studio's mailbox of a dead letter.
+const (
+	// MailGivenUpExhausted is a mail whose last attempt failed.
+	MailGivenUpExhausted MailGiveUp = iota
+	// MailGivenUpRejected is a mail the receiving server refused for good,
+	// an SMTP 5xx reply, dead-lettered without a retry.
+	MailGivenUpRejected
+	// MailGivenUpExpired is a mail whose attempt failed once it was older
+	// than the spool's MaxAge.
+	MailGivenUpExpired
+)
+
 // Mail is the mail subsystem: the outbox the framework's mailers keep and the
 // transports that empty it; nil until framework/app/mail is imported. A
 // product that declares a mailer without it is refused at the start (ADR
@@ -82,6 +96,9 @@ type MailRefusal uint8
 
 // MailEvent is what a spool reports of a mail.
 type MailEvent uint8
+
+// MailGiveUp is why a spool gave a mail up.
+type MailGiveUp uint8
 
 // MailSpoolConfig is one mailer's outbox: the transport each attempt runs,
 // the app's clock, what the framework hears of its mails, its retries, and where it
@@ -127,6 +144,13 @@ type MailSpoolConfig struct {
 	// MaxMessageBytes bounds one mail in the spool's own queue; zero is the
 	// spool's own bound.
 	MaxMessageBytes int
+	// MaxAge is how long after it was queued a mail may still be retried:
+	// an attempt that fails later gives it up; zero sets no age.
+	MaxAge time.Duration
+	// RetryPermanent retries a mail the receiving server refused for good —
+	// an SMTP 5xx reply — like a temporary failure, instead of giving it up
+	// at once.
+	RetryPermanent bool
 }
 
 // MailValue is a value of the SDK's mail package as it crosses the
@@ -163,10 +187,14 @@ type MailAttemptValue struct {
 }
 
 // MailEventValue is what a spool reports of a mail: its kind, the mail and
-// its outbox ID, the attempt, when, and the failure of a failed attempt.
+// its outbox ID, the attempt, when, the failure of a failed attempt, and why
+// a dead letter was given up.
 type MailEventValue struct {
 	// Err is a failed attempt's failure.
 	Err error
+	// Reply is the SMTP reply the failure carries, nil for none: the
+	// receiving server's own words, never shown in a public message.
+	Reply *textproto.Error
 	// Meta is what Annotate kept of the Send.
 	Meta map[string]string
 	// At is when the event happened.
@@ -181,4 +209,6 @@ type MailEventValue struct {
 	Attempt int
 	// Kind is what happened.
 	Kind MailEvent
+	// GivenUp is why a dead letter was given up, for MailEventDeadLettered.
+	GivenUp MailGiveUp
 }

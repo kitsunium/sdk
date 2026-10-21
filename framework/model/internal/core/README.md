@@ -1109,12 +1109,33 @@ const MailDead = "dead"
 
 Mail statuses.
 
+<a name="MailExhausted"></a>
+```go
+const MailExhausted = "exhausted"
+```
+
+Why a dead mail was given up.
+
+<a name="MailExpired"></a>
+```go
+const MailExpired = "expired"
+```
+
+Why a dead mail was given up.
+
 <a name="MailQueued"></a>
 ```go
 const MailQueued = "queued"
 ```
 
 Mail statuses.
+
+<a name="MailRejected"></a>
+```go
+const MailRejected = "rejected"
+```
+
+Why a dead mail was given up.
 
 <a name="MailRetrying"></a>
 ```go
@@ -3496,6 +3517,12 @@ type MailSummary struct {
 	Attempts int        `json:"attempts"`
 	// Error is the public message of the last failure.
 	Error    string     `json:"error,omitempty"`
+	// GivenUp says why a dead mail was given up: [MailRejected],
+	// [MailExpired] or [MailExhausted]; empty for any other status.
+	GivenUp  string     `json:"givenUp,omitempty"`
+	// Reply is the SMTP reply code of the last failure, 550 for instance,
+	// when the receiving server answered one; its text is never kept.
+	Reply    int        `json:"reply,omitempty"`
 	// QueuedAt is when it entered the outbox; SentAt when it left.
 	QueuedAt time.Time  `json:"queuedAt"`
 	SentAt   *time.Time `json:"sentAt,omitempty"`
@@ -3528,6 +3555,12 @@ type MailSummaryMessage struct {
 	Attempts int        `json:"attempts"`
 	// Error is the public message of the last failure.
 	Error    string     `json:"error,omitempty"`
+	// GivenUp says why a dead mail was given up: [MailRejected],
+	// [MailExpired] or [MailExhausted]; empty for any other status.
+	GivenUp  string     `json:"givenUp,omitempty"`
+	// Reply is the SMTP reply code of the last failure, 550 for instance,
+	// when the receiving server answered one; its text is never kept.
+	Reply    int        `json:"reply,omitempty"`
 	// QueuedAt is when it entered the outbox; SentAt when it left.
 	QueuedAt time.Time  `json:"queuedAt"`
 	SentAt   *time.Time `json:"sentAt,omitempty"`

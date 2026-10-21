@@ -230,6 +230,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Log\(ctx context.Context\) logger.Logger](<#Log>)
 - [func Logs\(w io.Writer\) AppOption](<#Logs>)
 - [func MailAttempts\(n int\) MailerOption](<#MailAttempts>)
+- [func MailMaxAge\(d time.Duration\) MailerOption](<#MailMaxAge>)
 - [func MaxBody\(bytes int64\) EndpointOption](<#MaxBody>)
 - [func MaxDeliveries\(n int\) DeliveryOption](<#MaxDeliveries>)
 - [func Migrations\(m ...Migration\) interface{DatabaseOption; ModulePart}](<#Migrations>)
@@ -247,6 +248,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [func NotFound\(message string\) \*Error](<#NotFound>)
 - [func NotReused\(n int\) PasswordOption](<#NotReused>)
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
+- [func OnBounce\(fn func\(ctx context.Context, b \*Bounce\)\) MailerOption](<#OnBounce>)
 - [func Only\(envs ...string\) MountOption](<#Only>)
 - [func Optional\(\) SecretOption](<#Optional>)
 - [func OwnStores\(\) SubscriptionOption](<#OwnStores>)
@@ -311,6 +313,7 @@ Package app — workflows: a state machine over the entities of one store.
   - [func \(\*Binary\) Main\(ctx context.Context, args \[\]string\) int](<#Binary.Main>)
   - [func \(\*Binary\) Role\(name string, app \*App, args ...string\) \*Binary](<#Binary.Role>)
   - [func \(\*Binary\) Talks\(from string, to string, contractName string\) \*Binary](<#Binary.Talks>)
+- [type Bounce](<#Bounce>)
 - [type CLI](<#CLI>)
 - [type CLIFunc](<#CLIFunc>)
 - [type CLIOption](<#CLIOption>)
@@ -2183,6 +2186,17 @@ MailAttempts is how many deliveries a message gets before it is dead-lettered. T
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="MailMaxAge"></a>
+## func [MailMaxAge](<https://github.com/kitsunium/sdk/blob/main/framework/app/mailer.go>)
+
+```go
+func MailMaxAge(d time.Duration) MailerOption
+```
+
+MailMaxAge is how long after it was queued a mail may still be retried: an attempt that fails later gives it up, as expired, whatever attempts it had left. It is the default of the mailer's setting \<mailer>-max-age, which config/\<env>.\* and \<PRODUCT>\_\<MAILER>\_MAX\_AGE override; 0 sets no age. The default is 5 days (RFC 5321 §4.5.4.1).
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="MaxBody"></a>
 ## func [MaxBody](<https://github.com/kitsunium/sdk/blob/main/framework/app/endpoint.go>)
 
@@ -2358,6 +2372,17 @@ func Now(ctx context.Context) time.Time
 ```
 
 Now returns the app's time: the system clock, or the clock a test gave with [Clock](#Clock). Product code that compares with a deadline reads it rather than time.Now, so that a test's manual clock reaches it.
+
+<a name="OnBounce"></a>
+## func [OnBounce](<https://github.com/kitsunium/sdk/blob/main/framework/app/mailer.go>)
+
+```go
+func OnBounce(fn func(ctx context.Context, b *Bounce)) MailerOption
+```
+
+OnBounce replaces what the mailer does with a mail it gives up — by default, it logs it as an error naming why — with fn: mark an address undeliverable, tell an operator, send it another way. fn runs on a goroutine of its own once the mailbox is updated — the outbox goes on meanwhile, and fn may send mail —, with a context on the mailer's node that continues the trace of the Send; the mailer's stop waits for it. A panic in fn is logged and changes nothing else. A nil fn keeps the framework's own.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Only"></a>
 ## func [Only](<https://github.com/kitsunium/sdk/blob/main/framework/app/mount.go>)
@@ -3106,6 +3131,44 @@ func (*Binary) Talks(from string, to string, contractName string) *Binary
 ```
 
 Talks declares that role from talks to role to through contract — "\<name>/v\<major>". It is the only edge two roles may have.
+
+<a name="Bounce"></a>
+## type [Bounce](<https://github.com/kitsunium/sdk/blob/main/framework/app/mailer.go>)
+
+Bounce is a mail its mailer gave up on: the receiving server refused it for good, it outlived its mailer's max-age, or its last attempt failed — GivenUp says which. It stays in the outbox as a dead letter.
+
+Reply is the receiving server's own answer: the hook may read it, log it or act on it, but the framework never puts it in a message it shows — the Studio's mailbox keeps its code alone.
+
+```go
+type Bounce = iapp.BounceEvent
+```
+
+Bounce is an alias of `github.com/kitsunium/sdk/framework/internal/app.BounceEvent`, declared as:
+
+```go
+type Bounce struct {
+	// Err is the last attempt's failure.
+	Err      error
+	// Reply is the SMTP reply that failure carries, nil when the server
+	// answered none — a relay that could not be reached, a timeout.
+	Reply    *textproto.Error
+	// Message is the mail, as it was queued.
+	Message  mail.Message
+	// QueuedAt is when it entered the outbox.
+	QueuedAt time.Time
+	// At is when it was given up, on the app's clock.
+	At       time.Time
+	// Mailer is the mailer's node ID.
+	Mailer   string
+	// ID is the mail's outbox ID.
+	ID       string
+	// GivenUp is why: model.MailRejected, model.MailExpired or
+	// model.MailExhausted.
+	GivenUp  string
+	// Attempts is how many deliveries it got.
+	Attempts int
+}
+```
 
 <a name="CLI"></a>
 ## type [CLI](<https://github.com/kitsunium/sdk/blob/main/framework/app/cli.go>)

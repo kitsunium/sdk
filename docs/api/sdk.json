@@ -465,6 +465,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Bounce",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Bounce",
+      "spelled": "iapp.BounceEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.BounceEvent",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.BounceEvent",
+      "doc": "Bounce is a mail its mailer gave up on: the receiving server refused it for\ngood, it outlived its mailer's max-age, or its last attempt failed —\nGivenUp says which. It stays in the outbox as a dead letter.\n\nReply is the receiving server's own answer: the hook may read it, log it or\nact on it, but the framework never puts it in a message it shows — the\nStudio's mailbox keeps its code alone.\n",
+      "file": "framework/app/mailer.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Bulkhead",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2714,6 +2726,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.MailMaxAge",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "MailMaxAge",
+      "spelled": "func(d time.Duration) MailerOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.MailerOption",
+      "doc": "MailMaxAge is how long after it was queued a mail may still be retried: an\nattempt that fails later gives it up, as expired, whatever attempts it had\nleft. It is the default of the mailer's setting <mailer>-max-age, which\nconfig/<env>.* and <PRODUCT>_<MAILER>_MAX_AGE override; 0 sets no age. The\ndefault is 5 days (RFC 5321 §4.5.4.1).\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/mailer.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Mailer",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3019,6 +3042,17 @@
       "canonical": "func(ctx context.Context) time.Time",
       "doc": "Now returns the app's time: the system clock, or the clock a test gave\nwith [Clock]. Product code that compares with a deadline reads it rather\nthan time.Now, so that a test's manual clock reaches it.\n",
       "file": "framework/app/request.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OnBounce",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OnBounce",
+      "spelled": "func(fn func(ctx context.Context, b *Bounce)) MailerOption",
+      "canonical": "func(fn func(ctx context.Context, b *github.com/kitsunium/sdk/framework/app.Bounce)) github.com/kitsunium/sdk/framework/app.MailerOption",
+      "doc": "OnBounce replaces what the mailer does with a mail it gives up — by\ndefault, it logs it as an error naming why — with fn: mark an address\nundeliverable, tell an operator, send it another way. fn runs on a\ngoroutine of its own once the mailbox is updated — the outbox goes on\nmeanwhile, and fn may send mail —, with a context on the mailer's node that\ncontinues the trace of the Send; the mailer's stop waits for it. A panic in\nfn is logged and changes nothing else. A nil fn keeps the framework's own.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/mailer.go",
       "layer": "framework"
     },
     {
@@ -5660,6 +5694,64 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.BounceEvent",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "BounceEvent",
+      "spelled": "struct{Err error; Reply *textproto.Error; Message mail.Message; QueuedAt time.Time; At time.Time; Mailer string; ID string; GivenUp string; Attempts int}",
+      "canonical": "struct{Err error; Reply *net/textproto.Error; Message github.com/kitsunium/sdk/pkg/v1/app/mail.Message; QueuedAt time.Time; At time.Time; Mailer string; ID string; GivenUp string; Attempts int}",
+      "fields": [
+        {
+          "name": "Err",
+          "type": "error",
+          "doc": "Err is the last attempt's failure.\n"
+        },
+        {
+          "name": "Reply",
+          "type": "*textproto.Error",
+          "doc": "Reply is the SMTP reply that failure carries, nil when the server\nanswered none — a relay that could not be reached, a timeout.\n"
+        },
+        {
+          "name": "Message",
+          "type": "mail.Message",
+          "doc": "Message is the mail, as it was queued.\n"
+        },
+        {
+          "name": "QueuedAt",
+          "type": "time.Time",
+          "doc": "QueuedAt is when it entered the outbox.\n"
+        },
+        {
+          "name": "At",
+          "type": "time.Time",
+          "doc": "At is when it was given up, on the app's clock.\n"
+        },
+        {
+          "name": "Mailer",
+          "type": "string",
+          "doc": "Mailer is the mailer's node ID.\n"
+        },
+        {
+          "name": "ID",
+          "type": "string",
+          "doc": "ID is the mail's outbox ID.\n"
+        },
+        {
+          "name": "GivenUp",
+          "type": "string",
+          "doc": "GivenUp is why: model.MailRejected, model.MailExpired or\nmodel.MailExhausted.\n"
+        },
+        {
+          "name": "Attempts",
+          "type": "int",
+          "doc": "Attempts is how many deliveries it got.\n"
+        }
+      ],
+      "doc": "BounceEvent is a mail its mailer gave up on: the receiving server refused it for\ngood, it outlived its mailer's max-age, or its last attempt failed —\nGivenUp says which. It stays in the outbox as a dead letter.\n\nReply is the receiving server's own answer: the hook may read it, log it or\nact on it, but the framework never puts it in a message it shows — the\nStudio's mailbox keeps its code alone.\n",
+      "file": "framework/internal/app/mailer_bounce.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.Bulkhead",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8199,6 +8291,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.MailMaxAge",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "MailMaxAge",
+      "spelled": "func(d time.Duration) MailerConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.MailerConfigurer",
+      "doc": "MailMaxAge is how long after it was queued a mail may still be retried: an\nattempt that fails later gives it up, as expired, whatever attempts it had\nleft. It is the default of the mailer's setting <mailer>-max-age, which\nconfig/<env>.* and <PRODUCT>_<MAILER>_MAX_AGE override; 0 sets no age. The\ndefault is 5 days (RFC 5321 §4.5.4.1).\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/mailer_bounce.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.Mailer",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8754,6 +8857,17 @@
       "canonical": "func(ctx context.Context) time.Time",
       "doc": "Now returns the app's time: the system clock, or the clock a test gave\nwith [Clock]. Product code that compares with a deadline reads it rather\nthan time.Now, so that a test's manual clock reaches it.\n",
       "file": "framework/internal/app/request.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OnBounce",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OnBounce",
+      "spelled": "func(fn func(ctx context.Context, b *BounceEvent)) MailerConfigurer",
+      "canonical": "func(fn func(ctx context.Context, b *github.com/kitsunium/sdk/framework/internal/app.BounceEvent)) github.com/kitsunium/sdk/framework/internal/app.MailerConfigurer",
+      "doc": "OnBounce replaces what the mailer does with a mail it gives up — by\ndefault, it logs it as an error naming why — with fn: mark an address\nundeliverable, tell an operator, send it another way. fn runs on a\ngoroutine of its own once the mailbox is updated — the outbox goes on\nmeanwhile, and fn may send mail —, with a context on the mailer's node that\ncontinues the trace of the Send; the mailer's stop waits for it. A panic in\nfn is logged and changes nothing else. A nil fn keeps the framework's own.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/mailer_bounce.go",
       "layer": "framework"
     },
     {
@@ -12178,13 +12292,18 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "MailEventValue",
-      "spelled": "struct{Err error; Meta map[string]string; At time.Time; QueuedAt time.Time; Message MailValue; ID string; Attempt int; Kind MailEvent}",
-      "canonical": "struct{Err error; Meta map[string]string; At time.Time; QueuedAt time.Time; Message github.com/kitsunium/sdk/framework/internal/app/plug.MailValue; ID string; Attempt int; Kind github.com/kitsunium/sdk/framework/internal/app/plug.MailEvent}",
+      "spelled": "struct{Err error; Reply *textproto.Error; Meta map[string]string; At time.Time; QueuedAt time.Time; Message MailValue; ID string; Attempt int; Kind MailEvent; GivenUp MailGiveUp}",
+      "canonical": "struct{Err error; Reply *net/textproto.Error; Meta map[string]string; At time.Time; QueuedAt time.Time; Message github.com/kitsunium/sdk/framework/internal/app/plug.MailValue; ID string; Attempt int; Kind github.com/kitsunium/sdk/framework/internal/app/plug.MailEvent; GivenUp github.com/kitsunium/sdk/framework/internal/app/plug.MailGiveUp}",
       "fields": [
         {
           "name": "Err",
           "type": "error",
           "doc": "Err is a failed attempt's failure.\n"
+        },
+        {
+          "name": "Reply",
+          "type": "*textproto.Error",
+          "doc": "Reply is the SMTP reply the failure carries, nil for none: the\nreceiving server's own words, never shown in a public message.\n"
         },
         {
           "name": "Meta",
@@ -12220,9 +12339,61 @@
           "name": "Kind",
           "type": "MailEvent",
           "doc": "Kind is what happened.\n"
+        },
+        {
+          "name": "GivenUp",
+          "type": "MailGiveUp",
+          "doc": "GivenUp is why a dead letter was given up, for MailEventDeadLettered.\n"
         }
       ],
-      "doc": "MailEventValue is what a spool reports of a mail: its kind, the mail and\nits outbox ID, the attempt, when, and the failure of a failed attempt.\n",
+      "doc": "MailEventValue is what a spool reports of a mail: its kind, the mail and\nits outbox ID, the attempt, when, the failure of a failed attempt, and why\na dead letter was given up.\n",
+      "file": "framework/internal/app/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.MailGiveUp",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "MailGiveUp",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "MailGiveUp is why a spool gave a mail up.\n",
+      "file": "framework/internal/app/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.MailGivenUpExhausted",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "MailGivenUpExhausted",
+      "spelled": "MailGiveUp",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app/plug.MailGiveUp",
+      "value": "0",
+      "doc": "MailGivenUpExhausted is a mail whose last attempt failed.\n",
+      "file": "framework/internal/app/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.MailGivenUpExpired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "MailGivenUpExpired",
+      "spelled": "MailGiveUp",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app/plug.MailGiveUp",
+      "value": "2",
+      "doc": "MailGivenUpExpired is a mail whose attempt failed once it was older\nthan the spool's MaxAge.\n",
+      "file": "framework/internal/app/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.MailGivenUpRejected",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "MailGivenUpRejected",
+      "spelled": "MailGiveUp",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app/plug.MailGiveUp",
+      "value": "1",
+      "doc": "MailGivenUpRejected is a mail the receiving server refused for good,\nan SMTP 5xx reply, dead-lettered without a retry.\n",
       "file": "framework/internal/app/plug/mail.go",
       "layer": "framework"
     },
@@ -12412,8 +12583,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "MailSpoolConfig",
-      "spelled": "struct{Transport func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error; Clock Clock; Observe func(e *MailEventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Outbox Broker; Database Database; From MailValue; Dir string; BackoffBase time.Duration; BackoffMax time.Duration; SendTimeout time.Duration; PollInterval time.Duration; MaxAttempts int; MaxMessageBytes int}",
-      "canonical": "struct{Transport func(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/app/plug.MailValue, attempt github.com/kitsunium/sdk/framework/internal/app/plug.MailAttemptValue) error; Clock github.com/kitsunium/sdk/framework/internal/app/plug.Clock; Observe func(e *github.com/kitsunium/sdk/framework/internal/app/plug.MailEventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Outbox github.com/kitsunium/sdk/framework/internal/app/plug.Broker; Database github.com/kitsunium/sdk/framework/internal/app/plug.Database; From github.com/kitsunium/sdk/framework/internal/app/plug.MailValue; Dir string; BackoffBase time.Duration; BackoffMax time.Duration; SendTimeout time.Duration; PollInterval time.Duration; MaxAttempts int; MaxMessageBytes int}",
+      "spelled": "struct{Transport func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error; Clock Clock; Observe func(e *MailEventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Outbox Broker; Database Database; From MailValue; Dir string; BackoffBase time.Duration; BackoffMax time.Duration; SendTimeout time.Duration; PollInterval time.Duration; MaxAttempts int; MaxMessageBytes int; MaxAge time.Duration; RetryPermanent bool}",
+      "canonical": "struct{Transport func(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/app/plug.MailValue, attempt github.com/kitsunium/sdk/framework/internal/app/plug.MailAttemptValue) error; Clock github.com/kitsunium/sdk/framework/internal/app/plug.Clock; Observe func(e *github.com/kitsunium/sdk/framework/internal/app/plug.MailEventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Outbox github.com/kitsunium/sdk/framework/internal/app/plug.Broker; Database github.com/kitsunium/sdk/framework/internal/app/plug.Database; From github.com/kitsunium/sdk/framework/internal/app/plug.MailValue; Dir string; BackoffBase time.Duration; BackoffMax time.Duration; SendTimeout time.Duration; PollInterval time.Duration; MaxAttempts int; MaxMessageBytes int; MaxAge time.Duration; RetryPermanent bool}",
       "fields": [
         {
           "name": "Transport",
@@ -12489,6 +12660,16 @@
           "name": "MaxMessageBytes",
           "type": "int",
           "doc": "MaxMessageBytes bounds one mail in the spool's own queue; zero is the\nspool's own bound.\n"
+        },
+        {
+          "name": "MaxAge",
+          "type": "time.Duration",
+          "doc": "MaxAge is how long after it was queued a mail may still be retried:\nan attempt that fails later gives it up; zero sets no age.\n"
+        },
+        {
+          "name": "RetryPermanent",
+          "type": "bool",
+          "doc": "RetryPermanent retries a mail the receiving server refused for good —\nan SMTP 5xx reply — like a temporary failure, instead of giving it up\nat once.\n"
         }
       ],
       "doc": "MailSpoolConfig is one mailer's outbox: the transport each attempt runs,\nthe app's clock, what the framework hears of its mails, its retries, and where it\nkeeps them — a queue on the database that keeps the mailer's service, a\ndirectory, or memory.\n",
@@ -21700,6 +21881,32 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model.MailExhausted",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "MailExhausted",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"exhausted\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailExhausted",
+      "doc": "Why a dead mail was given up.\n",
+      "file": "framework/model/devtools.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.MailExpired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "MailExpired",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"expired\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailExpired",
+      "doc": "Why a dead mail was given up.\n",
+      "file": "framework/model/devtools.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model.MailMessage",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/model",
@@ -21721,6 +21928,19 @@
       "value": "\"queued\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailQueued",
       "doc": "Mail statuses.\n",
+      "file": "framework/model/devtools.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.MailRejected",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "MailRejected",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"rejected\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailRejected",
+      "doc": "Why a dead mail was given up.\n",
       "file": "framework/model/devtools.go",
       "layer": "framework"
     },
@@ -28347,6 +28567,30 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailExhausted",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "MailExhausted",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"exhausted\"",
+      "doc": "Why a dead mail was given up.\n",
+      "file": "framework/model/internal/core/devtools.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailExpired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "MailExpired",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"expired\"",
+      "doc": "Why a dead mail was given up.\n",
+      "file": "framework/model/internal/core/devtools.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailMessage",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
@@ -28401,6 +28645,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailRejected",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "MailRejected",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"rejected\"",
+      "doc": "Why a dead mail was given up.\n",
+      "file": "framework/model/internal/core/devtools.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.MailRetrying",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
@@ -28441,8 +28697,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "MailSummaryMessage",
-      "spelled": "struct{ID string \"json:\\\"id\\\"\"; Mailer string \"json:\\\"mailer\\\"\"; From string \"json:\\\"from\\\"\"; To []string \"json:\\\"to\\\"\"; Subject string \"json:\\\"subject\\\"\"; Status string \"json:\\\"status\\\"\"; Attempts int \"json:\\\"attempts\\\"\"; Error string \"json:\\\"error,omitempty\\\"\"; QueuedAt time.Time \"json:\\\"queuedAt\\\"\"; SentAt *time.Time \"json:\\\"sentAt,omitempty\\\"\"; TraceID string \"json:\\\"traceId,omitempty\\\"\"; Node string \"json:\\\"node,omitempty\\\"\"}",
-      "canonical": "struct{ID string \"json:\\\"id\\\"\"; Mailer string \"json:\\\"mailer\\\"\"; From string \"json:\\\"from\\\"\"; To []string \"json:\\\"to\\\"\"; Subject string \"json:\\\"subject\\\"\"; Status string \"json:\\\"status\\\"\"; Attempts int \"json:\\\"attempts\\\"\"; Error string \"json:\\\"error,omitempty\\\"\"; QueuedAt time.Time \"json:\\\"queuedAt\\\"\"; SentAt *time.Time \"json:\\\"sentAt,omitempty\\\"\"; TraceID string \"json:\\\"traceId,omitempty\\\"\"; Node string \"json:\\\"node,omitempty\\\"\"}",
+      "spelled": "struct{ID string \"json:\\\"id\\\"\"; Mailer string \"json:\\\"mailer\\\"\"; From string \"json:\\\"from\\\"\"; To []string \"json:\\\"to\\\"\"; Subject string \"json:\\\"subject\\\"\"; Status string \"json:\\\"status\\\"\"; Attempts int \"json:\\\"attempts\\\"\"; Error string \"json:\\\"error,omitempty\\\"\"; GivenUp string \"json:\\\"givenUp,omitempty\\\"\"; Reply int \"json:\\\"reply,omitempty\\\"\"; QueuedAt time.Time \"json:\\\"queuedAt\\\"\"; SentAt *time.Time \"json:\\\"sentAt,omitempty\\\"\"; TraceID string \"json:\\\"traceId,omitempty\\\"\"; Node string \"json:\\\"node,omitempty\\\"\"}",
+      "canonical": "struct{ID string \"json:\\\"id\\\"\"; Mailer string \"json:\\\"mailer\\\"\"; From string \"json:\\\"from\\\"\"; To []string \"json:\\\"to\\\"\"; Subject string \"json:\\\"subject\\\"\"; Status string \"json:\\\"status\\\"\"; Attempts int \"json:\\\"attempts\\\"\"; Error string \"json:\\\"error,omitempty\\\"\"; GivenUp string \"json:\\\"givenUp,omitempty\\\"\"; Reply int \"json:\\\"reply,omitempty\\\"\"; QueuedAt time.Time \"json:\\\"queuedAt\\\"\"; SentAt *time.Time \"json:\\\"sentAt,omitempty\\\"\"; TraceID string \"json:\\\"traceId,omitempty\\\"\"; Node string \"json:\\\"node,omitempty\\\"\"}",
       "fields": [
         {
           "name": "ID",
@@ -28490,6 +28746,18 @@
           "type": "string",
           "tag": "json:\"error,omitempty\"",
           "doc": "Error is the public message of the last failure.\n"
+        },
+        {
+          "name": "GivenUp",
+          "type": "string",
+          "tag": "json:\"givenUp,omitempty\"",
+          "doc": "GivenUp says why a dead mail was given up: [MailRejected],\n[MailExpired] or [MailExhausted]; empty for any other status.\n"
+        },
+        {
+          "name": "Reply",
+          "type": "int",
+          "tag": "json:\"reply,omitempty\"",
+          "doc": "Reply is the SMTP reply code of the last failure, 550 for instance,\nwhen the receiving server answered one; its text is never kept.\n"
         },
         {
           "name": "QueuedAt",

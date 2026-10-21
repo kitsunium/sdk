@@ -118,6 +118,10 @@ sequences:
     of: From
   - forward: iapp.MailAttempts
     of: MailAttempts
+  - forward: iapp.OnBounce
+    of: OnBounce
+  - forward: iapp.MailMaxAge
+    of: MailMaxAge
   - forward: iapp.NewModule
     of: NewModule
   - forward: iapp.Requires

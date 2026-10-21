@@ -25,6 +25,7 @@ var facadeNames = [][2]string{
 	{"WakeEvent", "Wake"},
 	{"RevisionEvent", "Revision"},
 	{"TombstoneEvent", "Tombstone"},
+	{"BounceEvent", "Bounce"},
 	{"PasswordPolicyService", "PasswordPolicy"},
 	{"PortService", "Port"},
 	{"FieldRefValue", "FieldRef"},

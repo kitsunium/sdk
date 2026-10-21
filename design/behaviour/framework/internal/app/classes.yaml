@@ -593,6 +593,24 @@ constants:
         type: int
         value: "6"
     name: defaultMailAttempts
+  - doc: The suffixes of a mailer's settings.
+    grouped: true
+    items:
+      - name: maxAgeSuffix
+        value: "\"max-age\""
+      - name: retryPermanentSuffix
+        value: "\"retry-permanent\""
+    name: maxAgeSuffix
+  - doc: |-
+      defaultMailMaxAge is how long after it was queued a mail may still be
+      retried, unless the mailer says otherwise: RFC 5321 §4.5.4.1 — "the
+      give-up time generally needs to be at least 4-5 days" —, at its upper
+      bound, so that a relay down over a long weekend loses no mail.
+    items:
+      - name: defaultMailMaxAge
+        type: time.Duration
+        value: 5 * 24 * time.Hour
+    name: defaultMailMaxAge
   - doc: outboxBind is what a sealed mail is bound to, beside its mailer's node.
     items:
       - name: outboxBind
@@ -2787,6 +2805,22 @@ files:
       - NewMailer
     name: mailer.go
   - decls:
+      - maxAgeSuffix
+      - defaultMailMaxAge
+      - BounceEvent
+      - OnBounce
+      - MailMaxAge
+      - (*Mailer).declareSettings
+      - declareNodeSetting
+      - (*Mailer).maxAge
+      - (*Mailer).retriesPermanent
+      - (*Mailer).bounced
+      - (*Mailer).logBounce
+      - givenUps
+      - givenUpName
+      - replyCode
+    name: mailer_bounce.go
+  - decls:
       - revealStringer
     name: mailer_interface.go
   - decls:
@@ -4490,6 +4524,7 @@ files:
       - TombstoneEvent
       - (*storeCore).declareTrash
       - trashSettingName
+      - nodeSettingName
       - (*storeCore).trashLength
       - (*storeCore).trashes
       - (*storeCore).trashKeeper
@@ -6326,6 +6361,31 @@ functions:
     results: plug.MailRelayValue, phrase
   - name: NewMailer
     results: "*Mailer"
+  - name: OnBounce
+    params: fn func(ctx context.Context, b *BounceEvent)
+    results: MailerConfigurer
+  - name: MailMaxAge
+    params: d time.Duration
+    results: MailerConfigurer
+  - doc: |-
+      declareNodeSetting declares in svc the setting <node>-<suffix> the
+      framework keeps for n, with def as its default and check judging its
+      resolved value; nil, with a declaration error, when the node's name makes
+      no setting's.
+    name: declareNodeSetting
+    params: svc *Service, n *nodeBase, suffix string, def T, check func(v any) phrase
+    results: "*SettingService[T]"
+    typeParams: T SettingValue
+  - doc: |-
+      givenUpName is why the spool gave a mail up, in the mailbox's words;
+      exhausted for a reason the framework does not know.
+    name: givenUpName
+    params: g plug.MailGiveUp
+    results: string
+  - doc: replyCode is reply's code, 0 for none.
+    name: replyCode
+    params: reply *textproto.Error
+    results: int
   - doc: |-
       statusOf is the exit status of a run that failed: 78 when the product is
       declared wrong, the error's own status otherwise.
@@ -8389,6 +8449,13 @@ functions:
     name: trashSettingName
     params: store string
     results: string
+  - doc: |-
+      nodeSettingName is <node>-<suffix>, a setting the framework declares for
+      a node it names — a store's trash, a mailer's age —: the node's name in a
+      setting's grammar, lower case, an underscore or a dot written as a dash.
+    name: nodeSettingName
+    params: node, suffix string
+    results: string
   - doc: trashOf is the trash eng keeps, false for an engine that keeps none.
     name: trashOf
     params: eng plug.StoreEngine
@@ -8660,6 +8727,7 @@ imports:
   tabwriter: text/tabwriter
   telemetry: github.com/kitsunium/sdk/framework/telemetry
   testing: testing
+  textproto: net/textproto
   time: time
   trace: github.com/kitsunium/sdk/pkg/v1/observe/trace
   url: net/url
@@ -15946,6 +16014,20 @@ types:
           the attempt that sent it to the spool's report that it was sent.
         name: composed
         type: map[string][]byte
+      - doc: |-
+          hooks are the bounce hooks running, each on its own goroutine, out of
+          the spool's observer — which a hook's Send would re-enter: the
+          mailer's stop waits for them.
+        name: hooks
+        type: sync.WaitGroup
+      - doc: |-
+          maxAgeFor and retryPermanentFor are the mailer's settings
+          <mailer>-max-age and <mailer>-retry-permanent (mailer_bounce.go),
+          declared with it; nil for a mailer no service declares.
+        name: maxAgeFor
+        type: "*SettingService[time.Duration]"
+      - name: retryPermanentFor
+        type: "*SettingService[bool]"
     kind: struct
     methods:
       - name: Send
@@ -16031,7 +16113,13 @@ types:
         params: ctx context.Context, a *App
         recv: m *Mailer
         results: error
-      - doc: stop ends the outbox's loop and closes its spool, waiting until ctx ends.
+      - doc: |-
+          stop ends the outbox's loop, waits for the bounce hooks still running, and
+          closes its spool, waiting until ctx ends.
+
+          Goroutine lifecycle: one goroutine waits for the bounce hooks and closes
+          hooksDone; it ends when the last hook returns, which stop waits for unless
+          ctx ends first.
         name: stop
         params: ctx context.Context, a *App
         recv: m *Mailer
@@ -16053,8 +16141,10 @@ types:
         recv: m *Mailer
         results: plug.MailSink
       - doc: |-
-          failed logs a failed attempt: a warning while attempts remain, an error on
-          the last one, after which the spool gives the mail up.
+          failed logs a failed attempt as a warning. Whether the spool retries it or
+          gives the mail up — its last attempt, a permanent refusal, a mail too old —
+          is the spool's to say once the attempt returns: the bounce hook hears of a
+          mail given up (observe), and by default logs it as an error (logBounce).
         name: failed
         params: ctx context.Context, a *App, attempt plug.MailAttemptValue, err error
         recv: m *Mailer
@@ -16069,6 +16159,10 @@ types:
           observe keeps the mailbox in step with what the spool reports — each
           mail's status and the counts — and streams the mail's new status. The
           spool reports a mail an earlier run queued too: the mailbox learns it then.
+          A mail given up is handed to the bounce hook (bounced).
+
+          Goroutine lifecycle: one goroutine per mail given up runs the bounce hook
+          and ends with it; m.hooks counts it, and stop waits for it.
         name: observe
         params: a *App, e *plug.MailEventValue
         recv: m *Mailer
@@ -16087,6 +16181,39 @@ types:
         name: senderProblem
         recv: m *Mailer
         results: phrase
+      - doc: |-
+          declareSettings declares the mailer's settings in svc, the service that
+          declares it: <mailer>-max-age, defaulting to [MailMaxAge]'s, never
+          negative, and <mailer>-retry-permanent, false.
+        name: declareSettings
+        params: svc *Service
+        recv: m *Mailer
+      - doc: maxAge is the mailer's <mailer>-max-age in the app that runs it.
+        name: maxAge
+        recv: m *Mailer
+        results: time.Duration
+      - doc: |-
+          retriesPermanent is the mailer's <mailer>-retry-permanent in the app that
+          runs it.
+        name: retriesPermanent
+        recv: m *Mailer
+        results: bool
+      - doc: |-
+          bounced hands the mail e reports given up to the mailer's bounce hook, in a
+          context of the app's on the mailer's node — app.Log and every API that reads
+          the running app find it there —, continuing the trace of the Send. The
+          mailer's stop waits for the hook rather than cancel it, so that a mail it
+          sends still reaches the outbox.
+        name: bounced
+        params: a *App, e *plug.MailEventValue
+        recv: m *Mailer
+      - doc: |-
+          logBounce is the framework's bounce hook: an error naming the mail, why it
+          was given up, its attempts, the reply's code — never its text — and the
+          failure as an SDK error renders it, its public half.
+        name: logBounce
+        params: ctx context.Context, a *App, b *BounceEvent
+        recv: m *Mailer
       - doc: |-
           sealOutbox has the queue cfg places seal every mail on its way in and open
           it on its way out, under data-key, bound to the mailer m: a mail above
@@ -16143,8 +16270,16 @@ types:
   - fields:
       - name: from
         type: mail.Address
+      - doc: |-
+          bounce is told of each mail given up ([OnBounce]); nil for the
+          framework's own, which logs it (logBounce).
+        name: bounce
+        type: func(ctx context.Context, b *BounceEvent)
       - name: maxAttempts
         type: int
+      - doc: maxAge is the default of the mailer's <mailer>-max-age ([MailMaxAge]).
+        name: maxAge
+        type: time.Duration
     kind: struct
     name: mailerOptions
   - kind: named
@@ -16250,6 +16385,40 @@ types:
         recv: t outboxTransport
         results: err error
     name: outboxTransport
+  - fields:
+      - doc: Err is the last attempt's failure.
+        name: Err
+        type: error
+      - doc: |-
+          Reply is the SMTP reply that failure carries, nil when the server
+          answered none — a relay that could not be reached, a timeout.
+        name: Reply
+        type: "*textproto.Error"
+      - doc: Message is the mail, as it was queued.
+        name: Message
+        type: mail.Message
+      - doc: QueuedAt is when it entered the outbox.
+        name: QueuedAt
+        type: time.Time
+      - doc: At is when it was given up, on the app's clock.
+        name: At
+        type: time.Time
+      - doc: Mailer is the mailer's node ID.
+        name: Mailer
+        type: string
+      - doc: ID is the mail's outbox ID.
+        name: ID
+        type: string
+      - doc: |-
+          GivenUp is why: model.MailRejected, model.MailExpired or
+          model.MailExhausted.
+        name: GivenUp
+        type: string
+      - doc: Attempts is how many deliveries it got.
+        name: Attempts
+        type: int
+    kind: struct
+    name: BounceEvent
   - doc: revealStringer is a secret that shows its value, which parsing a URL needs.
     kind: named
     name: revealStringer
@@ -25449,6 +25618,16 @@ vars:
       - name: loopBackoff
         value: "resilience.Backoff{BaseDelay: loopBackoffFirst, MaxDelay: loopBackoffMax}"
     name: loopBackoff
+  - doc: givenUps are the mailbox's words for why the spool gave a mail up.
+    items:
+      - name: givenUps
+        value: |-
+          map[plug.MailGiveUp]string{
+          	plug.MailGivenUpExhausted: model.MailExhausted,
+          	plug.MailGivenUpRejected:  model.MailRejected,
+          	plug.MailGivenUpExpired:   model.MailExpired,
+          }
+    name: givenUps
   - doc: |-
       reservedModules are names no module may take: the framework's own — and
       its former one, the name of its own service until ADR 0180 step 5 —, the node

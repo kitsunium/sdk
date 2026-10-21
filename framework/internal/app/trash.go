@@ -76,7 +76,12 @@ func (s *storeCore) declareTrash(svc *Service) {
 
 // trashSettingName is <store>-trash, the store's name in a setting's
 // grammar: lower case, an underscore or a dot written as a dash.
-func trashSettingName(store string) string {
+func trashSettingName(store string) string { return nodeSettingName(store, trashSuffix) }
+
+// nodeSettingName is <node>-<suffix>, a setting the framework declares for
+// a node it names — a store's trash, a mailer's age —: the node's name in a
+// setting's grammar, lower case, an underscore or a dot written as a dash.
+func nodeSettingName(node, suffix string) string {
 	flat := strings.Map(func(r rune) rune {
 		switch {
 		case r == '_' || r == '.':
@@ -85,8 +90,8 @@ func trashSettingName(store string) string {
 			return r + ('a' - 'A')
 		}
 		return r
-	}, store)
-	return flat + "-" + trashSuffix
+	}, node)
+	return flat + "-" + suffix
 }
 
 // trashLength is how long the store keeps what the product deletes, in the

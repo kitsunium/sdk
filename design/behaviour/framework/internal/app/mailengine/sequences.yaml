@@ -159,6 +159,8 @@ sequences:
           		PollInterval:    cfg.PollInterval,
           		Dir:             cfg.Dir,
           		MaxMessageBytes: cfg.MaxMessageBytes,
+          		MaxAge:          cfg.MaxAge,
+          		RetryPermanent:  cfg.RetryPermanent,
           	}
       - opt:
           do:
@@ -230,9 +232,27 @@ sequences:
             steps:
               - eval: |-
                   fn(&plug.MailEventValue{
-                  			Err: e.Err, Meta: e.Meta, At: e.At, QueuedAt: e.QueuedAt, Message: plug.MailValue{Value: e.Message},
-                  			ID: e.ID, Attempt: e.Attempt, Kind: eventOf(e.Kind),
+                  			Err: e.Err, Reply: replyOf(e.Err), Meta: e.Meta, At: e.At, QueuedAt: e.QueuedAt, Message: plug.MailValue{Value: e.Message},
+                  			ID: e.ID, Attempt: e.Attempt, Kind: eventOf(e.Kind), GivenUp: givenUpOf(e.Err),
                   		})
+  - of: givenUpOf
+    steps:
+      - switch:
+          cases:
+            - case: errs.HasCode(err, mailspool.CodeMailRejected)
+              do:
+                - return: plug.MailGivenUpRejected
+            - case: errs.HasCode(err, mailspool.CodeMailExpired)
+              do:
+                - return: plug.MailGivenUpExpired
+            - default: true
+              do:
+                - return: plug.MailGivenUpExhausted
+  - of: replyOf
+    steps:
+      - bind: reply, _
+        eval: errors.AsType[*textproto.Error](err)
+      - return: reply
   - of: eventOf
     steps:
       - opt:

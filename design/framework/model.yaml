@@ -835,6 +835,18 @@ packages:
         name: MailDead
         type: string
         value: "\"dead\""
+      - blockDoc: Why a dead mail was given up.
+        name: MailRejected
+        type: string
+        value: "\"rejected\""
+      - blockDoc: Why a dead mail was given up.
+        name: MailExpired
+        type: string
+        value: "\"expired\""
+      - blockDoc: Why a dead mail was given up.
+        name: MailExhausted
+        type: string
+        value: "\"exhausted\""
       - doc: |-
           MockReplace is the one mode a [Mock] has: a test's app.Replace, a typed
           function run in place of an operation's handler — or of what a port calls —
@@ -2617,6 +2629,15 @@ packages:
       - blockDoc: Mail statuses.
         name: MailDead
         value: "\"dead\""
+      - blockDoc: Why a dead mail was given up.
+        name: MailRejected
+        value: "\"rejected\""
+      - blockDoc: Why a dead mail was given up.
+        name: MailExpired
+        value: "\"expired\""
+      - blockDoc: Why a dead mail was given up.
+        name: MailExhausted
+        value: "\"exhausted\""
       - doc: |-
           MockReplace is the one mode a [MockMessage] has: a test's app.Replace, a typed
           function run in place of an operation's handler — or of what a port calls —
@@ -8074,6 +8095,18 @@ packages:
               name: Error
               tag: json:"error,omitempty"
               type: string
+            - doc: |-
+                GivenUp says why a dead mail was given up: [MailRejected],
+                [MailExpired] or [MailExhausted]; empty for any other status.
+              name: GivenUp
+              tag: json:"givenUp,omitempty"
+              type: string
+            - doc: |-
+                Reply is the SMTP reply code of the last failure, 550 for instance,
+                when the receiving server answered one; its text is never kept.
+              name: Reply
+              tag: json:"reply,omitempty"
+              type: int
             - doc: QueuedAt is when it entered the outbox; SentAt when it left.
               name: QueuedAt
               tag: json:"queuedAt"

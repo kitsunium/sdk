@@ -1600,6 +1600,38 @@ packages:
         out:
           - type: MailerConfigurer
       - doc: |-
+          OnBounce replaces what the mailer does with a mail it gives up — by
+          default, it logs it as an error naming why — with fn: mark an address
+          undeliverable, tell an operator, send it another way. fn runs on a
+          goroutine of its own once the mailbox is updated — the outbox goes on
+          meanwhile, and fn may send mail —, with a context on the mailer's node that
+          continues the trace of the Send; the mailer's stop waits for it. A panic in
+          fn is logged and changes nothing else. A nil fn keeps the framework's own.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: fn
+            type: func(ctx context.Context, b *BounceEvent)
+        name: OnBounce
+        out:
+          - type: MailerConfigurer
+      - doc: |-
+          MailMaxAge is how long after it was queued a mail may still be retried: an
+          attempt that fails later gives it up, as expired, whatever attempts it had
+          left. It is the default of the mailer's setting <mailer>-max-age, which
+          config/<env>.* and <PRODUCT>_<MAILER>_MAX_AGE override; 0 sets no age. The
+          default is 5 days (RFC 5321 §4.5.4.1).
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: MailMaxAge
+        out:
+          - type: MailerConfigurer
+      - doc: |-
           NewMailer is a mailer no service declares yet, with the default attempts:
           [Service.Mailer] makes one and declares it, which is how a product gets
           one.
@@ -2528,6 +2560,7 @@ packages:
       model: github.com/kitsunium/sdk/framework/model
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
       stdsql: database/sql
+      textproto: net/textproto
     path: github.com/kitsunium/sdk/framework/internal/app
     types:
       - doc: |-
@@ -3793,6 +3826,48 @@ packages:
         typeParams:
           - constraint: any
             name: T
+      - doc: |-
+          BounceEvent is a mail its mailer gave up on: the receiving server refused it for
+          good, it outlived its mailer's max-age, or its last attempt failed —
+          GivenUp says which. It stays in the outbox as a dead letter.
+
+          Reply is the receiving server's own answer: the hook may read it, log it or
+          act on it, but the framework never puts it in a message it shows — the
+          Studio's mailbox keeps its code alone.
+        name: BounceEvent
+        struct:
+          fields:
+            - doc: Err is the last attempt's failure.
+              name: Err
+              type: error
+            - doc: |-
+                Reply is the SMTP reply that failure carries, nil when the server
+                answered none — a relay that could not be reached, a timeout.
+              name: Reply
+              type: "*textproto.Error"
+            - doc: Message is the mail, as it was queued.
+              name: Message
+              type: mail.Message
+            - doc: QueuedAt is when it entered the outbox.
+              name: QueuedAt
+              type: time.Time
+            - doc: At is when it was given up, on the app's clock.
+              name: At
+              type: time.Time
+            - doc: Mailer is the mailer's node ID.
+              name: Mailer
+              type: string
+            - doc: ID is the mail's outbox ID.
+              name: ID
+              type: string
+            - doc: |-
+                GivenUp is why: model.MailRejected, model.MailExpired or
+                model.MailExhausted.
+              name: GivenUp
+              type: string
+            - doc: Attempts is how many deliveries it got.
+              name: Attempts
+              type: int
       - doc: |-
           TombstoneEvent is one record in a store's trash: its key, when the product
           deleted it, on the app's clock, and when the framework purges it — its trash's
@@ -5289,6 +5364,31 @@ packages:
         name: MailEventDuplicate
         type: MailEvent
         value: "5"
+      - blockDoc: |-
+          Why a spool gave a mail up: what the framework tells the product's bounce
+          hook and the Studio's mailbox of a dead letter.
+        doc: MailGivenUpExhausted is a mail whose last attempt failed.
+        name: MailGivenUpExhausted
+        type: MailGiveUp
+        value: "0"
+      - blockDoc: |-
+          Why a spool gave a mail up: what the framework tells the product's bounce
+          hook and the Studio's mailbox of a dead letter.
+        doc: |-
+          MailGivenUpRejected is a mail the receiving server refused for good,
+          an SMTP 5xx reply, dead-lettered without a retry.
+        name: MailGivenUpRejected
+        type: MailGiveUp
+        value: "1"
+      - blockDoc: |-
+          Why a spool gave a mail up: what the framework tells the product's bounce
+          hook and the Studio's mailbox of a dead letter.
+        doc: |-
+          MailGivenUpExpired is a mail whose attempt failed once it was older
+          than the spool's MaxAge.
+        name: MailGivenUpExpired
+        type: MailGiveUp
+        value: "2"
       - doc: LabelNode is the pprof label naming the node a goroutine works for.
         name: LabelNode
         type: string
@@ -5672,6 +5772,7 @@ packages:
       json: encoding/json
       model: github.com/kitsunium/sdk/framework/model
       sql: database/sql
+      textproto: net/textproto
     path: github.com/kitsunium/sdk/framework/internal/app/plug
     types:
       - doc: |-
@@ -5826,6 +5927,9 @@ packages:
       - doc: MailEvent is what a spool reports of a mail.
         name: MailEvent
         underlying: uint8
+      - doc: MailGiveUp is why a spool gave a mail up.
+        name: MailGiveUp
+        underlying: uint8
       - doc: |-
           MailSpoolConfig is one mailer's outbox: the transport each attempt runs,
           the app's clock, what the framework hears of its mails, its retries, and where it
@@ -5897,6 +6001,17 @@ packages:
                 spool's own bound.
               name: MaxMessageBytes
               type: int
+            - doc: |-
+                MaxAge is how long after it was queued a mail may still be retried:
+                an attempt that fails later gives it up; zero sets no age.
+              name: MaxAge
+              type: time.Duration
+            - doc: |-
+                RetryPermanent retries a mail the receiving server refused for good —
+                an SMTP 5xx reply — like a temporary failure, instead of giving it up
+                at once.
+              name: RetryPermanent
+              type: bool
       - doc: |-
           MailValue is a value of the SDK's mail package as it crosses the
           contract: a mail.Message, or a sender's mail.Address, held as any — the framework's
@@ -5943,13 +6058,19 @@ packages:
               type: int
       - doc: |-
           MailEventValue is what a spool reports of a mail: its kind, the mail and
-          its outbox ID, the attempt, when, and the failure of a failed attempt.
+          its outbox ID, the attempt, when, the failure of a failed attempt, and why
+          a dead letter was given up.
         name: MailEventValue
         struct:
           fields:
             - doc: Err is a failed attempt's failure.
               name: Err
               type: error
+            - doc: |-
+                Reply is the SMTP reply the failure carries, nil for none: the
+                receiving server's own words, never shown in a public message.
+              name: Reply
+              type: "*textproto.Error"
             - doc: Meta is what Annotate kept of the Send.
               name: Meta
               type: map[string]string
@@ -5971,6 +6092,9 @@ packages:
             - doc: Kind is what happened.
               name: Kind
               type: MailEvent
+            - doc: GivenUp is why a dead letter was given up, for MailEventDeadLettered.
+              name: GivenUp
+              type: MailGiveUp
       - doc: |-
           MailSpool is one mailer's outbox as the framework's core uses it: a mail put in it
           at once or under an ID the framework minted, the loop that hands each mail to the
@@ -8742,6 +8866,16 @@ packages:
         name: MailerOption
         target: iapp.MailerConfigurer
       - doc: |-
+          Bounce is a mail its mailer gave up on: the receiving server refused it for
+          good, it outlived its mailer's max-age, or its last attempt failed —
+          GivenUp says which. It stays in the outbox as a dead letter.
+
+          Reply is the receiving server's own answer: the hook may read it, log it or
+          act on it, but the framework never puts it in a message it shows — the
+          Studio's mailbox keeps its code alone.
+        name: Bounce
+        target: iapp.BounceEvent
+      - doc: |-
           Module is a set of services a product mounts as one: [NewModule] declares
           it, [App].With or [Mount] mounts it.
         name: Module
@@ -10485,6 +10619,38 @@ packages:
           - name: "n"
             type: int
         name: MailAttempts
+        out:
+          - type: MailerOption
+      - doc: |-
+          OnBounce replaces what the mailer does with a mail it gives up — by
+          default, it logs it as an error naming why — with fn: mark an address
+          undeliverable, tell an operator, send it another way. fn runs on a
+          goroutine of its own once the mailbox is updated — the outbox goes on
+          meanwhile, and fn may send mail —, with a context on the mailer's node that
+          continues the trace of the Send; the mailer's stop waits for it. A panic in
+          fn is logged and changes nothing else. A nil fn keeps the framework's own.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: fn
+            type: func(ctx context.Context, b *Bounce)
+        name: OnBounce
+        out:
+          - type: MailerOption
+      - doc: |-
+          MailMaxAge is how long after it was queued a mail may still be retried: an
+          attempt that fails later gives it up, as expired, whatever attempts it had
+          left. It is the default of the mailer's setting <mailer>-max-age, which
+          config/<env>.* and <PRODUCT>_<MAILER>_MAX_AGE override; 0 sets no age. The
+          default is 5 days (RFC 5321 §4.5.4.1).
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: MailMaxAge
         out:
           - type: MailerOption
       - doc: |-

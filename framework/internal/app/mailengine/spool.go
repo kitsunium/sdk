@@ -2,6 +2,8 @@ package mailengine
 
 import (
 	"context"
+	"errors"
+	"net/textproto"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/internal/app/queueengine"
@@ -46,6 +48,8 @@ func open(cfg *plug.MailSpoolConfig) (plug.MailSpool, error) {
 		PollInterval:    cfg.PollInterval,
 		Dir:             cfg.Dir,
 		MaxMessageBytes: cfg.MaxMessageBytes,
+		MaxAge:          cfg.MaxAge,
+		RetryPermanent:  cfg.RetryPermanent,
 	}
 	if cfg.Outbox != nil {
 		b, ok := queueengine.BrokerOf(cfg.Outbox)
@@ -94,10 +98,32 @@ func observeOf(fn func(e *plug.MailEventValue)) func(mailspool.Event) {
 	}
 	return func(e mailspool.Event) {
 		fn(&plug.MailEventValue{
-			Err: e.Err, Meta: e.Meta, At: e.At, QueuedAt: e.QueuedAt, Message: plug.MailValue{Value: e.Message},
-			ID: e.ID, Attempt: e.Attempt, Kind: eventOf(e.Kind),
+			Err: e.Err, Reply: replyOf(e.Err), Meta: e.Meta, At: e.At, QueuedAt: e.QueuedAt, Message: plug.MailValue{Value: e.Message},
+			ID: e.ID, Attempt: e.Attempt, Kind: eventOf(e.Kind), GivenUp: givenUpOf(e.Err),
 		})
 	}
+}
+
+// givenUpOf is why the spool gave up a mail that failed with err: the code
+// the spool adds to a dead letter's trail when it gives it up early — a
+// permanent refusal, a mail too old —, else its last attempt. errs.HasCode
+// reads the trail, where errors.Is would see only the origin.
+func givenUpOf(err error) plug.MailGiveUp {
+	switch {
+	case errs.HasCode(err, mailspool.CodeMailRejected):
+		return plug.MailGivenUpRejected
+	case errs.HasCode(err, mailspool.CodeMailExpired):
+		return plug.MailGivenUpExpired
+	default:
+		return plug.MailGivenUpExhausted
+	}
+}
+
+// replyOf is the SMTP reply err carries, which the SDK's SMTP transport
+// keeps reachable through errors.As; nil for none.
+func replyOf(err error) *textproto.Error {
+	reply, _ := errors.AsType[*textproto.Error](err)
+	return reply
 }
 
 // events are the spool's events kit's core tells apart.

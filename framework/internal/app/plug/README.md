@@ -86,6 +86,7 @@ The package imports the standard library and the framework's model only, so that
 - [type MailDriverConfig](<#MailDriverConfig>)
 - [type MailEvent](<#MailEvent>)
 - [type MailEventValue](<#MailEventValue>)
+- [type MailGiveUp](<#MailGiveUp>)
 - [type MailRefusal](<#MailRefusal>)
 - [type MailRelayValue](<#MailRelayValue>)
 - [type MailSink](<#MailSink>)
@@ -293,6 +294,27 @@ const MailEventSent MailEvent = 2
 ```
 
 MailEventSent is a mail the transport accepted.
+
+<a name="MailGivenUpExhausted"></a>
+```go
+const MailGivenUpExhausted MailGiveUp = 0
+```
+
+MailGivenUpExhausted is a mail whose last attempt failed.
+
+<a name="MailGivenUpExpired"></a>
+```go
+const MailGivenUpExpired MailGiveUp = 2
+```
+
+MailGivenUpExpired is a mail whose attempt failed once it was older than the spool's MaxAge.
+
+<a name="MailGivenUpRejected"></a>
+```go
+const MailGivenUpRejected MailGiveUp = 1
+```
+
+MailGivenUpRejected is a mail the receiving server refused for good, an SMTP 5xx reply, dead-lettered without a retry.
 
 <a name="MailRefusalClosed"></a>
 ```go
@@ -1679,12 +1701,15 @@ type MailEvent uint8
 <a name="MailEventValue"></a>
 ## type [MailEventValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
 
-MailEventValue is what a spool reports of a mail: its kind, the mail and its outbox ID, the attempt, when, and the failure of a failed attempt.
+MailEventValue is what a spool reports of a mail: its kind, the mail and its outbox ID, the attempt, when, the failure of a failed attempt, and why a dead letter was given up.
 
 ```go
 type MailEventValue struct {
 	// Err is a failed attempt's failure.
 	Err      error
+	// Reply is the SMTP reply the failure carries, nil for none: the
+	// receiving server's own words, never shown in a public message.
+	Reply    *textproto.Error
 	// Meta is what Annotate kept of the Send.
 	Meta     map[string]string
 	// At is when the event happened.
@@ -1699,7 +1724,18 @@ type MailEventValue struct {
 	Attempt  int
 	// Kind is what happened.
 	Kind     MailEvent
+	// GivenUp is why a dead letter was given up, for MailEventDeadLettered.
+	GivenUp  MailGiveUp
 }
+```
+
+<a name="MailGiveUp"></a>
+## type [MailGiveUp](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
+
+MailGiveUp is why a spool gave a mail up.
+
+```go
+type MailGiveUp uint8
 ```
 
 <a name="MailRefusal"></a>
@@ -1861,6 +1897,13 @@ type MailSpoolConfig struct {
 	// MaxMessageBytes bounds one mail in the spool's own queue; zero is the
 	// spool's own bound.
 	MaxMessageBytes int
+	// MaxAge is how long after it was queued a mail may still be retried:
+	// an attempt that fails later gives it up; zero sets no age.
+	MaxAge          time.Duration
+	// RetryPermanent retries a mail the receiving server refused for good —
+	// an SMTP 5xx reply — like a temporary failure, instead of giving it up
+	// at once.
+	RetryPermanent  bool
 }
 ```
 

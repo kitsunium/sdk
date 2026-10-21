@@ -50,7 +50,7 @@ Two packages, one API:
 | `node_info.go` | kind-specific details (`SecretInfo`, `PortInfo`, `EndpointInfo`, `StoreInfo`, `CommandInfo`, `QueryInfo`, …), `Mechanic`, `Schema`, `Field` |
 | `node_process.go` | what a product is made of beyond its services: the `Profile*` constants (`server`, `cli`, `daemon`), the `Network*` constants, `BinaryInfo`, `RoleInfo`, `CLIInfo`, `ListenerInfo`, `LibraryInfo`, `PresentationInfo` |
 | `code.go` | a node's code level, C4's fourth (`CodeInfo`, `CodeFunc`, `CodeStep`s under `CodeBlock`s) |
-| `devtools.go` | the mail statuses, `MailMessage`, `MockReplace` |
+| `devtools.go` | the mail statuses, why a dead mail was given up (`MailRejected`, `MailExpired`, `MailExhausted` — `MailSummary.GivenUp`, issue #489), `MailMessage`, `MockReplace` |
 | `profile.go` | a CPU or heap `Profile` folded onto the nodes, `Goroutines` grouped |
 | `doc.go` | `SplitDoc`: a doc comment's default text and its translations (`docTag` compiled at its first use) |
 | `history.go` | what a store remembers: `StoreHistory`, `Former`, `RecordHistory`, a record's versions (`RecordVersion`, `RecordVersions`, `Edit`), and a store's trash as the Studio lists it (`StoreTrash`, `TrashedRecord`: key — or `hidden` —, `at`, `purgeAt`, never the value; `GET /_app/api/trash`, ADR 0178 C4 amended on 2026-10-15) |

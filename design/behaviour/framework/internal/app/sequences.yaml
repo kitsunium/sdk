@@ -21150,6 +21150,8 @@ sequences:
         kind: internal
       - id: s.problem
         kind: internal
+      - id: m.declareSettings
+        kind: internal
     steps:
       - bind: m
         eval: NewMailer()
@@ -21170,6 +21172,8 @@ sequences:
             - eval: s.problem(m.decl, m.id, "mailer.attempts", "name", name)
               to: s.problem
           when: m.opts.maxAttempts < 1
+      - eval: m.declareSettings(s)
+        to: m.declareSettings
       - return: m
   - of: (*Mailer).Send
     participants:
@@ -21605,14 +21609,14 @@ sequences:
       - id: m.mu.Unlock
         kind: value
     steps:
-      - bind: d
+      - bind: driver
         eval: plug.Mail.Load()
         to: plug.Mail.Load
       - opt:
           do:
             - return: mailsMissing()
               to: mailsMissing
-          when: d == nil || d.Open == nil
+          when: driver == nil || driver.Open == nil
       - bind: transport, capture, relay, err
         eval: m.openTransport(ctx, a)
         to: m.openTransport
@@ -21634,6 +21638,9 @@ sequences:
           		MaxAttempts:  m.opts.maxAttempts,
           		SendTimeout:  mailSendTimeout,
           		PollInterval: pollInterval,
+          		// The mailer's settings, as the start resolved them.
+          		MaxAge:         m.maxAge(),
+          		RetryPermanent: m.retriesPermanent(),
           	}
       - bind: db, broker, err
         eval: m.openOutbox(ctx, a)
@@ -21659,7 +21666,7 @@ sequences:
                         value: filepath.Join(a.dataDir, m.svc.name, underOutbox, m.name)
                     when: a.dataDir != ""
       - bind: spool, err
-        eval: d.Open(&cfg)
+        eval: driver.Open(&cfg)
       - opt:
           do:
             - return: failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
@@ -21731,6 +21738,20 @@ sequences:
       - select:
           cases:
             - comm: <-done
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+      - bind: hooksDone
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		m.hooks.Wait()
+          		close(hooksDone)
+          	}()
+      - select:
+          cases:
+            - comm: <-hooksDone
             - comm: <-ctx.Done()
               do:
                 - return: ctx.Err()
@@ -22018,15 +22039,9 @@ sequences:
       - id: logger
         kind: package
     steps:
-      - bind: fields
-        eval: "[]logger.Attr{logger.String(\"node\", m.id), logger.String(\"mail\", attempt.ID), logger.Int(\"attempt\", attempt.Attempt), logger.String(\"error\", err.Error())}"
-      - opt:
-          do:
-            - eval: logger.Error(ctx, a.log, "a mail was abandoned after its last attempt", fields...)
-              to: logger
-            - return: ""
-          when: attempt.Attempt >= m.opts.maxAttempts
-      - eval: logger.Warn(ctx, a.log, "a mail delivery failed; it will be retried", fields...)
+      - eval: |-
+          logger.Warn(ctx, a.log, "a mail delivery failed", logger.String("node", m.id), logger.String("mail", attempt.ID),
+          		logger.Int("attempt", attempt.Attempt), logger.String("error", err.Error()))
         to: logger
   - of: (*Mailer).transmit
     participants:
@@ -22087,12 +22102,16 @@ sequences:
         kind: internal
       - id: rawText
         kind: internal
+      - id: givenUpName
+        kind: internal
       - id: summaryOf
         kind: internal
       - id: m.mu.Unlock
         kind: value
       - id: a.hub.publish
         kind: internal
+      - id: m.hooks.Go
+        kind: value
     steps:
       - opt:
           do:
@@ -22116,8 +22135,8 @@ sequences:
                   value: "true"
             - case: plug.MailEventSent
               do:
-                - set: rec.Attempts, rec.Status, rec.Error, rec.SentAt
-                  value: e.Attempt, model.MailSent, "", new(e.At.UTC())
+                - set: rec.Attempts, rec.Status, rec.Error, rec.SentAt, rec.Reply
+                  value: e.Attempt, model.MailSent, "", new(e.At.UTC()), 0
                 - opt:
                     do:
                       - set: rec.Raw
@@ -22133,14 +22152,17 @@ sequences:
                   set: m.ring.sent
             - case: plug.MailEventRetrying
               do:
-                - set: rec.Attempts, rec.Status, rec.Error
-                  value: e.Attempt, model.MailRetrying, publicText(e.Err)
+                - set: rec.Attempts, rec.Status, rec.Error, rec.Reply
+                  value: e.Attempt, model.MailRetrying, publicText(e.Err), replyCode(e.Reply)
                 - set: m.ring.pending[e.ID]
                   value: "true"
             - case: plug.MailEventDeadLettered
               do:
-                - set: rec.Attempts, rec.Status, rec.Error
-                  value: e.Attempt, model.MailDead, publicText(e.Err)
+                - set: rec.Attempts, rec.Status, rec.Error, rec.Reply
+                  value: e.Attempt, model.MailDead, publicText(e.Err), replyCode(e.Reply)
+                - set: rec.GivenUp
+                  to: givenUpName
+                  value: givenUpName(e.GivenUp)
                 - eval: delete(m.ring.pending, e.ID)
                 - op: ++
                   set: m.ring.dead
@@ -22153,6 +22175,11 @@ sequences:
         to: m.mu.Unlock
       - eval: "a.hub.publish(model.Event{Type: model.EventMail, Mail: summary})"
         to: a.hub.publish
+      - opt:
+          do:
+            - eval: m.hooks.Go(func() { m.bounced(a, e) })
+              to: m.hooks.Go
+          when: e.Kind == plug.MailEventDeadLettered
   - of: (*Mailer).messageOf
     participants:
       - id: caller
@@ -22616,7 +22643,191 @@ sequences:
       - return: "false"
   - of: NewMailer
     steps:
-      - return: "&Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts}}"
+      - return: "&Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts, maxAge: defaultMailMaxAge}}"
+  - of: OnBounce
+    steps:
+      - return: mailerOption(func(o *mailerOptions) { o.bounce = fn })
+  - of: MailMaxAge
+    steps:
+      - return: mailerOption(func(o *mailerOptions) { o.maxAge = d })
+  - of: (*Mailer).declareSettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Mailer).declareSettings
+        kind: self
+      - id: svc.problem
+        kind: internal
+      - id: declareNodeSetting
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: svc.problem(m.decl, m.id, "mailer.max-age-negative", "name", m.name)
+              to: svc.problem
+          when: m.opts.maxAge < 0
+      - set: m.maxAgeFor
+        to: declareNodeSetting
+        value: |-
+          declareNodeSetting(svc, &m.nodeBase, maxAgeSuffix, max(m.opts.maxAge, 0), func(v any) phrase {
+          		if d, ok := v.(time.Duration); ok && d < 0 {
+          			return say("mailer.max-age-negative", "name", m.name)
+          		}
+          		return phrase{}
+          	})
+      - set: m.retryPermanentFor
+        to: declareNodeSetting
+        value: declareNodeSetting(svc, &m.nodeBase, retryPermanentSuffix, false, nil)
+  - of: declareNodeSetting
+    participants:
+      - id: caller
+        kind: actor
+      - id: declareNodeSetting
+        kind: self
+      - id: nodeSettingName
+        kind: internal
+      - id: svc.problem
+        kind: internal
+      - id: NewSettingService
+        kind: internal
+      - id: svc.mu.Lock
+        kind: value
+      - id: svc.mu.Unlock
+        kind: value
+    steps:
+      - bind: name
+        eval: nodeSettingName(n.name, suffix)
+        to: nodeSettingName
+      - opt:
+          do:
+            - eval: svc.problem(n.decl, n.id, "node.setting-name", "node", n.name, "setting", name, "max", secret.MaxNameLen)
+              to: svc.problem
+            - return: nil
+          when: secret.ValidateName(name) != nil
+      - bind: st
+        eval: NewSettingService(def)
+        to: NewSettingService
+      - set: st.svc, st.name, st.decl, st.check
+        value: svc, name, n.decl, check
+      - set: st.id
+        value: svc.name + "/setting/" + name
+      - eval: svc.mu.Lock()
+        to: svc.mu.Lock
+      - set: svc.settings
+        value: append(svc.settings, st)
+      - eval: svc.mu.Unlock()
+        to: svc.mu.Unlock
+      - return: st
+  - of: (*Mailer).maxAge
+    steps:
+      - opt:
+          do:
+            - return: max(m.opts.maxAge, 0)
+          when: m.maxAgeFor == nil
+      - return: max(m.maxAgeFor.Get(), 0)
+  - of: (*Mailer).retriesPermanent
+    steps:
+      - return: m.retryPermanentFor != nil && m.retryPermanentFor.Get()
+  - of: (*Mailer).bounced
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Mailer).bounced
+        kind: self
+      - id: withNode
+        kind: internal
+      - id: trace
+        kind: package
+      - id: m.logBounce
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: withNode(context.WithoutCancel(a.baseCtx), m.id, a)
+        to: withNode
+      - opt:
+          do:
+            - set: ctx
+              to: trace
+              value: trace.ContextWithSpanContext(ctx, sc)
+          init:
+            bind: sc, err
+            eval: trace.ParseTraceParent(e.Meta[metaTrace])
+            to: trace
+          when: err == nil
+      - bind: msg, _
+        eval: e.Message.Value.(mail.Message)
+      - bind: b
+        eval: |-
+          &BounceEvent{
+          		Err: e.Err, Reply: e.Reply, Message: msg, QueuedAt: e.QueuedAt, At: e.At,
+          		Mailer: m.id, ID: e.ID, GivenUp: givenUpName(e.GivenUp), Attempts: e.Attempt,
+          	}
+      - bind: hook
+        eval: m.opts.bounce
+      - opt:
+          do:
+            - eval: m.logBounce(ctx, a, b)
+              to: m.logBounce
+            - return: ""
+          when: hook == nil
+      - defer: |-
+          func() {
+          		if p := recover(); p != nil {
+          			logger.Error(ctx, a.log, "a mailer's bounce hook panicked", logger.String("node", m.id), logger.String("mail", b.ID),
+          				logger.Any("panic", p), logger.String("stack", string(debug.Stack())))
+          		}
+          	}()
+      - eval: hook(ctx, b)
+  - of: (*Mailer).logBounce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Mailer).logBounce
+        kind: self
+      - id: replyCode
+        kind: internal
+      - id: logger
+        kind: package
+    steps:
+      - bind: fields
+        eval: |-
+          []logger.Attr{
+          		logger.String("node", m.id), logger.String("mail", b.ID), logger.String("given_up", b.GivenUp),
+          		logger.Int("attempts", b.Attempts),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, logger.Int("reply", code))
+          init:
+            bind: code
+            eval: replyCode(b.Reply)
+            to: replyCode
+          when: code != 0
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, logger.String("error", b.Err.Error()))
+          when: b.Err != nil
+      - eval: "logger.Error(ctx, a.log, \"a mail was given up: \"+b.GivenUp, fields...)"
+        to: logger
+  - of: givenUpName
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: givenUps[g]
+          when: ok
+      - return: model.MailExhausted
+  - of: replyCode
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: reply == nil
+      - return: reply.Code
   - of: (*Mailer).sealOutbox
     participants:
       - id: caller
@@ -54583,6 +54794,17 @@ sequences:
         kind: actor
       - id: trashSettingName
         kind: self
+      - id: nodeSettingName
+        kind: internal
+    steps:
+      - return: nodeSettingName(store, trashSuffix)
+        to: nodeSettingName
+  - of: nodeSettingName
+    participants:
+      - id: caller
+        kind: actor
+      - id: nodeSettingName
+        kind: self
       - id: strings
         kind: stdlib
     steps:
@@ -54596,9 +54818,9 @@ sequences:
           			return r + ('a' - 'A')
           		}
           		return r
-          	}, store)
+          	}, node)
         to: strings
-      - return: flat + "-" + trashSuffix
+      - return: flat + "-" + suffix
   - of: (*storeCore).trashLength
     steps:
       - opt:
