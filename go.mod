@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk
 
-go 1.27.2
+go 1.27.3
 
 // The SDK's root module (ADR 0171): it holds the framework under framework/,
 // and nothing of internal/ or pkg/ — each pkg/v1/<family> is a module of its

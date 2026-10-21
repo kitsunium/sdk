@@ -19,9 +19,9 @@ bazel_dep(name = "gazelle", version = "0.50.0")
 # ── Go SDK ─────────────────────────────────────────────────────────────
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 
-# The patch-level floor go.work and every go.mod declare (`go 1.27.2`): the
+# The patch-level floor go.work and every go.mod declare (`go 1.27.3`): the
 # Bazel SDK is pinned to exactly that version and moves with it.
-go_sdk.download(version = "1.27.2")
+go_sdk.download(version = "1.27.3")
 
 # ── Go dependencies ────────────────────────────────────────────────────
 # `go_deps.from_file(go_work=...)` imports every direct + indirect
