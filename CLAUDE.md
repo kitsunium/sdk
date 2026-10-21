@@ -90,7 +90,7 @@ internal/
                              file sinks share;
                            metrics — in-memory meter + text/prometheus/
                              otlpjson exporters + the OTLP/HTTP emitter;
-                           trace — tracer + samplers + recorder + otlpjson
+                           trace — tracer + samplers + recorder + batch sink + otlpjson
                              exporter + the OTLP/HTTP emitter + the
                              server/client HTTP middlewares + the W3C
                              traceparent/tracestate reader and writer

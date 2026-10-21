@@ -31,6 +31,7 @@ sentinels as `coretrace.X` and declares none.
 | `sampler.go` | `AlwaysSample` / `NeverSample` / `ParentBased` / `Ratio` |
 | `idgen.go` | `NewTraceID` / `NewSpanID` over `drawTraceID` / `drawSpanID`, which read `crypto/rand` directly: since Go 1.24 it never returns an error (a failing source crashes the program), so the published error is always nil, the tracer's mint cannot fail, and `EntropyFailed` stays declared and published but is returned by nothing. A root span's two ids come from ONE 24-byte read (`drawRootIDs`): a read is a getrandom call whose fixed cost dwarfs its bytes (crypto/rand was 39 % of an unsampled root's `Start`), so the second read bought only overhead — unsampled root `Start`+`End` −8 %, `Sampler_Ratio` −7 %; each half is still checked and redrawn on its own; a child still draws its span id alone |
 | `recorder.go` / `recorder_config.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
+| `batch_sink.go` / `batch_sink_config.go` | `BatchSink` — the specification's batching span processor, as a `SpanSink` (#479) — + `NewBatchSink` / `Sink` / `Resource` / `ForceFlush` / `Shutdown` / `Dropped` / `Failed` / `Len`; `BatchSinkConfig` and its four `DefaultBatch*` constants, the specification's own; see §The batch sink |
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `collector/trace` and `trace.proto`, in FIELD-NUMBER order; the `common.proto` / `resource.proto` messages and the proto3-JSON scalars are the shared package's |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter over the shared `otlp.Stream` + `OTLPJSON` (registered, stderr) + the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
@@ -44,6 +45,43 @@ sentinels as `coretrace.X` and declares none.
 | `tracestate.go` | `ParseTraceState` — the header's list syntax; each member goes through a `coretrace.StateBuilder`, which owns the member grammar, the repeated-key refusal and the 32-member cap |
 | `propagation.go` | `Inject` / `Extract` over the core's `Carrier` |
 | `internal/core/observe/trace` | the codes (range 0.3.50.*) and sentinels — `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` — declared in the core since ADR 0160; this package declares none |
+
+## The batch sink
+
+ADR 0051 §Deferred named it: "a batching processor is a sink that buffers and
+forwards, where its cost is visible". `BatchSink` is that sink — the batching
+span processor of the OpenTelemetry trace SDK specification
+(https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor) — and
+`Recorder` stays the pull shape a `scheduler` job wants.
+
+- **Zero is the specification, never inert (ADR 0031).** `MaxQueueSize` 2048,
+  `ScheduledDelay` 5 s, `ExportTimeout` 30 s, `MaxExportBatchSize` 512, each the
+  specification's default; a batch larger than the queue clamps to the queue, as
+  the specification requires. `Exporter` has no default and is REFUSED
+  (`BatchExporterMissing`, `0.3.50.9`), a typed nil and an uncomparable plug-in
+  included, as the registry refuses them.
+- **A span end never waits.** It copies the span into a ring slot allocated at
+  construction under one short `sync.Mutex` — zero allocations, held by
+  `TestBatchSinkRecordingAllocatesNothing` in the race-off alloc lane — and wakes
+  the goroutine through a one-slot channel when a batch is full.
+- **Loss is counted.** A full queue, or a span ending after `Shutdown`, advances
+  `Dropped`; an export that fails advances `Failed` by its span count and reaches
+  `OnError`. Nothing is retried here: a retry policy wraps the exporter, where it
+  is visible (`OTLPRetryable` is its classification).
+- **Every wait is bounded, on the injected clock (ADR 0090).** One goroutine
+  exports on a full batch, when `ScheduledDelay` has passed on `Clock` since the
+  last export, on `ForceFlush` and on `Shutdown`. An export runs under
+  `ExportTimeout`, also on `Clock`: an exporter implementing
+  `coretrace.ContextSpanExporter` gets a context that a watcher ends when a
+  clock timer fires, so a `ManualClock` decides it and no test sleeps; one that
+  implements only `SpanExporter` is bounded by nothing but itself.
+  `ForceFlush`/`Shutdown` wait at most until their own context ends and then say
+  so with `BatchFlushIncomplete` (`0.3.50.10`), the goroutine finishing on its
+  own.
+- **A batch is a slice of its own.** An exporter may keep what it is handed, so
+  each batch is a fresh slice and its ring slots are zeroed; that copy is the
+  ~280 B/op `BenchmarkBatchSinkRecord` reports with 0 allocs/op — one batch
+  allocation amortised over 512 spans. BENCH.md §7.
 
 ## W3C Trace Context — the refusals that look arbitrary
 
@@ -321,6 +359,8 @@ Four decisions:
 | `TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget` | 12 allocations sampled, 10 unsampled — the §Cost argument, guarded (`!race` lane) |
 | `TestRecordingAtCapacityAllocatesNothing` | refusing a span costs less than keeping it (`!race` lane) |
 | `TestRecorderTakesAnExclusiveLockOnEveryPath` | `Recorder.mu` is a `sync.Mutex`; see §Cost |
+| `TestBatchSink*` (`batch_sink_external_test.go`) | the batching processor on a `ManualClock`: the fill and the delay triggers, the queue clamp, a drop counted, an export cut at `ExportTimeout`, `ForceFlush`/`Shutdown` bounded by their context — no sleep |
+| `TestBatchSinkRecordingAllocatesNothing` | a span end into a `BatchSink` allocates nothing (`!race` lane) |
 | `TestTheValueASinkReceivesIsFinal` | `finish` TRANSFERS its slices, so nothing that happens to an ended span reaches the exported value |
 
 ## Cost
@@ -399,4 +439,6 @@ it would weaken a stated property — the full argument is in `BENCH.md` §4:
 
 ### Batching
 
-ADR 0051 §Deferred brings a third unit, still unmeasured.
+ADR 0051 §Deferred brought a third unit, and #479 measured it: a span end
+into a `BatchSink` costs 238-273 ns and **0 allocations** with the exporting
+goroutine draining behind it, 265-344 ns from every P at once. BENCH.md §7.

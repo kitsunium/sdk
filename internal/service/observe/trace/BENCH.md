@@ -676,3 +676,49 @@ BenchmarkInject_Invalid-8               	94023556	        12.15 ns/op	       0 B
 
 Reproduce with
 `cd internal/service && GOWORK=off go test -run='^$' -bench='ParseTrace|FormatTrace|Extract|Inject' -benchmem -benchtime=1s ./observe/trace/`.
+
+## 7. `BatchSink.record` — what a span end pays the batching processor (#479)
+
+`BatchSink` is the specification's batching span processor. Its `record` is the
+`SpanSink` a span end calls: one `sync.Mutex`, a copy of the span into a ring
+slot allocated at construction, and a non-blocking send on a one-slot channel
+when a batch is full. Both benchmarks run at the specification's defaults on the
+system clock, the exporting goroutine draining batches of 512 into an exporter
+that keeps nothing — the steady state of a traced service, contention with the
+exporter's batch copy included.
+
+Run on linux/amd64, AMD EPYC 7351P (8 vCPU), go1.27.3, `-benchtime=1s
+-count=5`, load average 2-4 (the VM is shared):
+
+```
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/internal/service/observe/trace
+cpu: AMD EPYC 7351P 16-Core Processor
+BenchmarkBatchSinkRecord-8           	 4908068	       238.4 ns/op	     287 B/op	       0 allocs/op
+BenchmarkBatchSinkRecord-8           	 4417846	       272.6 ns/op	     289 B/op	       0 allocs/op
+BenchmarkBatchSinkRecord-8           	 4498873	       240.9 ns/op	     246 B/op	       0 allocs/op
+BenchmarkBatchSinkRecord-8           	 4382931	       252.5 ns/op	     265 B/op	       0 allocs/op
+BenchmarkBatchSinkRecord-8           	 4529502	       273.1 ns/op	     285 B/op	       0 allocs/op
+BenchmarkBatchSinkRecordParallel-8   	 4562977	       265.2 ns/op	     272 B/op	       0 allocs/op
+BenchmarkBatchSinkRecordParallel-8   	 5599125	       344.2 ns/op	     284 B/op	       0 allocs/op
+BenchmarkBatchSinkRecordParallel-8   	 3638371	       296.7 ns/op	     288 B/op	       0 allocs/op
+BenchmarkBatchSinkRecordParallel-8   	 4011499	       295.7 ns/op	     291 B/op	       0 allocs/op
+BenchmarkBatchSinkRecordParallel-8   	 3946659	       294.0 ns/op	     303 B/op	       0 allocs/op
+```
+
+**0 allocs/op is the property, and it is guarded**:
+`TestBatchSinkRecordingAllocatesNothing` counts a 500-call window on its own call
+stack (`mallocsOver`) in the race-off alloc lane. The **~280 B/op** beside it is
+not the span end's: it is the exporting goroutine's batch, one fresh slice of 512
+`SpanValue` per export — an exporter may keep what it is handed — amortised over
+the spans it carries. Reusing that slice would save the bytes and hand an
+exporter a batch the next one overwrites.
+
+The nanoseconds are mostly that same goroutine: it copies a batch out under the
+lock the span ends take, so a producer that arrives during the copy waits for
+it. That is the price of exporting at all, paid in the background and bounded by
+the batch size, and a span end never waits on the exporter's network.
+
+Reproduce with
+`cd internal && GOWORK=off go test -run NONE -bench BatchSink -benchmem -count=5 ./service/observe/trace/`.

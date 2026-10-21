@@ -475,7 +475,9 @@ Named here so a future reader finds the reason rather than the gap.
   precisely so a batching processor is a sink that buffers and forwards, where its
   cost is visible. The current `Recorder` accumulates and hands out on `Collect`,
   which is the pull shape a `scheduler` job wants; a push-with-timeout batcher is
-  additive and brings a benchmark with it.
+  additive and brings a benchmark with it. *Landed by #479*: `BatchSink`, the
+  specification's batching processor as a `SpanSink`, with its benchmark and an
+  allocation gate (`internal/service/observe/trace/BENCH.md` §7).
 - **Variable-rate / adaptive sampling.** A rate that changes at runtime in response
   to load. It needs a feedback signal, a decision cadence and an answer to "what
   does the rate mean for a trace already in flight" — a whole policy surface, and

@@ -22,7 +22,8 @@ Code ranges: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
 attribute model moved to `internal/core/observe/otel`), and `0.3.50.*` — the range
 ADR 0051 allocated to the engine, `internal/service/observe/trace`, declared here
 since ADR 0160 §2 with its values unchanged (`ENTROPY_FAILED`,
-`INVALID_SAMPLE_RATIO` and the six `OTLP_*`). The engine returns those sentinels
+`INVALID_SAMPLE_RATIO`, the six `OTLP_*`, and since #479 `BATCH_EXPORTER_MISSING`
+`0.3.50.9` and `BATCH_FLUSH_INCOMPLETE` `0.3.50.10`, the batch sink's). The engine returns those sentinels
 and declares none; `codeRangeOwners` maps both keys to this directory.
 
 **The ports are generated from the design** (ADR 0163): `Tracer`, `Span`,
@@ -58,7 +59,7 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
 | `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/observe/otel` and refusing with this package's `InvalidAttribute` |
 | `exporter.go` | `ExporterName` + the `SpanExporter` registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export` / `ExportContext`, which applies `DefaultExportTimeout` — 30 s, the specification's `exportTimeout` — to a context with no deadline and calls `ExportContext` where the exporter implements the sibling, `Export` where it does not) over `internal/kernel/plugin.Registry`, the table `core/observe/metrics`' exporter registry runs on too |
-| `gen_codes.go` | `Code*` constants — range 0.2.20.*, and the engine's 0.3.50.*; `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute`; and the engine's `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` — written by kit gen from `design/observe/trace.yaml` (ADR 0164) |
+| `gen_codes.go` | `Code*` constants — range 0.2.20.*, and the engine's 0.3.50.*; `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute`; and the engine's `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` / `BatchExporterMissing` / `BatchFlushIncomplete` — written by kit gen from `design/observe/trace.yaml` (ADR 0164) |
 
 ## The one rule everything else follows from
 

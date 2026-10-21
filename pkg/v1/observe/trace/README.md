@@ -86,6 +86,7 @@ See ADR 0051.
 - [func Int64\(key string, value int64\) Attr](<#Int64>)
 - [func LookupExporter\(name ExporterName\) \(e SpanExporter, ok bool\)](<#LookupExporter>)
 - [func NeverSample\(params SamplingParams\) bool](<#NeverSample>)
+- [func NewBatchSink\(cfg BatchSinkConfig\) \(sink \*BatchSink, err error\)](<#NewBatchSink>)
 - [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter ContextSpanExporter, err error\)](<#NewOTLPHTTPExporter>)
 - [func NewOTLPJSONExporter\(name ExporterName, dst io.Writer\) SpanExporter](<#NewOTLPJSONExporter>)
 - [func NewRecorder\(cfg RecorderConfig\) \*Recorder](<#NewRecorder>)
@@ -113,6 +114,15 @@ See ADR 0051.
   - [func \(Attr\) Kind\(\) AttrKind](<#Attr.Kind>)
   - [func \(Attr\) Str\(\) string](<#Attr.Str>)
 - [type AttrKind](<#AttrKind>)
+- [type BatchSink](<#BatchSink>)
+  - [func \(\*BatchSink\) Dropped\(\) uint64](<#BatchSink.Dropped>)
+  - [func \(\*BatchSink\) Failed\(\) uint64](<#BatchSink.Failed>)
+  - [func \(\*BatchSink\) ForceFlush\(ctx context.Context\) error](<#BatchSink.ForceFlush>)
+  - [func \(\*BatchSink\) Len\(\) int](<#BatchSink.Len>)
+  - [func \(\*BatchSink\) Resource\(\) coreotel.ResourceValue](<#BatchSink.Resource>)
+  - [func \(\*BatchSink\) Shutdown\(ctx context.Context\) error](<#BatchSink.Shutdown>)
+  - [func \(\*BatchSink\) Sink\(\) coretrace.SpanSink](<#BatchSink.Sink>)
+- [type BatchSinkConfig](<#BatchSinkConfig>)
 - [type Carrier](<#Carrier>)
   - [func \(Carrier\) Get\(key string\) string](<#Carrier.Get>)
   - [func \(Carrier\) Set\(key string, value string\)](<#Carrier.Set>)
@@ -236,6 +246,42 @@ const AttrKindString AttrKind = 1
 AttrKindString marks a string-valued attribute.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString`.
+
+<a name="DefaultBatchExportTimeout"></a>
+```go
+const DefaultBatchExportTimeout time.Duration = 30000000000
+```
+
+DefaultBatchExportTimeout bounds one export of a BatchSink.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchExportTimeout`.
+
+<a name="DefaultBatchMaxExportBatchSize"></a>
+```go
+const DefaultBatchMaxExportBatchSize int = 512
+```
+
+DefaultBatchMaxExportBatchSize bounds how many spans one export carries.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchMaxExportBatchSize`.
+
+<a name="DefaultBatchMaxQueueSize"></a>
+```go
+const DefaultBatchMaxQueueSize int = 2048
+```
+
+DefaultBatchMaxQueueSize, DefaultBatchScheduledDelay, DefaultBatchExportTimeout and DefaultBatchMaxExportBatchSize are a BatchSink's defaults — the OpenTelemetry trace SDK specification's own: 2048 spans, 5s, 30s and 512 spans.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchMaxQueueSize`.
+
+<a name="DefaultBatchScheduledDelay"></a>
+```go
+const DefaultBatchScheduledDelay time.Duration = 5000000000
+```
+
+DefaultBatchScheduledDelay is the longest a queued span waits before an export starts.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchScheduledDelay`.
 
 <a name="DefaultExportTimeout"></a>
 ```go
@@ -517,6 +563,28 @@ VersionSupported is the traceparent version this SDK emits: "00".
 Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.VersionSupported`.
 
 ## Variables
+
+<a name="BatchExporterMissing"></a>
+```go
+var BatchExporterMissing *errs.Error
+```
+
+BatchExporterMissing reports a BatchSink configured with no usable exporter.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.BatchExporterMissing`.
+
+Code `0.3.50.9` · reason `BATCH_EXPORTER_MISSING` · public "The batch span sink needs an exporter"
+
+<a name="BatchFlushIncomplete"></a>
+```go
+var BatchFlushIncomplete *errs.Error
+```
+
+BatchFlushIncomplete reports a ForceFlush or Shutdown cut short by its context.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.BatchFlushIncomplete`.
+
+Code `0.3.50.10` · reason `BATCH_FLUSH_INCOMPLETE` · public "The batch span sink did not finish exporting before the deadline"
 
 <a name="DuplicateRegistration"></a>
 ```go
@@ -818,6 +886,15 @@ func NeverSample(params SamplingParams) bool
 
 NeverSample drops every root trace. It exists so "off" has a NAME a reviewer can grep for, rather than a rate of zero that is indistinguishable from a field nobody set.
 
+<a name="NewBatchSink"></a>
+## func [NewBatchSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+```go
+func NewBatchSink(cfg BatchSinkConfig) (sink *BatchSink, err error)
+```
+
+NewBatchSink builds the batching span destination and starts its exporting goroutine; Shutdown ends it. A missing exporter is refused with BatchExporterMissing.
+
 <a name="NewOTLPHTTPExporter"></a>
 ## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
@@ -1085,6 +1162,129 @@ AttrKind is an alias of `github.com/kitsunium/sdk/internal/core/observe/otel.Att
 
 ```go
 type AttrKind uint8
+```
+
+<a name="BatchSink"></a>
+## type [BatchSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+BatchSink is the specification's batching span processor, as a SpanSink: a bounded queue exported in batches by one goroutine, its losses counted.
+
+```go
+type BatchSink = svctrace.BatchSink
+```
+
+BatchSink is an alias of `github.com/kitsunium/sdk/internal/service/observe/trace.BatchSink`, declared as:
+
+```go
+type BatchSink struct{}
+```
+
+<a name="BatchSink.Dropped"></a>
+### func \(BatchSink\) [Dropped](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Dropped() uint64
+```
+
+Dropped reports how many spans were refused since construction — the queue was full, or the sink was shut down. It is cumulative.
+
+<a name="BatchSink.Failed"></a>
+### func \(BatchSink\) [Failed](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Failed() uint64
+```
+
+Failed reports how many spans were handed to an export that returned an error, since construction. It is cumulative.
+
+<a name="BatchSink.ForceFlush"></a>
+### func \(BatchSink\) [ForceFlush](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) ForceFlush(ctx context.Context) error
+```
+
+ForceFlush exports every span queued when it is called, in batches, and returns once the exporter has answered for each of them or ctx has ended, whichever is first. It returns the first export failure, or BatchFlushIncomplete wrapping the context's error. After Shutdown it has nothing to flush and returns nil.
+
+<a name="BatchSink.Len"></a>
+### func \(BatchSink\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Len() int
+```
+
+Len reports how many spans are queued and not yet handed to the exporter.
+
+<a name="BatchSink.Resource"></a>
+### func \(BatchSink\) [Resource](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Resource() coreotel.ResourceValue
+```
+
+Resource returns the producing resource this sink stamps on every batch, already normalised, so a Tracer and its sink can be given ONE resource literal.
+
+<a name="BatchSink.Shutdown"></a>
+### func \(BatchSink\) [Shutdown](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Shutdown(ctx context.Context) error
+```
+
+Shutdown stops accepting spans, exports what is queued, and ends the exporting goroutine. It returns the first export failure of that last flush, or BatchFlushIncomplete when ctx ends first — the goroutine then finishes on its own, each export still bounded by ExportTimeout. A second call waits for the same end and returns nil.
+
+<a name="BatchSink.Sink"></a>
+### func \(BatchSink\) [Sink](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Sink() coretrace.SpanSink
+```
+
+Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig. Every call returns the same bound method; recording takes one short lock and never waits on the exporter.
+
+<a name="BatchSinkConfig"></a>
+## type [BatchSinkConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+BatchSinkConfig configures a BatchSink; zero fields take the specification's defaults.
+
+```go
+type BatchSinkConfig = svctrace.BatchSinkConfig
+```
+
+BatchSinkConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/trace.BatchSinkConfig`, declared as:
+
+```go
+type BatchSinkConfig struct {
+	// Exporter receives every batch. Required: NewBatchSink refuses a nil one
+	// with BatchExporterMissing. One that implements ContextSpanExporter is
+	// bounded by ExportTimeout.
+	Exporter           coretrace.SpanExporter
+	// Resource identifies the producer, stamped on every batch.
+	Resource           coreotel.ResourceValue
+	// Scope identifies the instrumentation, stamped on every batch.
+	Scope              coreotel.ScopeValue
+	// MaxQueueSize bounds how many finished spans wait for export.
+	// Non-positive CLAMPS to DefaultBatchMaxQueueSize (2048).
+	MaxQueueSize       int
+	// ScheduledDelay is the longest a queued span waits before an export
+	// starts. Non-positive CLAMPS to DefaultBatchScheduledDelay (5 s).
+	ScheduledDelay     time.Duration
+	// ExportTimeout bounds one export, on Clock. Non-positive CLAMPS to
+	// DefaultBatchExportTimeout (30 s).
+	ExportTimeout      time.Duration
+	// MaxExportBatchSize bounds how many spans one export carries, and is the
+	// fill level that starts an export before ScheduledDelay. Non-positive
+	// CLAMPS to DefaultBatchMaxExportBatchSize (512); above MaxQueueSize it
+	// clamps to MaxQueueSize, as the specification requires.
+	MaxExportBatchSize int
+	// Clock drives ScheduledDelay and ExportTimeout. Unset CLAMPS to
+	// clock.System; a test injects a ManualClock and waits on nothing.
+	Clock              clock.Timed
+	// OnError receives every export failure, from the exporting goroutine. Nil
+	// discards it; Failed counts the spans either way. It must not block: the
+	// next export waits for it.
+	OnError            func(err error)
+}
 ```
 
 <a name="Carrier"></a>
