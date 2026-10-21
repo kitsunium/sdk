@@ -187,7 +187,7 @@ sequences:
         to: guard
       - opt:
           do:
-            - return: ignoreLapsed(broker.Ack(ctx, delivery.Lease.Receipt))
+            - return: ignoreLapsed(broker.Ack(context.WithoutCancel(ctx), delivery.Lease.Receipt))
               to: ignoreLapsed
           when: failure == nil
       - bind: rejecter, rejects

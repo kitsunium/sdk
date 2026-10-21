@@ -318,7 +318,9 @@ func TestIDNeverRendersItsBytes(t *testing.T) {
 		{"an unexported field, %+v", func() string { return fmt.Sprintf("%+v", idHider{id: id}) }},
 		{"an unexported field, %d", func() string { return fmt.Sprintf("%d", idHider{id: id}) }},
 	}
-	forbidden := []string{id.Reveal(), "0 1 2 3 4 5 6", "000102030405", "0x0 0x1 0x2"}
+	//: the hex spelling is 24 digits, longer than any 64-bit pointer address
+	//: a reflected field can print, so an address never matches it (#484).
+	forbidden := []string{id.Reveal(), "0 1 2 3 4 5 6", "000102030405060708090a0b", "0x0 0x1 0x2"}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		rendered := c.render()

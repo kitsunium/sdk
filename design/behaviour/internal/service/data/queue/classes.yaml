@@ -700,6 +700,16 @@ functions:
       without the sibling is nacked as before — the shortcut is lost, never the
       message — and a panic is never the mark, because guard carries the recovered
       value as a field of HANDLER_PANICKED and never as its origin.
+
+      A handler that returned nil is acknowledged on ctx WITHOUT its cancellation:
+      the work is done, and a stop that lands between the handler's return and
+      the acknowledgement — the consumer's context cancelled by Close or a
+      lifecycle's Stop — must not abandon it. Abandoned, the message stayed
+      leased and came back after the visibility timeout, a duplicate a graceful
+      stop caused, on every broker whose Ack honours its context
+      (kitsunium/sdk#472). The acknowledgement is one statement or one unlink;
+      what bounds it is the medium's own, and the caller's stop budget, which
+      waits for Consume to return.
     name: settle
     params: |2
 

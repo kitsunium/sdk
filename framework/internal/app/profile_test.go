@@ -56,32 +56,34 @@ func TestGoroutinesAreGroupedByNodeAndLoop(t *testing.T) {
 	}()
 	check := func(t *testing.T) {
 		var g model.Goroutines
-		eventually(t, "three waiting handlers", func() bool {
+		var wait, accept *model.GoroutineGroup
+		// The dump is taken by a handler, and the request that asks for it
+		// may be the connection the accept loop has just handed over: until
+		// that loop is back in Accept and parked, it is runnable, not in "IO
+		// wait" — on a slow guest the handler answers first (#485). The test
+		// waits for what it reads — three waiting handlers AND the loop parked
+		// in the listener — in one answer, rather than for the handlers alone.
+		eventually(t, "three waiting handlers and the accept loop in IO wait", func() bool {
 			// A fresh value each poll: decoding into the last one would keep
 			// the members this answer omits.
 			g = model.Goroutines{}
 			call(t, app, "GET /_app/api/goroutines", noBody).json(t, &g)
-			for _, grp := range g.Groups {
-				if grp.Node == "bench/endpoint/Wait" && grp.Count == 3 {
-					return true
+			wait, accept = nil, nil
+			for i := range g.Groups {
+				switch grp := &g.Groups[i]; {
+				case grp.Node == "bench/endpoint/Wait":
+					wait = grp
+				case grp.Loop == "http" && grp.State == "IO wait" && slices.ContainsFunc(grp.Stack, func(f string) bool { return strings.HasSuffix(f, ".Accept") }):
+					// The SDK engine's accept loop, blocked in the listener.
+					accept = grp
 				}
 			}
-			return false
+			return wait != nil && wait.Count == 3 && accept != nil
 		})
-		var wait, accept *model.GoroutineGroup
-		for i := range g.Groups {
-			switch grp := &g.Groups[i]; {
-			case grp.Node == "bench/endpoint/Wait":
-				wait = grp
-			case grp.Loop == "http" && grp.State == "IO wait" && slices.ContainsFunc(grp.Stack, func(f string) bool { return strings.HasSuffix(f, ".Accept") }):
-				// The SDK engine's accept loop, blocked in the listener.
-				accept = grp
-			}
-		}
 		if wait.State != "select" || !strings.HasSuffix(wait.Top, ".Wait") || wait.Loop != "http" || len(wait.Stack) == 0 {
 			t.Errorf("the waiting handlers: %+v", wait)
 		}
-		if accept == nil || accept.State != "IO wait" {
+		if len(accept.Stack) == 0 || accept.Count < 1 {
 			t.Errorf("the accept loop: %+v", accept)
 		}
 		total := 0
